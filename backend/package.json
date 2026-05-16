@@ -1,0 +1,18 @@
+{
+  "name": "@loftys-larder/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@loftys-larder/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "*"
+  }
+}

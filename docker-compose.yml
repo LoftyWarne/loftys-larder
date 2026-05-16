@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:17.2-alpine
+    container_name: loftys-larder-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lofty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lofty}
+      POSTGRES_DB: ${POSTGRES_DB:-lofty_dev}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER:-lofty}" -d "$${POSTGRES_DB:-lofty_dev}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+    name: loftys_larder_pgdata

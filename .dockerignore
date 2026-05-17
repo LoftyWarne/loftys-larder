@@ -1,0 +1,35 @@
+# Source-control + tooling state
+.git
+.gitignore
+.github
+
+# Local environment
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Workspace installs and build output (Dockerfile rebuilds these)
+node_modules
+**/node_modules
+**/dist
+**/.tanstack
+**/coverage
+**/.vitest-cache
+
+# Editor + OS noise
+.idea
+.vscode
+.DS_Store
+
+# Docs and infra files that don't belong in the image build context
+docs
+README.md
+AGENTS.md
+CLAUDE.md
+docker
+docker-compose.yml
+fly.toml
+.claude
+.dockerignore
+Dockerfile

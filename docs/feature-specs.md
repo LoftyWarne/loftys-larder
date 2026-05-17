@@ -191,7 +191,7 @@ Conventions:
 
 ### FEAT-05 — Production multi-stage Dockerfile + fly.toml
 
-**Goal:** Build a production image that bundles the backend via esbuild and serves the frontend via `@fastify/static`, plus a `fly.toml` ready to deploy. `[DEC-TBD: esbuild bundle in prod, tsx in dev]` `[DEC-TBD: single Fly app serves API and frontend same-origin]` `[DEC-TBD: single region lhr, auto-stop enabled]`
+**Goal:** Build a production image that bundles the backend via esbuild and serves the frontend via `@fastify/static`, plus a `fly.toml` ready to deploy. (DEC-61: esbuild bundle in prod, tsx in dev; DEC-62: multi-stage Dockerfile; DEC-60: single Fly app serves API and frontend same-origin; DEC-63: single region lhr; DEC-64: auto-stop enabled.)
 
 **Estimate:** 2–3 hr. **Depends on:** FEAT-03, 04. **Enables:** FEAT-06.
 

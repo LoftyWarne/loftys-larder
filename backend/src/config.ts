@@ -9,6 +9,7 @@ const configSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
     ALLOWED_ORIGIN: z.string().url().optional(),
+    STATIC_DIR: z.string().min(1).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'production' && !value.ALLOWED_ORIGIN) {

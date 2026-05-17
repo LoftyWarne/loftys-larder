@@ -1,0 +1,37 @@
+# Fly.io app config for Lofty's Larder.
+#
+# `app = "..."` is left unset deliberately: `flyctl launch` / `flyctl apps create`
+# fill it in during FEAT-06.
+#
+# Per DEC-63 / DEC-64: single region `lhr`, Fly auto-stop, no always-on machine.
+
+primary_region = "lhr"
+
+[build]
+  # Multi-stage Dockerfile in the repo root.
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpus = 1
+
+# Machine-level TCP liveness probe.
+#
+# FEAT-46 introduces `/api/health`; at that point swap this for an HTTP check
+# (or keep both). Declaring an HTTP check that points at a non-existent route
+# now would mark every machine unhealthy through FEAT-06 deployment.
+[checks]
+  [checks.tcp_alive]
+    type = "tcp"
+    port = 3000
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"

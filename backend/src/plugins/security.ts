@@ -1,13 +1,9 @@
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import staticPlugin from '@fastify/static';
-import type { FastifyInstance } from 'fastify';
-import { fileURLToPath } from 'node:url';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import path from 'node:path';
 import type { Config } from '../config.ts';
-
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const staticPlaceholderDir = path.resolve(moduleDir, '../../public');
 
 export async function registerSecurity(app: FastifyInstance, config: Config): Promise<void> {
   await app.register(helmet);
@@ -26,9 +22,20 @@ export async function registerSecurity(app: FastifyInstance, config: Config): Pr
     });
   }
 
-  await app.register(staticPlugin, {
-    root: staticPlaceholderDir,
-    prefix: '/api/static/',
-    decorateReply: false,
-  });
+  if (config.STATIC_DIR) {
+    const staticRoot = path.resolve(config.STATIC_DIR);
+    await app.register(staticPlugin, {
+      root: staticRoot,
+      prefix: '/',
+      wildcard: false,
+      index: ['index.html'],
+    });
+
+    app.setNotFoundHandler((req: FastifyRequest, reply: FastifyReply) => {
+      if (req.method === 'GET' && !req.url.startsWith('/api/')) {
+        return reply.type('text/html').sendFile('index.html');
+      }
+      return reply.code(404).send({ error: 'Not Found' });
+    });
+  }
 }

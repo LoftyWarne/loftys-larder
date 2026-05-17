@@ -834,6 +834,16 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** Health-check flapping becomes operationally noisy.
 - **Cross-refs:** FEAT-46, FEAT-05.
 
+### DEC-80 — `/shared` typechecks only (no dist emit); `AppRouter` reaches into backend via a type-only import
+
+- **Chosen:** `/shared/tsconfig.json` runs with `noEmit: true` and `rootDir: ".."`. TypeScript project references on `/backend` and `/frontend` (pointing at `/shared`) are removed. `shared/src/router-type.ts` re-exports `AppRouter` via a type-only relative import from `backend/src/trpc/router.ts` (erased at compile time, zero runtime crossing). `shared/package.json#main` still points at `./dist/index.js` but no build emits there today.
+- **Alternatives:** (a) Keep `composite: true` and TS project references; pre-build shared to `dist/` — incompatible because `composite + rootDir` forbids reading files outside the project boundary, even for type-only imports. (b) Have the frontend `import type { AppRouter } from '@loftys-larder/backend/...'` directly and skip the shared re-export — violates the AGENTS.md "frontend imports from /shared only" rule and the FEAT-03 acceptance criterion "AppRouter exported from /shared". (c) Generate a `.d.ts` for `AppRouter` ahead of time and commit it — staleness risk on every router change.
+- **Why it won:** TypeScript's composite-project model forbids reaching across workspace boundaries. The only way to honour FEAT-03's "AppRouter lives in /shared" criterion was to drop composite. `/shared` has nothing to emit yet (no schemas, no DTOs), so removing the build step is a no-op today — and the type-only import is erased at compile time, so the runtime layering AGENTS.md cares about is unaffected.
+- **Consequences (+):** Single source of truth for the router type lives in `/shared` as the FEAT-03 contract requires. Frontend's `import type { AppRouter } from '@loftys-larder/shared'` works without pulling backend runtime into its bundle. No build orchestration needed for the current scope.
+- **Consequences (−):** When schemas/DTOs land in `/shared` (FEAT-08 onward), backend will need them at *runtime* via `import { ... } from '@loftys-larder/shared'`. With no dist emit, the import resolves through `package.json#main → ./dist/index.js` to nothing. The FEAT that first introduces a runtime shared import has to decide between: (1) restoring a `tsc` build step for shared (still without composite — incremental builds become a per-package `pnpm --filter shared build`), (2) a tsconfig `paths` mapping that redirects `@loftys-larder/shared` to source files in dev/test, or (3) pointing shared's `exports` map at `src/` directly. None are blocked by today's setup, but the call is deferred.
+- **Revisit when:** The first runtime import from `/shared` is introduced (most likely FEAT-08, when Drizzle schemas + Zod schemas start landing in `/shared`).
+- **Cross-refs:** FEAT-03, FEAT-08, FEAT-09; AGENTS.md leaf-rule nuance.
+
 ---
 
 ## Most Worth Deep Consideration on Revisit

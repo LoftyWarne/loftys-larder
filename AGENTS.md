@@ -131,7 +131,7 @@ Cross-workspace rules:
 
 - `/frontend` imports from `/shared` only. Never from `/backend` runtime. `import type` for the router type.
 - `/backend` imports from `/shared` for schemas and DTOs.
-- `/shared` imports from neither — leaf.
+- `/shared` is a runtime leaf — no runtime imports from `/backend` or `/frontend`. One narrow type-only exception: `shared/src/router-type.ts` does `export type { AppRouter } from '../../backend/src/trpc/router.ts'`. Type-only re-exports are erased at compile time and add no runtime dependency. See DEC-80 for the trade-off and its revisit trigger.
 
 ---
 

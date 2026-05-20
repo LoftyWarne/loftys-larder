@@ -1,10 +1,8 @@
 # Fly.io app config for Lofty's Larder.
 #
-# `app = "..."` is left unset deliberately: `flyctl launch` / `flyctl apps create`
-# fill it in during FEAT-06.
-#
 # Per DEC-63 / DEC-64: single region `lhr`, Fly auto-stop, no always-on machine.
 
+app = "loftys-larder-prod"
 primary_region = "lhr"
 
 [build]

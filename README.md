@@ -43,3 +43,24 @@ psql "$DATABASE_URL_TEST" -c '\dx'      # same on the test DB
 > Note: backend integration tests (added in a later FEAT) use Testcontainers
 > for ephemeral per-run isolation rather than `lofty_test` in the Compose
 > Postgres. The in-Compose test DB is for ad-hoc scripts and manual probing.
+
+## Deploy
+
+Production runs on Fly.io (`loftys-larder-prod`, region `lhr`) behind
+Cloudflare orange-cloud DNS. From FEAT-48 onwards CI handles deploys on
+push to `main`; until then, deploy manually from a clean working tree:
+
+```sh
+flyctl deploy --release-command "pnpm drizzle-kit migrate"
+```
+
+Rollback (re-pins the previous release):
+
+```sh
+flyctl releases rollback
+```
+
+First-time setup — domain purchase, `flyctl apps create`, custom-domain
+attach, Cloudflare DNS and cache rules — is one-shot and documented as
+a runbook in `docs/session-notes.md`. Every command run there should be
+captured verbatim; FEAT-50 lifts the sequence into `OPERATIONS.md`.

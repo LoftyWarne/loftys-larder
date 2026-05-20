@@ -10,6 +10,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Run @v4 JS actions on Node.js 24 instead of the deprecated Node 20.
+  # Remove once actions/checkout, actions/setup-node, and pnpm/action-setup
+  # default to Node 24 (planned for June 2026).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   check:
     name: lint / typecheck / test

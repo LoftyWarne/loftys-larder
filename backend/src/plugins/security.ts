@@ -5,7 +5,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import path from 'node:path';
 import type { Config } from '../config.ts';
 
-export async function registerSecurity(app: FastifyInstance, config: Config): Promise<void> {
+export async function registerSecurity(
+  app: FastifyInstance,
+  config: Config,
+): Promise<void> {
   await app.register(helmet);
 
   if (config.NODE_ENV !== 'production' && config.ALLOWED_ORIGIN) {

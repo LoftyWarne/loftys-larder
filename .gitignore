@@ -12,6 +12,12 @@ coverage/
 npm-debug.log*
 pnpm-debug.log*
 
+# Stray TypeScript emit inside source trees (build output belongs in dist/)
+backend/src/**/*.js
+backend/src/**/*.js.map
+backend/src/**/*.d.ts
+backend/src/**/*.d.ts.map
+
 .DS_Store
 Thumbs.db
 

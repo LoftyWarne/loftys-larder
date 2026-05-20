@@ -24,7 +24,7 @@ function encodeTrpcInput(input: unknown): string {
 }
 
 describe('buildApp', () => {
-  let app: FastifyInstance;
+  let app: FastifyInstance | undefined;
 
   afterEach(async () => {
     if (app) await app.close();
@@ -47,7 +47,9 @@ describe('buildApp', () => {
       url: `/api/trpc/health.ping?input=${encodeTrpcInput({})}`,
     });
     expect(response.statusCode).toBe(200);
-    const body = response.json() as { result: { data: { ok: boolean; reqId: string } } };
+    const body = response.json<{
+      result: { data: { ok: boolean; reqId: string } };
+    }>();
     expect(body.result.data.ok).toBe(true);
     expect(typeof body.result.data.reqId).toBe('string');
     expect(body.result.data.reqId.length).toBeGreaterThan(0);
@@ -59,8 +61,9 @@ describe('buildApp', () => {
       method: 'GET',
       url: `/api/trpc/health.ping?input=${encodeTrpcInput({})}`,
     });
-    const headerReqId = response.headers['x-request-id'] ?? response.headers['request-id'];
-    const body = response.json() as { result: { data: { reqId: string } } };
+    const headerReqId =
+      response.headers['x-request-id'] ?? response.headers['request-id'];
+    const body = response.json<{ result: { data: { reqId: string } } }>();
     if (typeof headerReqId === 'string') {
       expect(body.result.data.reqId).toBe(headerReqId);
     } else {
@@ -78,14 +81,14 @@ describe('buildApp', () => {
       method: 'GET',
       url: `/api/trpc/health.ping?input=${encodeTrpcInput({})}`,
     });
-    const firstBody = first.json() as { result: { data: { reqId: string } } };
-    const secondBody = second.json() as { result: { data: { reqId: string } } };
+    const firstBody = first.json<{ result: { data: { reqId: string } } }>();
+    const secondBody = second.json<{ result: { data: { reqId: string } } }>();
     expect(firstBody.result.data.reqId).not.toBe(secondBody.result.data.reqId);
   });
 });
 
 describe('CORS', () => {
-  let app: FastifyInstance;
+  let app: FastifyInstance | undefined;
 
   afterEach(async () => {
     if (app) await app.close();
@@ -101,7 +104,9 @@ describe('CORS', () => {
         'access-control-request-method': 'GET',
       },
     });
-    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'http://localhost:5173',
+    );
   });
 
   it('omits CORS headers in dev for a foreign origin', async () => {
@@ -132,7 +137,7 @@ describe('CORS', () => {
 });
 
 describe('static + tRPC coexistence', () => {
-  let app: FastifyInstance;
+  let app: FastifyInstance | undefined;
 
   afterEach(async () => {
     if (app) await app.close();
@@ -155,14 +160,14 @@ describe('static + tRPC coexistence', () => {
 });
 
 describe('security headers', () => {
-  let app: FastifyInstance;
+  let app: FastifyInstance | undefined;
 
   afterEach(async () => {
     if (app) await app.close();
   });
 
   beforeEach(() => {
-    app = undefined as unknown as FastifyInstance;
+    app = undefined;
   });
 
   it('sets helmet default headers', async () => {

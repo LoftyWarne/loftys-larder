@@ -44,6 +44,29 @@ psql "$DATABASE_URL_TEST" -c '\dx'      # same on the test DB
 > for ephemeral per-run isolation rather than `lofty_test` in the Compose
 > Postgres. The in-Compose test DB is for ad-hoc scripts and manual probing.
 
+## Quality gates
+
+ESLint (typed, `@typescript-eslint` strict-type-checked) and Prettier own
+code quality and formatting. Husky runs `lint-staged` on `pre-commit`,
+applying Prettier and `eslint --fix` to staged files.
+
+The same commands run in CI on every push (any branch) and PRs to
+`main`, in `.github/workflows/ci.yml`:
+
+```sh
+pnpm format:check     # prettier --check
+pnpm -r lint          # eslint per workspace
+pnpm -r typecheck     # tsc per workspace
+pnpm -r test          # vitest per workspace
+```
+
+To auto-fix locally:
+
+```sh
+pnpm format           # write Prettier changes
+pnpm lint:fix         # eslint --fix
+```
+
 ## Deploy
 
 Production runs on Fly.io (`loftys-larder-prod`, region `lhr`) behind

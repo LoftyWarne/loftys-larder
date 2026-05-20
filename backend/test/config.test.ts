@@ -20,7 +20,9 @@ describe('loadConfig', () => {
   });
 
   it('rejects missing ALLOWED_ORIGIN outside production', () => {
-    expect(() => loadConfig({ NODE_ENV: 'development' })).toThrowError(ConfigValidationError);
+    expect(() => loadConfig({ NODE_ENV: 'development' })).toThrowError(
+      ConfigValidationError,
+    );
   });
 
   it('allows missing ALLOWED_ORIGIN in production', () => {
@@ -36,12 +38,14 @@ describe('loadConfig', () => {
   });
 
   it('rejects an invalid ALLOWED_ORIGIN url', () => {
-    expect(() => loadConfig({ ...baseEnv, ALLOWED_ORIGIN: 'not-a-url' })).toThrowError(
-      ConfigValidationError,
-    );
+    expect(() =>
+      loadConfig({ ...baseEnv, ALLOWED_ORIGIN: 'not-a-url' }),
+    ).toThrowError(ConfigValidationError);
   });
 
   it('rejects a non-numeric PORT', () => {
-    expect(() => loadConfig({ ...baseEnv, PORT: 'abc' })).toThrowError(ConfigValidationError);
+    expect(() => loadConfig({ ...baseEnv, PORT: 'abc' })).toThrowError(
+      ConfigValidationError,
+    );
   });
 });

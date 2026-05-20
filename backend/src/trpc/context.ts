@@ -7,7 +7,10 @@ export interface AppContext {
   session: null;
 }
 
-export function createContext({ req, res }: CreateFastifyContextOptions): AppContext {
+export function createContext({
+  req,
+  res,
+}: CreateFastifyContextOptions): AppContext {
   return {
     req,
     reply: res,

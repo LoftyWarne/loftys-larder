@@ -12,6 +12,9 @@
     "preview": "vite preview",
     "routes:gen": "tsr generate",
     "typecheck": "tsr generate && tsc -p tsconfig.json",
+    "lint": "tsr generate && eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -49,7 +52,7 @@
     "tailwindcss": "^4.0.0",
     "tw-animate-css": "^1.0.5",
     "typescript": "*",
-    "vite": "^6.0.7",
+    "vite": "^7.3.3",
     "vitest": "^3.0.4"
   }
 }

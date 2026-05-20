@@ -18,7 +18,13 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
     trpcOptions: {
       router: appRouter,
       createContext,
-      onError: ({ error, path }: { error: unknown; path: string | undefined }) => {
+      onError: ({
+        error,
+        path,
+      }: {
+        error: unknown;
+        path: string | undefined;
+      }) => {
         app.log.error({ err: error, path }, 'tRPC procedure failed');
       },
     },

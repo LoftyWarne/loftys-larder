@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+// Single-household MVP scope constant (DEC-17). Every domain query must include
+// `where household_id = CURRENT_HOUSEHOLD_ID`. FEAT-10's seed inserts a
+// households row with this id.
+export const CURRENT_HOUSEHOLD_ID = '00000000-0000-4000-8000-000000000001';
+
+const databaseUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^postgres(ql)?:\/\//.test(value), {
+    message: 'DATABASE_URL must be a postgres:// or postgresql:// URL.',
+  });
+
 const configSchema = z
   .object({
     NODE_ENV: z
@@ -12,6 +24,7 @@ const configSchema = z
       .default('info'),
     ALLOWED_ORIGIN: z.string().url().optional(),
     STATIC_DIR: z.string().min(1).optional(),
+    DATABASE_URL: databaseUrlSchema,
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'production' && !value.ALLOWED_ORIGIN) {

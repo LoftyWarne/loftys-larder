@@ -4,6 +4,70 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-05-20 — FEAT-09 done; FEAT-10 next
+
+- **Just finished:** FEAT-09 (Drizzle infrastructure). Detailed entry below. Tests green locally (26/26); human verification of acceptance criteria still pending. **Commit not yet made.**
+- **Operational follow-up (do before next prod deploy):** `flyctl postgres create` → `flyctl postgres attach` against `loftys-larder-prod`. Today the prod app has no `DATABASE_URL`; with FEAT-09 in, the server refuses to boot without it. Order matters: attach before merging FEAT-09 to `main`, or the next deploy crashloops.
+- **Next:** kick-off FEAT-10 (Schema: auth, household, reference tables + seeds). Read `docs/feature-specs.md §FEAT-10` + DEC-15 / DEC-16 / DEC-17 / DEC-41 / DEC-42.
+- **DEC-80 decision now blocking FEAT-10/11.** FEAT-09 didn't trigger it (no `/shared` runtime imports added); FEAT-10 will if it lands Better Auth Drizzle table shapes / Zod schemas in `/shared`. Decide build approach (tsc emit vs `paths` mapping vs `exports` → `src/`) at FEAT-10 kick-off, *before* the schema PR lands. Three options sketched in FEAT-05 session note.
+- **FEAT-10 must import `CURRENT_HOUSEHOLD_ID`** from `backend/src/config.ts` (or its re-export from `backend/src/db/index.ts`) for the households seed row. Do NOT regenerate the UUID — value is `00000000-0000-4000-8000-000000000001`.
+- **FEAT-10 first real migration** will be the first thing `backend/drizzle/` actually contains. `db:generate` is wired and verified empty against today's schema; `db:migrate` is wired and verified no-op against the Compose Postgres.
+
+---
+
+## 2026-05-20 — FEAT-09 (Drizzle infrastructure)
+
+**Status:** implementation complete; `pnpm --filter backend test` green (26 tests, including 5 Testcontainers smoke cases) with Colima env. Typecheck and lint clean across all workspaces. Definition-of-done boxes in `docs/feature-specs.md §FEAT-09` left unticked — human action.
+
+### Decisions taken at kick-off (the *why*, not just the *what*)
+
+- **`CURRENT_HOUSEHOLD_ID` is a hardcoded UUID constant** in `backend/src/config.ts` (`00000000-0000-4000-8000-000000000001`), re-exported from `backend/src/db/index.ts`. *Why hardcoded, not env-var:* single-household MVP (DEC-17) only needs *one* value across all environments; an env var would invite drift between dev/test/prod. FEAT-10's seed must import this constant — do not regenerate.
+- **`DATABASE_URL` is required in every environment** (Zod-validated as `postgres://` or `postgresql://`). *Why required, not optional-with-lazy-pool:* plumbing only earns its keep if it's hot at startup, and `health.ping` will start touching the DB at FEAT-46. Boot-time failure is the right time to surface a missing secret, not first-DB-query time.
+- **Pool max hardcoded at 10**, `min` at pg-pool default 0. *Why not env-var-overridable:* DEC-71 picked a static number once for the household workload ceiling. The Testcontainers smoke builds its own `pg.Pool({ max: 1 })`, so test concurrency is decoupled.
+- **DEC-80 not triggered by FEAT-09.** No `/shared` runtime imports added; the call is deferred to FEAT-10/11 when Better Auth Drizzle table shapes and/or Zod schemas first cross the workspace boundary at runtime.
+
+### Drift from kick-off plan
+
+1. **No `currentDatabase` factory.** Plan implied a singleton with optional factory; ended up with a clean singleton (`pool`, `db`, `withTransaction` exported from `backend/src/db/index.ts`) and a `makeWithTransaction(db)` constructor in its own file so the smoke test can build its own Drizzle handle against the Testcontainers Postgres without depending on env-var config. Audit-grep for `db.transaction(` still hits only `withTransaction.ts`.
+
+2. **`drizzle-kit` casing option set globally** via `casing: 'snake_case'` on both the Drizzle runtime (`drizzle(pool, { schema, casing: 'snake_case' })`) and `drizzle.config.ts`. Means FEAT-10 columns can stay camelCase in the Drizzle DSL without per-column `name()` mapping — DEC-15 honoured by config, not by per-column boilerplate.
+
+3. **`tsconfig.json` extended** to include `drizzle.config.ts` so ESLint's project service can lint it; not on the kick-off file list but unavoidable once `strictTypeChecked` ran on the config file.
+
+4. **`backend/test/server.test.ts` and `backend/test/config.test.ts` updates** beyond the kick-off plan: existing tests assumed `DATABASE_URL` didn't exist; both now pass it via `baseEnv` (config) / inline (server). The `_ignored` destructure pattern wasn't allowed by `@typescript-eslint/no-unused-vars` — switched to an `envWithout(key)` helper using `Object.fromEntries(...).filter(...)`.
+
+5. **`pg-pool` exhaustion test loop** initially asserted `select ${i}` round-trip; pg returns parameterized numeric values as strings (pg-types default for inferred `int4/numeric`). Tightened to `select 1 as ok` — still exercises the release-back-to-pool path, just without the type-coercion noise. Worth knowing in FEAT-10 onward: when a test (or runtime code) reads a count or numeric value back from pg, **the value may arrive as a string** unless you cast in SQL (`::int`) or configure `pg-types.setTypeParser`. Drizzle's typed `db.select()` API masks this for column reads — it's only loose `db.execute()` rows that hit the raw pg-types behaviour.
+
+### Implementation details worth carrying
+
+- **`pg` ESM import shape:** `import pg from 'pg'; const { Pool } = pg;` (or `new pg.Pool(...)`). `pg` is CJS-published with named exports; under NodeNext, the default-import-then-destructure pattern is what works. Reach for `import { Pool } from 'pg'` and the build will fail.
+- **`vitest.config.ts` left untouched.** No global test setup, no env-var injection at the vitest layer. Each test file that needs Postgres builds its own Drizzle handle (smoke test pattern). FEAT-10 integration tests can copy the smoke-test pattern; don't add a global setup file unless the duplication actually hurts.
+- **Drizzle's global `casing: 'snake_case'`** is set in both `backend/src/db/index.ts` (runtime) *and* `backend/drizzle.config.ts` (kit). The two need to agree, or generated migrations will diff against the runtime DSL. If you change one, change the other.
+
+### Environment notes — Testcontainers under Colima
+
+Two env vars required to run the smoke suite locally:
+
+```sh
+export DOCKER_HOST=unix:///Users/$USER/.colima/default/docker.sock
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+```
+
+- `DOCKER_HOST` — Colima's socket isn't at the default `/var/run/docker.sock`; Testcontainers' runtime detection has to be pointed at it.
+- `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` — Ryuk (Testcontainers' reaper) bind-mounts the docker socket back into its own container. Colima's Lima VM can't bind-mount a `~/.colima/...` path through 9p in a way Ryuk expects; pointing the override at `/var/run/docker.sock` is the documented Colima workaround.
+
+GitHub Actions runners use the default socket path and don't need either override. Worth a `docs/OPERATIONS.md` line at FEAT-50 lift; not blocking.
+
+### Deferred (do NOT do as part of FEAT-09)
+
+- Wire `db` into the tRPC context — downstream FEAT (FEAT-10 first procedure).
+- `flyctl postgres create` / `flyctl postgres attach` and `DATABASE_URL` in Fly secrets — operational follow-up; required before the next prod deploy.
+- Any table/schema — FEAT-10/11/12.
+- `release_command "pnpm drizzle-kit migrate"` in CI — FEAT-48.
+- `/shared` runtime build wiring (DEC-80 revisit) — deferred until the FEAT that first lands a runtime shared import.
+
+---
+
 ## 2026-05-17 — FEAT-06 (Fly.io initial deploy + Cloudflare DNS)
 
 **Status:** implementation complete on 2026-05-20. Live URL is `https://loftys-larder.co.uk`, `www` 301s to apex, `/api/trpc/health.ping` round-trips through Cloudflare → Fly (`lhr`). Browser load + DevTools clean. Definition-of-done boxes in `docs/feature-specs.md §FEAT-06` left unticked — human action.

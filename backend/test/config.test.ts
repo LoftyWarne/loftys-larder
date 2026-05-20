@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigValidationError, loadConfig } from '../src/config.ts';
+import {
+  ConfigValidationError,
+  CURRENT_HOUSEHOLD_ID,
+  loadConfig,
+} from '../src/config.ts';
 
 const baseEnv = {
   NODE_ENV: 'test',
   ALLOWED_ORIGIN: 'http://localhost:5173',
+  DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
 } as const;
+
+function envWithout(
+  key: keyof typeof baseEnv,
+): Partial<Record<keyof typeof baseEnv, string>> {
+  return Object.fromEntries(Object.entries(baseEnv).filter(([k]) => k !== key));
+}
 
 describe('loadConfig', () => {
   it('applies defaults for unspecified vars', () => {
@@ -20,13 +31,16 @@ describe('loadConfig', () => {
   });
 
   it('rejects missing ALLOWED_ORIGIN outside production', () => {
-    expect(() => loadConfig({ NODE_ENV: 'development' })).toThrowError(
-      ConfigValidationError,
-    );
+    expect(() =>
+      loadConfig({ ...envWithout('ALLOWED_ORIGIN'), NODE_ENV: 'development' }),
+    ).toThrowError(ConfigValidationError);
   });
 
   it('allows missing ALLOWED_ORIGIN in production', () => {
-    const config = loadConfig({ NODE_ENV: 'production' });
+    const config = loadConfig({
+      ...envWithout('ALLOWED_ORIGIN'),
+      NODE_ENV: 'production',
+    });
     expect(config.ALLOWED_ORIGIN).toBeUndefined();
     expect(config.NODE_ENV).toBe('production');
   });
@@ -46,6 +60,48 @@ describe('loadConfig', () => {
   it('rejects a non-numeric PORT', () => {
     expect(() => loadConfig({ ...baseEnv, PORT: 'abc' })).toThrowError(
       ConfigValidationError,
+    );
+  });
+
+  it('rejects missing DATABASE_URL in every environment', () => {
+    expect(() => loadConfig(envWithout('DATABASE_URL'))).toThrowError(
+      ConfigValidationError,
+    );
+    expect(() =>
+      loadConfig({ ...envWithout('DATABASE_URL'), NODE_ENV: 'production' }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('rejects a non-postgres DATABASE_URL', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, DATABASE_URL: 'https://example.com' }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('rejects a malformed DATABASE_URL', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, DATABASE_URL: 'not-a-url' }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('accepts both postgres:// and postgresql:// DATABASE_URL prefixes', () => {
+    const a = loadConfig({
+      ...baseEnv,
+      DATABASE_URL: 'postgres://u:p@h:5432/db',
+    });
+    const b = loadConfig({
+      ...baseEnv,
+      DATABASE_URL: 'postgresql://u:p@h:5432/db',
+    });
+    expect(a.DATABASE_URL).toBe('postgres://u:p@h:5432/db');
+    expect(b.DATABASE_URL).toBe('postgresql://u:p@h:5432/db');
+  });
+});
+
+describe('CURRENT_HOUSEHOLD_ID', () => {
+  it('is a fixed UUID exported from config', () => {
+    expect(CURRENT_HOUSEHOLD_ID).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
   });
 });

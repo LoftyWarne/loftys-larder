@@ -7,5 +7,11 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*", "test/**/*", "vitest.config.ts", "build.ts"]
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "vitest.config.ts",
+    "build.ts",
+    "drizzle.config.ts"
+  ]
 }

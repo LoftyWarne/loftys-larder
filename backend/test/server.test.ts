@@ -9,6 +9,7 @@ const devConfig: Config = {
   PORT: 0,
   LOG_LEVEL: 'silent',
   ALLOWED_ORIGIN: 'http://localhost:5173',
+  DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
 };
 
 const prodConfig: Config = {
@@ -17,6 +18,7 @@ const prodConfig: Config = {
   PORT: 0,
   LOG_LEVEL: 'silent',
   ALLOWED_ORIGIN: undefined,
+  DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
 };
 
 function encodeTrpcInput(input: unknown): string {

@@ -740,15 +740,15 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** Fly Postgres feature gaps become binding (PITR, read replicas).
 - **Cross-refs:** FEAT-06, FEAT-09.
 
-### DEC-71 — `pg-pool` size committed once after Phase 1 measurement
+### DEC-71 — `pg-pool` size committed once in Phase 1 (estimated, not measured at FEAT-08)
 
-- **Chosen:** A static `pg-pool` size, chosen against measured memory profile on the smallest Fly machine class (expected 5–10).
-- **Alternatives:** Dynamic pool sizing; library defaults; guess.
-- **Why it won:** Dynamic pool sizing introduces tuning surface and observability needs for a workload whose ceiling is two concurrent users. Static and measured is correct-enough.
-- **Consequences (+):** Predictable connection behaviour. No autotuning complexity.
-- **Consequences (−):** Locked-in until Phase 6 measurement reveals problems. Interacts with cold-start (more connections = longer first-request) and machine class changes (cross-cutting concern #18).
-- **Revisit when:** Memory pressure or connection-exhaustion errors appear in Phase 6 observability. Also if Fly machine class is upgraded.
-- **Cross-refs:** FEAT-08, FEAT-09, FEAT-51; cross-cutting concern #18.
+- **Chosen:** A static `pg-pool` size in the 5–10 range, committed once in Phase 1 ahead of FEAT-09. **10** picked at FEAT-08 (see `docs/measurements.md`). The original plan was a synthetic-load measurement on the deployed app, but `health.ping` doesn't touch the DB yet — the only measurement available right now is the Node baseline, not the real `pg-pool` allocation under traffic. The estimate stands until a revisit trigger fires.
+- **Alternatives:** Dynamic pool sizing; library defaults; guess (with no documented reasoning); run the synthetic load anyway, against the Node baseline.
+- **Why it won:** Dynamic pool sizing introduces tuning surface and observability needs for a workload whose ceiling is two concurrent users. Static is correct-enough. Skipping the load run at FEAT-08 trades empirical confidence at the Node baseline (low information) for a measurement window opening up at FEAT-09 (high information, real DB load).
+- **Consequences (+):** Predictable connection behaviour. No autotuning complexity. FEAT-09 unblocked without a measurement run that would mostly confirm headroom the runtime image footprint already implies.
+- **Consequences (−):** Estimate, not measurement — load behaviour under genuine concurrency is unverified. Locked-in until a Phase 6 (or FEAT-09 traffic) signal reveals problems. Interacts with cold-start (more eagerly-allocated connections = longer first-request) and machine class changes (cross-cutting concern #18).
+- **Revisit when:** Memory pressure or connection-exhaustion errors appear in Phase 6 observability. Also if Fly machine class is upgraded. FEAT-08-specific addendum (per `docs/measurements.md`): FEAT-09 ships, real traffic exercises `pg-pool`, and either peak RSS sits >70% of the machine's memory ceiling on the Fly dashboard, or `pg-pool` queue depth stays >0 in the logs.
+- **Cross-refs:** FEAT-08, FEAT-09, FEAT-51; cross-cutting concern #18; `docs/measurements.md`.
 
 ### DEC-72 — Cloudflare in front: registrar, DNS, CDN, TLS — with `/api/*` cache bypass
 

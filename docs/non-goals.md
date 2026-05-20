@@ -148,10 +148,10 @@ Where it's held: >5 errors per 5 minutes.
 Why this level: percentage-based thresholds page constantly at low traffic — a single flaky request becomes 100% error rate. Absolute thresholds align noise with real signal.
 Revisit: if traffic ever grows past the point where 5 errors is invisibly small noise relative to volume.
 
-### `pg-pool` size committed once after Phase 1 measurement
-Where it's held: a single static pool size, chosen against measured memory profile on the smallest machine class (expected 5–10).
+### `pg-pool` size committed once in Phase 1 (estimated, not measured)
+Where it's held: a single static pool size in the 5–10 range, committed at FEAT-08 against the workload's ceiling and the runtime image footprint rather than a synthetic-load measurement (`health.ping` doesn't touch the DB yet, so there's nothing real to measure). See `docs/measurements.md`.
 Why not dynamic: dynamic pool sizing introduces tuning surface and observability needs for a workload whose ceiling is two concurrent users.
-Revisit: if memory pressure or connection-exhaustion errors appear in Phase 6 observability. Also if Fly machine class is upgraded.
+Revisit: if memory pressure or connection-exhaustion errors appear in Phase 6 observability. Also if Fly machine class is upgraded. FEAT-09 traffic with peak RSS > 70% or sustained `pg-pool` queue depth > 0 is the cue to run the synthetic-load procedure captured in `docs/measurements.md`.
 
 ### Single-region deployment (`lhr`)
 Where it's held: one Fly region, one Postgres cluster co-located.

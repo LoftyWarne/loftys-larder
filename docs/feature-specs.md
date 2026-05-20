@@ -312,36 +312,37 @@ Conventions:
 
 ---
 
-### FEAT-08 — Memory profile and pg-pool sizing decision
+### FEAT-08 — `pg-pool` sizing decision (estimated; load run deferred)
 
-**Goal:** Measure container memory headroom on the chosen Fly machine class under simulated load, then commit a `pg-pool` size to be used in FEAT-09. `[DEC-TBD: pg-pool size committed from measurement, not guessed]`
+**Goal:** Commit a `pg-pool` size and confirm the Fly machine class so FEAT-09 has a number to consume. Per DEC-71, document the reasoning and the revisit triggers. The synthetic-load run the original plan called for is deferred — `health.ping` doesn't hit the DB yet, so a measurement now would only probe the Node baseline, not the real `pg-pool` allocation under traffic. FEAT-09 opens that measurement window if the estimate proves wrong. `[DEC-TBD: pg-pool size committed in Phase 1; estimated against workload ceiling + image footprint, with named revisit triggers]`
 
-**Estimate:** 1–2 hr. **Depends on:** FEAT-06. **Enables:** FEAT-09.
+**Estimate:** 30 min (docs only). **Depends on:** FEAT-06 (for the runtime image footprint reference in the FEAT-05 session note). **Enables:** FEAT-09.
 
 **Files:**
-- `docs/measurements.md` (or a section in `OPERATIONS.md` to be created in FEAT-50)
-- `fly.toml` (machine class confirmed)
+- `docs/measurements.md` — chosen pool size, machine class, reasoning, revisit triggers.
+- `fly.toml` — confirmed unchanged at `shared-cpu-1x@512mb` (no edit; the FEAT verifies the decision rather than touching the file).
 
 **Acceptance criteria:**
-- [ ] A simple load script (e.g. `autocannon`, `k6`, or a hand-rolled `Promise.all` loop) hits the production `health.ping` from a remote host
-- [ ] Memory usage observed via `flyctl status` / Fly dashboard during the run
-- [ ] A pool size in the 5–10 range is selected and documented with the reasoning
-- [ ] The chosen Fly machine class (e.g. `shared-cpu-1x@256mb` or larger) is recorded
-- [ ] Whether to revisit at higher traffic is noted
+- [ ] A pool size in the 5–10 range is committed in `docs/measurements.md` with the reasoning written down.
+- [ ] The Fly machine class is confirmed in `docs/measurements.md` (and matches the live `fly.toml`).
+- [ ] The file explicitly flags itself as an *estimate*, not a measurement, so future archaeology isn't misled.
+- [ ] DEC-71's revisit triggers are listed, plus the FEAT-specific addendum (FEAT-09 traffic with peak RSS > 70% of the machine ceiling, or sustained `pg-pool` queue depth > 0).
+- [ ] DEC-71 and `docs/plan.md`'s three "measure" references are updated to match the estimate framing.
 
 **Implementation notes:**
-- `health.ping` doesn't hit the DB yet, so this measurement is for the *Node baseline*. Re-measure after FEAT-09 wires up `pg-pool` if the result was close to capacity.
+- The synthetic-load procedure (autocannon against the deployed `health.ping`, `flyctl machine status --json` snapshots, dashboard memory chart) is captured *in `docs/measurements.md`* as the procedure to run if a revisit trigger fires. Don't lose it — that's the empirical fallback.
+- Don't tick the FEAT-08 boxes; that's a human action.
 
-**Manual verification:** The decision is reviewable in the docs file; the value gets used in FEAT-09.
+**Manual verification:** The decision is reviewable in `docs/measurements.md`; the pool size value gets used in FEAT-09.
 
 **Common gotchas:**
-- Auto-stop will pause the machine between probes; warm it first.
-- A single load run isn't a definitive sample. Take a couple of passes.
+- The instinct to pick the lower end of the range "to be safe" inverts the cost asymmetry. Connection-exhaustion is a correctness failure; over-provisioning is a few idle sockets. Default to the upper bound at this scale.
+- Don't downgrade the machine class to 256MB pre-emptively just because the FEAT-05 image footprint is small — wait for FEAT-09's real DB load before reclaiming that headroom.
 
 **Definition of done:**
 - Tests cover: not applicable.
-- Commit: `docs(infra): record pg-pool sizing decision from memory measurement`
-- Gate check: open the docs file; the chosen pool size and machine class are both there with the reasoning.
+- Commit: `docs(infra): record pg-pool sizing decision (estimated; revisit per DEC-71)`
+- Gate check: open `docs/measurements.md`; the chosen pool size, machine class, reasoning, and revisit triggers are all present, and the file explicitly flags itself as an estimate.
 
 ---
 

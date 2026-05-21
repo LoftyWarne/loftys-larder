@@ -2165,6 +2165,8 @@ The value of req.id is *cross-referenceability*: an alert in Sentry should link 
 
 The promise of "one schema, validated on both sides" only holds if `/shared/src/schemas/*` is the canonical home and both sides import from there. The temptation is to inline a quick schema in a procedure file — resist. **Set the convention in FEAT-17 (the first procedure) and hold it.** Every later feature inherits.
 
+**Version:** Zod 4 (pinned in DEC-07). Prefer the top-level format helpers (`z.url()`, `z.email()`, `z.uuid()`) — the `z.string().url()` / `.email()` methods are deprecated and will be removed in the next major. Don't reach for `z.ZodIssueCode.custom` — it's gone; use the string literal `'custom'` in `ctx.addIssue` or collapse single-issue `superRefine` to `.refine` with an explicit `path`. `@hookform/resolvers` is on `^5` (v4-compatible).
+
 ### 3. `CURRENT_HOUSEHOLD_ID` scoping discipline
 
 **Threads through:** FEAT-09 (constant introduced), FEAT-17 onward (every domain query).

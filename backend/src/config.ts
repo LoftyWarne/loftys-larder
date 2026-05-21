@@ -6,7 +6,6 @@ import { z } from 'zod';
 export const CURRENT_HOUSEHOLD_ID = '00000000-0000-4000-8000-000000000001';
 
 const databaseUrlSchema = z
-  .string()
   .url()
   .refine((value) => /^postgres(ql)?:\/\//.test(value), {
     message: 'DATABASE_URL must be a postgres:// or postgresql:// URL.',
@@ -22,20 +21,18 @@ const configSchema = z
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
-    ALLOWED_ORIGIN: z.string().url().optional(),
+    ALLOWED_ORIGIN: z.url().optional(),
     STATIC_DIR: z.string().min(1).optional(),
     DATABASE_URL: databaseUrlSchema,
   })
-  .superRefine((value, ctx) => {
-    if (value.NODE_ENV !== 'production' && !value.ALLOWED_ORIGIN) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['ALLOWED_ORIGIN'],
-        message:
-          'ALLOWED_ORIGIN is required outside production (used by the dev-only CORS origin).',
-      });
-    }
-  });
+  .refine(
+    (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),
+    {
+      path: ['ALLOWED_ORIGIN'],
+      message:
+        'ALLOWED_ORIGIN is required outside production (used by the dev-only CORS origin).',
+    },
+  );
 
 export type Config = z.infer<typeof configSchema>;
 

@@ -42,7 +42,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 ### Open items for downstream FEATs
 
 - **FEAT-14 — Better Auth `usePlural: true` config.** Schema is plural; Better Auth defaults to singular model names. Either pass `usePlural: true` in the adapter options or override per-model with `user: { modelName: 'users' }`, etc. If we forget, the adapter will throw at runtime on its first DB call.
-- **FEAT-14 — Zod 4 transitive pin.** `better-auth@1.6.11` pulls `zod@^4.0.0` via `@better-auth/core` and `better-call` for its own runtime; the project is on `zod@3.25.76` (root `package.json` constraints). Both coexist today via pnpm hoisting with no visible breakage — but the moment we share a Zod schema *between* the Better Auth surface and `/shared/src/schemas/*`, the types won't agree. Two paths at FEAT-14: (a) upgrade the entire project to Zod 4 (breaks every existing `/shared` schema with the v3→v4 migration); (b) treat the Better Auth boundary as a place where types deliberately don't share — translate at the seam. Pick before wiring `betterAuth(...)` into the Fastify lifecycle.
+- ~~**FEAT-14 — Zod 4 transitive pin.**~~ **Resolved 2026-05-21:** project upgraded to `zod@^4` while the consuming surface was a single file (`backend/src/config.ts`); path (a) chosen. DEC-07 amended with the version pin. `@hookform/resolvers` bumped to `^5` alongside. No translation seam needed at the Better Auth boundary — `/shared/src/schemas/*` will land on v4 from the start.
 - **FEAT-11 (recipes) — `addedByUserId` is `text` (Better Auth string ID)**, not `uuid`. Cascade behaviour at user deletion is *not* `ON DELETE CASCADE` (DEC-29 tombstoning); the recipe deletion step must NULL these columns explicitly in the FEAT-35 transaction.
 - **FEAT-11 (recipes) — `householdId` is `uuid`.** All FKs to `households.id` are 16-byte uuid columns. Index sizing in `docs/measurements.md` will need updating once recipe volume becomes measurable.
 
@@ -77,7 +77,6 @@ If a future change adds a fourth workspace, copy the relevant subset into a new 
 ### Deferred (do NOT do as part of FEAT-10)
 
 - Configure `betterAuth(...)`, mount the auth router, set `usePlural` — **FEAT-14**.
-- Choose Zod 3 vs 4 strategy at the Better Auth boundary — **FEAT-14**.
 - Recipes domain (recipes, recipe_ingredients, recipe_method, etc.) — **FEAT-11**.
 - Meal-plans domain — **FEAT-12**.
 - Trigram GIN indexes on recipe / ingredient name — **FEAT-11**.

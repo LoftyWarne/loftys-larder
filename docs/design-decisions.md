@@ -76,6 +76,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Schemas are reused between forms and the API — no duplicate validation logic.
 - **Consequences (−):** Zod's bundle weight on the frontend is non-trivial (tens of KB after minification). If bundle size becomes a real concern, Valibot is a smaller compatible-ish swap, but the migration touches every schema.
 - **Revisit when:** Frontend bundle size becomes user-visible (it will not at this scale) or Zod itself stalls.
+- **Pinned version:** `zod@^4` (2026-05-21). `better-auth@1.6.11` already pulls `zod@^4` transitively via `@better-auth/core` and `better-call`; the v3 → v4 migration was done while the consuming surface was a single file (`backend/src/config.ts`) and `shared/src/schemas/*` was still empty. Closes the FEAT-14 open item recorded in session-notes 2026-05-21. `@hookform/resolvers` bumped to `^5` alongside (peer `react-hook-form ^7.55`).
 - **Cross-refs:** FEAT-01, FEAT-03 (env loader), FEAT-21 (Recipe Editor forms), every tRPC procedure.
 
 ---

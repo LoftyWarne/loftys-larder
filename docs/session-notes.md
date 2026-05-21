@@ -64,9 +64,15 @@ export TESTCONTAINERS_RYUK_DISABLED=true   # or TESTCONTAINERS_DOCKER_SOCKET_OVE
 
 CI (`ubuntu-latest`) uses the default socket path and needs neither.
 
-### Pre-existing format failures observed (not introduced by FEAT-10)
+### Prettier ignore — root file isn't enough for per-workspace runs
 
-`pnpm -r format:check` flags `frontend/dist/`, `frontend/src/routeTree.gen.ts`, `backend/dist/server.js`, `backend/drizzle/meta/*.json`. All four are either build output or generated. Worth a `.prettierignore` pass at FEAT-07 next-touch — not FEAT-10's scope.
+`pnpm format:check` (root) was always clean; `pnpm -r format:check` (per-workspace) was flagging `frontend/dist/`, `frontend/src/routeTree.gen.ts`, `backend/dist/server.js`, `backend/drizzle/meta/*.json`. **Root cause:** prettier 3 finds `.prettierrc` by walking *up* the directory tree, but `.prettierignore` is only read from the CWD. So `pnpm -r format:check` ran `prettier --check .` inside each workspace and never saw the root ignore file. CI uses the root invocation, so it stayed green throughout — only local `-r` runs hit the gap.
+
+**Fix landed alongside FEAT-10:** added per-workspace `.prettierignore` files in `frontend/`, `backend/`, `shared/`, each with workspace-relative paths (`src/routeTree.gen.ts` in frontend, `drizzle/meta` in backend, etc.). Slight duplication with the root file, accepted because the alternative — `--ignore-path ../.prettierignore` in each workspace's `format`/`format:check` scripts — hits anchored-path issues (a rule like `frontend/src/routeTree.gen.ts` won't match `src/routeTree.gen.ts` when prettier runs from inside `frontend/`).
+
+Also tightened the root file: narrowed `backend/drizzle` (which was hiding the .sql migration files from prettier) to `backend/drizzle/meta`, and dropped the redundant `shared/dist` (matched by plain `dist`).
+
+If a future change adds a fourth workspace, copy the relevant subset into a new workspace-local `.prettierignore` rather than relying on the root file.
 
 ### Deferred (do NOT do as part of FEAT-10)
 

@@ -8,6 +8,13 @@
       "when": 1779349618853,
       "tag": "0000_auth_household_reference",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779383121618,
+      "tag": "0001_recipes_domain",
+      "breakpoints": true
     }
   ]
 }

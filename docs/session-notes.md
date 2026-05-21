@@ -4,6 +4,71 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-05-21 — FEAT-11 (Schema: recipes domain)
+
+**Status:** implementation complete; `pnpm --filter backend test` green (69 tests; 32 new recipes-domain cases + 37 inherited). Typecheck + lint clean across all workspaces. Migration applies cleanly via Testcontainers from a fresh image. Definition-of-done boxes in `docs/feature-specs.md §FEAT-11` left unticked — human action.
+
+### Decisions taken at kick-off (the *why*, not just the *what*)
+
+- **Eight per-serving macro columns, not the spec's six.** Final set: `calories`, `protein`, `carbs`, `fat`, `saturated_fat`, `fibre`, `sugar`, `salt` (all `smallint NULL`). *Why:* matches UK front-of-pack labelling — covers everything most online recipes already publish, and avoids a follow-up migration to add `salt` the first time someone logs a soy-sauce-heavy meal. `docs/plan.md` line 217 updated in the same pass.
+- **`recipe_sources` is household-scoped** with `UNIQUE (household_id, name)`. *Why:* the plan called it "user-extensible" but listed no `household_id`; under DEC-17's single-tenant-with-multi-tenant-readiness posture, the global option would leak one household's sources into another's picker the day a second household is added. Cheaper to scope now.
+- **`recipe_ratings.user_id` is `ON DELETE RESTRICT`,** not CASCADE. *Why:* DEC-29's tombstoning sequence (plan.md lines 86–91, step 1) explicitly deletes the user's ratings before the user row. RESTRICT forces FEAT-35 to honour that step instead of letting a stray `DELETE FROM users` quietly destroy ratings without going through the documented path.
+- **No `$onUpdate` on `recipe_comments.last_updated_at`.** *Why:* Drizzle's `$onUpdate` fires on INSERT too (when the column has no provided value) — keeping it would mean the column is never NULL on a fresh comment, defeating the spec's NULL-means-never-edited inference (plan.md line 229). The application layer (FEAT-29) sets `last_updated_at` explicitly when a comment is edited. All other timestamp / date columns in the new schema do use `$onUpdate` per DEC-16.
+- **Trigram GIN index expression went straight through `drizzle-kit`.** Declared as `index(...).using('gin', sql\`lower(${table.name}) gin_trgm_ops\`)`; the generated SQL is correct verbatim — no hand-edit needed for the index DSL. The only manual edit to the generated migration was prepending `CREATE EXTENSION IF NOT EXISTS pg_trgm;` (drizzle-kit doesn't track extensions). This means future schema diffs against this index round-trip cleanly.
+- **`date_added` / `date_last_updated` use `date({ mode: 'date' })`.** *Why:* the default `date()` builder returns string mode, which mismatches `$onUpdate(() => new Date())`'s `Date` return type. `mode: 'date'` keeps the column as Postgres `date` while letting Drizzle round-trip JS `Date` values. No SQL difference.
+- **PK style for recipe-domain tables is `integer().generatedAlwaysAsIdentity()`.** *Why:* spec says `int PK`; reference tables (FEAT-10) use `smallserial` because they're 5–10 rows each. Recipe-domain tables expect orders of magnitude more, so 32-bit identity is the right fit. The choice cascades into FKs — `recipe_ingredients.recipe_id` is `integer`, `recipe_ingredients.prep_type_id` is `smallint` to match `preparation_types.id`'s `smallserial`.
+
+### Drift from kick-off plan
+
+1. **Recipe `dateAdded` / `dateLastUpdated` declared with `mode: 'date'`** — not pre-flagged in the plan but unavoidable once Drizzle's typed builder rejected `Date` as the `$onUpdate` return type for a string-mode column. SQL output unchanged.
+2. **Test file is `backend/test/recipes-schema.test.ts`** (per the approved plan). Reuses the Testcontainers + per-test `truncate ... restart identity cascade` pattern from `backend/test/schema.test.ts:44–77`. 32 tests across migration-shape, CHECK constraints, FK ON DELETE behaviour, surrogate-key duplicates, NULL-distinct uniqueness on `recipe_drafts`, and `$onUpdate` round-trips.
+3. **A small `expectConstraintViolation(promise, name)` helper** lives in the test file. *Why:* `vitest`'s `rejects.toThrow(/regex/)` matches against the thrown error's `.message`, but Drizzle wraps the underlying `pg` `DatabaseError` in a `DrizzleQueryError` whose `.message` is just `"Failed query: <sql> params: ..."`. The constraint name is on `.cause.constraint`. The helper reads that and asserts on it — without it, the tests would either pass when the wrong constraint fired, or be reduced to "something threw."
+
+### Implementation details worth carrying
+
+- **Drizzle's `$onUpdate` fires on INSERT-without-value, not just UPDATE.** Counter-intuitive name. If a column should be NULL until explicitly set (like `recipe_comments.last_updated_at`), do not use `$onUpdate`. If the column should always be populated (the standard `updated_at` discipline DEC-16 describes), `$onUpdate` is correct precisely because of this behaviour.
+- **drizzle-kit doesn't track Postgres extensions.** `CREATE EXTENSION IF NOT EXISTS pg_trgm` had to be prepended to the generated SQL. The migration carries a `--` comment explaining why; any future migration that uses `gin_trgm_ops` (or any other extension operator class) needs the same treatment. There's no Drizzle DSL hook for this — it's a one-line manual edit and that's fine.
+- **`index(...).using('gin', sql\`lower(${col}) gin_trgm_ops\`)`** is the right Drizzle DSL for a trigram GIN index on an expression. The generated SQL is `CREATE INDEX "name" ON "table" USING gin (lower("col") gin_trgm_ops);` — verbatim what FEAT-19's ILIKE search needs.
+- **Self-referential FKs use `references((): AnyPgColumn => table.id, {...})`.** The lazy arrow + `AnyPgColumn` cast is the documented Drizzle pattern; the back-reference resolves at table finalisation. Three columns use it here: `recipes.base_recipe_id` (RESTRICT), `recipes.paired_recipe_id` (SET NULL), and (transitively, via composite FKs) `related_recipes`.
+- **Migration file was auto-named `0001_futuristic_cerise.sql`; renamed to `0001_recipes_domain.sql` and the journal `tag` updated to match.** drizzle-kit's auto-naming is fine in CI but worse than a descriptive name for future grep. The pattern: rename the `.sql` file, edit `drizzle/meta/_journal.json` to update the `tag` field for the matching `idx`. Snapshot file is keyed by `idx` and doesn't need renaming.
+- **Composite PK on `related_recipes` declared via `primaryKey({ columns: [a, b] })`** in the table's second-argument array. The CHECK `recipe_one_id < recipe_two_id` enforces symmetry at the DB level — one row per pair, period. App-layer code in FEAT-21 only ever has to compute `[lo, hi] = a < b ? [a, b] : [b, a]` before inserting.
+
+### Open items for downstream FEATs
+
+- **FEAT-12 (meal plans) — `meal_plan_slots.recipe_id` and `meal_plan_slots.cooks_base_recipe_id`** both FK to `recipes.id`. Recipes are 32-bit `integer`, so the slot FKs are `integer`. `cooks_base_recipe_id` ON DELETE RESTRICT (per spec). The slot-type enum lives there, not here.
+- **FEAT-19 (recipe procedures) — `pickable-recipes` helper** (cross-cutting #5) encodes the soft-delete visibility rule. Don't filter `is_deleted = false` by hand at any call site. The trigram GIN index is now ready for `lower(name) % :query` ILIKE search; no further DB work needed.
+- **FEAT-21 (recipe editor) — `paired_recipe_id` symmetry** is maintained in the application layer inside a `withTransaction` (DEC-22, cross-cutting #4). Setting A.paired = B must also set B.paired = A in the same tx; clearing one must clear both.
+- **FEAT-29 (comments) — `recipe_comments.last_updated_at`** is application-managed (no `$onUpdate`). The comment-edit procedure must set it explicitly. UI shows "(edited)" iff non-NULL.
+- **FEAT-35 (account deletion) — RESTRICT on `recipe_ratings.user_id` and `recipe_drafts.user_id`** forces the tombstoning sequence to delete those rows *before* the user row. Verified by the FK tests in this pass.
+
+### Spec ambiguities resolved here (don't re-litigate)
+
+- "six `*_per_serving` macro columns" — explicitly **changed to eight** with named columns (`calories`, `protein`, `carbs`, `fat`, `saturated_fat`, `fibre`, `sugar`, `salt`). Spec text in `docs/plan.md` line 217 updated.
+- "user-extensible" `recipe_sources` with no `household_id` mentioned — **scoped to household** + `UNIQUE (household_id, name)`.
+- `recipe_ratings.user_id` ON DELETE not specified explicitly — **RESTRICT**, in line with the spec's "tombstone-able SET NULL, the rest RESTRICT" rule and DEC-29's explicit-deletion sequence.
+
+### Environment notes — same Colima env vars as FEAT-09/10
+
+```sh
+export DOCKER_HOST=unix:///Users/$USER/.colima/default/docker.sock
+export TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
+export TESTCONTAINERS_RYUK_DISABLED=true   # or TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE per FEAT-09 entry
+```
+
+CI (`ubuntu-latest`) doesn't need either.
+
+### Deferred (do NOT do as part of FEAT-11)
+
+- tRPC procedures for recipes / ingredients — **FEAT-17 / FEAT-19 / FEAT-20**.
+- Zod schemas in `/shared/src/schemas/` — land alongside the procedures that consume them.
+- Cloudinary signed-upload procedure — **FEAT-17**.
+- The `pickable-recipes` helper — **FEAT-19**.
+- Recipe-pairing symmetry transaction — **FEAT-21 / FEAT-23**.
+- Account-deletion tombstoning — **FEAT-35**.
+- Partial index on `recipes WHERE is_deleted = false` — not in the spec; revisit if recipe scan plans get slow with soft-deleted rows.
+
+---
+
 ## 2026-05-21 — FEAT-10 (Schema: auth, household, reference tables + seeds)
 
 **Status:** implementation complete; `pnpm --filter backend test` green (37 tests; 11 new FEAT-10 cases + the 26 inherited). Typecheck + lint clean across all workspaces. Manual flow verified locally: migrate → seed → re-seed → psql confirms one household row, 2 occasions, 8 categories, 8 units, 6 prep types; counts unchanged after the second run. Definition-of-done boxes in `docs/feature-specs.md §FEAT-10` left unticked — human action.

@@ -404,20 +404,22 @@ Conventions:
 - `backend/src/db/schema/reference.ts`
 - `backend/src/db/seeds/reference.ts`
 - `backend/src/db/seeds/household.ts`
+- `backend/src/db/seeds/index.ts` (`runSeeds` runner; CLI + tests both consume it)
 - A seed runner script (`backend/scripts/seed.ts`)
 
 **Acceptance criteria:**
 - [ ] Better Auth tables match the library's expected shape (verify against Better Auth's Drizzle adapter docs)
 - [ ] `users.themePreference` enum (`system | light | dark`, default `system`)
-- [ ] `households` has a `name` column and one seeded row; `household_id smallint PK`
+- [ ] `households` has a `name` column and one seeded row; `id uuid PK` matching `CURRENT_HOUSEHOLD_ID` from `backend/src/config.ts` (chosen over the spec's original `smallint` to align with DEC-17's multi-tenancy-ready clause; rationale in `docs/session-notes.md` FEAT-10 entry)
 - [ ] All reference tables have `UNIQUE` on the user-visible name field
 - [ ] `meal_occasions` seeded with Lunch and Dinner
 - [ ] Seeds are idempotent (re-run safely)
 - [ ] Migration applied to local DB; `\d users` and `\d ingredient_categories` show expected shape
 
 **Implementation notes:**
-- Seed runner: read seed modules and `INSERT … ON CONFLICT DO NOTHING` for idempotence.
+- Seed runner: read seed modules and `INSERT … ON CONFLICT DO NOTHING` for idempotence; all inserts wrapped in a single `withTransaction` (cross-cutting #4) so a mid-sequence failure rolls everything back.
 - Better Auth may require specific column names/types — follow its docs precisely; if there's a mismatch, the magic-link flow fails late and confusingly.
+- Reference seeds beyond Lunch/Dinner are opinionated MVP lists (`INGREDIENT_CATEGORIES`, `UNITS_OF_MEASUREMENT`, `PREPARATION_TYPES` exported from `backend/src/db/seeds/reference.ts`). Edit at source — not via DB-only inserts — so reseeding stays authoritative.
 
 **Manual verification:**
 1. `pnpm --filter backend db:migrate` then `pnpm --filter backend seed`.

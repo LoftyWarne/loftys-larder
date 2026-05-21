@@ -4,6 +4,82 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-05-21 — FEAT-10 (Schema: auth, household, reference tables + seeds)
+
+**Status:** implementation complete; `pnpm --filter backend test` green (37 tests; 11 new FEAT-10 cases + the 26 inherited). Typecheck + lint clean across all workspaces. Manual flow verified locally: migrate → seed → re-seed → psql confirms one household row, 2 occasions, 8 categories, 8 units, 6 prep types; counts unchanged after the second run. Definition-of-done boxes in `docs/feature-specs.md §FEAT-10` left unticked — human action.
+
+### Decisions taken at kick-off (the *why*, not just the *what*)
+
+- **`households.id` is `uuid`, not the spec's `smallint`.** Kept the existing `CURRENT_HOUSEHOLD_ID = '00000000-0000-4000-8000-000000000001'` from FEAT-09. *Why:* DEC-17's "multi-tenancy-ready" promise is exactly the place the FK type pays off — a future `smallint → uuid` migration touches every domain table's FK and every index built on it, and uuid is the only sensible choice at SaaS scale (non-enumerable, no count leak, distributed-generation-safe). At household scale the 14 extra bytes per FK are rounding error. Spec text updated in this pass; the `[ ]` checkbox on that AC still reads literally — see "spec wording" below.
+- **Install `better-auth` now, code the schema against its runtime.** Reading the installed package's `@better-auth/core/db/get-tables.mjs` is unambiguous; reading the docs site is not. Schema shapes are now derived from the same code the library will execute at runtime, which is the only mismatch-proof reading.
+- **Reference seeds: opinionated MVP lists** (`INGREDIENT_CATEGORIES`, `UNITS_OF_MEASUREMENT`, `PREPARATION_TYPES` in `backend/src/db/seeds/reference.ts`). *Why:* "with their seed data" in the spec implies populated, not empty. Seeded lists are exported so tests can assert the full set; edit at source, not via DB-only inserts.
+- **`themePreference` via Drizzle `pgEnum`.** *Why:* matches DEC-78 verbatim and Drizzle infers the literal union type automatically. Adding values is cheap; removing values (the only painful case) isn't a realistic future for `system|light|dark`.
+- **Reference table columns minimal:** `id smallserial`, `name text UNIQUE NOT NULL`. No `display_order`, no timestamps. *Why:* these rows are static enums-with-attributes. Add `display_order` later only when the UI actually needs explicit ordering.
+- **Pluralised table names** (`users`, `sessions`, `accounts`, `verifications`). Better Auth defaults to singular (`user`), but `user` is a Postgres reserved word — quoting on every raw-SQL path is a footgun and the spec's `\d users` line uses plural anyway. FEAT-14 will need `usePlural: true` (or per-model `modelName` overrides) when configuring the Better Auth Drizzle adapter.
+
+### Drift from kick-off plan
+
+1. **`backend/src/db/seeds/index.ts` added** — not on the kick-off file list. Hosts the `runSeeds(withTransaction)` runner that both `scripts/seed.ts` and the test suite consume. Keeping it as a module lets the test import `runSeeds` without spinning up the CLI's pino logger or owning pool lifecycle.
+
+2. **`backend/tsconfig.json` extended** to include `scripts/**/*`. ESLint's project service couldn't resolve `scripts/seed.ts` otherwise (same shape as the FEAT-09 fix that added `drizzle.config.ts`). Follow the same pattern when adding any future top-level script directory.
+
+3. **`backend/package.json` script added:** `"seed": "tsx --env-file-if-exists=.env scripts/seed.ts"`. Mirrors the `dev` script's env-file handling so `pnpm --filter backend seed` works against any environment that has a `.env`, not just the shell session that exports vars.
+
+4. **Spec wording updated, AC checkbox text changed.** The original FEAT-10 spec said `household_id smallint PK`. With the uuid call locked in, the AC line now reads "`id uuid PK` matching `CURRENT_HOUSEHOLD_ID`". *Per AGENTS.md the box itself stays unticked* — the user verifies and ticks. Spec-text edits are not the same as DoD ticks.
+
+5. **No standalone Pino plugin used in the seed CLI.** `backend/src/plugins/logger.ts` returns a Fastify `FastifyServerOptions['logger']`, not a Pino instance — fine for the server, no use to a CLI script. Created a small `pino({ level: process.env.LOG_LEVEL ?? 'info' })` instance directly in `scripts/seed.ts`. The AGENTS.md "Pino only" rule is honoured; no `console.log` introduced.
+
+### Implementation details worth carrying
+
+- **Better Auth's canonical schema lives in `@better-auth/core/dist/db/get-tables.mjs`.** Single function `getAuthTables(options)` that returns the user/session/account/verification table shapes plus their plugin extensions. Read it first if a future schema change feels ambiguous from the docs — the source is unambiguous.
+- **Better Auth uses string IDs everywhere.** `users.id`, `sessions.userId`, `accounts.userId`, `verifications.id` are all `text`. Downstream FKs to `users.id` (FEAT-29's tombstoning columns: `recipes.addedByUserId`, `meal_plans.createdByUserId`, etc.) must be `text`, not `uuid`. Don't try to "normalise" by switching the auth schema to uuid PKs — Better Auth's own generator won't match.
+- **`pgEnum` migration shape.** Drizzle emits `CREATE TYPE "public"."theme_preference" AS ENUM('system','light','dark');` as a separate statement before the table referencing it. If a future migration removes the enum, the type-drop step has to follow the last column reference — Drizzle handles this automatically via `db:generate` but raw SQL migrations need to know it.
+- **`drizzle-orm/node-postgres/migrator`** is the right import for programmatic migrations in tests; pass `{ migrationsFolder: '<path-to>/backend/drizzle' }`. `import.meta.url` + `fileURLToPath` resolves to the test file's directory, so `path.resolve(here, '..', 'drizzle')` keeps the test file portable.
+- **`onConflictDoNothing({ target: column })`** needs the column to participate in a unique constraint *of its own* — not just a multi-column index that includes it. Our reference tables use a single-column `UNIQUE` per spec, so this works directly. Worth knowing if FEAT-11 lands a composite-unique table and the seed pattern repeats.
+- **`accounts.password` is dead-but-kept under magic-link-only.** DEC-41 forbids password *flows*; Better Auth's canonical account model has the column unconditionally and the Drizzle adapter inserts every field listed in `getAuthTables(options)`. Removing the column would crash the adapter on its first account-write unless we *also* configure `account.fields.password = false` (or similar) in `betterAuth({...})` at FEAT-14. NULL costs zero bytes in PG's row payload (only a bit in the null bitmap), so the schema-hygiene win isn't worth the new failure mode. Revisit at FEAT-14 if pruning the column for clarity becomes worth a one-config-line + one-migration follow-up.
+- **Session/verification token columns are plaintext-at-rest, not hashed.** This is Better Auth's design (`@better-auth/core/dist/crypto/*` generates `crypto.randomBytes`-backed strings); we just store them. Defence model is HttpOnly+Secure cookies (DEC-43) + 10-minute TTL on magic-link nonces (DEC-41). If a future security review wants hashed-at-rest sessions, that's a Better Auth fork/config conversation, not a schema change.
+
+### Open items for downstream FEATs
+
+- **FEAT-14 — Better Auth `usePlural: true` config.** Schema is plural; Better Auth defaults to singular model names. Either pass `usePlural: true` in the adapter options or override per-model with `user: { modelName: 'users' }`, etc. If we forget, the adapter will throw at runtime on its first DB call.
+- **FEAT-14 — Zod 4 transitive pin.** `better-auth@1.6.11` pulls `zod@^4.0.0` via `@better-auth/core` and `better-call` for its own runtime; the project is on `zod@3.25.76` (root `package.json` constraints). Both coexist today via pnpm hoisting with no visible breakage — but the moment we share a Zod schema *between* the Better Auth surface and `/shared/src/schemas/*`, the types won't agree. Two paths at FEAT-14: (a) upgrade the entire project to Zod 4 (breaks every existing `/shared` schema with the v3→v4 migration); (b) treat the Better Auth boundary as a place where types deliberately don't share — translate at the seam. Pick before wiring `betterAuth(...)` into the Fastify lifecycle.
+- **FEAT-11 (recipes) — `addedByUserId` is `text` (Better Auth string ID)**, not `uuid`. Cascade behaviour at user deletion is *not* `ON DELETE CASCADE` (DEC-29 tombstoning); the recipe deletion step must NULL these columns explicitly in the FEAT-35 transaction.
+- **FEAT-11 (recipes) — `householdId` is `uuid`.** All FKs to `households.id` are 16-byte uuid columns. Index sizing in `docs/measurements.md` will need updating once recipe volume becomes measurable.
+
+### Spec ambiguities resolved here (don't re-litigate)
+
+- "household_id smallint PK" — overridden to uuid per DEC-17's revisit clause. Spec text updated.
+- "with their seed data" for the three under-specified reference tables — resolved to the opinionated MVP lists exported from the seed module.
+- "users (with `theme_preference`...)" — implemented as Drizzle `pgEnum('theme_preference', [...])` rather than text + CHECK.
+
+### Environment notes — Colima continued
+
+Same two env vars as FEAT-09 are still required to run the backend test suite locally:
+
+```sh
+export DOCKER_HOST=unix:///Users/$USER/.colima/default/docker.sock
+export TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
+export TESTCONTAINERS_RYUK_DISABLED=true   # or TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE per FEAT-09 entry
+```
+
+CI (`ubuntu-latest`) uses the default socket path and needs neither.
+
+### Pre-existing format failures observed (not introduced by FEAT-10)
+
+`pnpm -r format:check` flags `frontend/dist/`, `frontend/src/routeTree.gen.ts`, `backend/dist/server.js`, `backend/drizzle/meta/*.json`. All four are either build output or generated. Worth a `.prettierignore` pass at FEAT-07 next-touch — not FEAT-10's scope.
+
+### Deferred (do NOT do as part of FEAT-10)
+
+- Configure `betterAuth(...)`, mount the auth router, set `usePlural` — **FEAT-14**.
+- Choose Zod 3 vs 4 strategy at the Better Auth boundary — **FEAT-14**.
+- Recipes domain (recipes, recipe_ingredients, recipe_method, etc.) — **FEAT-11**.
+- Meal-plans domain — **FEAT-12**.
+- Trigram GIN indexes on recipe / ingredient name — **FEAT-11**.
+- Account-deletion tombstoning sequence (NULL `addedByUserId` etc., delete user row) — **FEAT-35**.
+- Update `docs/measurements.md` with index sizing implications of `uuid` household FKs — open whenever FEAT-11/12 lands measurable row counts.
+
+---
+
 ## 2026-05-20 — FEAT-09 done; FEAT-10 next
 
 - **Just finished:** FEAT-09 (Drizzle infrastructure). Detailed entry below. Tests green locally (26/26); human verification of acceptance criteria still pending. **Commit not yet made.**

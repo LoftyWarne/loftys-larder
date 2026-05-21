@@ -4,6 +4,79 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-05-21 — FEAT-12 (Schema: meal plans and shopping list items)
+
+**Status:** implementation complete; `pnpm --filter backend test` green (99 tests; 30 new FEAT-12 cases + 69 inherited). Typecheck + lint + `format:check` clean across all workspaces. Migration applies cleanly via Testcontainers from a fresh image. Definition-of-done boxes in `docs/feature-specs.md §FEAT-12` left unticked — human action.
+
+### Decisions taken at kick-off (the *why*, not just the *what*)
+
+- **`meal_plans.id` and `meal_plan_slots.id` are `integer().generatedAlwaysAsIdentity()`.** Same reasoning as FEAT-11's recipe tables — plan/slot row counts climb at the same order as recipes, and the slot FKs `(recipeId, cooksBaseRecipeId)` must be `integer` to match `recipes.id`'s type. Consistent identity-PK style across the whole domain.
+- **`meal_plan_slots.planId` is `ON DELETE CASCADE`,** not RESTRICT. *Why:* slots have no meaning outside their plan. The alternative — forcing FEAT-37's plan-delete procedure to clear slots first — adds boilerplate to every plan-delete path for no semantic gain. Recipes and ingredients are explicitly *not* cascaded (RESTRICT on `recipeId` / `cooksBaseRecipeId`) because those references survive plan deletion (the recipe is shared, not owned).
+- **`number_of_servings > 0` extends the spec's NOT-NULL-when-recipe rule.** Spec called only for "NOT NULL when slot_type='recipe'"; added `> 0` as part of the same CHECK because a zero-serving slot would silently zero out FEAT-36's aggregation. The CHECK clause is one composite: `slot_type <> 'recipe' OR (number_of_servings IS NOT NULL AND number_of_servings > 0)` — a single named constraint, one violation message, cheap.
+- **`cooks_base_*` joint-set encoded as one combined CHECK.** Form: `(cooks_base_recipe_id IS NULL) = (cooks_base_servings IS NULL) AND (cooks_base_servings IS NULL OR cooks_base_servings > 0)`. *Why one clause:* the violation surface is "the pair is wrong somehow"; splitting into two named constraints would make the test assertions report on whichever fires first, not the conceptual violation. One name (`meal_plan_slots_cooks_base_joint`) is what FEAT-30's application layer will surface to the user.
+- **`recipeId` (eaten-recipe FK) is `ON DELETE RESTRICT`,** mirroring `cooksBaseRecipeId`. *Why:* recipes are soft-deleted (DEC-21) so the FK rarely fires in practice, but if a future migration ever hard-deletes a recipe, an existing slot reference should block it rather than corrupt the past plan. Spec only explicitly specified RESTRICT for `cooksBaseRecipeId`; same reasoning applies to both.
+- **`recipe_id IS NOT NULL` and `slot_type = 'recipe'` are coupled via biconditional CHECK.** Form: `(slot_type = 'recipe') = (recipe_id IS NOT NULL)`. *Why a biconditional, not just one direction:* a slot of type `eat_out` with a stray `recipeId` is also a bug; both directions of the bug have the same fix (clear or set the field), so one bidirectional CHECK is the precise primitive.
+- **No `shop_date` column on `meal_plans` in v1.** Spec AC didn't list it; `docs/non-goals.md` defers multi-shop planning and names `shop_date` as the entry point when that work happens. Adding it now would invite UI to surface a field nothing reads.
+- **No `householdId` denormalisation on slots / shopping-list items.** Both inherit scope via `planId → meal_plans.householdId`. *Why:* DEC-17's single-tenant-with-multi-tenant-readiness posture is satisfied at the plan level; queries already need to join the plan for date filtering, so the join is free. Redundant denormalisation would have to be kept in sync without a corresponding query win.
+- **`is_base = true` rule for `cooks_base_recipe_id` is application-layer.** Spec implementation notes say so explicitly; honoured. The DB enforces only the FK and the joint-set. FEAT-30's slot-save procedure will validate `is_base = true` against the `recipes` table and surface a domain error code via `TRPCError.cause` (per cross-cutting #11). Do not push this into a Postgres trigger.
+
+### Drift from kick-off plan
+
+1. **Tests live at `backend/test/meal-plans-schema.test.ts`,** not `backend/src/db/schema/__tests__/` as the kick-off plan said. Matches the FEAT-11 precedent — Vitest's `include: ['test/**/*.test.ts']` (in `backend/vitest.config.ts`) is the source of truth. Plan file said `__tests__/`; reality is `test/`.
+2. **Dropped a planned `meal_plan_slots_plan_id_idx` btree.** The `(plan_id, date, occasion_id)` unique index already serves single-column `plan_id` lookups (leading-column rule), so the standalone btree was redundant. drizzle-kit's first-pass output included it; removed before regenerating the migration. Migration is `0002_meal_plans_and_shopping.sql`.
+3. **First-pass migration auto-named `0002_redundant_black_bird.sql`; regenerated as `0002_meal_plans_and_shopping.sql`** using `pnpm --filter backend db:generate --name meal_plans_and_shopping`. The `--name` flag is the right way to get a descriptive tag — same naming discipline as FEAT-11's `0001_recipes_domain.sql`. If you regenerate, also clean up `drizzle/meta/_journal.json` so old entries don't accumulate.
+
+### Implementation details worth carrying
+
+- **`pgEnum` declaration and column use share the same identifier.** Following the `themePreference` precedent from FEAT-10/`auth.ts`: `export const slotType = pgEnum('slot_type', [...])` then `slotType: slotType().notNull()` in the table. Confusing at first glance, but the JS-name overload (constructor function for column declaration, value reference everywhere else) works and matches house style. Don't rename to `slotTypeEnum` — diverges from precedent.
+- **Postgres enum label order is observable.** The migration emits `CREATE TYPE "public"."slot_type" AS ENUM('empty','recipe','eat_out','takeaway','leftovers')` and the order is encoded in `pg_enum.enumsortorder`. A smoke test in `meal-plans-schema.test.ts` asserts the exact 5-label sequence; if a later migration accidentally reorders or renames, the test fires. Extending the enum requires `ALTER TYPE ... ADD VALUE ...` in a migration — drizzle-kit handles this when the array order is preserved and a new value is appended.
+- **Drizzle's `check()` SQL-tag generates correctly-quoted identifiers.** All four FEAT-12 CHECKs compiled to the expected form with backtick-style sql tags. No hand-edit of the migration was needed for the CHECK syntax (unlike FEAT-11's `CREATE EXTENSION pg_trgm` which had to be prepended manually — drizzle-kit doesn't track extensions, but it does track CHECKs).
+- **Test-FK behaviour via `expectConstraintViolation(promise, name)`.** Reused from FEAT-11. Drizzle's `DrizzleQueryError` wraps the underlying pg `DatabaseError`; `.cause.constraint` is the canonical place to read the constraint name. `vitest`'s `.rejects.toThrow(/regex/)` would match against the wrapper's `.message` which is just the failed SQL — the helper reads the constraint name directly so the tests prove which invariant fired.
+- **`date` columns declared with `mode: 'date'`,** same as FEAT-11. `meal_plans.startDate` / `endDate` and `meal_plan_slots.date` all use Drizzle's date-mode-Date variant so values round-trip as JS `Date` rather than strings. SQL is unchanged.
+- **`updatedAt` via `$onUpdate(() => new Date())` on all three new tables.** DEC-16 discipline. `mealPlans.updatedAt`, `mealPlanSlots.updatedAt`, `shoppingListItems.updatedAt` — all `timestamp({ withTimezone: true }).notNull().default(sql\`now()\`).$onUpdate(...)`. Tests cover the bump for all three.
+
+### Spec ambiguities resolved here (don't re-litigate)
+
+- "joint-set CHECK on `cooks_base_*` with `> 0` guard" — one combined CHECK, one constraint name, biconditional + positive guard.
+- `ON DELETE` for `meal_plan_slots.planId` — **CASCADE**. Slots are owned by their plan.
+- `number_of_servings` constraint when `slot_type = 'recipe'` — **NOT NULL AND > 0**, both in the same named CHECK.
+- `recipeId` ON DELETE — **RESTRICT**, mirroring `cooksBaseRecipeId`'s explicit RESTRICT.
+- `shop_date` on `meal_plans` — **not added in v1**; defer to whenever multi-shop work lands (per `docs/non-goals.md`).
+- `householdId` on slots / shopping_list_items — **not added**; inherited via `planId → meal_plans.householdId`.
+
+### Open items for downstream FEATs
+
+- **FEAT-27 (create plan) — overlap check uses the `meal_plans_household_start_date_idx` btree** on `(household_id, start_date)`. DEC-38's rule ("new plans cannot overlap with non-deleted plans whose `endDate >= today`") translates to a `WHERE household_id = CURRENT_HOUSEHOLD_ID AND end_date >= :today AND tstzrange(start_date, end_date, '[]') && tstzrange(:new_start, :new_end, '[]')` predicate; the index covers the leading clause.
+- **FEAT-30 (slot editor) — `cooks_base_recipe_id` must reference a recipe with `is_base = true`.** Application-layer validation, raise `TRPCError({ code: 'BAD_REQUEST', cause: { code: 'NOT_A_BASE_RECIPE', recipeId } })`. Multi-statement slot saves wrap in `withTransaction` (cross-cutting #4).
+- **FEAT-35 (account deletion) — the tombstoning sequence now also NULLs** `meal_plans.created_by_user_id` and `meal_plan_slots.chef_user_id`. Both columns are `ON DELETE SET NULL`, so the user-row delete would handle it automatically — but the explicit-update step in DEC-29's sequence still applies for audit-trace clarity.
+- **FEAT-36 / FEAT-38 (shopping list) — `shopping_list_items` rows are lazy-created on first call to `shopping.getForPlan(planId)`** (DEC-30). The `getForPlan` procedure must run inside `withTransaction` (cross-cutting #13) so concurrent first-reads can't race on insert. Quantities are *not* stored on the table — they're computed from the plan's recipes on read; only `is_checked` is persistent state.
+- **FEAT-37 (delete plan) — plan delete cascades to slots and shopping_list_items.** No explicit cleanup needed in the application layer; the FK actions handle it.
+
+### Environment notes — same Colima env vars as FEAT-09 / 10 / 11
+
+```sh
+export DOCKER_HOST=unix:///Users/$USER/.colima/default/docker.sock
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+```
+
+This pass confirmed the failure mode again: without `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` set, Ryuk tries to bind-mount `~/.colima/default/docker.sock` *inside* the Ryuk container, which the Lima VM rejects with `operation not supported`. The override points the bind-mount at `/var/run/docker.sock` (the path the daemon listens on *inside* the VM) and Ryuk is happy. `TESTCONTAINERS_RYUK_DISABLED=true` is the alternative documented at FEAT-10/11; either works.
+
+CI (`ubuntu-latest`) doesn't need either.
+
+### Deferred (do NOT do as part of FEAT-12)
+
+- `recipes.create` / `recipes.updateHeader` etc. — **FEAT-20**.
+- `plans.create` (with overlap check) — **FEAT-27**.
+- Slot-save procedure with `is_base` validation — **FEAT-30**.
+- Plan shrink/extend transaction — **FEAT-35**.
+- Shopping-list aggregation + lazy create — **FEAT-38**.
+- `pickable-recipes` helper (cross-cutting #5) — **FEAT-19**.
+- `dateUtils` module (cross-cutting #8) — **FEAT-27** (first consumer is the plan-overlap check).
+- Plant-points helper — **FEAT-40**.
+- Zod schemas in `/shared/src/schemas/*` — land alongside the procedures that consume them.
+
+---
+
 ## 2026-05-21 — FEAT-11 (Schema: recipes domain)
 
 **Status:** implementation complete; `pnpm --filter backend test` green (69 tests; 32 new recipes-domain cases + 37 inherited). Typecheck + lint clean across all workspaces. Migration applies cleanly via Testcontainers from a fresh image. Definition-of-done boxes in `docs/feature-specs.md §FEAT-11` left unticked — human action.

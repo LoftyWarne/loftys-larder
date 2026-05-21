@@ -15,6 +15,13 @@
       "when": 1779383121618,
       "tag": "0001_recipes_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779385306942,
+      "tag": "0002_meal_plans_and_shopping",
+      "breakpoints": true
     }
   ]
 }

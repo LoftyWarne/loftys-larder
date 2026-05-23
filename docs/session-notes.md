@@ -4,6 +4,130 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-05-23 — FEAT-13 (Resend domain verification)
+
+**Status:** verification complete on 2026-05-23. `loftys-larder.co.uk` verified with Resend; SPF / DKIM / DMARC published in Cloudflare; test send to a personal Gmail showed `spf=pass`, `dkim=pass`, `dmarc=pass` and landed in Inbox. Sender confirmed as `magic@loftys-larder.co.uk`. Definition-of-done boxes in `docs/feature-specs.md §FEAT-13` left unticked — human action.
+
+### Decisions taken at kick-off (the *why*, not just the *what*)
+
+- **Sender address: `magic@loftys-larder.co.uk`.** Matches the spec's example; scannable in an inbox; signals intent. This will be referenced in FEAT-14's Better Auth config as a constant — don't pre-bake it anywhere now (no premature import; see "Deferred" below).
+- **DKIM published at the apex, not a subdomain.** Single-purpose project, single sender; the trade-off (apex becomes "claimed" by Resend if a second sending service is added later) does not bite us. DKIM CNAME name will be whatever selector Resend prescribes under `*._domainkey.loftys-larder.co.uk` — copy verbatim from the wizard, do not invent.
+- **DMARC starts at `v=DMARC1; p=none` with no `rua`.** Per the spec ("start with `p=none` so failures are visible without blocking"). Skipping `rua` because at this send volume the daily XML reports cost more than they're worth; trivial to add `rua=mailto:...` later by editing the one TXT record. Tighten to `quarantine`/`reject` only after real send-volume data confirms alignment is stable.
+- **Fresh Resend account for this project**, not adding `loftys-larder.co.uk` to an existing personal workspace. Cleaner billing isolation; one account = one app.
+- **Resend region: EU (Dublin) if offered at signup.** Lowest latency from the Fly `lhr` app, and keeps personal-data processing in-region. If Resend's signup doesn't expose a region toggle, accept the default — it isn't a v1 blocker.
+- **No MX records.** Resend is outbound-only for our use; no inbound mail, no catch-all. Resend may *suggest* an MX for bounce handling — skip it; bounces are surfaced in the Resend dashboard already.
+- **DKIM CNAME must be unproxied (DNS only) in Cloudflare.** Proxied (orange-cloud) CNAMEs return Cloudflare's edge IPs on lookup, breaking the value chain for receivers fetching the public key. This is the named gotcha in the FEAT-13 spec; the runbook below double-flags it.
+
+### Pre-flight check (done at plan time)
+
+- `dig +short TXT loftys-larder.co.uk` → **empty.** No pre-existing apex TXT records, so SPF and DMARC TXT entries can be added as fresh records without the RFC-7208 single-merged-TXT dance.
+
+### Runbook — first-time Resend domain verification
+
+Substitute `<SPF_TXT>`, `<DKIM_SELECTOR>`, `<DKIM_TARGET>` with the verbatim values Resend's "Add domain" wizard shows for this workspace — those values are workspace-scoped and not predictable. The live values are in the Cloudflare DNS zone and the Resend dashboard; do not duplicate them here.
+
+#### Step 0 — Prerequisites
+
+- Domain live and on Cloudflare DNS: `loftys-larder.co.uk` (confirmed by FEAT-06).
+- A personal Gmail (or equivalent showing `Authentication-Results`) reachable for the test send.
+- Cloudflare dashboard access to `loftys-larder.co.uk`'s DNS zone.
+
+#### Step 1 — Resend account + add domain
+
+1. Sign up at <https://resend.com> with the project email. Record the account email.
+2. After signup, complete the workspace setup. Record the workspace name.
+3. Domains → Add Domain.
+   - **Domain:** `loftys-larder.co.uk` (apex — no subdomain).
+   - **Region:** EU (Dublin) if offered; otherwise the default.
+4. Resend reveals the required DNS records on the next screen. Leave that tab open — every value below comes from it verbatim.
+
+#### Step 2 — Capture Resend's prescribed records
+
+Read off Resend's wizard. Typically three records:
+
+| Resend field | Type | Name (host) | Content (target/value) |
+|---|---|---|---|
+| SPF | TXT | apex (`@`) | something like `v=spf1 include:<resend-domain> ~all` — copy **exact** string |
+| DKIM | CNAME | `<selector>._domainkey` | a Resend-hosted target (e.g. `<selector>._domainkey.<workspace>.<resend-host>`) |
+| DMARC | TXT | `_dmarc` | Resend may *suggest* a value; **use ours instead**: `v=DMARC1; p=none` |
+
+Notes:
+- Resend has sometimes shown a single DKIM CNAME, sometimes three (multi-selector). Copy whatever it shows, in whatever number; each goes in as its own DNS-only CNAME in step 3.
+- If Resend suggests an MX record for bounce handling, **skip it.** Outbound-only.
+- If Resend offers an existing-DMARC option for your DMARC TXT, **override** to our `v=DMARC1; p=none` — keeping our `rua`-less form explicit.
+
+#### Step 3 — Cloudflare DNS records
+
+Cloudflare dashboard → DNS → Records. Add each row exactly:
+
+| # | Type | Name | Content | Proxy | Source of value |
+|---|---|---|---|---|---|
+| 1 | TXT | `@` | `<SPF_TXT>` | DNS only — TXT never proxies | Resend wizard |
+| 2 | CNAME | `<DKIM_SELECTOR>._domainkey` | `<DKIM_TARGET>` | **DNS only — explicitly toggle off orange-cloud** | Resend wizard |
+| 3 | TXT | `_dmarc` | `v=DMARC1; p=none` | DNS only | Our decision |
+
+Repeat row 2 for each DKIM CNAME if Resend prescribes multiple.
+
+Cloudflare quirk: entering `@` in the Name field resolves to the zone apex; entering `_dmarc` resolves to `_dmarc.loftys-larder.co.uk`; entering `<selector>._domainkey` resolves to `<selector>._domainkey.loftys-larder.co.uk`. The dashboard preview confirms FQDN — verify before saving each row.
+
+**Defence-in-depth on the DKIM CNAME proxy flag.** After saving each CNAME, re-open it and confirm the toggle reads "DNS only" (grey cloud), not "Proxied" (orange cloud). Cloudflare's defaults try to proxy CNAMEs. The spec gotcha names this as the primary FEAT-13 failure mode.
+
+#### Step 4 — Wait + sanity-check DNS propagation
+
+Cloudflare propagates internally in < 60s; public DNS caches may lag a few minutes. From a shell:
+
+```sh
+dig +short TXT loftys-larder.co.uk                          # expect: SPF string
+dig +short CNAME <DKIM_SELECTOR>._domainkey.loftys-larder.co.uk   # expect: Resend target
+dig +short TXT _dmarc.loftys-larder.co.uk                   # expect: "v=DMARC1; p=none"
+```
+
+If empty after a few minutes: confirm the records exist in the Cloudflare dashboard and that no row was saved with the orange-cloud toggle on for the DKIM CNAME (a proxied CNAME would not resolve to the Resend target on lookup).
+
+#### Step 5 — Trigger Resend verification
+
+Resend dashboard → Domains → `loftys-larder.co.uk` → "Verify DNS" (or equivalent). Resend pulls fresh DNS and reports per-record status.
+
+Wait until the domain card reads **Verified** (green). Initial polls can take a few minutes; subsequent re-tries are instant.
+
+#### Step 6 — Test send + Gmail authentication-results check
+
+1. Resend dashboard → Emails → "Send test" (or via the API console).
+   - From: `magic@loftys-larder.co.uk`.
+   - To: a personal Gmail.
+   - Subject + body: anything plain text.
+2. In Gmail, open the message → ⋮ menu → "Show original".
+3. In the headers, locate the `Authentication-Results` line. Confirm three substrings:
+   - `spf=pass`
+   - `dkim=pass`
+   - `dmarc=pass`
+4. Confirm the message landed in **Inbox**, not Spam/Promotions.
+
+If any of the three reads `fail` or `neutral`, do **not** declare done — the corresponding DNS record is wrong (typo in the value, or DKIM was proxied) and needs re-checking.
+
+### Open items for downstream FEATs
+
+- **FEAT-14 (Better Auth server)** — consumes the verified domain. Sender constant should be `magic@loftys-larder.co.uk`; `RESEND_API_KEY` lands then via `flyctl secrets set` (do **not** set it now — no consumer yet, and an unused secret in Fly drift-checks adds noise).
+- **FEAT-50 (`OPERATIONS.md` + restore drills)** — lifts this runbook into the operations doc. The live record values stay in Cloudflare DNS / Resend dashboard; don't duplicate them into the doc.
+- **DMARC tightening watch.** Once FEAT-14 is live and we have a few weeks of real magic-link sends with no SPF/DKIM failures, revisit DMARC `p=none` → `quarantine`. Not now.
+- **`rua` watch.** If we ever suspect domain spoofing or want visibility into receiver behaviour, add `rua=mailto:conorwarne92@gmail.com` to the `_dmarc` TXT. Single-record edit, no other change.
+
+### Deferred (do NOT do as part of FEAT-13)
+
+- Any `backend/src/auth/*` file — **FEAT-14**.
+- `RESEND_API_KEY` in Fly secrets — **FEAT-14**.
+- A `from`-address constant anywhere in code — **FEAT-14**.
+- Postmark as a configured fallback — out of scope per DEC-69; only *named* as a fallback in case Resend deliverability degrades.
+- MX records on `loftys-larder.co.uk` — out of scope; outbound-only sender.
+- Tightening DMARC beyond `p=none` — explicitly deferred per spec.
+- Adding `rua` / `ruf` to DMARC — explicitly skipped at kick-off.
+
+### Commit
+
+`chore(infra): document Resend domain verification` — diff is this session-notes entry only.
+
+---
+
 ## 2026-05-21 — FEAT-12 (Schema: meal plans and shopping list items)
 
 **Status:** implementation complete; `pnpm --filter backend test` green (99 tests; 30 new FEAT-12 cases + 69 inherited). Typecheck + lint + `format:check` clean across all workspaces. Migration applies cleanly via Testcontainers from a fresh image. Definition-of-done boxes in `docs/feature-specs.md §FEAT-12` left unticked — human action.

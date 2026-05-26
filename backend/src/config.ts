@@ -11,6 +11,16 @@ const databaseUrlSchema = z
     message: 'DATABASE_URL must be a postgres:// or postgresql:// URL.',
   });
 
+const allowedEmailsSchema = z
+  .string()
+  .transform((value) =>
+    value
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.length > 0),
+  )
+  .pipe(z.array(z.email()).min(1));
+
 const configSchema = z
   .object({
     NODE_ENV: z
@@ -24,6 +34,17 @@ const configSchema = z
     ALLOWED_ORIGIN: z.url().optional(),
     STATIC_DIR: z.string().min(1).optional(),
     DATABASE_URL: databaseUrlSchema,
+    // 32-byte minimum mirrors Better Auth's `generateRandomString(32)` default;
+    // the secret signs session cookies and CSRF tokens (DEC-43).
+    BETTER_AUTH_SECRET: z.string().min(32),
+    BETTER_AUTH_URL: z.url(),
+    RESEND_API_KEY: z.string().min(1),
+    MAGIC_LINK_FROM: z.string().min(1).default('magic@loftys-larder.co.uk'),
+    MAGIC_LINK_TRUSTED_ORIGIN: z.url(),
+    // Allow-list gate (single-household MVP). Comma-separated emails; the
+    // magic-link send fn silently drops requests for any address not on the
+    // list so anyone guessing the sign-in URL cannot create an account.
+    MAGIC_LINK_ALLOWED_EMAILS: allowedEmailsSchema,
   })
   .refine(
     (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),

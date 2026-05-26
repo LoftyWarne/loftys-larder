@@ -1,6 +1,8 @@
 import { pino } from 'pino';
 
-import { pool, withTransaction } from '../src/db/index.ts';
+import { getDb } from '../src/db/index.ts';
+
+const { pool, withTransaction } = getDb();
 import { runSeeds } from '../src/db/seeds/index.ts';
 
 // CLI entry. Domain code uses Fastify's request logger; this script lives

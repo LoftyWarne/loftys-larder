@@ -17,15 +17,27 @@ type Schema = typeof schema;
 
 export type Db = NodePgDatabase<Schema>;
 
-const config = loadConfig();
+interface DbSingleton {
+  pool: pg.Pool;
+  db: Db;
+  withTransaction: WithTransaction;
+}
 
-export const pool = new pg.Pool({
-  connectionString: config.DATABASE_URL,
-  max: POOL_MAX,
-});
+let singleton: DbSingleton | undefined;
 
-export const db: Db = drizzle(pool, { schema, casing: 'snake_case' });
-
-export const withTransaction: WithTransaction = makeWithTransaction(db);
+// Lazy so importing this module is side-effect-free: tests that only need
+// `makeWithTransaction` or schema metadata don't need the production env vars
+// set, and the pool only opens when something actually wants the singleton.
+export function getDb(): DbSingleton {
+  if (singleton) return singleton;
+  const config = loadConfig();
+  const pool = new pg.Pool({
+    connectionString: config.DATABASE_URL,
+    max: POOL_MAX,
+  });
+  const db = drizzle(pool, { schema, casing: 'snake_case' });
+  singleton = { pool, db, withTransaction: makeWithTransaction(db) };
+  return singleton;
+}
 
 export { CURRENT_HOUSEHOLD_ID } from '../config.ts';

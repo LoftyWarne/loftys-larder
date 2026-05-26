@@ -4,6 +4,100 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-05-26 — FEAT-14 (Better Auth integration — server)
+
+**Status:** implementation complete; `pnpm --filter backend test` green (119 tests; 30 new FEAT-14 cases — 12 in `auth.test.ts` plus 7 new in `config.test.ts` and 4 in `server.test.ts` — over 89 inherited). Typecheck + lint + `format:check` clean across all three workspaces. Definition-of-done boxes in `docs/feature-specs.md §FEAT-14` left unticked — human action. The end-to-end gate check (real magic-link → click → session) is still owed.
+
+### Decisions taken at kick-off (the *why*, not just the *what*)
+
+- **No `resend` npm dep; plain `fetch` against `api.resend.com/emails`.** The SDK's only value-add is request shaping that's three lines of code; eliminating the dep removes one SDK-migration risk. The send fn is small enough that adding the SDK later is a one-paragraph diff if Resend ever ships a feature we want (batches, attachments). Production wraps fetch via `createResendSender` (`backend/src/auth/resend.ts`); tests inject a spy.
+- **Allow-list lives in a separate `withAllowList` wrapper, not in the Resend transport.** A first pass put the gate inside `createResendSender` — caught by a failing test on first run because injected test spies bypassed the transport entirely. Fix: compose the gate around any sender (real or test) in `buildApp`. The gate semantic is also better-named this way — `withAllowList(sender, emails, log)` reads as the policy it is, separate from the transport it wraps.
+- **Better Auth schema bridging: `{ usePlural: true, camelCase: true }`.** FEAT-10's tables are pluralised (`users`, `sessions`, …); Better Auth defaults to singular. `usePlural: true` (vs. per-model overrides) is the cheaper config. `camelCase: true` matches our Drizzle TS-keys (`userId`, `expiresAt`, …) — the snake_case mapping at the DB column level happens at the Drizzle runtime via the global `casing: 'snake_case'` (DEC-15), so the adapter only needs to know how to address fields via TS keys.
+- **Better Auth handler bridged via the Web `Request`/`Response` path, not `toNodeHandler`.** The Node-handler path requires disabling Fastify's body parsing on the auth route, which leaks across the rest of the app unless carefully scoped. Bridging via `auth.handler(new Request(url, init))` lets Fastify's built-in JSON parser run on the request body and we just `JSON.stringify` it back into the `RequestInit.body` — no body-parser fight, no encapsulation gymnastics. Matches the pattern in Better Auth's Fastify integration docs.
+- **`account.fields.password = false` not configured.** Kick-off plan flagged it; on closer reading, unnecessary. The password column only sees writes when the email-and-password provider is enabled, which it isn't (DEC-41). FEAT-10's session note already covers this — NULL costs zero bytes. Saved one config line plus a downstream migration risk.
+- **Cookie prefix: `lofty-larder`, not `__Host-`.** `__Host-` forbids subdomains and invalidates every existing session on the deploy that flips it, for no v1 benefit (single-origin in prod per DEC-44). Better Auth defaults already satisfy DEC-43 (`HttpOnly`, `Secure` in prod, `SameSite=Lax`, CSRF).
+- **`health.ping` exemption is dev-only.** Spec verbatim. The pre-handler's `isExempt(url, config)` returns true for `/api/trpc/health.ping` only when `NODE_ENV !== 'production'`. Prod healthcheck endpoint lands separately in FEAT-46 as a plain Fastify route under `/api/health`.
+- **No user→household join row.** Per DEC-17, `CURRENT_HOUSEHOLD_ID` IS the link in v1. Better Auth's user-create path runs unmodified; multi-user-household work is a non-goal.
+- **`buildApp(config, { db?, sendMagicLink? })` — both injectable.** The signature change is the test ergonomics that pays for itself across every later FEAT's tests. Production calls `buildApp(config)` and gets the singletons; tests pass their own Drizzle handle (Testcontainers in `auth.test.ts`, a no-op pool in `server.test.ts`) plus a spy sender.
+- **Module augmentation for `FastifyRequest.session`/`user` lives in `trpc/context.ts`, not the auth plugin.** First pass put it in `plugins/auth.ts` — typechecked fine in the backend but broke `/shared` because `router-type.ts` only pulls the tRPC chain (router → init → context), not the plugins. Moving the augmentation onto the `trpc/context.ts` compilation path makes it visible to every consumer of the AppRouter type.
+
+### Drift from kick-off plan
+
+1. **No `resend` SDK dependency** (see decisions above). Plan said "add `resend` to `backend/package.json`"; instead `backend/src/auth/resend.ts` does the REST call directly.
+2. **Allow-list refactored into `withAllowList`** after a failing test showed the gate was bypassed when tests injected a sender (see decisions above). Plan had it inside the Resend transport.
+3. **`backend/src/db/index.ts` refactored to lazy init.** Plan didn't flag it. The singleton pool's `loadConfig()` ran at module import — which was fine until `server.ts` started importing from `db/index.ts`. Unit tests that don't set the new auth env vars would have crashed on import. `getDb()` returns the singleton on first call; the pool only opens when something actually wants it. `scripts/seed.ts` updated to call `getDb()` to get `pool` and `withTransaction`.
+4. **`server.test.ts` `/api/static/does-not-exist.txt` test expectation changed from 404 to 401.** The pre-handler short-circuits before the not-found handler. The test's intent (static plugin doesn't claim `/api/*`) is now proven indirectly via the auth path catching it; the inline comment in the test calls this out.
+5. **No new `/shared` schemas.** Plan said no, and that held — Better Auth owns its own input validation for the magic-link flow. The first `/shared/src/schemas/*` entry will land alongside FEAT-15's frontend wiring or FEAT-17's ingredient procedures.
+
+### Implementation details worth carrying
+
+- **`BetterAuthOptions['account']` typing is open enough to accept a `fields` map** but we don't need it (see "decisions: `account.fields.password` not configured"). The password column will stay NULL forever under magic-link-only auth.
+- **Better Auth's verify endpoint returns 302 on token reuse**, not 4xx — the redirect URL carries an `error` query param. Tests must accept either shape: assert "no second session was minted" as the semantic check, and treat 302+`error=` *or* 4xx as both valid token-reuse signals. `auth.test.ts` codifies this.
+- **`auth.handler(new Request(url, init))` is the right Fastify bridge.** Fastify parses the body into `req.body` via its JSON parser; we re-stringify it into the Web `Request`'s `RequestInit.body`. The catch-all route declares all relevant methods (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`) so Better Auth sees the full surface. Set-cookie headers pass through Fastify's reply unchanged.
+- **`createCallerFactory` is the right way to test a `protectedProcedure` without an HTTP round-trip.** Reaching into `procedure._def.resolver` from outside doesn't exist on tRPC v11 — caller factories do. Reusable pattern for later FEATs that want to assert middleware behaviour without mocking the entire Fastify stack.
+- **Better Auth's `getSession` short-circuits to `null` when there's no session cookie present** — no DB query. Means unauth requests through the pre-handler don't pay a round-trip cost, and the no-DB tests in `server.test.ts` can run against a stubbed Drizzle handle without ever connecting.
+- **`pg.Pool` is fully lazy** — `new pg.Pool({ connectionString })` doesn't open a connection until a client is checked out. `server.test.ts` exploits this with a pool pointed at a bogus URL that never connects.
+- **Better Auth's `magicLink({ disableSignUp: false })` is the default**, but spelt out for clarity in `backend/src/auth/index.ts`. The allow-list is the actual sign-up gate (FEAT-14 kick-off Q2). Toggling `disableSignUp` would block the first-time sign-in path even for allow-listed emails who don't yet have a row.
+
+### Spec ambiguities resolved here (don't re-litigate)
+
+- "Verify cookies are set with the expected flags... `__Host-` prefix if used" — **not enabled** (single-origin prod, no subdomain access desired, flip would invalidate sessions).
+- `account.fields.password` — **not configured**. Column stays NULL; no consumer.
+- Sign-up posture — **allow-list via `MAGIC_LINK_ALLOWED_EMAILS`** (single-household MVP, two-person privacy default).
+- User→household linkage on first sign-in — **none in v1** (DEC-17; `CURRENT_HOUSEHOLD_ID` is the link).
+- `health.ping` exemption — **dev-only** per the spec AC literally.
+- Verify endpoint failure shape — **either 302+`error=` or 4xx**; test the no-session semantic, not the status code.
+- Pre-handler integration with `reqId` (DEC-77) — **honoured naturally**; both the auth handler and `getSession` run on the same `req`, so `req.id` flows untouched into Pino and downstream.
+
+### Open items for downstream FEATs
+
+- **FEAT-15 (sign-in UI + verification + protected routing)** — frontend Better Auth client must point at `/api/auth` and post `{ email, callbackURL }` to `/api/auth/sign-in/magic-link`. The verify endpoint is `/api/auth/magic-link/verify?token=…`. tRPC's client error link maps 401 → redirect to `/sign-in` (cross-cutting #16: don't change the tRPC URL shape; the PWA cache rules match on it).
+- **FEAT-15 — the verification route reads the token from `?token=` in the URL**, not the path. Better Auth's plugin generates URLs as `${MAGIC_LINK_TRUSTED_ORIGIN}/api/auth/magic-link/verify?token=…` by default. The frontend "magic-link landing" route should consume that token (or be hit directly server-side — confirm during FEAT-15 kick-off).
+- **FEAT-16 (profile + theme)** — `user.getMe` / `user.updateProfile` procedures should be `protectedProcedure` (not `publicProcedure`); the `ctx.user` narrowing means resolvers can read `ctx.user.id` and `ctx.user.themePreference` directly without a null check.
+- **FEAT-17 onward — every domain procedure file** uses `protectedProcedure` (from `backend/src/trpc/init.ts`) as the default. `publicProcedure` is reserved for `health.ping` and any future genuinely-anonymous endpoints. Domain procedures scope every query by `CURRENT_HOUSEHOLD_ID` (DEC-17, cross-cutting #3) — `ctx.user.id` is informational only, never authorisation.
+- **FEAT-35 (account deletion)** — the seven-step tombstoning sequence (DEC-29) will delete from `sessions` and `accounts` before the `users` row. Better Auth's cascade rule on `sessions.userId` / `accounts.userId` is `ON DELETE CASCADE` (FEAT-10 schema), so deleting the user row would clean those up automatically — but the explicit step is still in the sequence for audit-trace clarity. `verifications` are identified by email string, not `userId`, so they don't cascade; the tombstoning procedure should `DELETE FROM verifications WHERE identifier = :email` as part of the same transaction.
+- **FEAT-45 (rate limiting, DEC-45)** — the magic-link request endpoint needs the per-email 5/hour limit (DEC-45). Better Auth's built-in `rateLimit: { window: 60, max: 5 }` on the `magicLink` plugin would cover *per-IP* but not *per-email*; FEAT-45 will need a custom limiter or to extend Better Auth's. Not enabled now — wait for FEAT-45 to land the unified `@fastify/rate-limit` config.
+- **FEAT-46 (`/api/health` route)** — when this lands, the auth pre-handler exemption `/api/health` already accepts it (the `isExempt` helper matches the `/api/health` prefix). Just register the plain Fastify route.
+- **FEAT-50 (`OPERATIONS.md` + restore drills)** — the prod env-var checklist below should lift into the ops doc.
+
+### Operator action before next prod deploy
+
+Four new env vars are required outside test; the next deploy after this PR merges will crashloop without them. Set in Fly:
+
+```sh
+flyctl secrets set \
+  BETTER_AUTH_SECRET="$(openssl rand -base64 48 | tr -d '\n')" \
+  BETTER_AUTH_URL="https://loftys-larder.co.uk" \
+  RESEND_API_KEY="re_XXXXXXXX" \
+  MAGIC_LINK_TRUSTED_ORIGIN="https://loftys-larder.co.uk" \
+  MAGIC_LINK_ALLOWED_EMAILS="conorwarne92@gmail.com" \
+  --app loftys-larder-prod
+```
+
+`MAGIC_LINK_FROM` defaults to `magic@loftys-larder.co.uk` (the FEAT-13 sender) so doesn't need setting unless overriding. Add more comma-separated entries to `MAGIC_LINK_ALLOWED_EMAILS` as second-household-member emails come in.
+
+### Environment notes — same Colima env vars as FEAT-09 / 10 / 11 / 12
+
+```sh
+export DOCKER_HOST=unix:///Users/$USER/.colima/default/docker.sock
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+```
+
+`auth.test.ts` follows the same Testcontainers pattern as `schema.test.ts` — `beforeAll` boots Postgres + runs migrations; `beforeEach` truncates the four Better Auth tables with `restart identity cascade`. Auth suite finishes in ~5s once the container is warm.
+
+### Deferred (do NOT do as part of FEAT-14)
+
+- Frontend sign-in UI, verification route, protected layout — **FEAT-15**.
+- `user.getMe` / `user.updateProfile` procedures — **FEAT-16**.
+- Tombstoning sequence (delete sessions/accounts/verifications/recipes/etc. before user row) — **FEAT-35**.
+- Per-email rate-limit on magic-link request — **FEAT-45**.
+- Unauth `/api/health` Fastify route (already exempt in the pre-handler) — **FEAT-46**.
+- `OPERATIONS.md` lift of the env-var checklist above — **FEAT-50**.
+- Cloudflare cache-bypass tightening for `/api/auth/*` — already covered by the broad `/api/*` bypass rule landed at FEAT-06; revisit only if Cloudflare's edge starts misclassifying.
+- Sentry `beforeSend` PII scrub for auth headers — **FEAT-43** (when Sentry first lands).
+
+---
+
 ## 2026-05-23 — FEAT-13 (Resend domain verification)
 
 **Status:** verification complete on 2026-05-23. `loftys-larder.co.uk` verified with Resend; SPF / DKIM / DMARC published in Cloudflare; test send to a personal Gmail showed `spf=pass`, `dkim=pass`, `dmarc=pass` and landed in Inbox. Sender confirmed as `magic@loftys-larder.co.uk`. Definition-of-done boxes in `docs/feature-specs.md §FEAT-13` left unticked — human action.

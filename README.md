@@ -44,6 +44,26 @@ psql "$DATABASE_URL_TEST" -c '\dx'      # same on the test DB
 > for ephemeral per-run isolation rather than `lofty_test` in the Compose
 > Postgres. The in-Compose test DB is for ad-hoc scripts and manual probing.
 
+### Run the backend
+
+```sh
+cp backend/.env.example backend/.env
+# Edit BETTER_AUTH_SECRET, RESEND_API_KEY, and MAGIC_LINK_ALLOWED_EMAILS to
+# values for your machine. The other vars work out of the box.
+pnpm --filter backend dev
+```
+
+The backend refuses to boot without `DATABASE_URL`, `BETTER_AUTH_SECRET`,
+`BETTER_AUTH_URL`, `RESEND_API_KEY`, `MAGIC_LINK_TRUSTED_ORIGIN`, and
+`MAGIC_LINK_ALLOWED_EMAILS` (config validation runs at startup). A real Resend
+API key is only needed if you want a magic-link email to actually arrive — for
+plain server-boot you can leave the placeholder; the send call only fires when
+someone hits `/api/auth/sign-in/magic-link`.
+
+Magic-link requests are gated by `MAGIC_LINK_ALLOWED_EMAILS` (comma-separated).
+Requests for any address not on the list are silently dropped — by design
+(single-household MVP).
+
 ## Quality gates
 
 ESLint (typed, `@typescript-eslint` strict-type-checked) and Prettier own

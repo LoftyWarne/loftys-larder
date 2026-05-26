@@ -2,16 +2,48 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { createAuth, type Auth } from './auth/index.ts';
+import { createResendSender, withAllowList } from './auth/resend.ts';
+import type { MagicLinkSender } from './auth/resend.ts';
 import { ConfigValidationError, loadConfig, type Config } from './config.ts';
+import { getDb, type Db } from './db/index.ts';
 import { buildServerOptions } from './plugins/logger.ts';
+import { registerAuth } from './plugins/auth.ts';
 import { registerSecurity } from './plugins/security.ts';
 import { createContext } from './trpc/context.ts';
 import { appRouter } from './trpc/router.ts';
 
-export async function buildApp(config: Config): Promise<FastifyInstance> {
+export interface BuildAppOptions {
+  // Inject a Drizzle handle in tests; production uses the singleton pool.
+  db?: Db;
+  // Inject a magic-link sender in tests; production wraps Resend's REST API.
+  sendMagicLink?: MagicLinkSender;
+}
+
+export async function buildApp(
+  config: Config,
+  options: BuildAppOptions = {},
+): Promise<FastifyInstance> {
   const app = Fastify(buildServerOptions(config));
 
   await registerSecurity(app, config);
+
+  const db = options.db ?? getDb().db;
+  const transport: MagicLinkSender =
+    options.sendMagicLink ??
+    createResendSender({
+      apiKey: config.RESEND_API_KEY,
+      from: config.MAGIC_LINK_FROM,
+      log: app.log,
+    });
+  const sendMagicLink = withAllowList(
+    transport,
+    config.MAGIC_LINK_ALLOWED_EMAILS,
+    app.log,
+  );
+
+  const auth: Auth = createAuth({ config, db, sendMagicLink });
+  registerAuth(app, { auth, config });
 
   await app.register(fastifyTRPCPlugin, {
     prefix: '/api/trpc',

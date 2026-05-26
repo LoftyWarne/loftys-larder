@@ -9,6 +9,11 @@ const baseEnv = {
   NODE_ENV: 'test',
   ALLOWED_ORIGIN: 'http://localhost:5173',
   DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
+  BETTER_AUTH_SECRET: 'test-secret-thirty-two-characters-long!',
+  BETTER_AUTH_URL: 'http://localhost:3000',
+  RESEND_API_KEY: 're_test_key',
+  MAGIC_LINK_TRUSTED_ORIGIN: 'http://localhost:5173',
+  MAGIC_LINK_ALLOWED_EMAILS: 'allowed@example.com',
 } as const;
 
 function envWithout(
@@ -81,6 +86,49 @@ describe('loadConfig', () => {
   it('rejects a malformed DATABASE_URL', () => {
     expect(() =>
       loadConfig({ ...baseEnv, DATABASE_URL: 'not-a-url' }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('rejects a short BETTER_AUTH_SECRET', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, BETTER_AUTH_SECRET: 'too-short' }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('rejects missing RESEND_API_KEY', () => {
+    expect(() => loadConfig(envWithout('RESEND_API_KEY'))).toThrowError(
+      ConfigValidationError,
+    );
+  });
+
+  it('defaults MAGIC_LINK_FROM to the verified sender', () => {
+    const config = loadConfig({ ...baseEnv });
+    expect(config.MAGIC_LINK_FROM).toBe('magic@loftys-larder.co.uk');
+  });
+
+  it('parses MAGIC_LINK_ALLOWED_EMAILS into a lowercase array', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      MAGIC_LINK_ALLOWED_EMAILS: ' Alice@Example.com , bob@example.com ',
+    });
+    expect(config.MAGIC_LINK_ALLOWED_EMAILS).toEqual([
+      'alice@example.com',
+      'bob@example.com',
+    ]);
+  });
+
+  it('rejects an empty MAGIC_LINK_ALLOWED_EMAILS list', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, MAGIC_LINK_ALLOWED_EMAILS: '   ,   ' }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('rejects a malformed entry in MAGIC_LINK_ALLOWED_EMAILS', () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        MAGIC_LINK_ALLOWED_EMAILS: 'alice@example.com,not-an-email',
+      }),
     ).toThrowError(ConfigValidationError);
   });
 

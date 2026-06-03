@@ -4,6 +4,55 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-03 — FEAT-15 (Sign-in UI + magic-link verification + protected routing)
+
+**Status:** implementation complete; `pnpm --filter frontend test` green (19 tests across 5 files — `sign-in.test.tsx`, `auth.verify.test.tsx`, `_authed.test.tsx`, `lib/trpc.test.ts`, plus the inherited `-components/index-page.test.tsx`). `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format` clean across all three workspaces. Definition-of-done boxes in `docs/feature-specs.md §FEAT-15` left unticked — human action. The end-to-end gate check (real magic-link → click → app in a browser) is still owed.
+
+### Decisions taken at kick-off (the *why*, not just the *what*)
+
+- **Server-default magic-link redirect target (Better Auth's built-in flow).** The email link points at the server (`/api/auth/magic-link/verify?token=…&callbackURL=…`); the server verifies the token, sets the session cookie, and 302s straight to `callbackURL` (`/`). The frontend `/auth/verify` route is therefore an *error-landing page only* — reached when Better Auth's `errorCallbackURL` fires with `?error=<code>`. The alternative (frontend extracts the token and calls a verify API itself) would double the network hops and re-introduce cross-origin and CSRF concerns we don't need. The FEAT-15 spec wording ("verification route consumes the token from the URL") was interpreted to mean "is the destination of the verification flow," not literally "extracts the token in the browser."
+- **Move `routes/index.tsx` → `routes/_authed/index.tsx`.** `/` becomes the first authenticated route. Cleanest implementation of "logged-in user visiting `/sign-in` is redirected to `/`" — and matches the long-term shape, since every later FEAT (settings, recipes, planner, shopping list) will live under `_authed/`. The alternative of leaving `/` public and adding a placeholder `_authed/home.tsx` was rejected as junk that would get renamed in FEAT-16.
+- **Native `<label htmlFor>`, no `@radix-ui/react-label`.** Radix's label adds zero behavioural value for a single email input (the native `<label htmlFor>` already gives click-to-focus). Saved one dependency. shadcn/ui is still the styling system per DEC-51; this is purely "don't add a dep you don't need."
+- **CSRF transport: Better Auth's double-submit cookie, sent via `credentials: 'include'`.** Better Auth's default CSRF model uses a cookie the browser sends automatically. No header injection in the tRPC client. Confirmed at implementation time against the installed `better-auth@1.6.11`. The tRPC `httpBatchLink` was extended with a `fetch` override (`(input, init) => fetch(input, { ...init, credentials: 'include' })`) — minimum-viable wiring.
+- **tRPC URL shape preserved (cross-cutting #16).** `httpBatchLink({ url: '/api/trpc' })` stays — the PWA cache rules (FEAT-41 onward) match on the procedure segment.
+- **Custom `unauthorizedRedirectLink` over per-call `onError`.** A `TRPCLink<AppRouter>` (using `observable` from `@trpc/server/observable`) intercepts errors with `err.data?.code === 'UNAUTHORIZED'` and calls an injected `onUnauthorized` callback. `app.tsx` wires that callback to `router.navigate({ to: '/sign-in' })`. The injection pattern keeps `lib/trpc.ts` independent of the router and dodges the otherwise-cyclic import.
+- **Route file structure: named exports for `beforeLoad` + components.** Each route file exports its `beforeLoad` and its component as named exports (`signInBeforeLoad`, `SignInPage`, `verifyBeforeLoad`, `VerifyPage`, `copyForError`, `authedBeforeLoad`) which the `Route` definition then references. Tests call the named exports directly without standing up a memory router; the `Route` object's option shape doesn't expose a plain function for testing.
+
+### Drift from kick-off plan
+
+1. **Two stop-and-asks mid-implementation, both producing new DECs:**
+   - **DEC-80's deferred call resolved.** `signInSchema` was the first runtime import from `/shared`; Vite couldn't resolve `@loftys-larder/shared` (the `main` field pointed at non-existent `./dist/index.js`). User chose option (2) — alias to source. `frontend/vite.config.ts` and `frontend/vitest.config.ts` now alias `@loftys-larder/shared` → `../shared/src/index.ts`. `shared/package.json` gained `zod`. Captured as DEC-80 update.
+   - **`@typescript-eslint/only-throw-error` vs `throw redirect(...)`.** TanStack Router's `beforeLoad` contract is throwing a Response-like object; the strict rule flags this at every guard. User chose global config relaxation for `frontend/src/routes/**` over per-line suppressions. Captured as **DEC-81**.
+2. **Three failure states in `/auth/verify` collapse to two codes + default.** Plan listed {expired, used, invalid}. Reading Better Auth's source: only `EXPIRED_TOKEN` and `INVALID_TOKEN` are emitted (no separate "used" — once consumed, re-clicking hits `INVALID_TOKEN` because the verification row is deleted). UI copy is now: expired → "this link has expired"; invalid → "no longer valid (may have been used or modified)"; default branch covers `failed_to_create_user` / `failed_to_create_session` / `new_user_signup_disabled`.
+3. **`frontend/tsr.config.json` added** with `routeFileIgnorePattern: "\\.test\\.tsx?$"`, plus a matching `routeFileIgnorePattern` in the Vite plugin's `tanstackRouter({...})` call. Without it, `tsr generate` warns on every run for `*.test.tsx` files colocated with their routes. Not in plan; mechanical fix.
+4. **shadcn `Input` primitive added** (`frontend/src/components/ui/input.tsx`). Plan listed it; landed as anticipated, no new deps.
+5. **`zod` added as a direct `shared/package.json` dep** — was previously only in backend + frontend. Shared's first runtime import is FEAT-15's `signInSchema`. Mechanical, but worth flagging because it changes shared's dependency surface.
+
+### Implementation details worth carrying
+
+- **TanStack Router's `redirect()` returns a `Response`-like object with the target on `.options.to`, not `.to`.** First-pass tests asserted `{ to: '/sign-in' }` and failed with `Response { options: { to: '/sign-in', statusCode: 307 } }`. Fix the assertion shape to `{ options: { to: '/sign-in' } }`.
+- **Better Auth's React `useSession()` is backed by nanostores, not TanStack Query.** Don't try to fold it into the app's `QueryClient`. It manages its own subscription independently. For route guards, call `authClient.getSession()` directly in `beforeLoad` (it short-circuits to `{ data: null }` with zero DB round-trip when there's no session cookie, per the FEAT-14 implementation note).
+- **The unauthorized-redirect link sits *before* `httpBatchLink` in the links array.** Order matters: the batch link's error must propagate up through the redirect link's `error()` observer to fire the callback.
+- **`routes/_authed.tsx` (layout) and `routes/_authed/index.tsx` (child) are sibling files** under TanStack Router's pathless-route convention. The route tree generator merges them — no manual wiring.
+- **The tRPC client factory is now `createTRPCClient({ onUnauthorized })`** in `lib/trpc.ts`. The factory returns a fresh client wired with both the redirect link and the cookie-credentials `httpBatchLink`. The old inline `httpBatchLink({ url: '/api/trpc' })` in `app.tsx` is gone.
+- **Vite proxy gotcha sanity-checked.** `frontend/vite.config.ts` proxies `/api/*` to `BACKEND_URL ?? http://localhost:3000`. Better Auth's React client points at `/api/auth` (same-origin from the browser's perspective) and rides this proxy in dev. In prod the Fastify app serves both `/api/*` and the SPA — same origin, no proxy needed.
+
+### Spec ambiguities resolved here (don't re-litigate)
+
+- "Verification route consumes the token from the URL, completes sign-in, redirects to `/`" — interpreted as Better Auth's server-default flow. Server consumes the token; the frontend `/auth/verify` route is the error-landing.
+- "tRPC client treats `UNAUTHORIZED` responses by redirecting to `/sign-in`" — implemented as a global custom link, not as per-call `onError` handlers in individual queries.
+- "Verification route should handle the failure cases (expired, used, invalid) with distinct messages" — interpreted as: distinct copy for `EXPIRED_TOKEN`, distinct copy for `INVALID_TOKEN` (which is what "used" collapses to once Better Auth deletes the verification row), and a generic-failure default for the rarer codes.
+
+### Open items for downstream FEATs
+
+- **FEAT-16 (profile + theme settings).** First feature to land under `_authed`. Route file: `frontend/src/routes/_authed/settings.tsx`. Backend procedures `user.getMe` / `user.updateProfile` should be `protectedProcedure` (FEAT-14 contract). `ThemeProvider` reads from the Better Auth session — *not* localStorage — to honour DEC-TBD's cross-device theme persistence. Until a real navigation shell lands, the settings page is reachable only by hand-typing the URL.
+- **FEAT-17 onward** — every domain procedure inherits the `protectedProcedure` + `CURRENT_HOUSEHOLD_ID` discipline from FEAT-14. The frontend tRPC client now sends cookies on every call automatically; no per-procedure wiring needed on the frontend side.
+- **First backend runtime import from `/shared`.** Should resolve transparently — `tsx watch` (dev) and `esbuild` bundle (prod) both follow the workspace symlink to `shared/src/index.ts`. No config change anticipated. If anything trips, add a `paths` mapping to `backend/tsconfig.json` mirroring the frontend's.
+- **Sign-out flow not built.** `authClient.signOut()` exists in the auth client; when a real navigation shell adds a "sign out" affordance (likely FEAT-16 or a dedicated shell FEAT), wire `signOut()` + `router.navigate({ to: '/sign-in' })` on success.
+- **`useSession()` not exercised in code yet.** Route guards use `getSession()` directly. When a logged-in user's name needs to appear in the UI (FEAT-16 settings page), that's the call site for `useSession()`. The hook is already re-exported from `lib/auth-client.ts`.
+
+---
+
 ## 2026-05-26 — FEAT-14 (Better Auth integration — server)
 
 **Status:** implementation complete; `pnpm --filter backend test` green (119 tests; 30 new FEAT-14 cases — 12 in `auth.test.ts` plus 7 new in `config.test.ts` and 4 in `server.test.ts` — over 89 inherited). Typecheck + lint + `format:check` clean across all three workspaces. Definition-of-done boxes in `docs/feature-specs.md §FEAT-14` left unticked — human action. The end-to-end gate check (real magic-link → click → session) is still owed.

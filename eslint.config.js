@@ -66,5 +66,14 @@ export default defineConfig(
     },
     settings: { react: { version: '19' } },
   },
+  {
+    files: ['frontend/src/routes/**/*.{ts,tsx}'],
+    rules: {
+      // TanStack Router's `beforeLoad` contract is `throw redirect(...)`,
+      // where `redirect()` returns a Response-like object the framework
+      // catches. The strict `only-throw-error` rule cannot model this.
+      '@typescript-eslint/only-throw-error': 'off',
+    },
+  },
   prettier,
 );

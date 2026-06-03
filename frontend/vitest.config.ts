@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(here, './src'),
+      '@loftys-larder/shared': path.resolve(here, '../shared/src/index.ts'),
     },
   },
   test: {

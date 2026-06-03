@@ -64,6 +64,20 @@ Magic-link requests are gated by `MAGIC_LINK_ALLOWED_EMAILS` (comma-separated).
 Requests for any address not on the list are silently dropped — by design
 (single-household MVP).
 
+### Run the frontend
+
+```sh
+pnpm --filter frontend dev
+```
+
+Vite serves on `http://localhost:5173` and proxies `/api/*` to the backend
+(default `http://localhost:3000`, override via `BACKEND_URL`). The backend
+must be running for sign-in to work.
+
+Smoke test the magic-link flow: open `http://localhost:5173/sign-in`, enter
+an email on `MAGIC_LINK_ALLOWED_EMAILS`, and check that inbox. Hitting `/`
+without a session redirects to `/sign-in`.
+
 ## Quality gates
 
 ESLint (typed, `@typescript-eslint` strict-type-checked) and Prettier own

@@ -11,13 +11,18 @@ const BACKEND_DEV_URL = process.env.BACKEND_URL ?? 'http://localhost:3000';
 
 export default defineConfig({
   plugins: [
-    tanstackRouter({ target: 'react', autoCodeSplitting: true }),
+    tanstackRouter({
+      target: 'react',
+      autoCodeSplitting: true,
+      routeFileIgnorePattern: '\\.test\\.tsx?$',
+    }),
     react(),
     tailwindcss(),
   ],
   resolve: {
     alias: {
       '@': path.resolve(here, './src'),
+      '@loftys-larder/shared': path.resolve(here, '../shared/src/index.ts'),
     },
   },
   server: {

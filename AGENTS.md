@@ -166,6 +166,7 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 ## Code conventions
 
 - **One file, one job.** Procedures live next to their feature; cross-cutting helpers in `domain/` or `util/`.
+- **Route files are thin shells.** Files under `frontend/src/routes/` export _only_ `Route`. Page components, `beforeLoad` functions, and any other exports live in `frontend/src/routes/-components/` (the `-` prefix excludes the dir from TanStack Router's file-based routing). TanStack Router's auto-code-split plugin can only split `Route.options.component`; additional exports get hoisted into the route chunk and emit a dev-server warning.
 - **Schemas: `/shared/src/schemas/`.** DTO shapes: `/shared/src/dto/`. Import these — don't redefine.
 - **Errors:** `TRPCError` with a tRPC code on `code` and a domain code on `cause` of the form `{ code: string, ...metadata }`. (cross-cutting #11, DEC-35)
 - **Optimistic updates:** use the shared hook (`useOptimisticSlotUpdate`, FEAT-31). Don't reimplement `onMutate`/`onError`/`onSettled` per consumer. (cross-cutting #7)
@@ -212,6 +213,7 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 | Add a build orchestrator (Turborepo, Nx) | Three workspaces is below the threshold. (DEC-03) |
 | `console.log` for diagnostics | Pino only. (FEAT-03) |
 | Skip pre-commit hooks (`--no-verify`) | Fix the underlying failure. |
+| Export a React component or helper from `frontend/src/routes/*.tsx` | Route files are thin shells. Page bodies + `beforeLoad` live in `routes/-components/`; the route file only exports `Route`. (auto-code-split plugin warns otherwise) |
 
 ---
 

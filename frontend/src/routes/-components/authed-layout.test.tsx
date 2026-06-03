@@ -17,7 +17,7 @@ vi.mock('@tanstack/react-router', async () => {
 });
 
 import { authClient } from '@/lib/auth-client.ts';
-import { authedBeforeLoad } from './_authed.tsx';
+import { authedBeforeLoad } from './authed-layout.tsx';
 
 const getSessionMock = authClient.getSession as unknown as ReturnType<
   typeof vi.fn

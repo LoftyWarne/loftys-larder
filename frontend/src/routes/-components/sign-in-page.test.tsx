@@ -20,7 +20,7 @@ vi.mock('@tanstack/react-router', async () => {
 });
 
 import { authClient } from '@/lib/auth-client.ts';
-import { SignInPage, signInBeforeLoad } from './sign-in.tsx';
+import { SignInPage, signInBeforeLoad } from './sign-in-page.tsx';
 
 const magicLinkMock = authClient.signIn.magicLink as unknown as ReturnType<
   typeof vi.fn

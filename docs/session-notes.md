@@ -51,6 +51,22 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 - **Sign-out flow not built.** `authClient.signOut()` exists in the auth client; when a real navigation shell adds a "sign out" affordance (likely FEAT-16 or a dedicated shell FEAT), wire `signOut()` + `router.navigate({ to: '/sign-in' })` on success.
 - **`useSession()` not exercised in code yet.** Route guards use `getSession()` directly. When a logged-in user's name needs to appear in the UI (FEAT-16 settings page), that's the call site for `useSession()`. The hook is already re-exported from `lib/auth-client.ts`.
 
+### Follow-up later the same day — route-file thinning
+
+First `pnpm dev` after the initial implementation surfaced a TanStack Router auto-code-split warning:
+
+> These exports from "/.../routes/sign-in.tsx" will not be code-split and will increase your bundle size: - SignInPage
+
+The plugin can only split `Route.options.component` cleanly; any other exported React component gets hoisted into the route's chunk. Triggered because the initial implementation exported `SignInPage` / `VerifyPage` from the route files so the test suite could import them directly.
+
+**Fix:** moved page components and `beforeLoad` functions out of `routes/*.tsx` into `routes/-components/` (matching the existing `index-page.tsx` pattern; the `-` prefix excludes the dir from route detection). Route files are now thin shells exporting only `Route`. Test files colocated with the components they exercise — `routes/-components/sign-in-page.test.tsx`, `verify-page.test.tsx`, `authed-layout.test.tsx`.
+
+One small refactor along the way: `VerifyView` used to call `Route.useSearch()` directly, which couples the component to the route file. The component now takes `error: string | undefined` as a prop; the thin wrapper inside `auth.verify.tsx` reads `Route.useSearch()` and passes it through. Cleaner test surface, no circular import.
+
+**Codified in AGENTS.md** as a new "Code conventions" bullet (route files are thin shells; everything else in `-components/`) and a new "Common traps" row (don't export from route files). Every future FEAT that adds a route inherits this.
+
+Verification: typecheck + lint + 19 tests pass; dev server boots without the warning. Tests, route tree, and dev surface all green.
+
 ---
 
 ## 2026-05-26 — FEAT-14 (Better Auth integration — server)

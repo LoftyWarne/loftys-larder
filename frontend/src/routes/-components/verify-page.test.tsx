@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { copyForError, verifyBeforeLoad } from './auth.verify.tsx';
+import { copyForError, verifyBeforeLoad } from './verify-page.tsx';
 
 describe('copyForError', () => {
   it('returns expired-link copy for EXPIRED_TOKEN', () => {

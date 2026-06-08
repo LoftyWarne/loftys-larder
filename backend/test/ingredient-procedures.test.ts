@@ -119,6 +119,11 @@ describe('ingredients procedures', () => {
       reply: {} as AppContext['reply'],
       reqId: 'rid-test',
       db,
+      cloudinary: {
+        cloudName: 'test-cloud',
+        apiKey: 'test-key',
+        apiSecret: 'test-secret',
+      },
       session: authenticated
         ? {
             id: SESSION_ID,

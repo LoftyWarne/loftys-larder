@@ -30,6 +30,11 @@ export async function buildApp(
 
   const db = options.db ?? getDb().db;
   app.decorate('db', db);
+  app.decorate('cloudinary', {
+    cloudName: config.CLOUDINARY_CLOUD_NAME,
+    apiKey: config.CLOUDINARY_API_KEY,
+    apiSecret: config.CLOUDINARY_API_SECRET,
+  });
 
   const transport: MagicLinkSender =
     options.sendMagicLink ??

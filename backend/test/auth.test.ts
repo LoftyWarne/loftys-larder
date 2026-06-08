@@ -66,6 +66,9 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     MAGIC_LINK_FROM: 'magic@loftys-larder.co.uk',
     MAGIC_LINK_TRUSTED_ORIGIN: 'http://localhost:5173',
     MAGIC_LINK_ALLOWED_EMAILS: [ALLOWED_EMAIL],
+    CLOUDINARY_CLOUD_NAME: 'test-cloud',
+    CLOUDINARY_API_KEY: 'test-key',
+    CLOUDINARY_API_SECRET: 'test-secret',
     ...overrides,
   };
 }
@@ -377,6 +380,11 @@ describe('auth', () => {
         reply: {} as AppContext['reply'],
         reqId: 'rid',
         db: {} as AppContext['db'],
+        cloudinary: {
+          cloudName: 'test-cloud',
+          apiKey: 'test-key',
+          apiSecret: 'test-secret',
+        },
         session: null,
         user: null,
       });

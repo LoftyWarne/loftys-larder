@@ -14,6 +14,9 @@ const baseEnv = {
   RESEND_API_KEY: 're_test_key',
   MAGIC_LINK_TRUSTED_ORIGIN: 'http://localhost:5173',
   MAGIC_LINK_ALLOWED_EMAILS: 'allowed@example.com',
+  CLOUDINARY_CLOUD_NAME: 'test-cloud',
+  CLOUDINARY_API_KEY: 'test-key',
+  CLOUDINARY_API_SECRET: 'test-secret',
 } as const;
 
 function envWithout(

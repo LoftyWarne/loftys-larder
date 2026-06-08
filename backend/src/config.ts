@@ -45,6 +45,9 @@ const configSchema = z
     // magic-link send fn silently drops requests for any address not on the
     // list so anyone guessing the sign-in URL cannot create an account.
     MAGIC_LINK_ALLOWED_EMAILS: allowedEmailsSchema,
+    CLOUDINARY_CLOUD_NAME: z.string().min(1),
+    CLOUDINARY_API_KEY: z.string().min(1),
+    CLOUDINARY_API_SECRET: z.string().min(1),
   })
   .refine(
     (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),

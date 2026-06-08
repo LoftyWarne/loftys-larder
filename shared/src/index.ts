@@ -17,6 +17,14 @@ export {
   type DomainErrorCause,
 } from './schemas/errors.ts';
 export {
+  RECIPE_IMAGE_ALLOWED_FORMATS,
+  RECIPE_IMAGE_MAX_FILE_SIZE,
+  RECIPE_IMAGE_FOLDER,
+  RECIPE_IMAGE_EAGER_TRANSFORMATION,
+  recipeImageUploadCredentialsSchema,
+  type RecipeImageUploadCredentials,
+} from './schemas/uploads.ts';
+export {
   ingredientNameSchema,
   ingredientShelfLifeSchema,
   createIngredientInputSchema,

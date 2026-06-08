@@ -27,6 +27,9 @@ const authEnv = {
   MAGIC_LINK_FROM: 'magic@loftys-larder.co.uk',
   MAGIC_LINK_TRUSTED_ORIGIN: 'http://localhost:5173',
   MAGIC_LINK_ALLOWED_EMAILS: ['allowed@example.com'] as string[],
+  CLOUDINARY_CLOUD_NAME: 'test-cloud',
+  CLOUDINARY_API_KEY: 'test-key',
+  CLOUDINARY_API_SECRET: 'test-secret',
 };
 
 const devConfig: Config = {

@@ -376,6 +376,7 @@ describe('auth', () => {
         req: {} as AppContext['req'],
         reply: {} as AppContext['reply'],
         reqId: 'rid',
+        db: {} as AppContext['db'],
         session: null,
         user: null,
       });

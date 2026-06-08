@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lofty's Larder</title>
+    <script>
+      // Pre-paint theme guard: avoid a light-on-dark flash for users whose OS
+      // is dark before the React-mounted ThemeProvider takes over. No
+      // localStorage shadow (DEC-54); the authed preference wins on mount.
+      (function () {
+        try {
+          if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

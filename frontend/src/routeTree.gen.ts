@@ -13,6 +13,7 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthVerifyRouteImport } from './routes/auth.verify'
+import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
@@ -33,14 +34,21 @@ const AuthVerifyRoute = AuthVerifyRouteImport.update({
   path: '/auth/verify',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthedRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/sign-in': typeof SignInRoute
+  '/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
+  '/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/': typeof AuthedIndexRoute
 }
@@ -48,15 +56,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
   '/sign-in': typeof SignInRoute
+  '/_authed/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/_authed/': typeof AuthedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/sign-in' | '/auth/verify'
+  fullPaths: '/' | '/sign-in' | '/settings' | '/auth/verify'
   fileRoutesByTo: FileRoutesByTo
-  to: '/sign-in' | '/auth/verify' | '/'
-  id: '__root__' | '/_authed' | '/sign-in' | '/auth/verify' | '/_authed/'
+  to: '/sign-in' | '/settings' | '/auth/verify' | '/'
+  id:
+    | '__root__'
+    | '/_authed'
+    | '/sign-in'
+    | '/_authed/settings'
+    | '/auth/verify'
+    | '/_authed/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,14 +110,23 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthVerifyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authed/settings': {
+      id: '/_authed/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthedSettingsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
   }
 }
 
 interface AuthedRouteChildren {
+  AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedIndexRoute: AuthedIndexRoute,
 }
 

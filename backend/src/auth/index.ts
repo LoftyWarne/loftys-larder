@@ -37,6 +37,20 @@ export function createAuth({ config, db, sendMagicLink }: CreateAuthOptions) {
       cookiePrefix: 'lofty-larder',
       useSecureCookies: config.NODE_ENV === 'production',
     },
+    user: {
+      additionalFields: {
+        // Surfaces `themePreference` on `ctx.user` and on the client session
+        // so the ThemeProvider can read it without an extra round-trip
+        // (DEC-54). `input: false` keeps the field out of Better Auth's
+        // sign-up/update payloads — domain writes go through `user.updateProfile`.
+        themePreference: {
+          type: 'string',
+          required: true,
+          defaultValue: 'system',
+          input: false,
+        },
+      },
+    },
     plugins: [
       magicLink({
         expiresIn: TEN_MINUTES_IN_SECONDS,

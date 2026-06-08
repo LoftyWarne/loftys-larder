@@ -29,6 +29,8 @@ export async function buildApp(
   await registerSecurity(app, config);
 
   const db = options.db ?? getDb().db;
+  app.decorate('db', db);
+
   const transport: MagicLinkSender =
     options.sendMagicLink ??
     createResendSender({

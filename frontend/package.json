@@ -21,6 +21,7 @@
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@loftys-larder/shared": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.16",
     "@radix-ui/react-slot": "^1.1.1",
     "@tanstack/react-query": "^5.66.0",
     "@tanstack/react-query-devtools": "^5.66.0",

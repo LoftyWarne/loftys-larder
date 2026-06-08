@@ -6,6 +6,7 @@ import {
   pgTable,
   smallint,
   text,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -43,6 +44,13 @@ export const ingredients = pgTable(
     index('ingredients_name_trgm_idx').using(
       'gin',
       sql`lower(${table.name}) gin_trgm_ops`,
+    ),
+    // Case-insensitive name uniqueness within a household. Procedures translate
+    // PG 23505 on this index into TRPCError CONFLICT + INGREDIENT_NAME_TAKEN
+    // (DEC-35); two households can still each have an "Onion".
+    uniqueIndex('ingredients_household_lower_name_unique').on(
+      table.householdId,
+      sql`lower(${table.name})`,
     ),
   ],
 );

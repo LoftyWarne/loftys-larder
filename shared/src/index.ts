@@ -9,3 +9,28 @@ export {
   meSchema,
   type Me,
 } from './schemas/user.ts';
+export {
+  DOMAIN_ERROR_CODES,
+  domainErrorCodeSchema,
+  type DomainErrorCode,
+  domainErrorCauseSchema,
+  type DomainErrorCause,
+} from './schemas/errors.ts';
+export {
+  ingredientNameSchema,
+  ingredientShelfLifeSchema,
+  createIngredientInputSchema,
+  type CreateIngredientInput,
+  updateIngredientInputSchema,
+  type UpdateIngredientInput,
+  listIngredientsInputSchema,
+  type ListIngredientsInput,
+  deleteIngredientInputSchema,
+  type DeleteIngredientInput,
+  ingredientListItemSchema,
+  type IngredientListItem,
+  ingredientReferenceItemSchema,
+  type IngredientReferenceItem,
+  ingredientReferencesSchema,
+  type IngredientReferences,
+} from './schemas/ingredients.ts';

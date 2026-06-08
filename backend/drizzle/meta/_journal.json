@@ -22,6 +22,13 @@
       "when": 1779385306942,
       "tag": "0002_meal_plans_and_shopping",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780949275958,
+      "tag": "0003_glorious_silvermane",
+      "breakpoints": true
     }
   ]
 }

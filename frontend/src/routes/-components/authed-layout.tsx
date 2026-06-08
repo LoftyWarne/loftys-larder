@@ -1,4 +1,4 @@
-import { Outlet, redirect } from '@tanstack/react-router';
+import { Link, Outlet, redirect } from '@tanstack/react-router';
 import { authClient } from '@/lib/auth-client.ts';
 
 export async function authedBeforeLoad(): Promise<void> {
@@ -9,5 +9,32 @@ export async function authedBeforeLoad(): Promise<void> {
 }
 
 export function AuthedLayout(): React.ReactElement {
-  return <Outlet />;
+  return (
+    <div className="space-y-6 p-6">
+      <nav className="flex items-center gap-4 border-b pb-3 text-sm font-medium">
+        <Link
+          to="/"
+          activeProps={{ className: 'text-primary' }}
+          className="hover:underline"
+        >
+          Home
+        </Link>
+        <Link
+          to="/ingredients"
+          activeProps={{ className: 'text-primary' }}
+          className="hover:underline"
+        >
+          Ingredients
+        </Link>
+        <Link
+          to="/settings"
+          activeProps={{ className: 'text-primary' }}
+          className="hover:underline"
+        >
+          Settings
+        </Link>
+      </nav>
+      <Outlet />
+    </div>
+  );
 }

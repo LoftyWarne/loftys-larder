@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "ingredients_household_lower_name_unique" ON "ingredients" USING btree ("household_id",lower("name"));

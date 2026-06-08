@@ -14,6 +14,7 @@ import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthVerifyRouteImport } from './routes/auth.verify'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
+import { Route as AuthedIngredientsRouteImport } from './routes/_authed/ingredients'
 
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
@@ -39,15 +40,22 @@ const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedIngredientsRoute = AuthedIngredientsRouteImport.update({
+  id: '/ingredients',
+  path: '/ingredients',
+  getParentRoute: () => AuthedRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/sign-in': typeof SignInRoute
+  '/ingredients': typeof AuthedIngredientsRoute
   '/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
+  '/ingredients': typeof AuthedIngredientsRoute
   '/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/': typeof AuthedIndexRoute
@@ -56,19 +64,21 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
   '/sign-in': typeof SignInRoute
+  '/_authed/ingredients': typeof AuthedIngredientsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/_authed/': typeof AuthedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/sign-in' | '/settings' | '/auth/verify'
+  fullPaths: '/' | '/sign-in' | '/ingredients' | '/settings' | '/auth/verify'
   fileRoutesByTo: FileRoutesByTo
-  to: '/sign-in' | '/settings' | '/auth/verify' | '/'
+  to: '/sign-in' | '/ingredients' | '/settings' | '/auth/verify' | '/'
   id:
     | '__root__'
     | '/_authed'
     | '/sign-in'
+    | '/_authed/ingredients'
     | '/_authed/settings'
     | '/auth/verify'
     | '/_authed/'
@@ -117,15 +127,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/ingredients': {
+      id: '/_authed/ingredients'
+      path: '/ingredients'
+      fullPath: '/ingredients'
+      preLoaderRoute: typeof AuthedIngredientsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
   }
 }
 
 interface AuthedRouteChildren {
+  AuthedIngredientsRoute: typeof AuthedIngredientsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedIngredientsRoute: AuthedIngredientsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedIndexRoute: AuthedIndexRoute,
 }

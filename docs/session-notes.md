@@ -67,6 +67,14 @@ One small refactor along the way: `VerifyView` used to call `Route.useSearch()` 
 
 Verification: typecheck + lint + 19 tests pass; dev server boots without the warning. Tests, route tree, and dev surface all green.
 
+### Follow-up 2026-06-08 — gate check passed; tsx-watch + .env gotcha
+
+End-to-end magic-link flow confirmed working against the local stack: form → Resend → inbox → click → authenticated session. FEAT-15 DoD gate check is satisfied (human ticks the boxes in `docs/feature-specs.md §FEAT-15`).
+
+Debugging detour worth recording: `tsx watch` does **not** restart on `backend/.env` changes — it only watches imported source files. The symptom (emails not arriving despite the form returning success) traced to a backend instance that had loaded an early version of `.env` hours earlier and kept running across multiple in-place `.env` edits. Resolution: kill the backend and re-run `pnpm dev`. Documented in `README.md` under "Run the backend". Worth a one-paragraph mental model for anyone debugging "config change didn't take effect": tsx watch reloads `src/`, not env files.
+
+A second factor in that debug session: a leftover background `pnpm --filter backend dev` from an earlier "run the app" loop was still holding port 3000, which meant the user's subsequent `pnpm dev` invocations couldn't bind and silently lost their start. The `scripts/dev.sh` cleanup trap now sweeps :3000/:5173 stragglers on exit, but anyone running `pnpm --filter backend dev` outside the script should still `lsof -ti :3000` before/after to catch zombies.
+
 ---
 
 ## 2026-05-26 — FEAT-14 (Better Auth integration — server)

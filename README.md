@@ -64,6 +64,11 @@ Magic-link requests are gated by `MAGIC_LINK_ALLOWED_EMAILS` (comma-separated).
 Requests for any address not on the list are silently dropped — by design
 (single-household MVP).
 
+> `tsx watch` reloads on source changes, **not** on `backend/.env` changes.
+> If you edit `.env` (allow-list, API keys, anything), Ctrl-C and re-run
+> `pnpm --filter backend dev` (or `pnpm dev` at the repo root) for the new
+> values to take effect.
+
 ### Run the frontend
 
 ```sh

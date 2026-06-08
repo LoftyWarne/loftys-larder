@@ -31,8 +31,8 @@ export function SignInPage(): React.ReactElement {
     setState({ kind: 'submitting' });
     const { error } = await authClient.signIn.magicLink({
       email,
-      callbackURL: '/',
-      errorCallbackURL: '/auth/verify',
+      callbackURL: `${window.location.origin}/`,
+      errorCallbackURL: `${window.location.origin}/auth/verify`,
     });
     if (error) {
       setState({

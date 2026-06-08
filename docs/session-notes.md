@@ -75,6 +75,16 @@ Debugging detour worth recording: `tsx watch` does **not** restart on `backend/.
 
 A second factor in that debug session: a leftover background `pnpm --filter backend dev` from an earlier "run the app" loop was still holding port 3000, which meant the user's subsequent `pnpm dev` invocations couldn't bind and silently lost their start. The `scripts/dev.sh` cleanup trap now sweeps :3000/:5173 stragglers on exit, but anyone running `pnpm --filter backend dev` outside the script should still `lsof -ti :3000` before/after to catch zombies.
 
+### Follow-up 2026-06-08 — absolute callback URLs
+
+First real magic-link click hit a backend 404: `{"message":"Route GET:/ not found"}`. Cause: the sign-in form passed `callbackURL: '/'` (relative). Better Auth resolves relative URLs against `BETTER_AUTH_URL`, which is the backend origin (`http://localhost:3000`) in dev. The SPA lives on Vite (`:5173`), not Fastify — so the redirect landed on a Fastify origin that has no `/` route.
+
+**Fix:** `frontend/src/routes/-components/sign-in-page.tsx` now passes `` `${window.location.origin}/` `` and `` `${window.location.origin}/auth/verify` ``. Better Auth's server stores those verbatim and redirects to whichever origin the user is on — Vite in dev, the unified origin in prod. The dev origin (`http://localhost:5173`) is already on `MAGIC_LINK_TRUSTED_ORIGIN`, so Better Auth's allow-list lets the redirect through. Test assertion updated.
+
+Codified in AGENTS.md as a new "Common traps" row so future call sites (`signOut`, any future OAuth, anything taking a `callbackURL`) inherit the pattern.
+
+End-to-end flow now confirmed: form → email → click → redirect to `http://localhost:5173/` → authenticated session visible to the SPA.
+
 ---
 
 ## 2026-05-26 — FEAT-14 (Better Auth integration — server)

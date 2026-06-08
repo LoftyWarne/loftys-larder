@@ -75,8 +75,8 @@ describe('SignInPage submission', () => {
     });
     expect(magicLinkMock).toHaveBeenCalledWith({
       email: 'cook@example.com',
-      callbackURL: '/',
-      errorCallbackURL: '/auth/verify',
+      callbackURL: `${window.location.origin}/`,
+      errorCallbackURL: `${window.location.origin}/auth/verify`,
     });
     expect(
       await screen.findByRole('heading', { name: /check your email/i }),

@@ -214,6 +214,7 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 | `console.log` for diagnostics | Pino only. (FEAT-03) |
 | Skip pre-commit hooks (`--no-verify`) | Fix the underlying failure. |
 | Export a React component or helper from `frontend/src/routes/*.tsx` | Route files are thin shells. Page bodies + `beforeLoad` live in `routes/-components/`; the route file only exports `Route`. (auto-code-split plugin warns otherwise) |
+| Pass a relative `callbackURL` / `errorCallbackURL` to Better Auth | Better Auth resolves relative URLs against `BETTER_AUTH_URL` (the backend origin). In dev the SPA lives on a different origin (Vite on `:5173`); the relative path lands on Fastify and 404s. Use `` `${window.location.origin}/path` `` so the redirect goes to whichever origin the user is actually on. The dev origin must be on `MAGIC_LINK_TRUSTED_ORIGIN`. |
 
 ---
 

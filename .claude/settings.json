@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --filter backend test*)",
+      "Bash(pnpm --filter backend typecheck*)",
+      "Bash(pnpm --filter backend lint*)",
+      "Bash(pnpm --filter backend format:check*)",
+      "Bash(pnpm --filter frontend test*)",
+      "Bash(pnpm --filter frontend typecheck*)",
+      "Bash(pnpm --filter frontend lint*)",
+      "Bash(pnpm --filter frontend format:check*)",
+      "Bash(pnpm --filter shared typecheck*)",
+      "Bash(pnpm --filter shared lint*)",
+      "Bash(pnpm -r typecheck*)",
+      "Bash(pnpm -r lint*)",
+      "Bash(pnpm -r test*)",
+      "Bash(pnpm -r format:check*)",
+      "Bash(pnpm format:check*)",
+      "Bash(docker info*)",
+      "Bash(docker context ls*)",
+      "Bash(docker image ls*)"
+    ]
+  }
+}

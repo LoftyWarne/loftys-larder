@@ -16,14 +16,25 @@ import {
 import { ImageUploader } from '@/components/recipe-editor/image-uploader.tsx';
 import {
   IngredientList,
+  type IngredientDraftLine,
   type IngredientPickerOption,
   type ServerLineError,
 } from '@/components/recipe-editor/ingredient-list.tsx';
-import { MethodEditor } from '@/components/recipe-editor/method-editor.tsx';
+import {
+  MethodEditor,
+  type MethodDraftStep,
+} from '@/components/recipe-editor/method-editor.tsx';
+import { useRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 type Patch = UpdateRecipeHeaderInput['patch'];
+
+interface EditorDraftShape {
+  header: HeaderFormValues;
+  ingredients: IngredientDraftLine[];
+  method: MethodDraftStep[];
+}
 
 export function RecipeEditPage(): React.ReactElement {
   const params = useParams({ from: '/_authed/recipes/$recipeId/edit' });
@@ -57,10 +68,30 @@ export function RecipeEditPage(): React.ReactElement {
   const [topLevelError, setTopLevelError] = useState<string | null>(null);
 
   const recipe = recipeQuery.data ?? null;
-  const headerDefaults = useMemo<HeaderFormValues | null>(
-    () => (recipe ? toHeaderDefaults(recipe) : null),
-    [recipe],
-  );
+
+  const serverDefaults = useMemo<EditorDraftShape | null>(() => {
+    if (!recipe) return null;
+    return {
+      header: toHeaderDefaults(recipe),
+      ingredients: recipe.ingredients.map((line) => ({
+        ingredient: {
+          id: line.ingredientId,
+          label: line.ingredientName,
+          defaultUnitId: line.unitId,
+          unitName: line.unitName,
+        },
+        quantity: line.quantity,
+        prepTypeId: line.prepTypeId,
+      })),
+      method: recipe.method.map((step) => ({ instruction: step.instruction })),
+    };
+  }, [recipe]);
+
+  const draft = useRecipeDraft<EditorDraftShape>({
+    recipeId: idIsValid ? recipeId : null,
+    enabled: idIsValid && recipe !== null,
+    serverDefaults: serverDefaults ?? EMPTY_DRAFT_SHAPE,
+  });
 
   const searchIngredients = useCallback(
     async (query: string): Promise<readonly IngredientPickerOption[]> => {
@@ -93,14 +124,22 @@ export function RecipeEditPage(): React.ReactElement {
       </p>
     );
   }
-  if (!recipe || !headerDefaults) return <NotFound />;
+  if (!recipe || !serverDefaults) return <NotFound />;
+  if (!draft.isReady) {
+    return (
+      <p role="status" className="text-sm">
+        Loading recipe…
+      </p>
+    );
+  }
 
   const references: RecipeReferences = referencesQuery.data ?? {
     units: [],
     prepTypes: [],
     sources: [],
   };
-  const defaults = headerDefaults;
+  const defaults = draft.mergedDefaults;
+  const serverHeader = serverDefaults.header;
 
   async function invalidate(): Promise<void> {
     await utils.recipes.get.invalidate({ id: recipeId });
@@ -108,15 +147,17 @@ export function RecipeEditPage(): React.ReactElement {
 
   async function handleHeaderSubmit(values: HeaderFormValues): Promise<void> {
     setTopLevelError(null);
-    const patch = diffHeader(defaults, values);
+    const patch = diffHeader(serverHeader, values);
     if (Object.keys(patch).length === 0) {
       setHeaderSavedKey(Date.now());
+      draft.clearSection('header');
       return;
     }
     try {
       await updateHeader.mutateAsync({ id: recipeId, patch });
       await invalidate();
       setHeaderSavedKey(Date.now());
+      draft.clearSection('header');
     } catch (err) {
       setTopLevelError(extractMessage(err));
     }
@@ -131,8 +172,8 @@ export function RecipeEditPage(): React.ReactElement {
       await replaceIngredients.mutateAsync({ recipeId, lines });
       await invalidate();
       setIngredientsSavedKey(Date.now());
+      draft.clearSection('ingredients');
     } catch (err) {
-      // Try to map domain errors to per-line messages.
       const lineError = mapIngredientLineError(err, lines);
       if (lineError) {
         setIngredientErrors([lineError]);
@@ -150,6 +191,7 @@ export function RecipeEditPage(): React.ReactElement {
       await replaceMethod.mutateAsync({ recipeId, steps });
       await invalidate();
       setMethodSavedKey(Date.now());
+      draft.clearSection('method');
     } catch (err) {
       setTopLevelError(extractMessage(err));
     }
@@ -192,6 +234,22 @@ export function RecipeEditPage(): React.ReactElement {
         <h1 className="text-2xl font-semibold">Editing {recipe.name}</h1>
       </header>
 
+      {draft.draftPresent && (
+        <div
+          role="status"
+          className="flex items-center justify-between rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          <span>Unsaved draft restored.</span>
+          <button
+            type="button"
+            onClick={draft.discardDraft}
+            className="text-sm font-medium underline hover:no-underline"
+          >
+            Discard draft
+          </button>
+        </div>
+      )}
+
       {topLevelError && (
         <p role="alert" className="text-sm text-destructive">
           {topLevelError}
@@ -200,24 +258,35 @@ export function RecipeEditPage(): React.ReactElement {
 
       <HeaderFields
         mode="edit"
-        defaultValues={defaults}
+        defaultValues={defaults.header}
         sources={references.sources}
         onSubmit={handleHeaderSubmit}
+        onValuesChange={(values) => {
+          draft.queueAutosave('header', values);
+        }}
         savedNoticeKey={headerSavedKey}
       />
 
       <IngredientList
         initialLines={recipe.ingredients}
+        initialDraftLines={defaults.ingredients}
         prepTypes={references.prepTypes}
         searchIngredients={searchIngredients}
         onSubmit={handleIngredientsSubmit}
+        onLinesChange={(lines) => {
+          draft.queueAutosave('ingredients', lines);
+        }}
         serverErrors={ingredientErrors}
         savedNoticeKey={ingredientsSavedKey}
       />
 
       <MethodEditor
         initialSteps={recipe.method}
+        initialDraftSteps={defaults.method}
         onSubmit={handleMethodSubmit}
+        onStepsChange={(steps) => {
+          draft.queueAutosave('method', steps);
+        }}
         savedNoticeKey={methodSavedKey}
       />
 
@@ -238,6 +307,31 @@ export function RecipeEditPage(): React.ReactElement {
     </section>
   );
 }
+
+const EMPTY_DRAFT_SHAPE: EditorDraftShape = {
+  header: {
+    name: '',
+    description: null,
+    imageUrl: null,
+    baseServings: 1,
+    activeTimeMins: null,
+    totalTimeMins: null,
+    estimatedCostPerServing: null,
+    sourceId: null,
+    sourceUrl: null,
+    caloriesPerServing: null,
+    proteinPerServing: null,
+    carbsPerServing: null,
+    fatPerServing: null,
+    saturatedFatPerServing: null,
+    fibrePerServing: null,
+    sugarPerServing: null,
+    saltPerServing: null,
+    isBase: false,
+  },
+  ingredients: [],
+  method: [],
+};
 
 function toHeaderDefaults(recipe: Recipe): HeaderFormValues {
   return {
@@ -288,9 +382,6 @@ function diffHeader(before: HeaderFormValues, after: HeaderFormValues): Patch {
     const a = before[key];
     const b = after[key];
     if (a !== b) {
-      // The cast is sound — both source values are typed to the same field
-      // shape on HeaderFormValues, which mirrors the Patch shape for these
-      // keys.
       (patch as Record<string, unknown>)[key] = b;
     }
   }

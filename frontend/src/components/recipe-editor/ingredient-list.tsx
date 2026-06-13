@@ -3,7 +3,7 @@ import {
   type RecipeReferenceItem,
   type ReplaceRecipeIngredientsLine,
 } from '@loftys-larder/shared';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   SearchableCombobox,
@@ -38,8 +38,21 @@ export interface ServerLineError {
   message: string;
 }
 
+// Serializable shape used by the draft autosave hook. Internal `DraftLine`
+// state has a `rowKey` and per-row error strings that are React-only — a
+// snapshot omits them so the persisted blob stays stable across mounts.
+export interface IngredientDraftLine {
+  ingredient: IngredientPickerOption | null;
+  quantity: string;
+  prepTypeId: number | null;
+}
+
 export interface IngredientListProps {
   initialLines: readonly RecipeIngredientLine[];
+  // If provided, the editor seeds its state from these draft lines instead
+  // of `initialLines`. Used by the draft autosave hook on mount; omit it
+  // and the editor behaves exactly as before.
+  initialDraftLines?: readonly IngredientDraftLine[];
   prepTypes: readonly RecipeReferenceItem[];
   searchIngredients: (
     query: string,
@@ -47,6 +60,9 @@ export interface IngredientListProps {
     | Promise<readonly IngredientPickerOption[]>
     | readonly IngredientPickerOption[];
   onSubmit: (lines: ReplaceRecipeIngredientsLine[]) => Promise<void>;
+  // Fires whenever the in-progress line list changes. Used by the draft
+  // autosave hook — omit to opt out of autosave.
+  onLinesChange?: (lines: IngredientDraftLine[]) => void;
   serverErrors?: readonly ServerLineError[];
   savedNoticeKey?: number;
 }
@@ -73,16 +89,37 @@ function newRowKey(): string {
 
 export function IngredientList({
   initialLines,
+  initialDraftLines,
   prepTypes,
   searchIngredients,
   onSubmit,
+  onLinesChange,
   serverErrors,
   savedNoticeKey,
 }: IngredientListProps): React.ReactElement {
-  const [lines, setLines] = useState<DraftLine[]>(() =>
-    initialLines.map(toDraft),
-  );
+  const [lines, setLines] = useState<DraftLine[]>(() => {
+    if (initialDraftLines) {
+      return initialDraftLines.map((line) => ({
+        rowKey: newRowKey(),
+        ingredient: line.ingredient,
+        quantity: line.quantity,
+        prepTypeId: line.prepTypeId,
+      }));
+    }
+    return initialLines.map(toDraft);
+  });
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!onLinesChange) return;
+    onLinesChange(
+      lines.map((line) => ({
+        ingredient: line.ingredient,
+        quantity: line.quantity,
+        prepTypeId: line.prepTypeId,
+      })),
+    );
+  }, [lines, onLinesChange]);
 
   const serverErrorsByIndex = useMemo(() => {
     const map = new Map<number, string>();

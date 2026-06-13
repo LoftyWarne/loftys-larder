@@ -7,18 +7,42 @@ const {
   createMutateAsyncMock,
   createUseMutationMock,
   navigateMock,
+  draftGetNewDraftsUseQueryMock,
+  draftGetForRecipeUseQueryMock,
+  draftUpsertMutateMock,
+  draftDeleteMutateMock,
+  draftGetNewDraftsInvalidateMock,
+  draftGetForRecipeInvalidateMock,
 } = vi.hoisted(() => ({
   referencesUseQueryMock: vi.fn(),
   createMutateAsyncMock: vi.fn(),
   createUseMutationMock: vi.fn(),
   navigateMock: vi.fn(),
+  draftGetNewDraftsUseQueryMock: vi.fn(),
+  draftGetForRecipeUseQueryMock: vi.fn(),
+  draftUpsertMutateMock: vi.fn(),
+  draftDeleteMutateMock: vi.fn(),
+  draftGetNewDraftsInvalidateMock: vi.fn(),
+  draftGetForRecipeInvalidateMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
+    useUtils: () => ({
+      recipeDrafts: {
+        getForRecipe: { invalidate: draftGetForRecipeInvalidateMock },
+        getNewDrafts: { invalidate: draftGetNewDraftsInvalidateMock },
+      },
+    }),
     recipes: {
       references: { useQuery: referencesUseQueryMock },
       create: { useMutation: createUseMutationMock },
+    },
+    recipeDrafts: {
+      getForRecipe: { useQuery: draftGetForRecipeUseQueryMock },
+      getNewDrafts: { useQuery: draftGetNewDraftsUseQueryMock },
+      upsert: { useMutation: () => ({ mutate: draftUpsertMutateMock }) },
+      delete: { useMutation: () => ({ mutate: draftDeleteMutateMock }) },
     },
   },
 }));
@@ -36,10 +60,7 @@ vi.mock('@tanstack/react-router', async () => {
 import { RecipeNewPage } from './recipe-new-page.tsx';
 
 beforeEach(() => {
-  referencesUseQueryMock.mockReset();
-  createMutateAsyncMock.mockReset();
-  createUseMutationMock.mockReset();
-  navigateMock.mockReset();
+  vi.clearAllMocks();
 
   referencesUseQueryMock.mockReturnValue({
     data: { units: [], prepTypes: [], sources: [] },
@@ -49,6 +70,18 @@ beforeEach(() => {
   createUseMutationMock.mockReturnValue({
     mutateAsync: createMutateAsyncMock,
   });
+  draftGetNewDraftsUseQueryMock.mockReturnValue({
+    data: [],
+    isSuccess: true,
+    error: null,
+  });
+  draftGetForRecipeUseQueryMock.mockReturnValue({
+    data: null,
+    isSuccess: true,
+    error: null,
+  });
+  draftGetNewDraftsInvalidateMock.mockResolvedValue(undefined);
+  draftGetForRecipeInvalidateMock.mockResolvedValue(undefined);
 });
 
 describe('RecipeNewPage', () => {
@@ -71,6 +104,44 @@ describe('RecipeNewPage', () => {
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/recipes/$recipeId/edit',
       params: { recipeId: '42' },
+    });
+  });
+
+  it('resumes the most recent new-recipe draft on mount', () => {
+    draftGetNewDraftsUseQueryMock.mockReturnValue({
+      data: [
+        {
+          id: 12,
+          draftData: {
+            version: 1,
+            fields: { header: { name: 'Resumed draft', baseServings: 2 } },
+          },
+          lastUpdatedAt: 1700000000000,
+        },
+      ],
+      isSuccess: true,
+      error: null,
+    });
+
+    render(<RecipeNewPage />);
+    expect(screen.getByText('Unsaved draft restored.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('Resumed draft');
+  });
+
+  it('deletes the new-recipe draft on successful create', async () => {
+    createMutateAsyncMock.mockResolvedValue({ id: 99 });
+    navigateMock.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<RecipeNewPage />);
+
+    await user.type(screen.getByLabelText('Name'), 'New Soup');
+    await user.click(screen.getByRole('button', { name: 'Create recipe' }));
+
+    await waitFor(() => {
+      expect(draftDeleteMutateMock).toHaveBeenCalledWith(
+        { recipeId: null },
+        expect.any(Object),
+      );
     });
   });
 

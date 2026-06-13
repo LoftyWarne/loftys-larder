@@ -21,6 +21,9 @@ export interface HeaderFieldsProps {
   onSubmit: (values: HeaderFormValues) => Promise<void>;
   submitLabel?: string;
   savedNoticeKey?: number;
+  // Fires on every form value change. Used by the draft autosave hook —
+  // omit it and the form behaves exactly as before.
+  onValuesChange?: (values: HeaderFormValues) => void;
 }
 
 const FALLBACK_SOURCE_NONE_ID = '';
@@ -32,6 +35,7 @@ export function HeaderFields({
   onSubmit,
   submitLabel,
   savedNoticeKey,
+  onValuesChange,
 }: HeaderFieldsProps): React.ReactElement {
   // Same validation surface for both modes — the form always carries every
   // field (defaults from server on edit, blanks on create). The page is
@@ -44,6 +48,16 @@ export function HeaderFields({
   useEffect(() => {
     form.reset(defaultValues);
   }, [defaultValues, form]);
+
+  useEffect(() => {
+    if (!onValuesChange) return;
+    const subscription = form.watch((values) => {
+      onValuesChange(values as HeaderFormValues);
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [form, onValuesChange]);
 
   const submitting = form.formState.isSubmitting;
   const errors = form.formState.errors;

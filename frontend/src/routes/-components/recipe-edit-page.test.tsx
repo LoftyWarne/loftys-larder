@@ -15,6 +15,12 @@ const {
   updateHeaderUseMutationMock,
   replaceIngredientsUseMutationMock,
   replaceMethodUseMutationMock,
+  draftGetForRecipeUseQueryMock,
+  draftGetNewDraftsUseQueryMock,
+  draftUpsertMutateMock,
+  draftDeleteMutateMock,
+  draftGetForRecipeInvalidateMock,
+  draftGetNewDraftsInvalidateMock,
   useParamsMock,
 } = vi.hoisted(() => ({
   recipeGetUseQueryMock: vi.fn(),
@@ -28,6 +34,12 @@ const {
   updateHeaderUseMutationMock: vi.fn(),
   replaceIngredientsUseMutationMock: vi.fn(),
   replaceMethodUseMutationMock: vi.fn(),
+  draftGetForRecipeUseQueryMock: vi.fn(),
+  draftGetNewDraftsUseQueryMock: vi.fn(),
+  draftUpsertMutateMock: vi.fn(),
+  draftDeleteMutateMock: vi.fn(),
+  draftGetForRecipeInvalidateMock: vi.fn(),
+  draftGetNewDraftsInvalidateMock: vi.fn(),
   useParamsMock: vi.fn(),
 }));
 
@@ -36,6 +48,10 @@ vi.mock('@/lib/trpc.ts', () => ({
     useUtils: () => ({
       recipes: { get: { invalidate: recipeGetInvalidateMock } },
       ingredients: { list: { fetch: ingredientsListFetchMock } },
+      recipeDrafts: {
+        getForRecipe: { invalidate: draftGetForRecipeInvalidateMock },
+        getNewDrafts: { invalidate: draftGetNewDraftsInvalidateMock },
+      },
     }),
     recipes: {
       get: { useQuery: recipeGetUseQueryMock },
@@ -43,6 +59,12 @@ vi.mock('@/lib/trpc.ts', () => ({
       updateHeader: { useMutation: updateHeaderUseMutationMock },
       replaceIngredients: { useMutation: replaceIngredientsUseMutationMock },
       replaceMethod: { useMutation: replaceMethodUseMutationMock },
+    },
+    recipeDrafts: {
+      getForRecipe: { useQuery: draftGetForRecipeUseQueryMock },
+      getNewDrafts: { useQuery: draftGetNewDraftsUseQueryMock },
+      upsert: { useMutation: () => ({ mutate: draftUpsertMutateMock }) },
+      delete: { useMutation: () => ({ mutate: draftDeleteMutateMock }) },
     },
     uploads: {
       getRecipeImageCredentials: { useQuery: credentialsUseQueryMock },
@@ -81,6 +103,29 @@ vi.mock('@tanstack/react-router', async () => {
 });
 
 import { RecipeEditPage } from './recipe-edit-page.tsx';
+
+function toHeaderShape(recipe: Recipe): Record<string, unknown> {
+  return {
+    name: recipe.name,
+    description: recipe.description,
+    imageUrl: recipe.imageUrl,
+    baseServings: recipe.baseServings,
+    activeTimeMins: recipe.activeTimeMins,
+    totalTimeMins: recipe.totalTimeMins,
+    estimatedCostPerServing: recipe.estimatedCostPerServing,
+    sourceId: recipe.sourceId,
+    sourceUrl: recipe.sourceUrl,
+    caloriesPerServing: recipe.caloriesPerServing,
+    proteinPerServing: recipe.proteinPerServing,
+    carbsPerServing: recipe.carbsPerServing,
+    fatPerServing: recipe.fatPerServing,
+    saturatedFatPerServing: recipe.saturatedFatPerServing,
+    fibrePerServing: recipe.fibrePerServing,
+    sugarPerServing: recipe.sugarPerServing,
+    saltPerServing: recipe.saltPerServing,
+    isBase: recipe.isBase,
+  };
+}
 
 const RECIPE: Recipe = {
   id: 7,
@@ -141,6 +186,18 @@ beforeEach(() => {
     mutateAsync: replaceMethodMutateAsyncMock,
   });
   recipeGetInvalidateMock.mockResolvedValue(undefined);
+  draftGetForRecipeUseQueryMock.mockReturnValue({
+    data: null,
+    isSuccess: true,
+    error: null,
+  });
+  draftGetNewDraftsUseQueryMock.mockReturnValue({
+    data: [],
+    isSuccess: true,
+    error: null,
+  });
+  draftGetForRecipeInvalidateMock.mockResolvedValue(undefined);
+  draftGetNewDraftsInvalidateMock.mockResolvedValue(undefined);
 });
 
 describe('RecipeEditPage', () => {
@@ -201,6 +258,47 @@ describe('RecipeEditPage', () => {
     expect(
       screen.getByRole('heading', { name: /recipe not found/i }),
     ).toBeInTheDocument();
+  });
+
+  it('renders the unsaved-draft notice when a draft exists and seeds the form from it', () => {
+    draftGetForRecipeUseQueryMock.mockReturnValue({
+      data: {
+        id: 99,
+        draftData: {
+          version: 1,
+          fields: { header: { ...toHeaderShape(RECIPE), name: 'Draft name' } },
+        },
+        lastUpdatedAt: 1700000000000,
+      },
+      isSuccess: true,
+      error: null,
+    });
+
+    render(<RecipeEditPage />);
+
+    expect(screen.getByText('Unsaved draft restored.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('Draft name');
+  });
+
+  it('discards the draft when the discard button is clicked', async () => {
+    draftGetForRecipeUseQueryMock.mockReturnValue({
+      data: {
+        id: 99,
+        draftData: { version: 1, fields: { header: { name: 'Draft' } } },
+        lastUpdatedAt: 1700000000000,
+      },
+      isSuccess: true,
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Discard draft' }));
+
+    expect(draftDeleteMutateMock).toHaveBeenCalledWith(
+      { recipeId: 7 },
+      expect.any(Object),
+    );
   });
 
   it('keeps other sections enabled when one section save fails', async () => {

@@ -2,7 +2,7 @@ import type {
   RecipeMethodStep,
   ReplaceRecipeMethodStepInput,
 } from '@loftys-larder/shared';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button.tsx';
 
@@ -12,9 +12,20 @@ interface DraftStep {
   error?: string;
 }
 
+export interface MethodDraftStep {
+  instruction: string;
+}
+
 export interface MethodEditorProps {
   initialSteps: readonly RecipeMethodStep[];
+  // If provided, the editor seeds its state from these draft steps instead
+  // of `initialSteps`. Used by the draft autosave hook on mount; omit it
+  // and the editor behaves exactly as before.
+  initialDraftSteps?: readonly MethodDraftStep[];
   onSubmit: (steps: ReplaceRecipeMethodStepInput[]) => Promise<void>;
+  // Fires whenever the in-progress step list changes. Used by the draft
+  // autosave hook — omit to opt out of autosave.
+  onStepsChange?: (steps: MethodDraftStep[]) => void;
   savedNoticeKey?: number;
 }
 
@@ -33,12 +44,25 @@ function toDraft(step: RecipeMethodStep): DraftStep {
 
 export function MethodEditor({
   initialSteps,
+  initialDraftSteps,
   onSubmit,
+  onStepsChange,
   savedNoticeKey,
 }: MethodEditorProps): React.ReactElement {
-  const [steps, setSteps] = useState<DraftStep[]>(() =>
-    initialSteps.map(toDraft),
-  );
+  const [steps, setSteps] = useState<DraftStep[]>(() => {
+    if (initialDraftSteps) {
+      return initialDraftSteps.map((step) => ({
+        rowKey: newRowKey(),
+        instruction: step.instruction,
+      }));
+    }
+    return initialSteps.map(toDraft);
+  });
+
+  useEffect(() => {
+    if (!onStepsChange) return;
+    onStepsChange(steps.map((step) => ({ instruction: step.instruction })));
+  }, [steps, onStepsChange]);
   const [submitting, setSubmitting] = useState(false);
   const focusNewIndex = useRef<number | null>(null);
   const textareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());

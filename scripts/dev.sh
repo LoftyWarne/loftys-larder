@@ -29,6 +29,9 @@ done
 echo "→ Running migrations…"
 pnpm --filter backend db:migrate
 
+echo "→ Seeding dev data…"
+pnpm --filter backend seed
+
 PIDS=()
 
 cleanup() {

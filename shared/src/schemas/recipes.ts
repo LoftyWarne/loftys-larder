@@ -281,3 +281,23 @@ export const setRecipeDeletionResultSchema = z.object({
 export type SetRecipeDeletionResult = z.infer<
   typeof setRecipeDeletionResultSchema
 >;
+
+// Lookup data driving the recipe editor's unit / prep-type / source pickers.
+// `units` and `prepTypes` are global reference tables; `sources` is scoped to
+// the current household per DEC-17 — closes the cross-household source hole
+// flagged in session notes (the `sourceId` accepted by `create`/`updateHeader`
+// is now also scope-checked against this list at write time).
+export const recipeReferenceItemSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string(),
+});
+
+export type RecipeReferenceItem = z.infer<typeof recipeReferenceItemSchema>;
+
+export const recipeReferencesSchema = z.object({
+  units: z.array(recipeReferenceItemSchema),
+  prepTypes: z.array(recipeReferenceItemSchema),
+  sources: z.array(recipeReferenceItemSchema),
+});
+
+export type RecipeReferences = z.infer<typeof recipeReferencesSchema>;

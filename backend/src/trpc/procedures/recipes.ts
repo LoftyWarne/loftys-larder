@@ -7,6 +7,7 @@ import {
   getRecipeInputSchema,
   listRecipesInputSchema,
   listRecipesResultSchema,
+  recipeReferencesSchema,
   recipeSchema,
   replaceRecipeIngredientsInputSchema,
   replaceRecipeIngredientsResultSchema,
@@ -20,6 +21,7 @@ import {
   type DomainErrorCode,
   type ListRecipesResult,
   type Recipe,
+  type RecipeReferences,
   type ReplaceRecipeIngredientsResult,
   type ReplaceRecipeMethodResult,
   type SetRecipeDeletionResult,
@@ -50,6 +52,30 @@ import { protectedProcedure, router } from '../init.ts';
 const DEFAULT_LIST_LIMIT = 30;
 
 export const recipesRouter = router({
+  references: protectedProcedure
+    .output(recipeReferencesSchema)
+    .query(async ({ ctx }): Promise<RecipeReferences> => {
+      // Units + prep types are global reference tables; sources are scoped to
+      // the current household (DEC-17). Three parallel reads — cheaper than
+      // sequential and the result is the editor's picker payload.
+      const [units, prepTypes, sources] = await Promise.all([
+        ctx.db
+          .select({ id: unitsOfMeasurement.id, name: unitsOfMeasurement.name })
+          .from(unitsOfMeasurement)
+          .orderBy(asc(unitsOfMeasurement.name)),
+        ctx.db
+          .select({ id: preparationTypes.id, name: preparationTypes.name })
+          .from(preparationTypes)
+          .orderBy(asc(preparationTypes.name)),
+        ctx.db
+          .select({ id: recipeSources.id, name: recipeSources.name })
+          .from(recipeSources)
+          .where(eq(recipeSources.householdId, CURRENT_HOUSEHOLD_ID))
+          .orderBy(asc(recipeSources.name)),
+      ]);
+      return { units, prepTypes, sources };
+    }),
+
   list: protectedProcedure
     .input(listRecipesInputSchema)
     .output(listRecipesResultSchema)
@@ -240,6 +266,9 @@ export const recipesRouter = router({
     .input(createRecipeInputSchema)
     .output(createRecipeResultSchema)
     .mutation(async ({ ctx, input }): Promise<CreateRecipeResult> => {
+      if (input.sourceId !== null && input.sourceId !== undefined) {
+        await assertSourceInHousehold(ctx.db, input.sourceId);
+      }
       const inserted = await ctx.db
         .insert(recipes)
         .values({
@@ -280,6 +309,10 @@ export const recipesRouter = router({
     .output(updateRecipeHeaderResultSchema)
     .mutation(async ({ ctx, input }): Promise<UpdateRecipeHeaderResult> => {
       const { id, patch } = input;
+
+      if (patch.sourceId !== null && patch.sourceId !== undefined) {
+        await assertSourceInHousehold(ctx.db, patch.sourceId);
+      }
 
       const patchValues: Partial<typeof recipes.$inferInsert> = {};
       if (patch.name !== undefined) patchValues.name = patch.name;
@@ -461,6 +494,25 @@ function domainBadRequest(
     message,
     cause: { code, ...metadata },
   });
+}
+
+async function assertSourceInHousehold(
+  db: Db,
+  sourceId: number,
+): Promise<void> {
+  const rows = await db
+    .select({ id: recipeSources.id })
+    .from(recipeSources)
+    .where(
+      and(
+        eq(recipeSources.id, sourceId),
+        eq(recipeSources.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .limit(1);
+  if (rows.length === 0) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Source not found' });
+  }
 }
 
 async function assertRecipeInHousehold(

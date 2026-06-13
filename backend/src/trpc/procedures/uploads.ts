@@ -19,12 +19,18 @@ export const uploadsRouter = router({
       // signature its short-lived window.
       const timestamp = Math.floor(Date.now() / 1000);
 
+      // NOTE: `max_file_size` is intentionally NOT signed and NOT posted —
+      // it is a Pro-plan-only Cloudinary upload param. On lower plans
+      // Cloudinary strips it before signature verification, so including it
+      // here would produce a server signature over a different string than
+      // Cloudinary checks against → 401 "Invalid Signature". The cap is
+      // enforced client-side instead (the credential carries `maxFileSize`
+      // for the uploader to compare against `file.size`).
       const signature = signUploadParams(
         {
           allowed_formats: RECIPE_IMAGE_ALLOWED_FORMATS.join(','),
           eager: RECIPE_IMAGE_EAGER_TRANSFORMATION,
           folder: RECIPE_IMAGE_FOLDER,
-          max_file_size: RECIPE_IMAGE_MAX_FILE_SIZE,
           timestamp,
         },
         ctx.cloudinary.apiSecret,

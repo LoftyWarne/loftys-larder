@@ -255,6 +255,41 @@ describe('recipes procedures', () => {
     });
   }
 
+  describe('references', () => {
+    it('returns units and prep types alphabetically', async () => {
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.references();
+      expect(result.units.map((u) => u.name)).toEqual(['g', 'piece']);
+      expect(result.prepTypes.map((p) => p.name)).toEqual(['chopped', 'diced']);
+    });
+
+    it('returns sources only for the current household', async () => {
+      const inserted = await db
+        .insert(recipeSources)
+        .values([
+          { householdId: CURRENT_HOUSEHOLD_ID, name: 'BBC Good Food' },
+          { householdId: CURRENT_HOUSEHOLD_ID, name: 'Mob' },
+          { householdId: OTHER_HOUSEHOLD_ID, name: 'Other Cookbook' },
+        ])
+        .returning();
+      expect(inserted).toHaveLength(3);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.references();
+      expect(result.sources.map((s) => s.name)).toEqual([
+        'BBC Good Food',
+        'Mob',
+      ]);
+    });
+
+    it('rejects unauthenticated callers', async () => {
+      const caller = createCaller(makeContext({ authenticated: false }));
+      await expect(caller.recipes.references()).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+  });
+
   describe('list', () => {
     it('returns recipes for the current household only', async () => {
       await insertRecipe({ name: 'Aloo Gobi' });
@@ -612,6 +647,24 @@ describe('recipes procedures', () => {
         caller.recipes.create({ name: 'X', baseServings: 1 }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
+
+    it('rejects a sourceId belonging to another household', async () => {
+      const inserted = await db
+        .insert(recipeSources)
+        .values({ householdId: OTHER_HOUSEHOLD_ID, name: 'Foreign Cookbook' })
+        .returning({ id: recipeSources.id });
+      const foreignSourceId = inserted[0]?.id;
+      if (!foreignSourceId) throw new Error('source seed failed');
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.create({
+          name: 'Cross-household source',
+          baseServings: 2,
+          sourceId: foreignSourceId,
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
   });
 
   describe('updateHeader', () => {
@@ -678,6 +731,24 @@ describe('recipes procedures', () => {
         caller.recipes.updateHeader({
           id: otherId,
           patch: { name: 'Hacked' },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('rejects a sourceId belonging to another household', async () => {
+      const recipeId = await insertRecipe({ name: 'Recipe with source' });
+      const inserted = await db
+        .insert(recipeSources)
+        .values({ householdId: OTHER_HOUSEHOLD_ID, name: 'Foreign Cookbook' })
+        .returning({ id: recipeSources.id });
+      const foreignSourceId = inserted[0]?.id;
+      if (!foreignSourceId) throw new Error('source seed failed');
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.updateHeader({
+          id: recipeId,
+          patch: { sourceId: foreignSourceId },
         }),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });

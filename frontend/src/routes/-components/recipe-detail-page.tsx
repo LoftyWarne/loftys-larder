@@ -1,10 +1,11 @@
 import { TRPCClientError } from '@trpc/client';
 import { Link, useParams } from '@tanstack/react-router';
 
+import { formatQuantity } from '@/lib/format-quantity.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 export function RecipeDetailPage(): React.ReactElement {
-  const params = useParams({ from: '/_authed/recipes/$recipeId' });
+  const params = useParams({ from: '/_authed/recipes/$recipeId/' });
   const recipeId = Number.parseInt(params.recipeId, 10);
   const idIsValid = Number.isInteger(recipeId) && recipeId > 0;
 
@@ -36,9 +37,16 @@ export function RecipeDetailPage(): React.ReactElement {
   return (
     <article className="mx-auto max-w-3xl space-y-6">
       <header className="space-y-2">
-        <p className="text-sm">
+        <p className="flex items-center justify-between text-sm">
           <Link to="/recipes" className="text-muted-foreground hover:underline">
             ← Back to recipes
+          </Link>
+          <Link
+            to="/recipes/$recipeId/edit"
+            params={{ recipeId: String(recipe.id) }}
+            className="text-primary hover:underline"
+          >
+            Edit recipe
           </Link>
         </p>
         <h1 className="text-3xl font-semibold">{recipe.name}</h1>
@@ -93,7 +101,7 @@ export function RecipeDetailPage(): React.ReactElement {
             {recipe.ingredients.map((line) => (
               <li key={line.id} className="text-sm">
                 <span className="font-medium">
-                  {line.quantity} {line.unitName}
+                  {formatQuantity(line.quantity, line.unitName)} {line.unitName}
                 </span>{' '}
                 {line.ingredientName}
                 {line.prepTypeName && (

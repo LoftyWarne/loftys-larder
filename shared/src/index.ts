@@ -65,6 +65,10 @@ export {
   type SetRecipeDeletionInput,
   setRecipeDeletionResultSchema,
   type SetRecipeDeletionResult,
+  recipeReferenceItemSchema,
+  type RecipeReferenceItem,
+  recipeReferencesSchema,
+  type RecipeReferences,
 } from './schemas/recipes.ts';
 export {
   ingredientNameSchema,

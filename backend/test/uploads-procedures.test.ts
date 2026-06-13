@@ -85,12 +85,15 @@ describe('uploads procedures', () => {
       const caller = appRouter.createCaller(makeContext());
       const creds = await caller.uploads.getRecipeImageCredentials();
 
+      // `max_file_size` is deliberately omitted from the signed set — it is
+      // a Pro-plan-only Cloudinary upload param and lower plans strip it
+      // before signature verification, which would produce a 401. The cap
+      // is enforced client-side in the uploader instead.
       const expected = signUploadParams(
         {
           allowed_formats: RECIPE_IMAGE_ALLOWED_FORMATS.join(','),
           eager: RECIPE_IMAGE_EAGER_TRANSFORMATION,
           folder: RECIPE_IMAGE_FOLDER,
-          max_file_size: RECIPE_IMAGE_MAX_FILE_SIZE,
           timestamp: creds.timestamp,
         },
         cloudinary.apiSecret,

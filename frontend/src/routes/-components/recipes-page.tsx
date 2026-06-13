@@ -1,6 +1,8 @@
+import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
 import { RecipeCard } from '@/components/recipe-card.tsx';
+import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { trpc } from '@/lib/trpc.ts';
 
@@ -30,6 +32,9 @@ export function RecipesPage(): React.ReactElement {
     <section className="mx-auto max-w-6xl space-y-6">
       <header className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Recipes</h1>
+        <Button asChild>
+          <Link to="/recipes/new">New recipe</Link>
+        </Button>
       </header>
 
       <Input

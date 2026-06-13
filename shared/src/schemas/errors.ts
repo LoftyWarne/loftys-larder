@@ -7,6 +7,8 @@ import { z } from 'zod';
 export const DOMAIN_ERROR_CODES = [
   'INGREDIENT_IN_USE',
   'INGREDIENT_NAME_TAKEN',
+  'RECIPE_INGREDIENT_UNIT_MISMATCH',
+  'RECIPE_INGREDIENT_NOT_FOUND',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

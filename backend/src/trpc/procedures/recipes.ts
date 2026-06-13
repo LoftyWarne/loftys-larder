@@ -1,16 +1,33 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, avg, eq, or, sql } from 'drizzle-orm';
+import { and, asc, avg, eq, inArray, or, sql } from 'drizzle-orm';
 
 import {
+  createRecipeInputSchema,
+  createRecipeResultSchema,
   getRecipeInputSchema,
   listRecipesInputSchema,
   listRecipesResultSchema,
   recipeSchema,
+  replaceRecipeIngredientsInputSchema,
+  replaceRecipeIngredientsResultSchema,
+  replaceRecipeMethodInputSchema,
+  replaceRecipeMethodResultSchema,
+  setRecipeDeletionInputSchema,
+  setRecipeDeletionResultSchema,
+  updateRecipeHeaderInputSchema,
+  updateRecipeHeaderResultSchema,
+  type CreateRecipeResult,
+  type DomainErrorCode,
   type ListRecipesResult,
   type Recipe,
+  type ReplaceRecipeIngredientsResult,
+  type ReplaceRecipeMethodResult,
+  type SetRecipeDeletionResult,
+  type UpdateRecipeHeaderResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import type { Db } from '../../db/index.ts';
+import { makeWithTransaction } from '../../db/withTransaction.ts';
 import { ingredients } from '../../db/schema/ingredients.ts';
 import {
   preparationTypes,
@@ -218,7 +235,274 @@ export const recipesRouter = router({
         yourRating: ratingRow.yourRating,
       };
     }),
+
+  create: protectedProcedure
+    .input(createRecipeInputSchema)
+    .output(createRecipeResultSchema)
+    .mutation(async ({ ctx, input }): Promise<CreateRecipeResult> => {
+      const inserted = await ctx.db
+        .insert(recipes)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          name: input.name,
+          description: input.description,
+          imageUrl: input.imageUrl,
+          baseServings: input.baseServings,
+          activeTimeMins: input.activeTimeMins,
+          totalTimeMins: input.totalTimeMins,
+          estimatedCostPerServing: input.estimatedCostPerServing,
+          sourceId: input.sourceId,
+          sourceUrl: input.sourceUrl,
+          caloriesPerServing: input.caloriesPerServing,
+          proteinPerServing: input.proteinPerServing,
+          carbsPerServing: input.carbsPerServing,
+          fatPerServing: input.fatPerServing,
+          saturatedFatPerServing: input.saturatedFatPerServing,
+          fibrePerServing: input.fibrePerServing,
+          sugarPerServing: input.sugarPerServing,
+          saltPerServing: input.saltPerServing,
+          isBase: input.isBase ?? false,
+          addedByUserId: ctx.user.id,
+        })
+        .returning({ id: recipes.id });
+      const row = inserted[0];
+      if (!row) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Insert returned no row',
+        });
+      }
+      return { id: row.id };
+    }),
+
+  updateHeader: protectedProcedure
+    .input(updateRecipeHeaderInputSchema)
+    .output(updateRecipeHeaderResultSchema)
+    .mutation(async ({ ctx, input }): Promise<UpdateRecipeHeaderResult> => {
+      const { id, patch } = input;
+
+      const patchValues: Partial<typeof recipes.$inferInsert> = {};
+      if (patch.name !== undefined) patchValues.name = patch.name;
+      if (patch.description !== undefined)
+        patchValues.description = patch.description;
+      if (patch.imageUrl !== undefined) patchValues.imageUrl = patch.imageUrl;
+      if (patch.baseServings !== undefined)
+        patchValues.baseServings = patch.baseServings;
+      if (patch.activeTimeMins !== undefined)
+        patchValues.activeTimeMins = patch.activeTimeMins;
+      if (patch.totalTimeMins !== undefined)
+        patchValues.totalTimeMins = patch.totalTimeMins;
+      if (patch.estimatedCostPerServing !== undefined)
+        patchValues.estimatedCostPerServing = patch.estimatedCostPerServing;
+      if (patch.sourceId !== undefined) patchValues.sourceId = patch.sourceId;
+      if (patch.sourceUrl !== undefined)
+        patchValues.sourceUrl = patch.sourceUrl;
+      if (patch.caloriesPerServing !== undefined)
+        patchValues.caloriesPerServing = patch.caloriesPerServing;
+      if (patch.proteinPerServing !== undefined)
+        patchValues.proteinPerServing = patch.proteinPerServing;
+      if (patch.carbsPerServing !== undefined)
+        patchValues.carbsPerServing = patch.carbsPerServing;
+      if (patch.fatPerServing !== undefined)
+        patchValues.fatPerServing = patch.fatPerServing;
+      if (patch.saturatedFatPerServing !== undefined)
+        patchValues.saturatedFatPerServing = patch.saturatedFatPerServing;
+      if (patch.fibrePerServing !== undefined)
+        patchValues.fibrePerServing = patch.fibrePerServing;
+      if (patch.sugarPerServing !== undefined)
+        patchValues.sugarPerServing = patch.sugarPerServing;
+      if (patch.saltPerServing !== undefined)
+        patchValues.saltPerServing = patch.saltPerServing;
+
+      const updated = await ctx.db
+        .update(recipes)
+        .set(patchValues)
+        .where(
+          and(
+            eq(recipes.id, id),
+            eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+          ),
+        )
+        .returning({ id: recipes.id });
+
+      const row = updated[0];
+      if (!row) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Recipe not found',
+        });
+      }
+      return { id: row.id };
+    }),
+
+  replaceIngredients: protectedProcedure
+    .input(replaceRecipeIngredientsInputSchema)
+    .output(replaceRecipeIngredientsResultSchema)
+    .mutation(
+      async ({ ctx, input }): Promise<ReplaceRecipeIngredientsResult> => {
+        await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+        // Validate every line's ingredient + unit against household state
+        // before opening a transaction. A pre-flight lookup is cheaper than
+        // round-tripping each FK / unit check inside the write path, and the
+        // error messages are richer (we can name the offending line).
+        if (input.lines.length > 0) {
+          const ingredientIds = Array.from(
+            new Set(input.lines.map((line) => line.ingredientId)),
+          );
+          const ingredientRows = await ctx.db
+            .select({
+              id: ingredients.id,
+              defaultUnitId: ingredients.defaultUnitId,
+            })
+            .from(ingredients)
+            .where(
+              and(
+                inArray(ingredients.id, ingredientIds),
+                eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+              ),
+            );
+          const byId = new Map(ingredientRows.map((r) => [r.id, r]));
+
+          for (const line of input.lines) {
+            const ingredient = byId.get(line.ingredientId);
+            if (!ingredient) {
+              throw domainBadRequest(
+                'RECIPE_INGREDIENT_NOT_FOUND',
+                'One or more ingredients are not available to this household',
+                { ingredientId: line.ingredientId },
+              );
+            }
+            if (ingredient.defaultUnitId !== line.unitId) {
+              throw domainBadRequest(
+                'RECIPE_INGREDIENT_UNIT_MISMATCH',
+                'Ingredient unit does not match its enforced unit',
+                {
+                  ingredientId: line.ingredientId,
+                  expectedUnitId: ingredient.defaultUnitId,
+                  providedUnitId: line.unitId,
+                },
+              );
+            }
+          }
+        }
+
+        const withTransaction = makeWithTransaction(ctx.db);
+        await withTransaction(async (tx) => {
+          await tx
+            .delete(recipeIngredients)
+            .where(eq(recipeIngredients.recipeId, input.recipeId));
+          if (input.lines.length > 0) {
+            await tx.insert(recipeIngredients).values(
+              input.lines.map((line) => ({
+                recipeId: input.recipeId,
+                ingredientId: line.ingredientId,
+                quantity: line.quantity,
+                prepTypeId: line.prepTypeId,
+              })),
+            );
+          }
+        });
+
+        return { recipeId: input.recipeId, count: input.lines.length };
+      },
+    ),
+
+  replaceMethod: protectedProcedure
+    .input(replaceRecipeMethodInputSchema)
+    .output(replaceRecipeMethodResultSchema)
+    .mutation(async ({ ctx, input }): Promise<ReplaceRecipeMethodResult> => {
+      await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+      const withTransaction = makeWithTransaction(ctx.db);
+      await withTransaction(async (tx) => {
+        await tx
+          .delete(recipeMethod)
+          .where(eq(recipeMethod.recipeId, input.recipeId));
+        if (input.steps.length > 0) {
+          // Numbering is authoritative server-side — the unique
+          // `(recipe_id, step_number)` index would otherwise expose a footgun
+          // if clients sent duplicate step numbers.
+          await tx.insert(recipeMethod).values(
+            input.steps.map((step, index) => ({
+              recipeId: input.recipeId,
+              stepNumber: index + 1,
+              instruction: step.instruction,
+            })),
+          );
+        }
+      });
+
+      return { recipeId: input.recipeId, count: input.steps.length };
+    }),
+
+  softDelete: protectedProcedure
+    .input(setRecipeDeletionInputSchema)
+    .output(setRecipeDeletionResultSchema)
+    .mutation(async ({ ctx, input }): Promise<SetRecipeDeletionResult> => {
+      return setRecipeDeletion(ctx.db, input.id, true);
+    }),
+
+  restore: protectedProcedure
+    .input(setRecipeDeletionInputSchema)
+    .output(setRecipeDeletionResultSchema)
+    .mutation(async ({ ctx, input }): Promise<SetRecipeDeletionResult> => {
+      return setRecipeDeletion(ctx.db, input.id, false);
+    }),
 });
+
+function domainBadRequest(
+  code: DomainErrorCode,
+  message: string,
+  metadata: Record<string, unknown> = {},
+): TRPCError {
+  return new TRPCError({
+    code: 'BAD_REQUEST',
+    message,
+    cause: { code, ...metadata },
+  });
+}
+
+async function assertRecipeInHousehold(
+  db: Db,
+  recipeId: number,
+): Promise<void> {
+  const rows = await db
+    .select({ id: recipes.id })
+    .from(recipes)
+    .where(
+      and(
+        eq(recipes.id, recipeId),
+        eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .limit(1);
+  if (rows.length === 0) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipe not found' });
+  }
+}
+
+async function setRecipeDeletion(
+  db: Db,
+  recipeId: number,
+  isDeleted: boolean,
+): Promise<SetRecipeDeletionResult> {
+  const updated = await db
+    .update(recipes)
+    .set({ isDeleted })
+    .where(
+      and(
+        eq(recipes.id, recipeId),
+        eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .returning({ id: recipes.id, isDeleted: recipes.isDeleted });
+  const row = updated[0];
+  if (!row) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipe not found' });
+  }
+  return { id: row.id, isDeleted: row.isDeleted };
+}
 
 async function loadIngredientLines(
   db: Db,

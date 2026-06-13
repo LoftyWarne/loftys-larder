@@ -5,7 +5,7 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
-import { sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
@@ -520,6 +520,514 @@ describe('recipes procedures', () => {
 
       const points = await selectRecipePlantPoints(db, recipeId);
       expect(points).toBe(0);
+    });
+  });
+
+  describe('create', () => {
+    it('inserts a minimal recipe and returns the new id', async () => {
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.create({
+        name: 'Tomato Soup',
+        baseServings: 4,
+      });
+
+      expect(result.id).toBeGreaterThan(0);
+
+      const rows = await db
+        .select()
+        .from(recipes)
+        .where(eq(recipes.id, result.id));
+      const row = rows[0];
+      if (!row) throw new Error('recipe row missing');
+      expect(row.name).toBe('Tomato Soup');
+      expect(row.baseServings).toBe(4);
+      expect(row.householdId).toBe(CURRENT_HOUSEHOLD_ID);
+      expect(row.addedByUserId).toBe(USER_ID);
+      expect(row.isBase).toBe(false);
+      expect(row.isDeleted).toBe(false);
+    });
+
+    it('persists optional fields when provided', async () => {
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.create({
+        name: 'Lentil Dal',
+        baseServings: 2,
+        description: 'Comforting weeknight dal.',
+        imageUrl: 'https://res.cloudinary.test/img/lentil.jpg',
+        activeTimeMins: 20,
+        totalTimeMins: 45,
+        estimatedCostPerServing: '1.75',
+        caloriesPerServing: 410,
+        proteinPerServing: 18,
+        sourceUrl: 'https://example.test/lentil-dal',
+      });
+
+      const rows = await db
+        .select()
+        .from(recipes)
+        .where(eq(recipes.id, result.id));
+      const row = rows[0];
+      if (!row) throw new Error('recipe row missing');
+      expect(row.description).toBe('Comforting weeknight dal.');
+      expect(row.activeTimeMins).toBe(20);
+      expect(row.totalTimeMins).toBe(45);
+      expect(row.estimatedCostPerServing).toBe('1.75');
+      expect(row.caloriesPerServing).toBe(410);
+      expect(row.proteinPerServing).toBe(18);
+      expect(row.sourceUrl).toBe('https://example.test/lentil-dal');
+    });
+
+    it('creates a base recipe when isBase is true', async () => {
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.create({
+        name: 'Slow-Cooked Beans',
+        baseServings: 8,
+        isBase: true,
+      });
+
+      const rows = await db
+        .select({ isBase: recipes.isBase })
+        .from(recipes)
+        .where(eq(recipes.id, result.id));
+      expect(rows[0]?.isBase).toBe(true);
+    });
+
+    it('rejects baseServings below 1 at the boundary', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.create({ name: 'Bad', baseServings: 0 }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects an empty name', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.create({ name: '   ', baseServings: 2 }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects without a session', async () => {
+      const caller = createCaller(makeContext({ authenticated: false }));
+      await expect(
+        caller.recipes.create({ name: 'X', baseServings: 1 }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+  });
+
+  describe('updateHeader', () => {
+    it('updates only the supplied fields', async () => {
+      const recipeId = await insertRecipe({
+        name: 'Original',
+        description: 'Original description',
+      });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.updateHeader({
+        id: recipeId,
+        patch: { name: 'Renamed' },
+      });
+      expect(result.id).toBe(recipeId);
+
+      const rows = await db
+        .select({
+          name: recipes.name,
+          description: recipes.description,
+        })
+        .from(recipes)
+        .where(eq(recipes.id, recipeId));
+      expect(rows[0]).toEqual({
+        name: 'Renamed',
+        description: 'Original description',
+      });
+    });
+
+    it('clears a nullable column when null is supplied', async () => {
+      const recipeId = await insertRecipe({
+        name: 'WithDesc',
+        description: 'Will be cleared',
+      });
+
+      const caller = createCaller(makeContext());
+      await caller.recipes.updateHeader({
+        id: recipeId,
+        patch: { description: null },
+      });
+
+      const rows = await db
+        .select({ description: recipes.description })
+        .from(recipes)
+        .where(eq(recipes.id, recipeId));
+      expect(rows[0]?.description).toBeNull();
+    });
+
+    it('rejects an empty patch', async () => {
+      const recipeId = await insertRecipe({ name: 'Any' });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.updateHeader({ id: recipeId, patch: {} }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('returns NOT_FOUND for a recipe in another household', async () => {
+      const otherId = await insertRecipe({
+        name: 'Other',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.updateHeader({
+          id: otherId,
+          patch: { name: 'Hacked' },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('rejects unknown header fields (isBase, baseRecipeId, pairedRecipeId)', async () => {
+      const recipeId = await insertRecipe({ name: 'Strict' });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.updateHeader({
+          id: recipeId,
+          // Use a structural cast — the type rejects these, the runtime check
+          // confirms the boundary refuses them too.
+          patch: { isBase: true } as unknown as Parameters<
+            typeof caller.recipes.updateHeader
+          >[0]['patch'],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+  });
+
+  describe('replaceIngredients', () => {
+    it('replaces the full set in order', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      const garlic = await insertIngredient({ name: 'Garlic', isPlant: true });
+      await insertRecipeIngredient(recipeId, onion, { quantity: '50' });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.replaceIngredients({
+        recipeId,
+        lines: [
+          {
+            ingredientId: garlic,
+            quantity: '10',
+            unitId: unitG,
+            prepTypeId: null,
+          },
+          {
+            ingredientId: onion,
+            quantity: '200',
+            unitId: unitG,
+            prepTypeId: prepDiced,
+          },
+        ],
+      });
+      expect(result).toEqual({ recipeId, count: 2 });
+
+      const rows = await db
+        .select({
+          ingredientId: recipeIngredients.ingredientId,
+          quantity: recipeIngredients.quantity,
+          prepTypeId: recipeIngredients.prepTypeId,
+        })
+        .from(recipeIngredients)
+        .where(eq(recipeIngredients.recipeId, recipeId))
+        .orderBy(asc(recipeIngredients.id));
+      expect(rows).toEqual([
+        { ingredientId: garlic, quantity: '10.000', prepTypeId: null },
+        { ingredientId: onion, quantity: '200.000', prepTypeId: prepDiced },
+      ]);
+    });
+
+    it('allows the same ingredient twice with different prep types', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceIngredients({
+        recipeId,
+        lines: [
+          {
+            ingredientId: onion,
+            quantity: '100',
+            unitId: unitG,
+            prepTypeId: prepChopped,
+          },
+          {
+            ingredientId: onion,
+            quantity: '50',
+            unitId: unitG,
+            prepTypeId: prepDiced,
+          },
+        ],
+      });
+      const rows = await db
+        .select()
+        .from(recipeIngredients)
+        .where(eq(recipeIngredients.recipeId, recipeId));
+      expect(rows).toHaveLength(2);
+    });
+
+    it('rejects unit mismatch with BAD_REQUEST + domain code', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      const piecesUnit = await db
+        .select({ id: unitsOfMeasurement.id })
+        .from(unitsOfMeasurement)
+        .where(eq(unitsOfMeasurement.name, 'piece'));
+      const pieceId = piecesUnit[0]?.id;
+      if (!pieceId) throw new Error('piece unit not seeded');
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceIngredients({
+          recipeId,
+          lines: [
+            {
+              ingredientId: onion,
+              quantity: '1',
+              unitId: pieceId,
+              prepTypeId: null,
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RECIPE_INGREDIENT_UNIT_MISMATCH' },
+      });
+    });
+
+    it('rejects an ingredient from another household', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const inserted = await db
+        .insert(ingredients)
+        .values({
+          householdId: OTHER_HOUSEHOLD_ID,
+          name: 'Outsider',
+          categoryId,
+          defaultUnitId: unitG,
+          isPlant: false,
+        })
+        .returning({ id: ingredients.id });
+      const outsiderId = inserted[0]?.id;
+      if (!outsiderId) throw new Error('outsider seed failed');
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceIngredients({
+          recipeId,
+          lines: [
+            {
+              ingredientId: outsiderId,
+              quantity: '1',
+              unitId: unitG,
+              prepTypeId: null,
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RECIPE_INGREDIENT_NOT_FOUND' },
+      });
+    });
+
+    it('rolls back when the insert phase fails', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      await insertRecipeIngredient(recipeId, onion, { quantity: '111' });
+
+      const caller = createCaller(makeContext());
+
+      // The pre-flight validation guards the ingredient FK, so to simulate
+      // an in-transaction failure we use a non-existent `prepTypeId`. The
+      // FK fires inside the INSERT (after the DELETE) — a successful rollback
+      // means the original `111` row survives.
+      await expect(
+        caller.recipes.replaceIngredients({
+          recipeId,
+          lines: [
+            {
+              ingredientId: onion,
+              quantity: '999',
+              unitId: unitG,
+              prepTypeId: 99999,
+            },
+          ],
+        }),
+      ).rejects.toBeDefined();
+
+      const rows = await db
+        .select({ quantity: recipeIngredients.quantity })
+        .from(recipeIngredients)
+        .where(eq(recipeIngredients.recipeId, recipeId));
+      expect(rows).toEqual([{ quantity: '111.000' }]);
+    });
+
+    it('clears all lines when an empty array is supplied', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      await insertRecipeIngredient(recipeId, onion);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.replaceIngredients({
+        recipeId,
+        lines: [],
+      });
+      expect(result.count).toBe(0);
+
+      const rows = await db
+        .select()
+        .from(recipeIngredients)
+        .where(eq(recipeIngredients.recipeId, recipeId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('returns NOT_FOUND for a recipe in another household', async () => {
+      const otherId = await insertRecipe({
+        name: 'Other',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceIngredients({
+          recipeId: otherId,
+          lines: [],
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  describe('replaceMethod', () => {
+    it('replaces steps in order and renumbers from 1', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      await db.insert(recipeMethod).values({
+        recipeId,
+        stepNumber: 1,
+        instruction: 'old step',
+      });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          { instruction: 'first new step' },
+          { instruction: 'second new step' },
+          { instruction: 'third new step' },
+        ],
+      });
+      expect(result).toEqual({ recipeId, count: 3 });
+
+      const rows = await db
+        .select({
+          stepNumber: recipeMethod.stepNumber,
+          instruction: recipeMethod.instruction,
+        })
+        .from(recipeMethod)
+        .where(eq(recipeMethod.recipeId, recipeId))
+        .orderBy(asc(recipeMethod.stepNumber));
+      expect(rows).toEqual([
+        { stepNumber: 1, instruction: 'first new step' },
+        { stepNumber: 2, instruction: 'second new step' },
+        { stepNumber: 3, instruction: 'third new step' },
+      ]);
+    });
+
+    it('clears all steps when an empty array is supplied', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      await db.insert(recipeMethod).values({
+        recipeId,
+        stepNumber: 1,
+        instruction: 'old step',
+      });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [],
+      });
+      expect(result.count).toBe(0);
+
+      const rows = await db
+        .select()
+        .from(recipeMethod)
+        .where(eq(recipeMethod.recipeId, recipeId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('returns NOT_FOUND for a recipe in another household', async () => {
+      const otherId = await insertRecipe({
+        name: 'Other',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceMethod({ recipeId: otherId, steps: [] }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('rejects empty instruction text at the boundary', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [{ instruction: '   ' }],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+  });
+
+  describe('softDelete and restore', () => {
+    it('soft-deletes and restores a recipe', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+
+      const deleted = await caller.recipes.softDelete({ id: recipeId });
+      expect(deleted).toEqual({ id: recipeId, isDeleted: true });
+
+      const restored = await caller.recipes.restore({ id: recipeId });
+      expect(restored).toEqual({ id: recipeId, isDeleted: false });
+    });
+
+    it('softDelete is idempotent', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo', isDeleted: true });
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.softDelete({ id: recipeId });
+      expect(result).toEqual({ id: recipeId, isDeleted: true });
+    });
+
+    it('soft-deleted recipe is still returned by get (historical render)', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.softDelete({ id: recipeId });
+      const fetched = await caller.recipes.get({ id: recipeId });
+      expect(fetched.isDeleted).toBe(true);
+    });
+
+    it('soft-deleted recipe is hidden from list by default', async () => {
+      const recipeId = await insertRecipe({ name: 'Hidden' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.softDelete({ id: recipeId });
+
+      const listed = await caller.recipes.list();
+      expect(listed.items.find((r) => r.id === recipeId)).toBeUndefined();
+
+      const withDeleted = await caller.recipes.list({ includeDeleted: true });
+      expect(withDeleted.items.find((r) => r.id === recipeId)).toBeDefined();
+    });
+
+    it('returns NOT_FOUND for a recipe in another household', async () => {
+      const otherId = await insertRecipe({
+        name: 'Other',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.softDelete({ id: otherId }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(
+        caller.recipes.restore({ id: otherId }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
 });

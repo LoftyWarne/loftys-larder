@@ -4,6 +4,49 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-14 — FEAT-24 (Recipe ratings)
+
+**Status:** implementation complete; not yet committed. `pnpm -r typecheck` + `pnpm -r lint` clean. Frontend: 139/139 tests pass (8 new in `recipe-rating.test.tsx`, 4 new in `recipe-detail-page.test.tsx`, 2 new in `recipes-page.test.tsx`). Backend: `recipes-procedures.test.ts` 81/81 (14 new across `rate`, `unrate`, and `list rating aggregate` blocks). Testcontainers ran via the Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock`). DoD boxes in `docs/feature-specs.md §FEAT-24` left unticked — human action. Manual gate checks (rate → refresh → card aggregate updates; clear by clicking the same star; another user sees only their own "yours") are owed by the human.
+
+### Decisions taken at kick-off
+
+- **Q1 — Kept the existing `yourRating` field name** despite the spec saying `ownRating`. The DTO had already shipped under `yourRating` (schema, `RatingAggregate` type, two backend tests, two frontend fixtures). Cross-cutting concern #9 favours DTO stability; renaming would have churned five surfaces without semantic gain.
+- **Q2 — Star widget disabled on soft-deleted recipes.** Detail page still renders soft-deleted rows (DEC-21) so past plans can resolve titles, but rating a tombstoned recipe is incoherent. The widget reads `recipe.isDeleted` and disables all five buttons.
+- **Q3 — Display average to one decimal place** on both card and detail header. Centralised in `frontend/src/lib/format-rating.ts`.
+- **Q4 — Rating chip hidden on cards when `ratingCount === 0`.** No "Not rated" placeholder. The plant-points chip is unconditional and already carries the "always present" role.
+- **Q5 — Inline optimistic update on `recipes.get` via `setData`** (not `useOptimisticSlotUpdate` — that's planner-specific, FEAT-31). The rating component owns its `onMutate`/`onError`/`onSettled` against both `rate` and `unrate`; rollback restores the prior `recipes.get` snapshot from context.
+
+### Drift from kick-off plan
+
+1. **`averageRating` + `ratingCount` moved onto `recipeListItemSchema`, not added as separate detail-only fields.** Plan said add to both; cleanest implementation was to put them on the list shape and let `recipeSchema` inherit via `.extend(...)`. The existing `recipeSchema` had them duplicated — removed the duplicates. No external behaviour change.
+2. **Added `lib/format-rating.ts`** rather than inlining `toFixed(1)` in two call sites. Tiny DRY, consistent with the existing `format-quantity.ts`.
+3. **Backend `list` aggregate uses correlated scalar subqueries, not a LEFT JOIN to a grouped subquery.** Two scalar subqueries (one for `avg`, one for `count`) keyed on `recipe_ratings.recipe_id` are cheaper to write and read at this scale and stay composable with the existing keyset pagination + ORDER BY. The trade-off (re-running the subquery per row) is fine for a ≤60-row page.
+
+### Implementation details worth carrying
+
+- **The `${column}` bare-render trap inside `sql` templates bit again.** First cut wrote `where ${recipeRatings.recipeId} = ${recipes.id}` — Drizzle interpolates column references *bare* inside a `sql` template, and because `recipe_ratings` *also* has an `id` column, the WHERE clause silently resolved to `recipe_ratings.recipe_id = recipe_ratings.id`. The aggregate test caught it ("expected 4, got 5" — average of just the first inserted row). Fix: spell out `recipe_ratings.recipe_id = recipes.id` like `lib/plant-points.ts` does. **Worth carrying:** if a future helper joins a child table to `recipes` via a correlated subquery, *always* fully qualify both sides of the join predicate; the bare-render rule is a project-wide convention codified in the plant-points helper comment but easy to forget.
+- **`onConflictDoUpdate` does NOT fire Drizzle's `$onUpdate` callback** — the callback is wired into Drizzle's `.update(...)` builder, not the conflict-update path. `lastUpdatedAt` must be set explicitly in the `set: { ... }` block of the conflict clause. The rate procedure does `lastUpdatedAt: sql\`now()\`` to keep behaviour consistent with `$onUpdate`'s "DB clock" semantics. The "upserts the existing row and advances lastUpdatedAt" test pins this — without the explicit set, the row's timestamp would freeze on first insert.
+- **`unrate` is intentionally idempotent.** A missing row is a no-op, not a 404. DEC-36 (LWW, no row-version columns): if a second tab already cleared the rating, the click should still succeed silently. Pinned by the "is idempotent when no rating exists" test.
+- **Optimistic average is computed locally in the rating component.** `applyRating(recipe, nextRating)` recomputes `averageRating` + `ratingCount` from the previous (count, average) pair without a server round-trip; the `recipes.get` query gets the patched snapshot via `utils.recipes.get.setData`. Edge cases handled: previous null → new value (incr), previous value → null (decr, may make count zero), previous value → new value (delta only). Same-value clicks short-circuit. Failures roll back via the saved `previous` snapshot.
+- **The widget invalidates `recipes.list` on settle** (in addition to `recipes.get` for the detail page). This propagates the new aggregate to the browse-page card without forcing the user to navigate back and forth.
+- **Detail-page test mocks the widget to a `<div data-testid>`** instead of mocking trpc mutations inline. Keeps the detail-page test focused on the detail-page concerns (header layout, rating-summary chip, disabled-on-tombstoned propagation); the widget's mutation behaviour is exercised in its own test file.
+- **Browse card's "average rating" chip is rendered alongside the plant-points chip, gated on `ratingCount > 0`.** No layout shift when ratings are absent; the row keeps the time + plant-points pair always present.
+
+### What FEAT-25 / FEAT-26 / FEAT-31 will consume from here
+
+- **FEAT-25 (recipe comments)** can mirror the same optimistic-update shape — `setData` against `recipes.get` (or a comment-list query if one's added), `previous`-snapshot rollback, settle-time invalidation. Don't reach for `useOptimisticSlotUpdate`; it's planner-only.
+- **FEAT-26 (related recipes)** is unaffected by ratings, but the average-chip render pattern (small `aria-label`'d span, hidden when the value is zero/null) is the established convention for "secondary card facts" — copy it for related-recipe chips if needed.
+- **FEAT-31 (slot picker / planner card)** consumes `recipes.list`'s new `averageRating` + `ratingCount`. The fields are non-optional in the DTO (null + 0 when absent), so picker rows can render the chip without conditional fetches.
+
+### What did NOT change (carry from earlier notes)
+
+- The `recipe_ratings` table from FEAT-11 was sufficient as-is — no schema or migration work.
+- `recipes.get`'s aggregate path (`loadRatingAggregate`) was untouched; `yourRating` semantics preserved end-to-end.
+- `assertRecipeInHousehold` remains the single household gate for both mutations (`recipe_ratings` itself carries no `household_id` per DEC-17's "scope through the parent recipe" pattern).
+- No new dependencies (DEC-01 / cross-cutting #20). No `withTransaction` (each mutation is a single statement).
+
+---
+
 ## 2026-06-14 — FEAT-23 (Batch cooking model + UI)
 
 **Status:** implementation complete; not yet committed. `pnpm -r typecheck`, `pnpm -r lint` clean across all three workspaces. Frontend: 126/126 tests pass (7 new in `batch-fields.test.tsx`, 2 new in `recipe-edit-page.test.tsx`). Backend: `recipes-procedures.test.ts` 70/70 (21 new), `recipes-schema.test.ts` 32/32. Testcontainers ran via the established Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_RYUK_DISABLED=true`). DoD boxes in `docs/feature-specs.md §FEAT-23` left unticked — human action. Manual gate checks (pair two recipes; soft-delete one; observe the pair affordance hides; restore — the affordance returns) are owed by the human.

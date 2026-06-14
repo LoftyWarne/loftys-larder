@@ -56,7 +56,9 @@ export const recipeListItemSchema = z.object({
 export type RecipeListItem = z.infer<typeof recipeListItemSchema>;
 
 // `recipes.get` detail. Soft-deleted recipes are still returned (DEC-21) so
-// historical plans render their reference.
+// historical plans render their reference. Partner-recipe names + their
+// `isDeleted` flag are denormalised onto the row so the batch-fields editor
+// can render the affordance + a "(deleted)" hint without a second round-trip.
 export const recipeSchema = recipeListItemSchema.extend({
   description: z.string().nullable(),
   sourceId: sourceIdSchema.nullable(),
@@ -72,6 +74,10 @@ export const recipeSchema = recipeListItemSchema.extend({
   sugarPerServing: z.number().int().nullable(),
   saltPerServing: z.number().int().nullable(),
   addedByUserId: z.string().nullable(),
+  baseRecipeName: z.string().nullable(),
+  baseRecipeIsDeleted: z.boolean().nullable(),
+  pairedRecipeName: z.string().nullable(),
+  pairedRecipeIsDeleted: z.boolean().nullable(),
   ingredients: z.array(recipeIngredientLineSchema),
   method: z.array(recipeMethodStepSchema),
   averageRating: z.number().nullable(),
@@ -88,14 +94,15 @@ export const listRecipesCursorSchema = z.object({
 
 export type ListRecipesCursor = z.infer<typeof listRecipesCursorSchema>;
 
-// `includePickerHidden` is accepted now and threaded into the helper as a
-// no-op. FEAT-23 fills in the batch-version-of-deleted-base rule without
-// reshaping this input.
+// `includePickerHidden` now excludes batch-versions whose base is
+// soft-deleted (the batch model's "new picker" rule); `isBase` lets the base
+// picker filter to bases only. Both forward to `pickableRecipesWhere`.
 export const listRecipesInputSchema = z
   .object({
     search: z.string().trim().max(120).optional(),
     includeDeleted: z.boolean().optional(),
     includePickerHidden: z.boolean().optional(),
+    isBase: z.boolean().optional(),
     cursor: listRecipesCursorSchema.optional(),
     limit: z.number().int().min(1).max(60).optional(),
   })
@@ -280,6 +287,40 @@ export const setRecipeDeletionResultSchema = z.object({
 
 export type SetRecipeDeletionResult = z.infer<
   typeof setRecipeDeletionResultSchema
+>;
+
+// Batch-cooking edit surface. `updateHeader` deliberately refuses these
+// fields; the symmetry transaction for `pairedRecipeId` lives in its own
+// procedure (DEC-26). At least one field must be present so the procedure
+// always represents a real intent.
+export const setRecipeBatchFieldsInputSchema = z
+  .object({
+    id: recipeIdSchema,
+    isBase: z.boolean().optional(),
+    baseRecipeId: recipeIdSchema.nullable().optional(),
+    pairedRecipeId: recipeIdSchema.nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.isBase !== undefined ||
+      value.baseRecipeId !== undefined ||
+      value.pairedRecipeId !== undefined,
+    { message: 'Provide at least one field to update' },
+  );
+
+export type SetRecipeBatchFieldsInput = z.infer<
+  typeof setRecipeBatchFieldsInputSchema
+>;
+
+export const setRecipeBatchFieldsResultSchema = z.object({
+  id: recipeIdSchema,
+  isBase: z.boolean(),
+  baseRecipeId: recipeIdSchema.nullable(),
+  pairedRecipeId: recipeIdSchema.nullable(),
+});
+
+export type SetRecipeBatchFieldsResult = z.infer<
+  typeof setRecipeBatchFieldsResultSchema
 >;
 
 // Lookup data driving the recipe editor's unit / prep-type / source pickers.

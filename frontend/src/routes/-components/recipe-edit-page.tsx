@@ -10,6 +10,11 @@ import { TRPCClientError } from '@trpc/client';
 import { useCallback, useMemo, useState } from 'react';
 
 import {
+  BatchFields,
+  type BatchFieldsValues,
+  type RecipePickerOption,
+} from '@/components/recipe-editor/batch-fields.tsx';
+import {
   HeaderFields,
   type HeaderFormValues,
 } from '@/components/recipe-editor/header-fields.tsx';
@@ -55,6 +60,7 @@ export function RecipeEditPage(): React.ReactElement {
   const updateHeader = trpc.recipes.updateHeader.useMutation();
   const replaceIngredients = trpc.recipes.replaceIngredients.useMutation();
   const replaceMethod = trpc.recipes.replaceMethod.useMutation();
+  const setBatchFields = trpc.recipes.setBatchFields.useMutation();
 
   const [headerSavedKey, setHeaderSavedKey] = useState<number | undefined>();
   const [ingredientsSavedKey, setIngredientsSavedKey] = useState<
@@ -62,6 +68,8 @@ export function RecipeEditPage(): React.ReactElement {
   >();
   const [methodSavedKey, setMethodSavedKey] = useState<number | undefined>();
   const [imageSavedKey, setImageSavedKey] = useState<number | undefined>();
+  const [batchSavedKey, setBatchSavedKey] = useState<number | undefined>();
+  const [batchError, setBatchError] = useState<string | null>(null);
   const [ingredientErrors, setIngredientErrors] = useState<ServerLineError[]>(
     [],
   );
@@ -107,6 +115,35 @@ export function RecipeEditPage(): React.ReactElement {
       }));
     },
     [utils.ingredients.list],
+  );
+
+  const searchBases = useCallback(
+    async (query: string): Promise<readonly RecipePickerOption[]> => {
+      const trimmed = query.trim();
+      const result = await utils.recipes.list.fetch({
+        search: trimmed || undefined,
+        isBase: true,
+        includePickerHidden: true,
+      });
+      return result.items
+        .filter((row) => row.id !== recipeId)
+        .map((row) => ({ id: row.id, label: row.name }));
+    },
+    [utils.recipes.list, recipeId],
+  );
+
+  const searchPairs = useCallback(
+    async (query: string): Promise<readonly RecipePickerOption[]> => {
+      const trimmed = query.trim();
+      const result = await utils.recipes.list.fetch({
+        search: trimmed || undefined,
+        includePickerHidden: true,
+      });
+      return result.items
+        .filter((row) => row.id !== recipeId)
+        .map((row) => ({ id: row.id, label: row.name }));
+    },
+    [utils.recipes.list, recipeId],
   );
 
   if (!idIsValid) return <NotFound />;
@@ -211,6 +248,19 @@ export function RecipeEditPage(): React.ReactElement {
     }
   }
 
+  async function handleBatchSubmit(
+    changes: Partial<BatchFieldsValues>,
+  ): Promise<void> {
+    setBatchError(null);
+    try {
+      await setBatchFields.mutateAsync({ id: recipeId, ...changes });
+      await invalidate();
+      setBatchSavedKey(Date.now());
+    } catch (err) {
+      setBatchError(mapBatchError(err));
+    }
+  }
+
   async function fetchCredentials() {
     const data = await credentialsQuery.refetch();
     if (!data.data) {
@@ -265,6 +315,37 @@ export function RecipeEditPage(): React.ReactElement {
           draft.queueAutosave('header', values);
         }}
         savedNoticeKey={headerSavedKey}
+      />
+
+      <BatchFields
+        initial={{
+          isBase: recipe.isBase,
+          baseRecipeId: recipe.baseRecipeId,
+          pairedRecipeId: recipe.pairedRecipeId,
+        }}
+        baseRecipePartner={
+          recipe.baseRecipeId !== null && recipe.baseRecipeName !== null
+            ? {
+                id: recipe.baseRecipeId,
+                name: recipe.baseRecipeName,
+                isDeleted: recipe.baseRecipeIsDeleted ?? false,
+              }
+            : null
+        }
+        pairedRecipePartner={
+          recipe.pairedRecipeId !== null && recipe.pairedRecipeName !== null
+            ? {
+                id: recipe.pairedRecipeId,
+                name: recipe.pairedRecipeName,
+                isDeleted: recipe.pairedRecipeIsDeleted ?? false,
+              }
+            : null
+        }
+        searchBases={searchBases}
+        searchPairs={searchPairs}
+        onSubmit={handleBatchSubmit}
+        savedNoticeKey={batchSavedKey}
+        errorMessage={batchError}
       />
 
       <IngredientList
@@ -397,6 +478,24 @@ function isNotFoundError(error: unknown): boolean {
   if (!(error instanceof TRPCClientError)) return false;
   const data = (error as { data?: { code?: unknown } }).data;
   return data?.code === 'NOT_FOUND';
+}
+
+function mapBatchError(err: unknown): string {
+  const code = getDomainErrorCode(err);
+  switch (code) {
+    case 'RECIPE_BATCH_XOR_VIOLATION':
+      return 'A recipe cannot be a base and point to another base at the same time.';
+    case 'RECIPE_BATCH_BASE_NOT_FOUND':
+      return 'The chosen base recipe could not be found.';
+    case 'RECIPE_BATCH_BASE_NOT_PICKABLE':
+      return 'The chosen base recipe is no longer available.';
+    case 'RECIPE_BATCH_PAIR_NOT_FOUND':
+      return 'The chosen paired recipe could not be found.';
+    case 'RECIPE_BATCH_PAIR_SELF':
+      return 'A recipe cannot be paired with itself.';
+    default:
+      return extractMessage(err);
+  }
 }
 
 function mapIngredientLineError(

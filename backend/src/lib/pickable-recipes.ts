@@ -1,4 +1,4 @@
-import { type SQL, and, eq } from 'drizzle-orm';
+import { type SQL, and, eq, sql } from 'drizzle-orm';
 
 import { CURRENT_HOUSEHOLD_ID } from '../config.ts';
 import { recipes } from '../db/schema/recipes.ts';
@@ -9,18 +9,17 @@ import { recipes } from '../db/schema/recipes.ts';
 // clause; when the visibility rules change (extra picker flag, new household
 // scope), one site changes.
 //
-// Today (FEAT-19): scopes by household and hides soft-deleted by default.
-// FEAT-23 will use `includePickerHidden` to exclude batch versions whose
-// base recipe is soft-deleted, and `isBase` to filter to bases for the base
-// picker. The function shape is the contract — extending the branches is
-// additive.
+// Scopes by household; hides soft-deleted by default. `includePickerHidden`
+// (so named because the call site asking for it is offering a *new* picker)
+// hides batch-versions whose base recipe is soft-deleted — past plans keep
+// rendering those rows via `recipes.get`, but the picker doesn't surface
+// them. `isBase` filters to bases (or non-bases) for the base picker.
 
 export interface PickableRecipesOptions {
   includeDeleted?: boolean;
-  // Reserved for FEAT-23. Today a no-op; the rule lands when batch-version-
-  // of-deleted-base needs to be excluded from generic pickers.
+  // When true, hide batch-versions whose base recipe is soft-deleted from
+  // the result. Set on new pickers; left off for historical reads.
   includePickerHidden?: boolean;
-  // Reserved for FEAT-23 / FEAT-32 (base picker).
   isBase?: boolean;
 }
 
@@ -37,9 +36,19 @@ export function pickableRecipesWhere(
     conditions.push(eq(recipes.isBase, options.isBase));
   }
 
-  // `includePickerHidden` is intentionally not consulted yet — see file
-  // header. FEAT-23 fills in the rule.
-  void options.includePickerHidden;
+  if (options.includePickerHidden) {
+    // Hide batch-versions whose base is soft-deleted. The correlated subquery
+    // reads the recipes table with the table name spelled out so it doesn't
+    // collide with the outer reference; keeps the helper composable with any
+    // outer FROM / JOIN shape the caller already has.
+    conditions.push(
+      sql`(${recipes.baseRecipeId} IS NULL OR NOT EXISTS (
+        SELECT 1 FROM recipes AS base
+        WHERE base.id = ${recipes.baseRecipeId}
+          AND base.is_deleted = true
+      ))`,
+    );
+  }
 
   const combined = and(...conditions);
   if (!combined) {

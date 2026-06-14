@@ -8,13 +8,16 @@ const {
   referencesUseQueryMock,
   credentialsUseQueryMock,
   ingredientsListFetchMock,
+  recipesListFetchMock,
   recipeGetInvalidateMock,
   updateHeaderMutateAsyncMock,
   replaceIngredientsMutateAsyncMock,
   replaceMethodMutateAsyncMock,
+  setBatchFieldsMutateAsyncMock,
   updateHeaderUseMutationMock,
   replaceIngredientsUseMutationMock,
   replaceMethodUseMutationMock,
+  setBatchFieldsUseMutationMock,
   draftGetForRecipeUseQueryMock,
   draftGetNewDraftsUseQueryMock,
   draftUpsertMutateMock,
@@ -27,13 +30,16 @@ const {
   referencesUseQueryMock: vi.fn(),
   credentialsUseQueryMock: vi.fn(),
   ingredientsListFetchMock: vi.fn(),
+  recipesListFetchMock: vi.fn(),
   recipeGetInvalidateMock: vi.fn(),
   updateHeaderMutateAsyncMock: vi.fn(),
   replaceIngredientsMutateAsyncMock: vi.fn(),
   replaceMethodMutateAsyncMock: vi.fn(),
+  setBatchFieldsMutateAsyncMock: vi.fn(),
   updateHeaderUseMutationMock: vi.fn(),
   replaceIngredientsUseMutationMock: vi.fn(),
   replaceMethodUseMutationMock: vi.fn(),
+  setBatchFieldsUseMutationMock: vi.fn(),
   draftGetForRecipeUseQueryMock: vi.fn(),
   draftGetNewDraftsUseQueryMock: vi.fn(),
   draftUpsertMutateMock: vi.fn(),
@@ -46,7 +52,10 @@ const {
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     useUtils: () => ({
-      recipes: { get: { invalidate: recipeGetInvalidateMock } },
+      recipes: {
+        get: { invalidate: recipeGetInvalidateMock },
+        list: { fetch: recipesListFetchMock },
+      },
       ingredients: { list: { fetch: ingredientsListFetchMock } },
       recipeDrafts: {
         getForRecipe: { invalidate: draftGetForRecipeInvalidateMock },
@@ -59,6 +68,7 @@ vi.mock('@/lib/trpc.ts', () => ({
       updateHeader: { useMutation: updateHeaderUseMutationMock },
       replaceIngredients: { useMutation: replaceIngredientsUseMutationMock },
       replaceMethod: { useMutation: replaceMethodUseMutationMock },
+      setBatchFields: { useMutation: setBatchFieldsUseMutationMock },
     },
     recipeDrafts: {
       getForRecipe: { useQuery: draftGetForRecipeUseQueryMock },
@@ -151,6 +161,10 @@ const RECIPE: Recipe = {
   isBase: false,
   baseRecipeId: null,
   pairedRecipeId: null,
+  baseRecipeName: null,
+  baseRecipeIsDeleted: null,
+  pairedRecipeName: null,
+  pairedRecipeIsDeleted: null,
   isDeleted: false,
   plantPointsCount: 1,
   ingredients: [],
@@ -185,6 +199,10 @@ beforeEach(() => {
   replaceMethodUseMutationMock.mockReturnValue({
     mutateAsync: replaceMethodMutateAsyncMock,
   });
+  setBatchFieldsUseMutationMock.mockReturnValue({
+    mutateAsync: setBatchFieldsMutateAsyncMock,
+  });
+  recipesListFetchMock.mockResolvedValue({ items: [], nextCursor: null });
   recipeGetInvalidateMock.mockResolvedValue(undefined);
   draftGetForRecipeUseQueryMock.mockReturnValue({
     data: null,
@@ -299,6 +317,44 @@ describe('RecipeEditPage', () => {
       { recipeId: 7 },
       expect.any(Object),
     );
+  });
+
+  it('saves batch fields and invalidates the get query', async () => {
+    setBatchFieldsMutateAsyncMock.mockResolvedValue({
+      id: 7,
+      isBase: true,
+      baseRecipeId: null,
+      pairedRecipeId: null,
+    });
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    await user.click(screen.getByLabelText(/this is a base recipe/i));
+    await user.click(screen.getByRole('button', { name: 'Save batch fields' }));
+
+    await waitFor(() => {
+      expect(setBatchFieldsMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(setBatchFieldsMutateAsyncMock.mock.calls[0]?.[0]).toEqual({
+      id: 7,
+      isBase: true,
+    });
+    expect(recipeGetInvalidateMock).toHaveBeenCalledWith({ id: 7 });
+  });
+
+  it('hides the base and pair pickers once the recipe is marked as a base', async () => {
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    expect(screen.getByLabelText('Search base recipes')).toBeInTheDocument();
+    expect(screen.getByLabelText('Search paired recipes')).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/this is a base recipe/i));
+    expect(
+      screen.queryByLabelText('Search base recipes'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Search paired recipes'),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps other sections enabled when one section save fails', async () => {

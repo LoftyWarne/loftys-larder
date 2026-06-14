@@ -4,6 +4,50 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-14 — FEAT-23 (Batch cooking model + UI)
+
+**Status:** implementation complete; not yet committed. `pnpm -r typecheck`, `pnpm -r lint` clean across all three workspaces. Frontend: 126/126 tests pass (7 new in `batch-fields.test.tsx`, 2 new in `recipe-edit-page.test.tsx`). Backend: `recipes-procedures.test.ts` 70/70 (21 new), `recipes-schema.test.ts` 32/32. Testcontainers ran via the established Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_RYUK_DISABLED=true`). DoD boxes in `docs/feature-specs.md §FEAT-23` left unticked — human action. Manual gate checks (pair two recipes; soft-delete one; observe the pair affordance hides; restore — the affordance returns) are owed by the human.
+
+### Decisions taken at kick-off
+
+- **Q1 — Single `recipes.setBatchFields` mutation owns the whole batch surface** (`isBase`, `baseRecipeId`, `pairedRecipeId`). Two reasons: marking a recipe as a base often *also* clears `baseRecipeId` (XOR), so coupling them avoids a two-call dance; and putting pair-symmetry in its own surface keeps `updateHeader`'s "reject batch fields" pin from FEAT-20 intact and tested. The procedure refuses an empty input (`refine` on the input schema) — every call represents a real intent.
+- **Q2 — `recipes.list` accepts `isBase`.** `pickableRecipesWhere` already had the parameter from FEAT-19's reservation; the list input schema gained the same flag and threads it through. The base picker calls `recipes.list({ isBase: true, includePickerHidden: true })` instead of a bespoke `listBases` query. Composable with search + cursor pagination.
+- **Q3 — Partner names + isDeleted denormalised onto `recipeSchema`** via two aliased LEFT JOINs in `recipes.get`. Costs ~nothing per get; avoids a second round-trip on the editor mount to resolve picker labels. New fields: `baseRecipeName`, `baseRecipeIsDeleted`, `pairedRecipeName`, `pairedRecipeIsDeleted` (all nullable; null when the link is null).
+- **Q4 — No draft autosave for batch fields.** Pair-symmetry is dangerous to half-save (a partial repair could clobber the partner). The section has an explicit "Save batch fields" button mirroring image-uploader.
+- **Q5 — `isBase` toggle lives in `batch-fields.tsx` for edit mode, not in `header-fields.tsx`.** Session-notes 2026-06-13 line 63 had already flagged this; following it kept the header diff/patch logic unchanged. The create page keeps the `isBase` checkbox on `HeaderFields` via `mode === 'create'`.
+- **Q6 — Two batch-versions may be paired.** DEC-23 and the CHECKs don't prohibit it; the spec doesn't either. Allowed.
+
+### Drift from kick-off plan
+
+1. **`updateHeader` was not reopened.** Plan listed extending `updateHeader` to accept `isBase`/`baseRecipeId`/`pairedRecipeId`; reality was cleaner to put the whole batch surface on a new procedure. The XOR pre-check and the symmetry transaction belong together — splitting them across two procedures would have meant duplicating the XOR check inside `updateHeader`. The existing `updateHeader` test "rejects unknown header fields" still pins the boundary.
+2. **`getBatchFields` not added.** The shape `{ id, isBase, baseRecipeId, pairedRecipeId }` is already returned by `recipes.get`; the editor reads it from there. Avoids a parallel read path.
+3. **Pair picker hides when `isBase` is true (user-flagged during gate check).** Original plan kept the pair picker always visible — the FEAT-23 spec only called out hiding the base picker. The user pointed out the semantic problem: a base recipe is a *component* (e.g. "Slow-cooked beans"), not a meal, so it has no full↔batch sibling per DEC-23's pair definition. The picker is now `{!isBase && …}`; ticking the checkbox also clears local pair state, so the save round-trip emits `pairedRecipeId: null` and the symmetry transaction clears both sides. The procedure stays permissive (a base with a pair is still mechanically valid; only the UI refuses to construct one). Carry: when DEC-23 is revisited, decide whether to also reject `is_base=true AND paired_recipe_id IS NOT NULL` at the DB CHECK or procedure layer; today it's UI discipline only.
+
+### Implementation details worth carrying
+
+- **`includePickerHidden` now uses a correlated subquery against the `recipes` table aliased as `base`** — `NOT EXISTS (SELECT 1 FROM recipes AS base WHERE base.id = recipes.base_recipe_id AND base.is_deleted = true)`. The helper produces a single composable WHERE fragment; the alias keeps it usable when callers add their own joins. **Worth carrying:** when FEAT-31 (slot recipe picker) lands, it asks the same helper for the same rule; no second site to update.
+- **Aliased self-joins in `recipes.get` use Drizzle's `alias()` from `drizzle-orm/pg-core`** — `alias(recipes, 'base_recipe')` and `alias(recipes, 'paired_recipe')`. Drizzle requires unique aliases per FROM/JOIN; reusing a single `recipesAlias` across both joins fails at runtime. The aliased columns appear in the SELECT untouched (`baseRecipe.name`, `pairedRecipe.isDeleted`) — Drizzle's column resolution stays type-safe.
+- **The pair-symmetry transaction reads the new partner's `pairedRecipeId` BEFORE writing self.** If A is being paired with C and C currently points at D, the transaction needs D's id to clear D's back-pointer. Reading C's row first gives us D in a single round-trip; the write phase then issues a batched `UPDATE ... WHERE id IN (B, D) SET paired_recipe_id = NULL` followed by `UPDATE C SET paired_recipe_id = A` and `UPDATE A SET paired_recipe_id = C, ...`. The clearing pass deliberately skips ids equal to `self.id` or the new partner — those rows get overwritten by the forward updates a moment later.
+- **Two-row pair set is non-trivially LWW.** Two concurrent users pairing A with B and A with C race on the `UPDATE A` and the `UPDATE C/B`. The project's DEC-36 (LWW per row, no row-version columns) makes this acceptable at household scale; the spec called out FOR UPDATE as an option but the plan defers it. If a future feature observes torn pairs in the wild, the fix is `SELECT … FOR UPDATE` on the three rows touched (self, oldPartnerOfSelf, newPartner) at the top of the transaction.
+- **Procedure validation is pre-flight (outside the transaction).** Mirrors `replaceIngredients`. The pickable-base check, pair-in-household check, XOR check, and self-pair check all raise typed domain errors before `withTransaction` opens — the transaction body holds only writes. Cheaper, easier to read, and the domain error UI gets clean messages without round-tripping a CHECK violation.
+- **Frontend picker excludes self at the client edge.** `searchBases` / `searchPairs` filter `result.items.filter(row => row.id !== recipeId)` after the network call. The server doesn't know "self"; pushing the rule down would add an `excludeRecipeId` input to `recipes.list` for a single consumer. Worth carrying: if a third consumer needs the same filter, promote it to a server-side input.
+- **`BatchFields` resets its local state from props on recipe-id swap** via three `useEffect`s keyed on `initial.isBase`, `baseRecipePartner`, and `pairedRecipePartner`. Same pattern as `HeaderFields`'s `form.reset(defaultValues)` effect. Without it a route swap (FEAT-29 duplicate?) would render with stale state.
+- **Soft-deleted partner = read-only chip with "(deleted)" hint above the picker.** Picker control still renders so the user can clear or replace; the hint disappears once they pick a different partner. Confirms DEC-21's "historical references intact" rule on the UI side without forcing the user to re-pair through a dead row.
+
+### What FEAT-31 / FEAT-32 / FEAT-26 will consume from here
+
+- **FEAT-31 (slot editor)** reads `recipes.list({ includePickerHidden: true })` for its main recipe picker — already returns soft-deleted bases hidden + batch-versions-of-deleted-bases hidden.
+- **FEAT-32 (base picker for cooked-base)** reads `recipes.list({ isBase: true, includePickerHidden: true })` — same surface as the BatchFields base picker; no second query path.
+- **FEAT-26 (related recipes)** can copy the `searchPairs` callback shape (the only difference is the filter — related-recipes excludes existing pairs, batch picker excludes self).
+
+### What did NOT change (carry from earlier notes)
+
+- `updateHeader`'s "rejects unknown header fields" pin still holds — `isBase`/`baseRecipeId`/`pairedRecipeId` are still XOR'd out of the header writable schema.
+- `pickableRecipesWhere` is still the only place that knows visibility rules (cross-cutting #5).
+- `withTransaction` wraps the multi-statement write (cross-cutting #4) — the procedure constructs a `makeWithTransaction(ctx.db)` and runs the writes inside.
+
+---
+
 ## 2026-06-13 — FEAT-22 (Recipe draft autosave)
 
 **Status:** implementation complete; not yet committed (this session commits it). `pnpm -r typecheck`, `pnpm -r lint` clean across all three workspaces. Frontend: 117/117 tests pass (9 new in `use-recipe-draft.test.ts`, 2 new in `recipe-edit-page.test.tsx`, 2 new in `recipe-new-page.test.tsx`). Backend: 230/231 tests pass; 20/20 new tests in `recipe-drafts-procedures.test.ts` green. The single backend failure is the same pre-existing `user-procedures.test.ts > updateProfile > bumps updatedAt via $onUpdate` ms-race flake documented in every FEAT-17+ entry — not touched here. Testcontainers ran via the established Colima socket workaround. DoD boxes in `docs/feature-specs.md §FEAT-22` left unticked — human action. Manual gate check (type a draft in browser A, open the same recipe in browser B as the same user, see the draft restored) is owed by the human.

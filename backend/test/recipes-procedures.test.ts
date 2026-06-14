@@ -1570,4 +1570,265 @@ describe('recipes procedures', () => {
       expect(unrated?.ratingCount).toBe(0);
     });
   });
+
+  describe('addComment', () => {
+    it('inserts a comment authored by the caller and returns the row', async () => {
+      const recipeId = await insertRecipe({ name: 'Commented' });
+      const caller = createCaller(makeContext());
+
+      const result = await caller.recipes.addComment({
+        recipeId,
+        comment: 'Use the dutch oven',
+      });
+
+      expect(result.recipeId).toBe(recipeId);
+      expect(result.userId).toBe(USER_ID);
+      expect(result.authorName).toBe('Tester');
+      expect(result.comment).toBe('Use the dutch oven');
+      expect(result.lastUpdatedAt).toBeNull();
+
+      const stored = await db
+        .select()
+        .from(recipeComments)
+        .where(eq(recipeComments.recipeId, recipeId));
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.userId).toBe(USER_ID);
+    });
+
+    it('trims whitespace before storing', async () => {
+      const recipeId = await insertRecipe({ name: 'Trimmed' });
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.addComment({
+        recipeId,
+        comment: '   double the garlic   ',
+      });
+      expect(result.comment).toBe('double the garlic');
+    });
+
+    it('rejects empty / whitespace-only text with BAD_REQUEST', async () => {
+      const recipeId = await insertRecipe({ name: 'Empty' });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.addComment({ recipeId, comment: '' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        caller.recipes.addComment({ recipeId, comment: '   ' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects text longer than 2000 chars', async () => {
+      const recipeId = await insertRecipe({ name: 'Too long' });
+      const caller = createCaller(makeContext());
+      const overflow = 'a'.repeat(2001);
+      await expect(
+        caller.recipes.addComment({ recipeId, comment: overflow }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects with NOT_FOUND for a recipe in another household', async () => {
+      const recipeId = await insertRecipe({
+        name: 'Foreign',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.addComment({ recipeId, comment: 'hi' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('rejects without a session', async () => {
+      const recipeId = await insertRecipe({ name: 'Auth' });
+      const caller = createCaller(makeContext({ authenticated: false }));
+      await expect(
+        caller.recipes.addComment({ recipeId, comment: 'hi' }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+  });
+
+  describe('editComment', () => {
+    it('updates the text and sets lastUpdatedAt > createdAt', async () => {
+      const recipeId = await insertRecipe({ name: 'Editable' });
+      const caller = createCaller(makeContext());
+      const created = await caller.recipes.addComment({
+        recipeId,
+        comment: 'first take',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      const result = await caller.recipes.editComment({
+        id: created.id,
+        comment: 'second take',
+      });
+      expect(result.comment).toBe('second take');
+      expect(result.lastUpdatedAt).not.toBeNull();
+      if (!result.lastUpdatedAt) throw new Error('expected lastUpdatedAt');
+      expect(new Date(result.lastUpdatedAt).getTime()).toBeGreaterThan(
+        new Date(created.createdAt).getTime(),
+      );
+    });
+
+    it('rejects FORBIDDEN when caller is not the author', async () => {
+      const recipeId = await insertRecipe({ name: 'Theirs' });
+      const authorCaller = createCaller(makeContext());
+      const created = await authorCaller.recipes.addComment({
+        recipeId,
+        comment: 'mine',
+      });
+      const otherCaller = createCaller(makeContext({ userId: OTHER_USER_ID }));
+      await expect(
+        otherCaller.recipes.editComment({
+          id: created.id,
+          comment: 'hijacked',
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    });
+
+    it('rejects NOT_FOUND for a non-existent comment', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.editComment({ id: 9999, comment: 'lost' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('rejects NOT_FOUND when comment is on a recipe in another household', async () => {
+      const recipeId = await insertRecipe({
+        name: 'Foreign',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const inserted = await db
+        .insert(recipeComments)
+        .values({ recipeId, userId: USER_ID, comment: 'theirs' })
+        .returning({ id: recipeComments.id });
+      const id = inserted[0]?.id;
+      if (!id) throw new Error('insert failed');
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.editComment({ id, comment: 'no' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('validates: empty + max-length', async () => {
+      const recipeId = await insertRecipe({ name: 'Validate' });
+      const caller = createCaller(makeContext());
+      const created = await caller.recipes.addComment({
+        recipeId,
+        comment: 'ok',
+      });
+      await expect(
+        caller.recipes.editComment({ id: created.id, comment: '' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        caller.recipes.editComment({
+          id: created.id,
+          comment: 'a'.repeat(2001),
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+  });
+
+  describe('deleteComment', () => {
+    it('hard-deletes the row when caller is the author', async () => {
+      const recipeId = await insertRecipe({ name: 'Trash' });
+      const caller = createCaller(makeContext());
+      const created = await caller.recipes.addComment({
+        recipeId,
+        comment: 'gone',
+      });
+      const result = await caller.recipes.deleteComment({ id: created.id });
+      expect(result).toEqual({ id: created.id });
+      const remaining = await db
+        .select()
+        .from(recipeComments)
+        .where(eq(recipeComments.id, created.id));
+      expect(remaining).toHaveLength(0);
+    });
+
+    it('rejects FORBIDDEN for non-author', async () => {
+      const recipeId = await insertRecipe({ name: 'Keep' });
+      const authorCaller = createCaller(makeContext());
+      const created = await authorCaller.recipes.addComment({
+        recipeId,
+        comment: 'mine',
+      });
+      const otherCaller = createCaller(makeContext({ userId: OTHER_USER_ID }));
+      await expect(
+        otherCaller.recipes.deleteComment({ id: created.id }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    });
+
+    it('rejects NOT_FOUND for a non-existent comment', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.deleteComment({ id: 9999 }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  describe('listComments', () => {
+    it('returns rows newest-first with author display name', async () => {
+      const recipeId = await insertRecipe({ name: 'Threaded' });
+      await db.insert(recipeComments).values([
+        {
+          recipeId,
+          userId: USER_ID,
+          comment: 'first',
+          createdAt: new Date(Date.now() - 60_000),
+        },
+        {
+          recipeId,
+          userId: OTHER_USER_ID,
+          comment: 'second',
+          createdAt: new Date(Date.now() - 30_000),
+        },
+        {
+          recipeId,
+          userId: USER_ID,
+          comment: 'third',
+          createdAt: new Date(),
+        },
+      ]);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.listComments({ recipeId });
+      expect(result.items.map((r) => r.comment)).toEqual([
+        'third',
+        'second',
+        'first',
+      ]);
+      expect(result.items[0]?.authorName).toBe('Recipe Tester');
+      expect(result.items[1]?.authorName).toBe('Other Tester');
+    });
+
+    it('returns authorName: null for tombstoned authors', async () => {
+      const recipeId = await insertRecipe({ name: 'Ghost' });
+      await db.insert(recipeComments).values({
+        recipeId,
+        userId: null,
+        comment: 'orphaned',
+      });
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.listComments({ recipeId });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]?.userId).toBeNull();
+      expect(result.items[0]?.authorName).toBeNull();
+    });
+
+    it('rejects NOT_FOUND for a recipe in another household', async () => {
+      const recipeId = await insertRecipe({
+        name: 'Foreign',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.listComments({ recipeId }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('returns an empty list for a recipe with no comments', async () => {
+      const recipeId = await insertRecipe({ name: 'Silent' });
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.listComments({ recipeId });
+      expect(result.items).toEqual([]);
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import { Link, useParams } from '@tanstack/react-router';
 
+import { RecipeComments } from '@/components/recipe-comments.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { formatQuantity } from '@/lib/format-quantity.ts';
 import { formatAverageRating } from '@/lib/format-rating.ts';
@@ -144,6 +145,8 @@ export function RecipeDetailPage(): React.ReactElement {
           </ol>
         )}
       </section>
+
+      <RecipeComments recipeId={recipe.id} />
     </article>
   );
 }

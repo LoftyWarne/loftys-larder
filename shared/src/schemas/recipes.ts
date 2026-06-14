@@ -371,3 +371,98 @@ export const unrateRecipeResultSchema = z.object({
 });
 
 export type UnrateRecipeResult = z.infer<typeof unrateRecipeResultSchema>;
+
+// Recipe comments (FEAT-25). Authored text is plain string per DEC-49 — never
+// markdown, never HTML, never interpreted by `dangerouslySetInnerHTML`.
+// `userId` is nullable: the tombstoning sequence (DEC-29) SETs NULL when the
+// author leaves; the UI renders `[deleted user]` then. `lastUpdatedAt` is
+// likewise nullable — NULL means "never edited", which is how the UI infers
+// the "(edited)" affordance.
+export const RECIPE_COMMENT_MAX_LENGTH = 2000;
+
+const recipeCommentTextSchema = z
+  .string()
+  .trim()
+  .min(1, 'Comment cannot be empty')
+  .max(
+    RECIPE_COMMENT_MAX_LENGTH,
+    `Comment must be ${String(RECIPE_COMMENT_MAX_LENGTH)} characters or fewer`,
+  );
+
+const recipeCommentIdSchema = z.number().int().positive();
+
+// `createdAt` / `lastUpdatedAt` are ISO-8601 strings on the wire — the
+// project doesn't run a tRPC data transformer, so Date round-trips as a
+// string anyway (matches the `lastUpdatedAt: number` pattern in recipe
+// drafts; strings here so the UI can `new Date(s)` directly).
+export const recipeCommentSchema = z.object({
+  id: recipeCommentIdSchema,
+  recipeId: recipeIdSchema,
+  userId: z.string().nullable(),
+  authorName: z.string().nullable(),
+  comment: z.string(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string().nullable(),
+});
+
+export type RecipeComment = z.infer<typeof recipeCommentSchema>;
+
+export const addRecipeCommentInputSchema = z.object({
+  recipeId: recipeIdSchema,
+  comment: recipeCommentTextSchema,
+});
+
+export type AddRecipeCommentInput = z.infer<typeof addRecipeCommentInputSchema>;
+
+export const addRecipeCommentResultSchema = recipeCommentSchema;
+
+export type AddRecipeCommentResult = z.infer<
+  typeof addRecipeCommentResultSchema
+>;
+
+export const editRecipeCommentInputSchema = z.object({
+  id: recipeCommentIdSchema,
+  comment: recipeCommentTextSchema,
+});
+
+export type EditRecipeCommentInput = z.infer<
+  typeof editRecipeCommentInputSchema
+>;
+
+export const editRecipeCommentResultSchema = recipeCommentSchema;
+
+export type EditRecipeCommentResult = z.infer<
+  typeof editRecipeCommentResultSchema
+>;
+
+export const deleteRecipeCommentInputSchema = z.object({
+  id: recipeCommentIdSchema,
+});
+
+export type DeleteRecipeCommentInput = z.infer<
+  typeof deleteRecipeCommentInputSchema
+>;
+
+export const deleteRecipeCommentResultSchema = z.object({
+  id: recipeCommentIdSchema,
+});
+
+export type DeleteRecipeCommentResult = z.infer<
+  typeof deleteRecipeCommentResultSchema
+>;
+
+export const listRecipeCommentsInputSchema = z.object({
+  recipeId: recipeIdSchema,
+});
+
+export type ListRecipeCommentsInput = z.infer<
+  typeof listRecipeCommentsInputSchema
+>;
+
+export const listRecipeCommentsResultSchema = z.object({
+  items: z.array(recipeCommentSchema),
+});
+
+export type ListRecipeCommentsResult = z.infer<
+  typeof listRecipeCommentsResultSchema
+>;

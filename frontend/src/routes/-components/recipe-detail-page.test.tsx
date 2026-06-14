@@ -35,6 +35,12 @@ vi.mock('@/components/recipe-rating.tsx', () => ({
   ),
 }));
 
+vi.mock('@/components/recipe-comments.tsx', () => ({
+  RecipeComments: ({ recipeId }: { recipeId: number }) => (
+    <div data-testid="recipe-comments-mock" data-recipe-id={String(recipeId)} />
+  ),
+}));
+
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>(
     '@tanstack/react-router',

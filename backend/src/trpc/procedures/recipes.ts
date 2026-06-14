@@ -1,11 +1,19 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, avg, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, avg, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
+  addRecipeCommentInputSchema,
+  addRecipeCommentResultSchema,
   createRecipeInputSchema,
   createRecipeResultSchema,
+  deleteRecipeCommentInputSchema,
+  deleteRecipeCommentResultSchema,
+  editRecipeCommentInputSchema,
+  editRecipeCommentResultSchema,
   getRecipeInputSchema,
+  listRecipeCommentsInputSchema,
+  listRecipeCommentsResultSchema,
   listRecipesInputSchema,
   listRecipesResultSchema,
   rateRecipeInputSchema,
@@ -24,8 +32,12 @@ import {
   unrateRecipeResultSchema,
   updateRecipeHeaderInputSchema,
   updateRecipeHeaderResultSchema,
+  type AddRecipeCommentResult,
   type CreateRecipeResult,
+  type DeleteRecipeCommentResult,
   type DomainErrorCode,
+  type EditRecipeCommentResult,
+  type ListRecipeCommentsResult,
   type ListRecipesResult,
   type RateRecipeResult,
   type Recipe,
@@ -40,12 +52,16 @@ import {
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import type { Db } from '../../db/index.ts';
 import { makeWithTransaction } from '../../db/withTransaction.ts';
+import { users } from '../../db/schema/auth.ts';
 import { ingredients } from '../../db/schema/ingredients.ts';
 import {
   preparationTypes,
   unitsOfMeasurement,
 } from '../../db/schema/reference.ts';
-import { recipeRatings } from '../../db/schema/recipe-social.ts';
+import {
+  recipeComments,
+  recipeRatings,
+} from '../../db/schema/recipe-social.ts';
 import {
   recipeIngredients,
   recipeMethod,
@@ -743,6 +759,130 @@ export const recipesRouter = router({
 
       return { recipeId: input.recipeId };
     }),
+
+  addComment: protectedProcedure
+    .input(addRecipeCommentInputSchema)
+    .output(addRecipeCommentResultSchema)
+    .mutation(async ({ ctx, input }): Promise<AddRecipeCommentResult> => {
+      await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+      const inserted = await ctx.db
+        .insert(recipeComments)
+        .values({
+          recipeId: input.recipeId,
+          userId: ctx.user.id,
+          comment: input.comment,
+        })
+        .returning({
+          id: recipeComments.id,
+          recipeId: recipeComments.recipeId,
+          userId: recipeComments.userId,
+          comment: recipeComments.comment,
+          createdAt: recipeComments.createdAt,
+          lastUpdatedAt: recipeComments.lastUpdatedAt,
+        });
+      const row = inserted[0];
+      if (!row) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Insert returned no row',
+        });
+      }
+      return {
+        id: row.id,
+        recipeId: row.recipeId,
+        userId: row.userId,
+        authorName: ctx.user.name,
+        comment: row.comment,
+        createdAt: row.createdAt.toISOString(),
+        lastUpdatedAt: row.lastUpdatedAt?.toISOString() ?? null,
+      };
+    }),
+
+  // `lastUpdatedAt` is set explicitly to `now()` rather than via Drizzle's
+  // `$onUpdate` — the column is deliberately nullable so the UI can infer
+  // "never edited" (FEAT-25, schema comment on `recipe_comments`). Adding
+  // `$onUpdate` would fire on INSERT too and defeat that inference.
+  editComment: protectedProcedure
+    .input(editRecipeCommentInputSchema)
+    .output(editRecipeCommentResultSchema)
+    .mutation(async ({ ctx, input }): Promise<EditRecipeCommentResult> => {
+      const existing = await loadCommentForAuthor(ctx.db, input.id);
+      assertCommentAuthor(existing, ctx.user.id);
+
+      const updated = await ctx.db
+        .update(recipeComments)
+        .set({ comment: input.comment, lastUpdatedAt: sql`now()` })
+        .where(eq(recipeComments.id, input.id))
+        .returning({
+          id: recipeComments.id,
+          recipeId: recipeComments.recipeId,
+          userId: recipeComments.userId,
+          comment: recipeComments.comment,
+          createdAt: recipeComments.createdAt,
+          lastUpdatedAt: recipeComments.lastUpdatedAt,
+        });
+      const row = updated[0];
+      if (!row) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Comment not found',
+        });
+      }
+      return {
+        id: row.id,
+        recipeId: row.recipeId,
+        userId: row.userId,
+        authorName: ctx.user.name,
+        comment: row.comment,
+        createdAt: row.createdAt.toISOString(),
+        lastUpdatedAt: row.lastUpdatedAt?.toISOString() ?? null,
+      };
+    }),
+
+  deleteComment: protectedProcedure
+    .input(deleteRecipeCommentInputSchema)
+    .output(deleteRecipeCommentResultSchema)
+    .mutation(async ({ ctx, input }): Promise<DeleteRecipeCommentResult> => {
+      const existing = await loadCommentForAuthor(ctx.db, input.id);
+      assertCommentAuthor(existing, ctx.user.id);
+
+      await ctx.db
+        .delete(recipeComments)
+        .where(eq(recipeComments.id, input.id));
+
+      return { id: input.id };
+    }),
+
+  listComments: protectedProcedure
+    .input(listRecipeCommentsInputSchema)
+    .output(listRecipeCommentsResultSchema)
+    .query(async ({ ctx, input }): Promise<ListRecipeCommentsResult> => {
+      await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+      const rows = await ctx.db
+        .select({
+          id: recipeComments.id,
+          recipeId: recipeComments.recipeId,
+          userId: recipeComments.userId,
+          authorName: users.name,
+          comment: recipeComments.comment,
+          createdAt: recipeComments.createdAt,
+          lastUpdatedAt: recipeComments.lastUpdatedAt,
+        })
+        .from(recipeComments)
+        .leftJoin(users, eq(users.id, recipeComments.userId))
+        .where(eq(recipeComments.recipeId, input.recipeId))
+        .orderBy(desc(recipeComments.createdAt), desc(recipeComments.id));
+
+      return {
+        items: rows.map((row) => ({
+          ...row,
+          createdAt: row.createdAt.toISOString(),
+          lastUpdatedAt: row.lastUpdatedAt?.toISOString() ?? null,
+        })),
+      };
+    }),
 });
 
 function domainBadRequest(
@@ -907,6 +1047,49 @@ interface RatingAggregate {
   averageRating: number | null;
   ratingCount: number;
   yourRating: number | null;
+}
+
+interface ExistingComment {
+  id: number;
+  recipeId: number;
+  userId: string | null;
+}
+
+async function loadCommentForAuthor(
+  db: Db,
+  commentId: number,
+): Promise<ExistingComment> {
+  const rows = await db
+    .select({
+      id: recipeComments.id,
+      recipeId: recipeComments.recipeId,
+      userId: recipeComments.userId,
+      householdId: recipes.householdId,
+    })
+    .from(recipeComments)
+    .innerJoin(recipes, eq(recipes.id, recipeComments.recipeId))
+    .where(eq(recipeComments.id, commentId))
+    .limit(1);
+  const row = rows[0];
+  if (row?.householdId !== CURRENT_HOUSEHOLD_ID) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Comment not found',
+    });
+  }
+  return { id: row.id, recipeId: row.recipeId, userId: row.userId };
+}
+
+function assertCommentAuthor(
+  comment: ExistingComment,
+  callerUserId: string,
+): void {
+  if (comment.userId !== callerUserId) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'You can only edit your own comments',
+    });
+  }
 }
 
 async function loadRatingAggregate(

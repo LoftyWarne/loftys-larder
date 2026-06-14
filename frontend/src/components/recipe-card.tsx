@@ -1,6 +1,8 @@
 import type { RecipeListItem } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 
+import { formatAverageRating } from '@/lib/format-rating.ts';
+
 export interface RecipeCardProps {
   recipe: RecipeListItem;
 }
@@ -12,6 +14,12 @@ export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
       : recipe.activeTimeMins !== null
         ? `${String(recipe.activeTimeMins)} min active`
         : null;
+  const ratingLabel =
+    recipe.ratingCount > 0
+      ? `★ ${formatAverageRating(recipe.averageRating) ?? ''} (${String(
+          recipe.ratingCount,
+        )})`
+      : null;
 
   return (
     <Link
@@ -44,6 +52,12 @@ export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
           <span aria-label="plant points">
             🌱 {String(recipe.plantPointsCount)}
           </span>
+          {ratingLabel && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span aria-label="average rating">{ratingLabel}</span>
+            </>
+          )}
         </div>
       </div>
     </Link>

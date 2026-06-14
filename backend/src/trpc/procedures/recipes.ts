@@ -8,6 +8,8 @@ import {
   getRecipeInputSchema,
   listRecipesInputSchema,
   listRecipesResultSchema,
+  rateRecipeInputSchema,
+  rateRecipeResultSchema,
   recipeReferencesSchema,
   recipeSchema,
   replaceRecipeIngredientsInputSchema,
@@ -18,17 +20,21 @@ import {
   setRecipeBatchFieldsResultSchema,
   setRecipeDeletionInputSchema,
   setRecipeDeletionResultSchema,
+  unrateRecipeInputSchema,
+  unrateRecipeResultSchema,
   updateRecipeHeaderInputSchema,
   updateRecipeHeaderResultSchema,
   type CreateRecipeResult,
   type DomainErrorCode,
   type ListRecipesResult,
+  type RateRecipeResult,
   type Recipe,
   type RecipeReferences,
   type ReplaceRecipeIngredientsResult,
   type ReplaceRecipeMethodResult,
   type SetRecipeBatchFieldsResult,
   type SetRecipeDeletionResult,
+  type UnrateRecipeResult,
   type UpdateRecipeHeaderResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
@@ -117,7 +123,13 @@ export const recipesRouter = router({
       }
 
       // Fetch limit + 1 to learn whether more pages exist without a second
-      // count query.
+      // count query. Rating aggregates are correlated scalar subqueries —
+      // one indexed lookup per row on `(recipe_id)` against `recipe_ratings`,
+      // null when the recipe has no ratings. Columns are spelled out as
+      // `<table>.<column>` because `${column}` renders bare inside a `sql`
+      // template and `recipe_ratings` also has its own `id`, which would
+      // otherwise capture the outer `recipes.id` reference (same trap as
+      // `plant-points.ts`).
       const rows = await ctx.db
         .select({
           id: recipes.id,
@@ -131,6 +143,16 @@ export const recipesRouter = router({
           pairedRecipeId: recipes.pairedRecipeId,
           isDeleted: recipes.isDeleted,
           plantPointsCount: recipePlantPointsExpr(sql`recipes.id`),
+          averageRating: sql<string | null>`(
+            select avg(recipe_ratings.rating)
+            from ${recipeRatings}
+            where recipe_ratings.recipe_id = recipes.id
+          )`,
+          ratingCount: sql<number>`(
+            select count(*)::int
+            from ${recipeRatings}
+            where recipe_ratings.recipe_id = recipes.id
+          )`,
         })
         .from(recipes)
         .where(and(...conditions))
@@ -158,6 +180,9 @@ export const recipesRouter = router({
           pairedRecipeId: row.pairedRecipeId,
           isDeleted: row.isDeleted,
           plantPointsCount: row.plantPointsCount,
+          averageRating:
+            row.averageRating === null ? null : Number(row.averageRating),
+          ratingCount: row.ratingCount,
         })),
         nextCursor,
       };
@@ -667,6 +692,56 @@ export const recipesRouter = router({
         baseRecipeId: nextBaseRecipeId,
         pairedRecipeId: nextPairedRecipeId,
       };
+    }),
+
+  // Upsert keyed on `(recipe_id, user_id)` per the table's unique index. The
+  // household gate is the recipe-side check (DEC-17); `recipe_ratings` itself
+  // doesn't carry `household_id`. `lastUpdatedAt` is set explicitly on the
+  // conflict path because Drizzle's `$onUpdate` only fires on
+  // `.update(...)`, not on `onConflictDoUpdate`.
+  rate: protectedProcedure
+    .input(rateRecipeInputSchema)
+    .output(rateRecipeResultSchema)
+    .mutation(async ({ ctx, input }): Promise<RateRecipeResult> => {
+      await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+      await ctx.db
+        .insert(recipeRatings)
+        .values({
+          recipeId: input.recipeId,
+          userId: ctx.user.id,
+          rating: input.rating,
+        })
+        .onConflictDoUpdate({
+          target: [recipeRatings.recipeId, recipeRatings.userId],
+          set: {
+            rating: input.rating,
+            lastUpdatedAt: sql`now()`,
+          },
+        });
+
+      return { recipeId: input.recipeId, rating: input.rating };
+    }),
+
+  // Idempotent: a missing row is a no-op, not an error — clicking the
+  // currently-selected star to clear should succeed even if a parallel
+  // tab already cleared it (DEC-36: last-write-wins).
+  unrate: protectedProcedure
+    .input(unrateRecipeInputSchema)
+    .output(unrateRecipeResultSchema)
+    .mutation(async ({ ctx, input }): Promise<UnrateRecipeResult> => {
+      await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+      await ctx.db
+        .delete(recipeRatings)
+        .where(
+          and(
+            eq(recipeRatings.recipeId, input.recipeId),
+            eq(recipeRatings.userId, ctx.user.id),
+          ),
+        );
+
+      return { recipeId: input.recipeId };
     }),
 });
 

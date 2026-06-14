@@ -16,6 +16,25 @@ vi.mock('@/lib/trpc.ts', () => ({
   },
 }));
 
+vi.mock('@/components/recipe-rating.tsx', () => ({
+  RecipeRating: ({
+    recipeId,
+    yourRating,
+    isDisabled,
+  }: {
+    recipeId: number;
+    yourRating: number | null;
+    isDisabled?: boolean;
+  }) => (
+    <div
+      data-testid="recipe-rating-mock"
+      data-recipe-id={String(recipeId)}
+      data-your-rating={yourRating === null ? 'null' : String(yourRating)}
+      data-disabled={isDisabled ? 'true' : 'false'}
+    />
+  ),
+}));
+
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>(
     '@tanstack/react-router',
@@ -171,5 +190,44 @@ describe('RecipeDetailPage', () => {
     expect(
       screen.getByRole('heading', { name: /recipe not found/i }),
     ).toBeInTheDocument();
+  });
+
+  it('renders the rating widget and hides the average summary when no ratings', () => {
+    getUseQueryMock.mockReturnValue({
+      data: FULL_RECIPE,
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    const widget = screen.getByTestId('recipe-rating-mock');
+    expect(widget).toHaveAttribute('data-recipe-id', '7');
+    expect(widget).toHaveAttribute('data-your-rating', 'null');
+    expect(widget).toHaveAttribute('data-disabled', 'false');
+    expect(screen.queryByLabelText(/average rating/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the average summary when there is at least one rating', () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, averageRating: 4.25, ratingCount: 4 },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    const summary = screen.getByLabelText(/average rating/i);
+    expect(summary).toHaveTextContent('4.3');
+    expect(summary).toHaveTextContent('(4)');
+  });
+
+  it('disables the rating widget on a soft-deleted recipe', () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, isDeleted: true },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    expect(screen.getByTestId('recipe-rating-mock')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
   });
 });

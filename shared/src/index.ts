@@ -73,6 +73,16 @@ export {
   type RecipeReferenceItem,
   recipeReferencesSchema,
   type RecipeReferences,
+  ratingSchema,
+  type Rating,
+  rateRecipeInputSchema,
+  type RateRecipeInput,
+  rateRecipeResultSchema,
+  type RateRecipeResult,
+  unrateRecipeInputSchema,
+  type UnrateRecipeInput,
+  unrateRecipeResultSchema,
+  type UnrateRecipeResult,
 } from './schemas/recipes.ts';
 export {
   RECIPE_DRAFT_VERSION,

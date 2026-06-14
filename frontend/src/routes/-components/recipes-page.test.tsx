@@ -58,6 +58,8 @@ const TOMATO: RecipeListItem = {
   pairedRecipeId: null,
   isDeleted: false,
   plantPointsCount: 3,
+  averageRating: 4.25,
+  ratingCount: 4,
 };
 
 const ROAST: RecipeListItem = {
@@ -72,6 +74,8 @@ const ROAST: RecipeListItem = {
   pairedRecipeId: null,
   isDeleted: false,
   plantPointsCount: 2,
+  averageRating: null,
+  ratingCount: 0,
 };
 
 interface SetupOptions {
@@ -154,6 +158,20 @@ describe('RecipesPage', () => {
     setup({ items: [TOMATO] });
     render(<RecipesPage />);
     expect(screen.getByLabelText(/plant points/i)).toHaveTextContent('3');
+  });
+
+  it('renders the average rating chip when the recipe has ratings', () => {
+    setup({ items: [TOMATO] });
+    render(<RecipesPage />);
+    const chip = screen.getByLabelText(/average rating/i);
+    expect(chip).toHaveTextContent('4.3');
+    expect(chip).toHaveTextContent('(4)');
+  });
+
+  it('hides the rating chip when the recipe has no ratings', () => {
+    setup({ items: [ROAST] });
+    render(<RecipesPage />);
+    expect(screen.queryByLabelText(/average rating/i)).not.toBeInTheDocument();
   });
 
   it('renders an error message when the list query fails', () => {

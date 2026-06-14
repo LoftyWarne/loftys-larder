@@ -11,7 +11,9 @@ const ingredientIdSchema = z.number().int().positive();
 const unitIdSchema = z.number().int().positive();
 const prepTypeIdSchema = z.number().int().positive();
 const sourceIdSchema = z.number().int().positive();
-const ratingSchema = z.number().int().min(1).max(5);
+export const ratingSchema = z.number().int().min(1).max(5);
+
+export type Rating = z.infer<typeof ratingSchema>;
 
 export const recipeIngredientLineSchema = z.object({
   id: z.number().int().positive(),
@@ -51,6 +53,9 @@ export const recipeListItemSchema = z.object({
   isDeleted: z.boolean(),
   // Server-computed: COUNT(DISTINCT ingredient_id WHERE is_plant) (DEC-32).
   plantPointsCount: z.number().int().nonnegative(),
+  // Aggregate over `recipe_ratings`; `null` average when no ratings exist.
+  averageRating: z.number().nullable(),
+  ratingCount: z.number().int().nonnegative(),
 });
 
 export type RecipeListItem = z.infer<typeof recipeListItemSchema>;
@@ -80,8 +85,6 @@ export const recipeSchema = recipeListItemSchema.extend({
   pairedRecipeIsDeleted: z.boolean().nullable(),
   ingredients: z.array(recipeIngredientLineSchema),
   method: z.array(recipeMethodStepSchema),
-  averageRating: z.number().nullable(),
-  ratingCount: z.number().int().nonnegative(),
   yourRating: ratingSchema.nullable(),
 });
 
@@ -342,3 +345,29 @@ export const recipeReferencesSchema = z.object({
 });
 
 export type RecipeReferences = z.infer<typeof recipeReferencesSchema>;
+
+export const rateRecipeInputSchema = z.object({
+  recipeId: recipeIdSchema,
+  rating: ratingSchema,
+});
+
+export type RateRecipeInput = z.infer<typeof rateRecipeInputSchema>;
+
+export const rateRecipeResultSchema = z.object({
+  recipeId: recipeIdSchema,
+  rating: ratingSchema,
+});
+
+export type RateRecipeResult = z.infer<typeof rateRecipeResultSchema>;
+
+export const unrateRecipeInputSchema = z.object({
+  recipeId: recipeIdSchema,
+});
+
+export type UnrateRecipeInput = z.infer<typeof unrateRecipeInputSchema>;
+
+export const unrateRecipeResultSchema = z.object({
+  recipeId: recipeIdSchema,
+});
+
+export type UnrateRecipeResult = z.infer<typeof unrateRecipeResultSchema>;

@@ -1,7 +1,9 @@
 import { TRPCClientError } from '@trpc/client';
 import { Link, useParams } from '@tanstack/react-router';
 
+import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { formatQuantity } from '@/lib/format-quantity.ts';
+import { formatAverageRating } from '@/lib/format-rating.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 export function RecipeDetailPage(): React.ReactElement {
@@ -62,6 +64,12 @@ export function RecipeDetailPage(): React.ReactElement {
             <span>· {String(recipe.activeTimeMins)} min active</span>
           )}
           <span>· 🌱 {String(recipe.plantPointsCount)}</span>
+          {recipe.ratingCount > 0 && (
+            <span aria-label="average rating">
+              · ★ {formatAverageRating(recipe.averageRating)} (
+              {String(recipe.ratingCount)})
+            </span>
+          )}
           {recipe.sourceName && (
             <span>
               ·{' '}
@@ -80,6 +88,11 @@ export function RecipeDetailPage(): React.ReactElement {
             </span>
           )}
         </p>
+        <RecipeRating
+          recipeId={recipe.id}
+          yourRating={recipe.yourRating}
+          isDisabled={recipe.isDeleted}
+        />
       </header>
 
       {recipe.imageUrl && (

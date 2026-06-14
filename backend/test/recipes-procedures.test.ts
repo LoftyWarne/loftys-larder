@@ -1402,4 +1402,172 @@ describe('recipes procedures', () => {
       expect(result.pairedRecipeIsDeleted).toBe(true);
     });
   });
+
+  describe('rate', () => {
+    it('inserts a rating when none exists', async () => {
+      const recipeId = await insertRecipe({ name: 'New rating' });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.rate({ recipeId, rating: 4 });
+
+      expect(result).toEqual({ recipeId, rating: 4 });
+
+      const detail = await caller.recipes.get({ id: recipeId });
+      expect(detail.yourRating).toBe(4);
+      expect(detail.averageRating).toBe(4);
+      expect(detail.ratingCount).toBe(1);
+    });
+
+    it('upserts the existing row and advances lastUpdatedAt', async () => {
+      const recipeId = await insertRecipe({ name: 'Reratable' });
+      const caller = createCaller(makeContext());
+
+      await caller.recipes.rate({ recipeId, rating: 2 });
+      const firstRow = await db
+        .select()
+        .from(recipeRatings)
+        .where(eq(recipeRatings.recipeId, recipeId));
+      expect(firstRow).toHaveLength(1);
+      const firstUpdatedAt = firstRow[0]?.lastUpdatedAt;
+      if (!firstUpdatedAt) throw new Error('expected lastUpdatedAt');
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await caller.recipes.rate({ recipeId, rating: 5 });
+
+      const secondRow = await db
+        .select()
+        .from(recipeRatings)
+        .where(eq(recipeRatings.recipeId, recipeId));
+      expect(secondRow).toHaveLength(1);
+      expect(secondRow[0]?.rating).toBe(5);
+      const secondUpdatedAt = secondRow[0]?.lastUpdatedAt;
+      if (!secondUpdatedAt) throw new Error('expected lastUpdatedAt');
+      expect(secondUpdatedAt.getTime()).toBeGreaterThan(
+        firstUpdatedAt.getTime(),
+      );
+    });
+
+    it('rejects rating values outside the 1-5 range', async () => {
+      const recipeId = await insertRecipe({ name: 'Bounded' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.rate({ recipeId, rating: 0 }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        caller.recipes.rate({ recipeId, rating: 6 }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects with NOT_FOUND for a recipe in another household', async () => {
+      const recipeId = await insertRecipe({
+        name: 'Foreign',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.rate({ recipeId, rating: 3 }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('rejects without a session', async () => {
+      const recipeId = await insertRecipe({ name: 'Auth' });
+      const caller = createCaller(makeContext({ authenticated: false }));
+      await expect(
+        caller.recipes.rate({ recipeId, rating: 3 }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+  });
+
+  describe('unrate', () => {
+    it("deletes the caller's row and reduces the aggregate", async () => {
+      const recipeId = await insertRecipe({ name: 'Clearable' });
+      await db.insert(recipeRatings).values([
+        { recipeId, userId: USER_ID, rating: 5 },
+        { recipeId, userId: OTHER_USER_ID, rating: 1 },
+      ]);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.unrate({ recipeId });
+      expect(result).toEqual({ recipeId });
+
+      const detail = await caller.recipes.get({ id: recipeId });
+      expect(detail.yourRating).toBeNull();
+      expect(detail.ratingCount).toBe(1);
+      expect(detail.averageRating).toBe(1);
+    });
+
+    it('is idempotent when no rating exists', async () => {
+      const recipeId = await insertRecipe({ name: 'Already gone' });
+      const caller = createCaller(makeContext());
+      await expect(caller.recipes.unrate({ recipeId })).resolves.toEqual({
+        recipeId,
+      });
+      await expect(caller.recipes.unrate({ recipeId })).resolves.toEqual({
+        recipeId,
+      });
+    });
+
+    it("leaves another user's rating untouched", async () => {
+      const recipeId = await insertRecipe({ name: 'Shared' });
+      await db.insert(recipeRatings).values([
+        { recipeId, userId: USER_ID, rating: 4 },
+        { recipeId, userId: OTHER_USER_ID, rating: 2 },
+      ]);
+
+      const caller = createCaller(makeContext());
+      await caller.recipes.unrate({ recipeId });
+
+      const remaining = await db
+        .select()
+        .from(recipeRatings)
+        .where(eq(recipeRatings.recipeId, recipeId));
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0]?.userId).toBe(OTHER_USER_ID);
+      expect(remaining[0]?.rating).toBe(2);
+    });
+
+    it('rejects with NOT_FOUND for a recipe in another household', async () => {
+      const recipeId = await insertRecipe({
+        name: 'Foreign',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(caller.recipes.unrate({ recipeId })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+  });
+
+  describe('list rating aggregate', () => {
+    it('returns null average and zero count for unrated recipes', async () => {
+      await insertRecipe({ name: 'Unrated' });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.list();
+      const recipe = result.items[0];
+      if (!recipe) throw new Error('expected one item');
+      expect(recipe.averageRating).toBeNull();
+      expect(recipe.ratingCount).toBe(0);
+    });
+
+    it('aggregates ratings across users on each list item', async () => {
+      const ratedId = await insertRecipe({ name: 'Rated' });
+      await insertRecipe({ name: 'Unrated' });
+      await db.insert(recipeRatings).values([
+        { recipeId: ratedId, userId: USER_ID, rating: 5 },
+        { recipeId: ratedId, userId: OTHER_USER_ID, rating: 3 },
+      ]);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.list();
+      const rated = result.items.find((r) => r.id === ratedId);
+      const unrated = result.items.find((r) => r.id !== ratedId);
+      expect(rated?.averageRating).toBe(4);
+      expect(rated?.ratingCount).toBe(2);
+      expect(unrated?.averageRating).toBeNull();
+      expect(unrated?.ratingCount).toBe(0);
+    });
+  });
 });

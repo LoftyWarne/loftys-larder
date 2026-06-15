@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  addDays,
   daysBetween,
   eachDateInRange,
   formatCivilDate,
@@ -116,6 +117,38 @@ describe('date-utils', () => {
       expect(
         daysBetween(parseCivilDate('2026-03-28'), parseCivilDate('2026-03-30')),
       ).toBe(3);
+    });
+  });
+
+  describe('addDays', () => {
+    it('shifts forward by a positive number of days', () => {
+      expect(formatCivilDate(addDays(parseCivilDate('2026-06-15'), 7))).toBe(
+        '2026-06-22',
+      );
+    });
+
+    it('shifts backward by a negative number of days', () => {
+      expect(formatCivilDate(addDays(parseCivilDate('2026-06-15'), -7))).toBe(
+        '2026-06-08',
+      );
+    });
+
+    it('returns the same date for an offset of zero', () => {
+      expect(formatCivilDate(addDays(parseCivilDate('2026-06-15'), 0))).toBe(
+        '2026-06-15',
+      );
+    });
+
+    it('crosses month boundaries', () => {
+      expect(formatCivilDate(addDays(parseCivilDate('2026-01-30'), 5))).toBe(
+        '2026-02-04',
+      );
+    });
+
+    it('is DST-stable across a BST spring-forward', () => {
+      expect(formatCivilDate(addDays(parseCivilDate('2026-03-28'), 2))).toBe(
+        '2026-03-30',
+      );
     });
   });
 });

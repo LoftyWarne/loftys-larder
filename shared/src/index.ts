@@ -170,6 +170,10 @@ export {
   type UpdatePlanRangeInput,
   updatePlanRangeResultSchema,
   type UpdatePlanRangeResult,
+  duplicatePlanInputSchema,
+  type DuplicatePlanInput,
+  duplicatePlanResultSchema,
+  type DuplicatePlanResult,
   planSlotLossSchema,
   type PlanSlotLoss,
 } from './schemas/plans.ts';

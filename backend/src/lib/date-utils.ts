@@ -73,6 +73,18 @@ export function eachDateInRange(start: Date, end: Date): Date[] {
   return dates;
 }
 
+// Shift a civil-day Date by a whole number of days. Negative values shift
+// backwards. Used by plan duplication (FEAT-29) to anchor a new plan's end
+// date and shift slot dates by the start-to-start offset without reaching
+// for raw Date arithmetic in domain code (DEC-33).
+export function addDays(date: Date, days: number): Date {
+  return civilDateAt({
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate() + days,
+  });
+}
+
 // Whole calendar days between two civil-day Dates, inclusive. `daysBetween(d, d)`
 // is 1. The plan overlap check uses this to enforce the max-range cap.
 export function daysBetween(start: Date, end: Date): number {

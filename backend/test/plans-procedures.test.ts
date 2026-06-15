@@ -9,7 +9,15 @@ import { and, eq, sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import { CURRENT_HOUSEHOLD_ID } from '../src/config.ts';
 import * as schema from '../src/db/schema/index.ts';
@@ -969,6 +977,304 @@ describe('plans procedures', () => {
             (prev.date === cur.date && prev.occasionId <= cur.occasionId),
         ).toBe(true);
       }
+    });
+  });
+
+  describe('duplicate', () => {
+    async function seedPlan(
+      start: Date,
+      end: Date,
+    ): Promise<{ planId: number; slotCount: number }> {
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.create({
+        startDate: formatCivilDate(start),
+        endDate: formatCivilDate(end),
+      });
+      return { planId: result.plan.id, slotCount: result.slotCount };
+    }
+
+    it('copies all slot assignments with dates shifted by the offset', async () => {
+      const today = todayInLondon();
+      const recipeId = await insertRecipe('Tofu Stir Fry');
+      const baseRecipeId = await insertRecipe('Basmati Rice', { isBase: true });
+
+      const sourceStart = addDays(today, -10);
+      const sourceEnd = addDays(today, -7);
+      const { planId: sourceId } = await seedPlan(sourceStart, sourceEnd);
+
+      const dinnerId = occasionIds[0];
+      const lunchId = occasionIds[1];
+      if (dinnerId === undefined || lunchId === undefined) {
+        throw new Error('expected two occasions');
+      }
+
+      // One recipe slot (with chef), one eat_out, the rest empty. Add a
+      // base-cook annotation to the recipe slot so the cooks_base_* fields
+      // get copied too.
+      await db
+        .update(mealPlanSlots)
+        .set({
+          slotType: 'recipe',
+          recipeId,
+          numberOfServings: 3,
+          chefUserId: USER_ID,
+          cooksBaseRecipeId: baseRecipeId,
+          cooksBaseServings: 6,
+        })
+        .where(
+          and(
+            eq(mealPlanSlots.planId, sourceId),
+            eq(mealPlanSlots.date, sourceStart),
+            eq(mealPlanSlots.occasionId, dinnerId),
+          ),
+        );
+      await db
+        .update(mealPlanSlots)
+        .set({ slotType: 'eat_out' })
+        .where(
+          and(
+            eq(mealPlanSlots.planId, sourceId),
+            eq(mealPlanSlots.date, addDays(sourceStart, 1)),
+            eq(mealPlanSlots.occasionId, lunchId),
+          ),
+        );
+
+      const newStart = addDays(today, 5);
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.duplicate({
+        planId: sourceId,
+        newStartDate: formatCivilDate(newStart),
+      });
+
+      // Duration preserved (4 days inclusive → endDate = newStart + 3).
+      expect(result.plan.startDate).toBe(formatCivilDate(newStart));
+      expect(result.plan.endDate).toBe(formatCivilDate(addDays(newStart, 3)));
+      expect(result.plan.createdByUserId).toBe(USER_ID);
+      expect(result.slotCount).toBe(4 * occasionIds.length);
+
+      const newSlots = await db
+        .select({
+          date: mealPlanSlots.date,
+          occasionId: mealPlanSlots.occasionId,
+          slotType: mealPlanSlots.slotType,
+          recipeId: mealPlanSlots.recipeId,
+          numberOfServings: mealPlanSlots.numberOfServings,
+          chefUserId: mealPlanSlots.chefUserId,
+          cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
+          cooksBaseServings: mealPlanSlots.cooksBaseServings,
+        })
+        .from(mealPlanSlots)
+        .where(eq(mealPlanSlots.planId, result.plan.id));
+
+      expect(newSlots).toHaveLength(4 * occasionIds.length);
+
+      const recipeSlot = newSlots.find(
+        (s) =>
+          formatCivilDate(s.date) === formatCivilDate(newStart) &&
+          s.occasionId === dinnerId,
+      );
+      expect(recipeSlot).toMatchObject({
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: 3,
+        chefUserId: USER_ID,
+        cooksBaseRecipeId: baseRecipeId,
+        cooksBaseServings: 6,
+      });
+
+      const eatOutSlot = newSlots.find(
+        (s) =>
+          formatCivilDate(s.date) === formatCivilDate(addDays(newStart, 1)) &&
+          s.occasionId === lunchId,
+      );
+      expect(eatOutSlot?.slotType).toBe('eat_out');
+      expect(eatOutSlot?.recipeId).toBeNull();
+
+      // Every other slot stays empty.
+      const nonAssigned = newSlots.filter(
+        (s) => s !== recipeSlot && s !== eatOutSlot,
+      );
+      for (const slot of nonAssigned) {
+        expect(slot.slotType).toBe('empty');
+        expect(slot.recipeId).toBeNull();
+      }
+
+      // Source plan is unchanged.
+      const sourceSlots = await db
+        .select({ id: mealPlanSlots.id })
+        .from(mealPlanSlots)
+        .where(eq(mealPlanSlots.planId, sourceId));
+      expect(sourceSlots).toHaveLength(4 * occasionIds.length);
+    });
+
+    it('allows duplicating a past plan into the future', async () => {
+      const today = todayInLondon();
+      const sourceId = await insertPlan({
+        startDate: addDays(today, -14),
+        endDate: addDays(today, -8),
+      });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.duplicate({
+        planId: sourceId,
+        newStartDate: formatCivilDate(addDays(today, 1)),
+      });
+
+      expect(result.plan.startDate).toBe(formatCivilDate(addDays(today, 1)));
+      expect(result.plan.endDate).toBe(formatCivilDate(addDays(today, 7)));
+    });
+
+    it('rejects overlap with an existing active plan via CONFLICT + PLAN_DATE_OVERLAP', async () => {
+      const today = todayInLondon();
+      const sourceId = await insertPlan({
+        startDate: addDays(today, -10),
+        endDate: addDays(today, -4),
+      });
+      const blockingId = await insertPlan({
+        startDate: addDays(today, 2),
+        endDate: addDays(today, 8),
+      });
+
+      const caller = createCaller(makeContext());
+      const error = await caller.plans
+        .duplicate({
+          planId: sourceId,
+          newStartDate: formatCivilDate(addDays(today, 1)),
+        })
+        .catch((e: unknown) => e);
+
+      expect(error).toMatchObject({
+        code: 'CONFLICT',
+        cause: { code: 'PLAN_DATE_OVERLAP' },
+      });
+      const cause = (error as { cause: { conflictingPlanIds: number[] } })
+        .cause;
+      expect(cause.conflictingPlanIds).toEqual([blockingId]);
+
+      // No partial state — source + blocker only.
+      const allPlans = await db.select({ id: mealPlans.id }).from(mealPlans);
+      expect(allPlans.map((p) => p.id).sort((a, b) => a - b)).toEqual(
+        [sourceId, blockingId].sort((a, b) => a - b),
+      );
+    });
+
+    it('exempts past plans from the overlap check', async () => {
+      const today = todayInLondon();
+      const sourceId = await insertPlan({
+        startDate: addDays(today, -20),
+        endDate: addDays(today, -16),
+      });
+      await insertPlan({
+        startDate: addDays(today, -10),
+        endDate: addDays(today, -6),
+      });
+
+      const caller = createCaller(makeContext());
+      // Duplicate into a range that overlaps the past plan but no
+      // active/future plan — should succeed.
+      const result = await caller.plans.duplicate({
+        planId: sourceId,
+        newStartDate: formatCivilDate(addDays(today, -8)),
+      });
+
+      expect(result.plan.startDate).toBe(formatCivilDate(addDays(today, -8)));
+      expect(result.plan.endDate).toBe(formatCivilDate(addDays(today, -4)));
+    });
+
+    it('treats touching boundaries as overlap (inclusive)', async () => {
+      const today = todayInLondon();
+      // Source range is 8 days inclusive → duplicated with newStart=today
+      // gives newEnd=today+7, exactly touching the blocker's start date.
+      const sourceId = await insertPlan({
+        startDate: addDays(today, -10),
+        endDate: addDays(today, -3),
+      });
+      await insertPlan({
+        startDate: addDays(today, 7),
+        endDate: addDays(today, 13),
+      });
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.plans.duplicate({
+          planId: sourceId,
+          newStartDate: formatCivilDate(today),
+        }),
+      ).rejects.toMatchObject({
+        code: 'CONFLICT',
+        cause: { code: 'PLAN_DATE_OVERLAP' },
+      });
+    });
+
+    it('returns NOT_FOUND for a plan in another household', async () => {
+      const today = todayInLondon();
+      const otherId = await insertPlan({
+        startDate: addDays(today, -5),
+        endDate: addDays(today, -3),
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.plans.duplicate({
+          planId: otherId,
+          newStartDate: formatCivilDate(addDays(today, 1)),
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('returns NOT_FOUND for a non-existent plan id', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.plans.duplicate({
+          planId: 99999,
+          newStartDate: formatCivilDate(todayInLondon()),
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('rolls back the plan insert when the slot copy throws', async () => {
+      const today = todayInLondon();
+      const { planId: sourceId } = await seedPlan(
+        addDays(today, -10),
+        addDays(today, -8),
+      );
+
+      // Wrap db.transaction so an error is thrown inside the callback after
+      // the procedure's writes complete. This triggers a real Postgres
+      // ROLLBACK; assertions below confirm neither the plan row nor the
+      // slot rows survived.
+      const originalTransaction = db.transaction.bind(db);
+      const spy = vi
+        .spyOn(db, 'transaction')
+        .mockImplementationOnce((fn: Parameters<typeof db.transaction>[0]) =>
+          originalTransaction(async (tx) => {
+            await fn(tx);
+            throw new Error('synthetic mid-transaction failure');
+          }),
+        );
+
+      const caller = createCaller(makeContext());
+      try {
+        await expect(
+          caller.plans.duplicate({
+            planId: sourceId,
+            newStartDate: formatCivilDate(addDays(today, 1)),
+          }),
+        ).rejects.toThrow();
+      } finally {
+        spy.mockRestore();
+      }
+
+      // No orphan plan or slots for the attempted newStart date.
+      const orphanPlans = await db
+        .select({ id: mealPlans.id })
+        .from(mealPlans)
+        .where(eq(mealPlans.startDate, addDays(today, 1)));
+      expect(orphanPlans).toHaveLength(0);
+
+      const allPlans = await db.select({ id: mealPlans.id }).from(mealPlans);
+      expect(allPlans.map((p) => p.id)).toEqual([sourceId]);
     });
   });
 });

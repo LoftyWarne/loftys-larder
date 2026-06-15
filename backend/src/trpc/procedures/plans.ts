@@ -7,6 +7,8 @@ import {
   createPlanResultSchema,
   deletePlanInputSchema,
   deletePlanResultSchema,
+  duplicatePlanInputSchema,
+  duplicatePlanResultSchema,
   getPlanInputSchema,
   getPlanResultSchema,
   listPlansInputSchema,
@@ -17,6 +19,7 @@ import {
   updatePlanRangeResultSchema,
   type CreatePlanResult,
   type DeletePlanResult,
+  type DuplicatePlanResult,
   type GetPlanResult,
   type ListPlansResult,
   type Plan,
@@ -31,6 +34,7 @@ import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import {
+  addDays,
   daysBetween,
   eachDateInRange,
   formatCivilDate,
@@ -366,6 +370,136 @@ export const plansRouter = router({
       });
 
       return { ...plan, slots };
+    }),
+
+  duplicate: protectedProcedure
+    .input(duplicatePlanInputSchema)
+    .output(duplicatePlanResultSchema)
+    .mutation(async ({ ctx, input }): Promise<DuplicatePlanResult> => {
+      const newStart = parseCivilDate(input.newStartDate);
+
+      const sourceRow = await loadHouseholdPlan(ctx.db, input.planId);
+
+      // Duration is preserved exactly. `daysBetween` is 1-based inclusive, so
+      // shifting `endDate` by `daysBetween - 1` keeps the same range length.
+      const offsetDays = daysBetween(sourceRow.startDate, newStart) - 1;
+      const newEnd = addDays(sourceRow.endDate, offsetDays);
+
+      const today = todayInLondon();
+
+      // Same overlap predicate as `create` (DEC-38): household-scoped, future
+      // or active plans only, inclusive boundary.
+      const conflicting = await ctx.db
+        .select({ id: mealPlans.id })
+        .from(mealPlans)
+        .where(
+          and(
+            eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+            gte(mealPlans.endDate, today),
+            sql`NOT (${mealPlans.endDate} < ${newStart} OR ${mealPlans.startDate} > ${newEnd})`,
+          ),
+        );
+      if (conflicting.length > 0) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'Plan overlaps with an existing active or future plan',
+          cause: {
+            code: 'PLAN_DATE_OVERLAP',
+            conflictingPlanIds: conflicting.map((row) => row.id),
+          },
+        });
+      }
+
+      // Load source slots and build a source-date → new-date map by walking
+      // both ranges in lockstep. Sidesteps per-slot arithmetic and keeps all
+      // date math inside `eachDateInRange` / `addDays`.
+      const sourceSlots = await ctx.db
+        .select({
+          date: mealPlanSlots.date,
+          occasionId: mealPlanSlots.occasionId,
+          slotType: mealPlanSlots.slotType,
+          recipeId: mealPlanSlots.recipeId,
+          numberOfServings: mealPlanSlots.numberOfServings,
+          chefUserId: mealPlanSlots.chefUserId,
+          cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
+          cooksBaseServings: mealPlanSlots.cooksBaseServings,
+        })
+        .from(mealPlanSlots)
+        .where(eq(mealPlanSlots.planId, sourceRow.id));
+
+      const sourceDates = eachDateInRange(
+        sourceRow.startDate,
+        sourceRow.endDate,
+      );
+      const newDates = eachDateInRange(newStart, newEnd);
+      const dateMap = new Map<string, Date>();
+      for (let i = 0; i < sourceDates.length; i++) {
+        const src = sourceDates[i];
+        const next = newDates[i];
+        if (!src || !next) continue;
+        dateMap.set(formatCivilDate(src), next);
+      }
+
+      const withTransaction = makeWithTransaction(ctx.db);
+      const { plan, slotCount } = await withTransaction(async (tx) => {
+        const inserted = await tx
+          .insert(mealPlans)
+          .values({
+            householdId: CURRENT_HOUSEHOLD_ID,
+            createdByUserId: ctx.user.id,
+            startDate: newStart,
+            endDate: newEnd,
+          })
+          .returning({
+            id: mealPlans.id,
+            startDate: mealPlans.startDate,
+            endDate: mealPlans.endDate,
+            createdByUserId: mealPlans.createdByUserId,
+          });
+        const row = inserted[0];
+        if (!row) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Plan insert returned no row',
+          });
+        }
+
+        if (sourceSlots.length === 0) {
+          return { plan: toPlanDto(row), slotCount: 0 };
+        }
+
+        const slotValues = sourceSlots.map((slot) => {
+          const shifted = dateMap.get(formatCivilDate(slot.date));
+          if (!shifted) {
+            // Source slot dates always fall within the source range so the
+            // map lookup never misses; this guard is defence-in-depth.
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: 'Slot date outside source plan range',
+            });
+          }
+          return {
+            planId: row.id,
+            date: shifted,
+            occasionId: slot.occasionId,
+            slotType: slot.slotType,
+            recipeId: slot.recipeId,
+            numberOfServings: slot.numberOfServings,
+            chefUserId: slot.chefUserId,
+            cooksBaseRecipeId: slot.cooksBaseRecipeId,
+            cooksBaseServings: slot.cooksBaseServings,
+          };
+        });
+
+        const insertedSlots = await tx
+          .insert(mealPlanSlots)
+          .values(slotValues)
+          .returning({ id: mealPlanSlots.id });
+
+        return { plan: toPlanDto(row), slotCount: insertedSlots.length };
+      });
+
+      return { plan, slotCount };
     }),
 });
 

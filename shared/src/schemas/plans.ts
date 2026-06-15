@@ -132,6 +132,21 @@ export const updatePlanRangeResultSchema = planSchema.extend({
 });
 export type UpdatePlanRangeResult = z.infer<typeof updatePlanRangeResultSchema>;
 
+// Duplicate copies a plan's slot assignments into a new plan anchored on
+// `newStartDate`. Duration is inherited from the source (so no `endDate` on
+// the input); slot dates are shifted by `newStartDate - source.startDate`.
+export const duplicatePlanInputSchema = z.object({
+  planId: planIdSchema,
+  newStartDate: civilDateSchema,
+});
+export type DuplicatePlanInput = z.infer<typeof duplicatePlanInputSchema>;
+
+export const duplicatePlanResultSchema = z.object({
+  plan: planSchema,
+  slotCount: z.number().int().nonnegative(),
+});
+export type DuplicatePlanResult = z.infer<typeof duplicatePlanResultSchema>;
+
 // Shape of the slot list surfaced on PLAN_DESTRUCTIVE_RANGE_CHANGE so the UI
 // can render a "these slots will be lost" confirm dialog.
 export const planSlotLossSchema = z.object({

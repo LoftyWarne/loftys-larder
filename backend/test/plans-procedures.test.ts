@@ -5,7 +5,7 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
@@ -149,7 +149,6 @@ describe('plans procedures', () => {
   const createCaller = appRouter.createCaller;
 
   interface InsertPlanOptions {
-    name: string;
     startDate: Date;
     endDate: Date;
     householdId?: string;
@@ -163,7 +162,6 @@ describe('plans procedures', () => {
         createdByUserId: USER_ID,
         startDate: options.startDate,
         endDate: options.endDate,
-        name: options.name,
       })
       .returning({ id: mealPlans.id });
     const row = inserted[0];
@@ -199,7 +197,6 @@ describe('plans procedures', () => {
 
       const caller = createCaller(makeContext());
       const result = await caller.plans.create({
-        name: 'Week of greens',
         startDate: start,
         endDate: end,
       });
@@ -228,7 +225,6 @@ describe('plans procedures', () => {
       const caller = createCaller(makeContext());
       await expect(
         caller.plans.create({
-          name: 'Backwards',
           startDate: formatCivilDate(addDays(today, 3)),
           endDate: formatCivilDate(today),
         }),
@@ -240,7 +236,6 @@ describe('plans procedures', () => {
       const caller = createCaller(makeContext());
       await expect(
         caller.plans.create({
-          name: 'Too long',
           startDate: formatCivilDate(today),
           endDate: formatCivilDate(addDays(today, 14)),
         }),
@@ -253,7 +248,6 @@ describe('plans procedures', () => {
     it('rejects overlap with an active plan, rolling back the insert', async () => {
       const today = todayInLondon();
       const existingId = await insertPlan({
-        name: 'Existing',
         startDate: today,
         endDate: addDays(today, 6),
       });
@@ -261,7 +255,6 @@ describe('plans procedures', () => {
       const caller = createCaller(makeContext());
       const error = await caller.plans
         .create({
-          name: 'Overlapper',
           startDate: formatCivilDate(addDays(today, 3)),
           endDate: formatCivilDate(addDays(today, 9)),
         })
@@ -282,7 +275,6 @@ describe('plans procedures', () => {
     it('treats touching boundaries as overlap (inclusive)', async () => {
       const today = todayInLondon();
       await insertPlan({
-        name: 'Existing',
         startDate: today,
         endDate: addDays(today, 6),
       });
@@ -290,7 +282,6 @@ describe('plans procedures', () => {
       const caller = createCaller(makeContext());
       await expect(
         caller.plans.create({
-          name: 'Same end day',
           startDate: formatCivilDate(addDays(today, 6)),
           endDate: formatCivilDate(addDays(today, 12)),
         }),
@@ -303,14 +294,12 @@ describe('plans procedures', () => {
     it('exempts past plans from the overlap check', async () => {
       const today = todayInLondon();
       await insertPlan({
-        name: 'Past',
         startDate: addDays(today, -10),
         endDate: addDays(today, -4),
       });
 
       const caller = createCaller(makeContext());
       const result = await caller.plans.create({
-        name: 'New plan',
         startDate: formatCivilDate(today),
         endDate: formatCivilDate(addDays(today, 6)),
       });
@@ -320,7 +309,6 @@ describe('plans procedures', () => {
     it('ignores plans belonging to other households', async () => {
       const today = todayInLondon();
       await insertPlan({
-        name: 'Other household plan',
         startDate: today,
         endDate: addDays(today, 6),
         householdId: OTHER_HOUSEHOLD_ID,
@@ -328,7 +316,6 @@ describe('plans procedures', () => {
 
       const caller = createCaller(makeContext());
       const result = await caller.plans.create({
-        name: 'Ours',
         startDate: formatCivilDate(today),
         endDate: formatCivilDate(addDays(today, 6)),
       });
@@ -340,7 +327,6 @@ describe('plans procedures', () => {
       const caller = createCaller(makeContext({ authenticated: false }));
       await expect(
         caller.plans.create({
-          name: 'No auth',
           startDate: formatCivilDate(today),
           endDate: formatCivilDate(today),
         }),
@@ -352,17 +338,14 @@ describe('plans procedures', () => {
     it('buckets plans by status relative to today', async () => {
       const today = todayInLondon();
       const pastId = await insertPlan({
-        name: 'Past',
         startDate: addDays(today, -10),
         endDate: addDays(today, -4),
       });
       const activeId = await insertPlan({
-        name: 'Active',
         startDate: addDays(today, -1),
         endDate: addDays(today, 2),
       });
       const futureId = await insertPlan({
-        name: 'Future',
         startDate: addDays(today, 5),
         endDate: addDays(today, 11),
       });
@@ -385,12 +368,10 @@ describe('plans procedures', () => {
     it('treats today as inclusive at both ends of active', async () => {
       const today = todayInLondon();
       const startsToday = await insertPlan({
-        name: 'Starts today',
         startDate: today,
         endDate: addDays(today, 3),
       });
       const endsToday = await insertPlan({
-        name: 'Ends today',
         startDate: addDays(today, -3),
         endDate: today,
       });
@@ -405,20 +386,18 @@ describe('plans procedures', () => {
     it('excludes plans from other households', async () => {
       const today = todayInLondon();
       await insertPlan({
-        name: 'Other',
         startDate: today,
         endDate: addDays(today, 3),
         householdId: OTHER_HOUSEHOLD_ID,
       });
-      await insertPlan({
-        name: 'Mine',
+      const mineId = await insertPlan({
         startDate: today,
         endDate: addDays(today, 3),
       });
 
       const caller = createCaller(makeContext());
       const all = await caller.plans.list({ status: 'all' });
-      expect(all.items.map((p) => p.name)).toEqual(['Mine']);
+      expect(all.items.map((p) => p.id)).toEqual([mineId]);
     });
   });
 
@@ -427,7 +406,6 @@ describe('plans procedures', () => {
       const today = todayInLondon();
       const caller = createCaller(makeContext());
       const created = await caller.plans.create({
-        name: 'Detail test',
         startDate: formatCivilDate(today),
         endDate: formatCivilDate(addDays(today, 1)),
       });
@@ -455,7 +433,6 @@ describe('plans procedures', () => {
       const today = todayInLondon();
       const recipeId = await insertRecipe('Tofu Stir Fry');
       const planId = await insertPlan({
-        name: 'Manual',
         startDate: today,
         endDate: today,
       });
@@ -493,7 +470,6 @@ describe('plans procedures', () => {
     it('returns NOT_FOUND for a plan in another household', async () => {
       const today = todayInLondon();
       const otherId = await insertPlan({
-        name: 'Other',
         startDate: today,
         endDate: today,
         householdId: OTHER_HOUSEHOLD_ID,
@@ -510,7 +486,6 @@ describe('plans procedures', () => {
       const today = todayInLondon();
       const caller = createCaller(makeContext());
       const created = await caller.plans.create({
-        name: 'To go',
         startDate: formatCivilDate(today),
         endDate: formatCivilDate(addDays(today, 2)),
       });
@@ -530,13 +505,11 @@ describe('plans procedures', () => {
       const today = todayInLondon();
       const caller = createCaller(makeContext());
       const first = await caller.plans.create({
-        name: 'First',
         startDate: formatCivilDate(today),
         endDate: formatCivilDate(addDays(today, 6)),
       });
       await caller.plans.delete({ id: first.plan.id });
       const second = await caller.plans.create({
-        name: 'Second',
         startDate: formatCivilDate(today),
         endDate: formatCivilDate(addDays(today, 6)),
       });
@@ -546,7 +519,6 @@ describe('plans procedures', () => {
     it('returns NOT_FOUND when deleting another households plan, leaving it intact', async () => {
       const today = todayInLondon();
       const otherId = await insertPlan({
-        name: 'Other',
         startDate: today,
         endDate: addDays(today, 2),
         householdId: OTHER_HOUSEHOLD_ID,
@@ -562,6 +534,441 @@ describe('plans procedures', () => {
         .from(mealPlans)
         .where(eq(mealPlans.id, otherId));
       expect(remaining).toHaveLength(1);
+    });
+  });
+
+  describe('updateRange', () => {
+    interface SlotRow {
+      id: number;
+      date: Date;
+      occasionId: number;
+      slotType: 'empty' | 'recipe' | 'eat_out' | 'takeaway' | 'leftovers';
+      recipeId: number | null;
+    }
+
+    async function listSlots(planId: number): Promise<SlotRow[]> {
+      return db
+        .select({
+          id: mealPlanSlots.id,
+          date: mealPlanSlots.date,
+          occasionId: mealPlanSlots.occasionId,
+          slotType: mealPlanSlots.slotType,
+          recipeId: mealPlanSlots.recipeId,
+        })
+        .from(mealPlanSlots)
+        .where(eq(mealPlanSlots.planId, planId));
+    }
+
+    async function seedPlan(
+      start: Date,
+      end: Date,
+    ): Promise<{ planId: number; slotCount: number }> {
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.create({
+        startDate: formatCivilDate(start),
+        endDate: formatCivilDate(end),
+      });
+      return { planId: result.plan.id, slotCount: result.slotCount };
+    }
+
+    it('extends forward by appending empty slots without disturbing existing ones', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 3));
+      const before = await listSlots(planId);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 6)),
+      });
+
+      expect(result.startDate).toBe(formatCivilDate(today));
+      expect(result.endDate).toBe(formatCivilDate(addDays(today, 6)));
+      expect(result.slots).toHaveLength(7 * occasionIds.length);
+
+      const after = await listSlots(planId);
+      const survivingIds = new Set(before.map((s) => s.id));
+      for (const original of before) {
+        expect(after.some((s) => s.id === original.id)).toBe(true);
+      }
+      const newSlots = after.filter((s) => !survivingIds.has(s.id));
+      expect(newSlots).toHaveLength(3 * occasionIds.length);
+      for (const slot of newSlots) {
+        expect(slot.slotType).toBe('empty');
+      }
+    });
+
+    it('extends backward by prepending empty slots', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 3));
+
+      const caller = createCaller(makeContext());
+      const newStart = addDays(today, -2);
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(newStart),
+        endDate: formatCivilDate(addDays(today, 3)),
+      });
+
+      expect(result.startDate).toBe(formatCivilDate(newStart));
+      expect(result.slots).toHaveLength(6 * occasionIds.length);
+      const slotDates = new Set(result.slots.map((s) => s.date));
+      expect(slotDates.has(formatCivilDate(newStart))).toBe(true);
+      expect(slotDates.has(formatCivilDate(addDays(today, -1)))).toBe(true);
+    });
+
+    it('shrinks from the end by deleting empty out-of-range slots', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 6));
+      const before = await listSlots(planId);
+      const beforeIdsForDay3 = new Set(
+        before
+          .filter(
+            (s) =>
+              formatCivilDate(s.date) === formatCivilDate(addDays(today, 3)),
+          )
+          .map((s) => s.id),
+      );
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 3)),
+      });
+
+      expect(result.endDate).toBe(formatCivilDate(addDays(today, 3)));
+      expect(result.slots).toHaveLength(4 * occasionIds.length);
+      // In-range slots (e.g. the original day 3 row) survive with their ids.
+      for (const id of beforeIdsForDay3) {
+        expect(result.slots.some((s) => s.id === id)).toBe(true);
+      }
+    });
+
+    it('shrinks from the start by deleting empty out-of-range slots', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 6));
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(addDays(today, 3)),
+        endDate: formatCivilDate(addDays(today, 6)),
+      });
+
+      expect(result.startDate).toBe(formatCivilDate(addDays(today, 3)));
+      expect(result.slots).toHaveLength(4 * occasionIds.length);
+      for (const slot of result.slots) {
+        expect(slot.date >= formatCivilDate(addDays(today, 3))).toBe(true);
+      }
+    });
+
+    it('applies a mixed shrink + extend as a symmetric diff, preserving in-range assignments', async () => {
+      const today = todayInLondon();
+      const recipeId = await insertRecipe('Pesto pasta');
+      const { planId } = await seedPlan(today, addDays(today, 4));
+      const occasionId = occasionIds[0];
+      if (occasionId === undefined) throw new Error('expected occasion');
+      // Assign a recipe to the slot at day+2 (which will remain in range).
+      const assignedDate = addDays(today, 2);
+      const [assignedSlot] = await db
+        .update(mealPlanSlots)
+        .set({ slotType: 'recipe', recipeId, numberOfServings: 2 })
+        .where(
+          and(
+            eq(mealPlanSlots.planId, planId),
+            eq(mealPlanSlots.date, assignedDate),
+            eq(mealPlanSlots.occasionId, occasionId),
+          ),
+        )
+        .returning({ id: mealPlanSlots.id });
+      if (!assignedSlot) throw new Error('expected assignment');
+
+      const caller = createCaller(makeContext());
+      // Shift the window: drop day 0, drop day 3-4, keep days 1-2, add days 5-6.
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(addDays(today, 1)),
+        endDate: formatCivilDate(addDays(today, 6)),
+      });
+
+      expect(result.slots).toHaveLength(6 * occasionIds.length);
+      const survivor = result.slots.find((s) => s.id === assignedSlot.id);
+      expect(survivor).toBeDefined();
+      expect(survivor?.slotType).toBe('recipe');
+      expect(survivor?.recipeId).toBe(recipeId);
+      expect(survivor?.numberOfServings).toBe(2);
+    });
+
+    it('is a no-op when the range is unchanged', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 3));
+      const before = await listSlots(planId);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 3)),
+      });
+
+      const after = await listSlots(planId);
+      expect(after.map((s) => s.id).sort()).toEqual(
+        before.map((s) => s.id).sort(),
+      );
+      expect(result.slots).toHaveLength(before.length);
+    });
+
+    it('rejects a destructive shrink without confirmation, leaving the plan untouched', async () => {
+      const today = todayInLondon();
+      const recipeId = await insertRecipe('Tofu Stir Fry');
+      const { planId } = await seedPlan(today, addDays(today, 6));
+      const occasionId = occasionIds[0];
+      if (occasionId === undefined) throw new Error('expected occasion');
+      const lostDate = addDays(today, 5);
+      const [assigned] = await db
+        .update(mealPlanSlots)
+        .set({ slotType: 'recipe', recipeId, numberOfServings: 3 })
+        .where(
+          and(
+            eq(mealPlanSlots.planId, planId),
+            eq(mealPlanSlots.date, lostDate),
+            eq(mealPlanSlots.occasionId, occasionId),
+          ),
+        )
+        .returning({ id: mealPlanSlots.id });
+      if (!assigned) throw new Error('expected assignment');
+
+      const caller = createCaller(makeContext());
+      const error = await caller.plans
+        .updateRange({
+          id: planId,
+          startDate: formatCivilDate(today),
+          endDate: formatCivilDate(addDays(today, 3)),
+        })
+        .catch((e: unknown) => e);
+
+      expect(error).toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'PLAN_DESTRUCTIVE_RANGE_CHANGE' },
+      });
+      const cause = (
+        error as {
+          cause: {
+            slots: {
+              id: number;
+              date: string;
+              occasionId: number;
+              slotType: string;
+              recipeId: number | null;
+            }[];
+          };
+        }
+      ).cause;
+      expect(cause.slots).toHaveLength(1);
+      expect(cause.slots[0]).toMatchObject({
+        id: assigned.id,
+        date: formatCivilDate(lostDate),
+        occasionId,
+        slotType: 'recipe',
+        recipeId,
+      });
+
+      const after = await listSlots(planId);
+      expect(after).toHaveLength(7 * occasionIds.length);
+      const [planAfter] = await db
+        .select({
+          startDate: mealPlans.startDate,
+          endDate: mealPlans.endDate,
+        })
+        .from(mealPlans)
+        .where(eq(mealPlans.id, planId));
+      expect(planAfter?.endDate.getTime()).toBe(addDays(today, 6).getTime());
+    });
+
+    it('proceeds with a destructive shrink when confirmDestructive is true', async () => {
+      const today = todayInLondon();
+      const recipeId = await insertRecipe('Sushi bowl');
+      const { planId } = await seedPlan(today, addDays(today, 6));
+      const occasionId = occasionIds[0];
+      if (occasionId === undefined) throw new Error('expected occasion');
+      const lostDate = addDays(today, 5);
+      await db
+        .update(mealPlanSlots)
+        .set({ slotType: 'recipe', recipeId, numberOfServings: 2 })
+        .where(
+          and(
+            eq(mealPlanSlots.planId, planId),
+            eq(mealPlanSlots.date, lostDate),
+            eq(mealPlanSlots.occasionId, occasionId),
+          ),
+        );
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 3)),
+        confirmDestructive: true,
+      });
+
+      expect(result.slots).toHaveLength(4 * occasionIds.length);
+      const after = await listSlots(planId);
+      expect(
+        after.some(
+          (s) => formatCivilDate(s.date) === formatCivilDate(lostDate),
+        ),
+      ).toBe(false);
+    });
+
+    it('does not require confirmation when shrunk dates only carry empty slots', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 6));
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 3)),
+      });
+      expect(result.slots).toHaveLength(4 * occasionIds.length);
+    });
+
+    it('rejects an overlap with another active plan and rolls back', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 3));
+      const neighbourId = await insertPlan({
+        startDate: addDays(today, 6),
+        endDate: addDays(today, 9),
+      });
+      const beforeSlots = await listSlots(planId);
+
+      const caller = createCaller(makeContext());
+      const error = await caller.plans
+        .updateRange({
+          id: planId,
+          startDate: formatCivilDate(today),
+          endDate: formatCivilDate(addDays(today, 7)),
+        })
+        .catch((e: unknown) => e);
+
+      expect(error).toMatchObject({
+        code: 'CONFLICT',
+        cause: { code: 'PLAN_DATE_OVERLAP' },
+      });
+      const cause = (error as { cause: { conflictingPlanIds: number[] } })
+        .cause;
+      expect(cause.conflictingPlanIds).toEqual([neighbourId]);
+
+      const afterSlots = await listSlots(planId);
+      expect(afterSlots.map((s) => s.id).sort()).toEqual(
+        beforeSlots.map((s) => s.id).sort(),
+      );
+    });
+
+    it('does not flag the plan itself as a self-conflict', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 3));
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 5)),
+      });
+      expect(result.endDate).toBe(formatCivilDate(addDays(today, 5)));
+    });
+
+    it('rejects an inverted range via Zod refine', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 3));
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.plans.updateRange({
+          id: planId,
+          startDate: formatCivilDate(addDays(today, 3)),
+          endDate: formatCivilDate(today),
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects a range longer than 14 days with PLAN_RANGE_TOO_LONG', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 3));
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.plans.updateRange({
+          id: planId,
+          startDate: formatCivilDate(today),
+          endDate: formatCivilDate(addDays(today, 14)),
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'PLAN_RANGE_TOO_LONG' },
+      });
+    });
+
+    it('rejects editing a plan whose current range is entirely in the past', async () => {
+      const today = todayInLondon();
+      const planId = await insertPlan({
+        startDate: addDays(today, -10),
+        endDate: addDays(today, -3),
+      });
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.plans.updateRange({
+          id: planId,
+          startDate: formatCivilDate(addDays(today, -10)),
+          endDate: formatCivilDate(today),
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'PLAN_PAST_NOT_EDITABLE' },
+      });
+    });
+
+    it('returns NOT_FOUND when targeting another households plan', async () => {
+      const today = todayInLondon();
+      const otherId = await insertPlan({
+        startDate: today,
+        endDate: addDays(today, 2),
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.plans.updateRange({
+          id: otherId,
+          startDate: formatCivilDate(today),
+          endDate: formatCivilDate(addDays(today, 3)),
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('returns slots ordered by date then occasionId', async () => {
+      const today = todayInLondon();
+      const { planId } = await seedPlan(today, addDays(today, 1));
+
+      const caller = createCaller(makeContext());
+      const result = await caller.plans.updateRange({
+        id: planId,
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 2)),
+      });
+
+      for (let i = 1; i < result.slots.length; i += 1) {
+        const prev = result.slots[i - 1];
+        const cur = result.slots[i];
+        if (!prev || !cur) throw new Error('expected slot');
+        expect(
+          prev.date < cur.date ||
+            (prev.date === cur.date && prev.occasionId <= cur.occasionId),
+        ).toBe(true);
+      }
     });
   });
 });

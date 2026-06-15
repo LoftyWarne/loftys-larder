@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import {
   createPlanInputSchema,
@@ -12,26 +13,38 @@ import {
   listPlansResultSchema,
   PLAN_MAX_RANGE_DAYS,
   planSchema,
+  updatePlanRangeInputSchema,
+  updatePlanRangeResultSchema,
   type CreatePlanResult,
   type DeletePlanResult,
   type GetPlanResult,
   type ListPlansResult,
   type Plan,
   type PlanSlot,
+  type PlanSlotLoss,
+  type UpdatePlanRangeResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
+import * as schema from '../../db/schema/index.ts';
 import { mealPlans, mealPlanSlots } from '../../db/schema/meal-plans.ts';
 import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
-import { makeWithTransaction } from '../../db/withTransaction.ts';
+import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import {
   daysBetween,
+  eachDateInRange,
   formatCivilDate,
   parseCivilDate,
   todayInLondon,
 } from '../../lib/date-utils.ts';
-import { generateEmptySlotsForRange } from '../../lib/slot-generation.ts';
+import {
+  generateEmptySlotsForDates,
+  generateEmptySlotsForRange,
+} from '../../lib/slot-generation.ts';
 import { protectedProcedure, router } from '../init.ts';
+
+type Schema = typeof schema;
+type DbHandle = NodePgDatabase<Schema> | Tx;
 
 export const plansRouter = router({
   create: protectedProcedure
@@ -81,19 +94,7 @@ export const plansRouter = router({
         });
       }
 
-      const occasionRows = await ctx.db
-        .select({ id: mealOccasions.id })
-        .from(mealOccasions)
-        .orderBy(asc(mealOccasions.id));
-      if (occasionRows.length === 0) {
-        // Reference data ships in the seed (`MEAL_OCCASIONS`); an empty
-        // table means deployment misconfiguration, not user error.
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'No meal occasions configured',
-        });
-      }
-      const occasionIds = occasionRows.map((row) => row.id);
+      const occasionIds = await loadOccasionIds(ctx.db);
 
       const withTransaction = makeWithTransaction(ctx.db);
       const { plan, slotCount } = await withTransaction(async (tx) => {
@@ -104,11 +105,9 @@ export const plansRouter = router({
             createdByUserId: ctx.user.id,
             startDate,
             endDate,
-            name: input.name,
           })
           .returning({
             id: mealPlans.id,
-            name: mealPlans.name,
             startDate: mealPlans.startDate,
             endDate: mealPlans.endDate,
             createdByUserId: mealPlans.createdByUserId,
@@ -155,7 +154,6 @@ export const plansRouter = router({
       const rows = await ctx.db
         .select({
           id: mealPlans.id,
-          name: mealPlans.name,
           startDate: mealPlans.startDate,
           endDate: mealPlans.endDate,
           createdByUserId: mealPlans.createdByUserId,
@@ -171,84 +169,8 @@ export const plansRouter = router({
     .input(getPlanInputSchema)
     .output(getPlanResultSchema)
     .query(async ({ ctx, input }): Promise<GetPlanResult> => {
-      const planRows = await ctx.db
-        .select({
-          id: mealPlans.id,
-          name: mealPlans.name,
-          startDate: mealPlans.startDate,
-          endDate: mealPlans.endDate,
-          createdByUserId: mealPlans.createdByUserId,
-        })
-        .from(mealPlans)
-        .where(
-          and(
-            eq(mealPlans.id, input.id),
-            eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
-          ),
-        )
-        .limit(1);
-      const planRow = planRows[0];
-      if (!planRow) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Plan not found',
-        });
-      }
-
-      // LEFT JOIN recipes without an `is_deleted` filter so historical slots
-      // referencing soft-deleted recipes still render (DEC-21). meal_occasions
-      // join provides the occasion name for the UI to label columns.
-      const slotRows = await ctx.db
-        .select({
-          id: mealPlanSlots.id,
-          planId: mealPlanSlots.planId,
-          date: mealPlanSlots.date,
-          occasionId: mealPlanSlots.occasionId,
-          occasionName: mealOccasions.name,
-          slotType: mealPlanSlots.slotType,
-          recipeId: mealPlanSlots.recipeId,
-          numberOfServings: mealPlanSlots.numberOfServings,
-          chefUserId: mealPlanSlots.chefUserId,
-          cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
-          cooksBaseServings: mealPlanSlots.cooksBaseServings,
-          recipeName: recipes.name,
-          recipeImageUrl: recipes.imageUrl,
-          recipeIsBase: recipes.isBase,
-          recipeIsDeleted: recipes.isDeleted,
-        })
-        .from(mealPlanSlots)
-        .innerJoin(
-          mealOccasions,
-          eq(mealPlanSlots.occasionId, mealOccasions.id),
-        )
-        .leftJoin(recipes, eq(mealPlanSlots.recipeId, recipes.id))
-        .where(eq(mealPlanSlots.planId, planRow.id))
-        .orderBy(asc(mealPlanSlots.date), asc(mealPlanSlots.occasionId));
-
-      const slots: PlanSlot[] = slotRows.map((row) => ({
-        id: row.id,
-        planId: row.planId,
-        date: formatCivilDate(row.date),
-        occasionId: row.occasionId,
-        occasionName: row.occasionName,
-        slotType: row.slotType,
-        recipeId: row.recipeId,
-        numberOfServings: row.numberOfServings,
-        chefUserId: row.chefUserId,
-        cooksBaseRecipeId: row.cooksBaseRecipeId,
-        cooksBaseServings: row.cooksBaseServings,
-        recipe:
-          row.recipeId === null || row.recipeName === null
-            ? null
-            : {
-                id: row.recipeId,
-                name: row.recipeName,
-                imageUrl: row.recipeImageUrl,
-                isBase: row.recipeIsBase ?? false,
-                isDeleted: row.recipeIsDeleted ?? false,
-              },
-      }));
-
+      const planRow = await loadHouseholdPlan(ctx.db, input.id);
+      const slots = await selectPlanSlots(ctx.db, planRow.id);
       return { ...toPlanDto(planRow), slots };
     }),
 
@@ -280,11 +202,175 @@ export const plansRouter = router({
       }
       return { id: row.id };
     }),
+
+  updateRange: protectedProcedure
+    .input(updatePlanRangeInputSchema)
+    .output(updatePlanRangeResultSchema)
+    .mutation(async ({ ctx, input }): Promise<UpdatePlanRangeResult> => {
+      const newStart = parseCivilDate(input.startDate);
+      const newEnd = parseCivilDate(input.endDate);
+
+      const planRow = await loadHouseholdPlan(ctx.db, input.id);
+      const today = todayInLondon();
+
+      // Past plans are immutable (DEC-83 follow-up; the planner UI only
+      // surfaces edits on active/future plans). Re-planning the same dates
+      // is supported via FEAT-29 duplication, not via mutating the original.
+      if (planRow.endDate < today) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Past plans cannot be edited',
+          cause: {
+            code: 'PLAN_PAST_NOT_EDITABLE',
+          },
+        });
+      }
+
+      if (daysBetween(newStart, newEnd) > PLAN_MAX_RANGE_DAYS) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Plan range cannot exceed ${PLAN_MAX_RANGE_DAYS.toString()} days`,
+          cause: {
+            code: 'PLAN_RANGE_TOO_LONG',
+            maxDays: PLAN_MAX_RANGE_DAYS,
+          },
+        });
+      }
+
+      // Overlap check (DEC-38) excluding self: shrinking or extending a
+      // plan must never report it as conflicting with itself.
+      const conflicting = await ctx.db
+        .select({ id: mealPlans.id })
+        .from(mealPlans)
+        .where(
+          and(
+            eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+            ne(mealPlans.id, planRow.id),
+            gte(mealPlans.endDate, today),
+            sql`NOT (${mealPlans.endDate} < ${newStart} OR ${mealPlans.startDate} > ${newEnd})`,
+          ),
+        );
+      if (conflicting.length > 0) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'Plan overlaps with an existing active or future plan',
+          cause: {
+            code: 'PLAN_DATE_OVERLAP',
+            conflictingPlanIds: conflicting.map((row) => row.id),
+          },
+        });
+      }
+
+      // Compute the symmetric date-set diff. Using formatted civil-date
+      // strings as the set key avoids comparing `Date` objects by reference.
+      const currentDates = new Set(
+        eachDateInRange(planRow.startDate, planRow.endDate).map(
+          formatCivilDate,
+        ),
+      );
+      const newDates = new Set(
+        eachDateInRange(newStart, newEnd).map(formatCivilDate),
+      );
+      const datesToAdd = [...newDates].filter((d) => !currentDates.has(d));
+      const datesToRemove = [...currentDates].filter((d) => !newDates.has(d));
+
+      // Pre-flight destructive-shrink check (spec implementation note: a
+      // separate read at household scale is cheap). Without confirmation,
+      // surface the list so the UI (FEAT-31) can render a confirm dialog.
+      if (datesToRemove.length > 0 && !input.confirmDestructive) {
+        const lostNonEmpty = await ctx.db
+          .select({
+            id: mealPlanSlots.id,
+            date: mealPlanSlots.date,
+            occasionId: mealPlanSlots.occasionId,
+            slotType: mealPlanSlots.slotType,
+            recipeId: mealPlanSlots.recipeId,
+          })
+          .from(mealPlanSlots)
+          .where(
+            and(
+              eq(mealPlanSlots.planId, planRow.id),
+              inArray(mealPlanSlots.date, datesToRemove.map(parseCivilDate)),
+              ne(mealPlanSlots.slotType, 'empty'),
+            ),
+          )
+          .orderBy(asc(mealPlanSlots.date), asc(mealPlanSlots.occasionId));
+
+        if (lostNonEmpty.length > 0) {
+          const slots: PlanSlotLoss[] = lostNonEmpty.map((row) => ({
+            id: row.id,
+            date: formatCivilDate(row.date),
+            occasionId: row.occasionId,
+            slotType: row.slotType,
+            recipeId: row.recipeId,
+          }));
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Shrink would discard assigned slots',
+            cause: {
+              code: 'PLAN_DESTRUCTIVE_RANGE_CHANGE',
+              slots,
+            },
+          });
+        }
+      }
+
+      const occasionIds = await loadOccasionIds(ctx.db);
+
+      const withTransaction = makeWithTransaction(ctx.db);
+      const { plan, slots } = await withTransaction(async (tx) => {
+        const updated = await tx
+          .update(mealPlans)
+          .set({ startDate: newStart, endDate: newEnd })
+          .where(
+            and(
+              eq(mealPlans.id, planRow.id),
+              eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .returning({
+            id: mealPlans.id,
+            startDate: mealPlans.startDate,
+            endDate: mealPlans.endDate,
+            createdByUserId: mealPlans.createdByUserId,
+          });
+        const row = updated[0];
+        if (!row) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Plan update returned no row',
+          });
+        }
+
+        if (datesToRemove.length > 0) {
+          await tx
+            .delete(mealPlanSlots)
+            .where(
+              and(
+                eq(mealPlanSlots.planId, row.id),
+                inArray(mealPlanSlots.date, datesToRemove.map(parseCivilDate)),
+              ),
+            );
+        }
+        if (datesToAdd.length > 0) {
+          await generateEmptySlotsForDates(
+            tx,
+            row.id,
+            datesToAdd.map(parseCivilDate),
+            occasionIds,
+          );
+        }
+
+        const refreshed = await selectPlanSlots(tx, row.id);
+        return { plan: toPlanDto(row), slots: refreshed };
+      });
+
+      return { ...plan, slots };
+    }),
 });
 
 interface PlanRow {
   id: number;
-  name: string;
   startDate: Date;
   endDate: Date;
   createdByUserId: string | null;
@@ -293,9 +379,106 @@ interface PlanRow {
 function toPlanDto(row: PlanRow): Plan {
   return planSchema.parse({
     id: row.id,
-    name: row.name,
     startDate: formatCivilDate(row.startDate),
     endDate: formatCivilDate(row.endDate),
     createdByUserId: row.createdByUserId,
   });
+}
+
+async function loadHouseholdPlan(db: DbHandle, id: number): Promise<PlanRow> {
+  const rows = await db
+    .select({
+      id: mealPlans.id,
+      startDate: mealPlans.startDate,
+      endDate: mealPlans.endDate,
+      createdByUserId: mealPlans.createdByUserId,
+    })
+    .from(mealPlans)
+    .where(
+      and(
+        eq(mealPlans.id, id),
+        eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Plan not found',
+    });
+  }
+  return row;
+}
+
+async function loadOccasionIds(db: DbHandle): Promise<number[]> {
+  const rows = await db
+    .select({ id: mealOccasions.id })
+    .from(mealOccasions)
+    .orderBy(asc(mealOccasions.id));
+  if (rows.length === 0) {
+    // Reference data ships in the seed (`MEAL_OCCASIONS`); an empty
+    // table means deployment misconfiguration, not user error.
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'No meal occasions configured',
+    });
+  }
+  return rows.map((row) => row.id);
+}
+
+// LEFT JOIN recipes without an `is_deleted` filter so historical slots
+// referencing soft-deleted recipes still render (DEC-21). meal_occasions
+// join provides the occasion name for the UI to label columns.
+async function selectPlanSlots(
+  db: DbHandle,
+  planId: number,
+): Promise<PlanSlot[]> {
+  const rows = await db
+    .select({
+      id: mealPlanSlots.id,
+      planId: mealPlanSlots.planId,
+      date: mealPlanSlots.date,
+      occasionId: mealPlanSlots.occasionId,
+      occasionName: mealOccasions.name,
+      slotType: mealPlanSlots.slotType,
+      recipeId: mealPlanSlots.recipeId,
+      numberOfServings: mealPlanSlots.numberOfServings,
+      chefUserId: mealPlanSlots.chefUserId,
+      cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
+      cooksBaseServings: mealPlanSlots.cooksBaseServings,
+      recipeName: recipes.name,
+      recipeImageUrl: recipes.imageUrl,
+      recipeIsBase: recipes.isBase,
+      recipeIsDeleted: recipes.isDeleted,
+    })
+    .from(mealPlanSlots)
+    .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
+    .leftJoin(recipes, eq(mealPlanSlots.recipeId, recipes.id))
+    .where(eq(mealPlanSlots.planId, planId))
+    .orderBy(asc(mealPlanSlots.date), asc(mealPlanSlots.occasionId));
+
+  return rows.map((row) => ({
+    id: row.id,
+    planId: row.planId,
+    date: formatCivilDate(row.date),
+    occasionId: row.occasionId,
+    occasionName: row.occasionName,
+    slotType: row.slotType,
+    recipeId: row.recipeId,
+    numberOfServings: row.numberOfServings,
+    chefUserId: row.chefUserId,
+    cooksBaseRecipeId: row.cooksBaseRecipeId,
+    cooksBaseServings: row.cooksBaseServings,
+    recipe:
+      row.recipeId === null || row.recipeName === null
+        ? null
+        : {
+            id: row.recipeId,
+            name: row.recipeName,
+            imageUrl: row.recipeImageUrl,
+            isBase: row.recipeIsBase ?? false,
+            isDeleted: row.recipeIsDeleted ?? false,
+          },
+  }));
 }

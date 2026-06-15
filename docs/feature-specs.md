@@ -1104,10 +1104,10 @@ Conventions:
 - `shared/src/schemas/plans.ts`
 - `backend/src/lib/date-utils.ts` (`todayInLondon()`, `eachDateInRange`, `daysBetween`, `parseCivilDate`, `formatCivilDate`)
 - `backend/src/lib/slot-generation.ts` (`generateEmptySlotsForRange(planId, start, end, occasionIds)`)
-- `backend/src/db/schema/meal-plans.ts` (added the `name` column FEAT-12 missed; see migration `0004`)
+- `backend/src/db/schema/meal-plans.ts` (no `name` column; see DEC-83 — date range is the identifier)
 
 **Acceptance criteria:**
-- [ ] `create({ name, startDate, endDate })` validates start ≤ end; rejects with `CONFLICT` (`cause.code = 'PLAN_DATE_OVERLAP'`) if any plan with `endDate >= today` overlaps the range; rejects with `BAD_REQUEST` (`cause.code = 'PLAN_RANGE_TOO_LONG'`) if the range exceeds `PLAN_MAX_RANGE_DAYS` (14)
+- [ ] `create({ startDate, endDate })` validates start ≤ end; rejects with `CONFLICT` (`cause.code = 'PLAN_DATE_OVERLAP'`) if any plan with `endDate >= today` overlaps the range; rejects with `BAD_REQUEST` (`cause.code = 'PLAN_RANGE_TOO_LONG'`) if the range exceeds `PLAN_MAX_RANGE_DAYS` (14)
 - [ ] On accept, inserts the plan and generates empty slots for every (date × meal occasion) inside a `withTransaction`
 - [ ] `list({ status: 'active' | 'past' | 'future' | 'all' })` filters per `todayInLondon()`: active = `today BETWEEN startDate AND endDate` (inclusive), past = `endDate < today`, future = `startDate > today`
 - [ ] `get(planId)` returns the plan + all slots, including the joined recipe sub-shape on assigned slots (rendering soft-deleted recipes — DEC-21)
@@ -1195,7 +1195,7 @@ Conventions:
 
 **Implementation notes:**
 - This is the cleanest way to test the transaction helper, since failure mid-copy must leave no orphan plan.
-- The new plan's `name` could be `Copy of <name>` or take an explicit `newName` input — pick one (suggest explicit input).
+- Plans have no `name` (DEC-83); the duplicate is identified by its new date range.
 
 **Manual verification:**
 1. Duplicate a plan to a fresh future date — new plan with identical slot pattern offset by the date delta.
@@ -1387,8 +1387,8 @@ Conventions:
 
 **Acceptance criteria:**
 - [ ] Status filter (radio or tabs): active / past / future / all (default: active)
-- [ ] New-plan dialog: name, start date, end date; calls `plans.create`; on success, navigates to the new plan
-- [ ] Plan card: name, date range, slot-fill summary (e.g. "12/14 slots assigned"); actions: open, duplicate, delete
+- [ ] New-plan dialog: start date, end date; calls `plans.create`; on success, navigates to the new plan
+- [ ] Plan card: date range, slot-fill summary (e.g. "12/14 slots assigned"); actions: open, duplicate, delete
 - [ ] Duplicate action opens a small dialog asking for the new start date and name
 - [ ] Soft-delete prompts a confirm
 

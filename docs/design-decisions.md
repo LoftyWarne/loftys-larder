@@ -868,6 +868,16 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** A "trash / restore" UI gets proposed, or a usage pattern emerges where the cook routinely deletes plans they later regret. The migration to tombstoning is additive — add a column, flip `delete` to update, gate overlap on it.
 - **Cross-refs:** FEAT-27 (origin), DEC-21 (contrast: recipes *do* tombstone because slots reference them), DEC-29 (account-deletion tombstoning has independent motivation — user-row preservation for audit-trace).
 
+### DEC-83 — Plans have no `name` column; date range is the identifier
+
+- **Chosen:** `meal_plans` carries `(start_date, end_date)` but no `name` text column. The new-plan dialog (FEAT-31) collects start date + end date only; plan cards and list rows render the date range plus a slot-fill summary. FEAT-29 duplication identifies the copy by its new date range, not a "Copy of …" string.
+- **Alternatives:** Required user-supplied name (FEAT-27's original wording, migration `0004_worthless_storm`); optional name with date-range fallback.
+- **Why it won:** Single-household MVP (DEC-17) used weekly. The plan overlap rule (DEC-38) already guarantees `(start_date, end_date)` is unique within the active/future window, so the date range is a sufficient identifier on its own. Past plans are likewise distinguishable by their range. A required name adds friction at every create call (one more field to invent) with no compensating affordance — the cook isn't browsing a long list of semantically labelled plans, they're looking at a handful of recent weeks. Reversible if a real semantic-label need emerges.
+- **Consequences (+):** New-plan dialog is two fields. `plans.create` input is `{ startDate, endDate }`. One less Zod schema (`planNameSchema` removed). One less surface for the planner UI to render.
+- **Consequences (−):** No way to label "Christmas week" / "Whole30 reset" / etc. A future re-introduction is a small forward migration (`ALTER TABLE meal_plans ADD COLUMN name text`) and adding the field back to the create input, but cards, list views, and FEAT-29 will need to learn about it again.
+- **Revisit when:** A second user joins the household and naming a plan would disambiguate "whose week is this"; or a public-archive / sharing surface (currently a non-goal) is proposed where semantic labels matter; or the user reports actively wanting to label specific plans.
+- **Cross-refs:** FEAT-27 (`create` input now `{ startDate, endDate }`), FEAT-29 (duplication identifies by date range), FEAT-31 (new-plan dialog + plan card), DEC-17 (single-household assumption underpins the choice), DEC-38 (overlap rule guarantees range-as-identifier in the active window).
+
 ---
 
 ## Most Worth Deep Consideration on Revisit

@@ -139,9 +139,7 @@ export {
   type DeleteRecipeDraftResult,
 } from './schemas/recipe-drafts.ts';
 export {
-  PLAN_NAME_MAX_LENGTH,
   PLAN_MAX_RANGE_DAYS,
-  planNameSchema,
   planStatusSchema,
   type PlanStatus,
   slotTypeSchema,
@@ -168,6 +166,12 @@ export {
   type DeletePlanInput,
   deletePlanResultSchema,
   type DeletePlanResult,
+  updatePlanRangeInputSchema,
+  type UpdatePlanRangeInput,
+  updatePlanRangeResultSchema,
+  type UpdatePlanRangeResult,
+  planSlotLossSchema,
+  type PlanSlotLoss,
 } from './schemas/plans.ts';
 export {
   ingredientNameSchema,

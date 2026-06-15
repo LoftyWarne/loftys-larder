@@ -13,14 +13,7 @@ const recipeIdSchema = z.number().int().positive();
 
 const civilDateSchema = z.iso.date();
 
-export const PLAN_NAME_MAX_LENGTH = 120;
 export const PLAN_MAX_RANGE_DAYS = 14;
-
-export const planNameSchema = z
-  .string()
-  .trim()
-  .min(1, 'Plan name is required')
-  .max(PLAN_NAME_MAX_LENGTH);
 
 export const planStatusSchema = z.enum(['active', 'past', 'future', 'all']);
 export type PlanStatus = z.infer<typeof planStatusSchema>;
@@ -66,7 +59,6 @@ export type PlanSlot = z.infer<typeof planSlotSchema>;
 
 export const planSchema = z.object({
   id: planIdSchema,
-  name: z.string(),
   startDate: civilDateSchema,
   endDate: civilDateSchema,
   createdByUserId: z.string().nullable(),
@@ -75,7 +67,6 @@ export type Plan = z.infer<typeof planSchema>;
 
 export const createPlanInputSchema = z
   .object({
-    name: planNameSchema,
     startDate: civilDateSchema,
     endDate: civilDateSchema,
   })
@@ -120,3 +111,34 @@ export const deletePlanResultSchema = z.object({
   id: planIdSchema,
 });
 export type DeletePlanResult = z.infer<typeof deletePlanResultSchema>;
+
+export const updatePlanRangeInputSchema = z
+  .object({
+    id: planIdSchema,
+    startDate: civilDateSchema,
+    endDate: civilDateSchema,
+    confirmDestructive: z.boolean().optional(),
+  })
+  .refine((value) => value.startDate <= value.endDate, {
+    path: ['endDate'],
+    message: 'End date must be on or after start date',
+  });
+export type UpdatePlanRangeInput = z.infer<typeof updatePlanRangeInputSchema>;
+
+// Result is structurally identical to getPlanResultSchema — same projection
+// pattern (plan dto + slots ordered by date, occasionId).
+export const updatePlanRangeResultSchema = planSchema.extend({
+  slots: z.array(planSlotSchema),
+});
+export type UpdatePlanRangeResult = z.infer<typeof updatePlanRangeResultSchema>;
+
+// Shape of the slot list surfaced on PLAN_DESTRUCTIVE_RANGE_CHANGE so the UI
+// can render a "these slots will be lost" confirm dialog.
+export const planSlotLossSchema = z.object({
+  id: slotIdSchema,
+  date: civilDateSchema,
+  occasionId: occasionIdSchema,
+  slotType: slotTypeSchema,
+  recipeId: recipeIdSchema.nullable(),
+});
+export type PlanSlotLoss = z.infer<typeof planSlotLossSchema>;

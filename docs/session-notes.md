@@ -4,6 +4,44 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-15 — FEAT-30 (Slot procedures — recipe only)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean. Backend: 20/20 in the new `slots-procedures.test.ts`; 71/71 in `plans-procedures.test.ts` + `meal-plans-schema.test.ts` (no regressions from the new `comment` column). Testcontainers ran via the now-familiar Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). DoD boxes in `docs/feature-specs.md §FEAT-30` left unticked — human action.
+
+### Decisions taken at kick-off
+
+- **Add the `comment` column on FEAT-30**, despite the kick-off proposal to defer. The FEAT-30 spec input lists `comment?` and FEAT-31's editor sheet expects it; the migration is a one-liner (`ALTER TABLE meal_plan_slots ADD COLUMN comment text`), nullable, no default. FEAT-29's duplicate already had a placeholder TODO; that landed in this commit too.
+- **Full-replace input semantics, not patch.** Caller declares the desired final state of every editable field on the slot (`slotType`, `recipeId`, `numberOfServings`, `chefUserId`, `comment`). Two Zod `refine`s encode the biconditional `slotType === 'recipe' ⇔ recipeId !== null && numberOfServings !== null`, mirroring the DB CHECK constraints so the procedure returns a clean domain error before the write. Simpler than threading "omitted = unchanged" through the procedure, and matches the FEAT-31 editor-sheet save model (save = whole form).
+- **"Edit in place" gate is `recipeId === existing.recipeId`.** Pickability is only re-checked when the assignment is *changing*. A slot whose recipe was soft-deleted after assignment keeps working: servings/comment/chef can be edited; only switching to a *different* (soft-deleted) recipe is rejected. Test coverage on both branches.
+- **`empty` clears chef + comment too.** Schema doesn't force it — it's the caller's responsibility — but the UI will pass `null` for both when transitioning to empty, and the procedure writes what comes in. Coherent reading of "empty = nothing assigned".
+- **`chefUserId` validity = exists in `users`.** Single-household MVP (DEC-17) has no membership table; the FK already enforces SET NULL on user delete (DEC-29). Procedure-layer existence check returns a typed domain error (`SLOT_CHEF_NOT_FOUND`) rather than letting the DB FK throw.
+- **`cooks_base_*` deliberately untouched here** (FEAT-32 territory). Procedure never reads or writes those columns; new test asserts pre-existing values survive transitions in case any prior fixture set them.
+- **`SLOT_COMMENT_MAX_LENGTH = 2000`**, matching `RECIPE_COMMENT_MAX_LENGTH`. Untighter limit not explicitly requested; mirroring the recipe-comment cap keeps the constant easy to reason about.
+- **File path follows the existing `trpc/procedures/` convention**, not the spec's `trpc/routers/slots.ts`. Same pattern as every other router file in the repo; the spec wording predates the directory layout convergence.
+
+### Drift from kick-off plan
+
+1. **Schema change scope expanded** to add `meal_plan_slots.comment text` — initially proposed dropping the `comment` field from FEAT-30 until a separate migration. User vetoed; column added inline.
+2. **Domain error code list grew by four** (`SLOT_NOT_FOUND`, `SLOT_RECIPE_NOT_PICKABLE`, `SLOT_RECIPE_CROSS_HOUSEHOLD`, `SLOT_CHEF_NOT_FOUND`). All thread through the existing `domainErrorCauseSchema` (DEC-35) — no new error machinery.
+3. **`plans.duplicate` updated to copy `comment`** alongside the six fields it already carries. This is the FEAT-29 follow-up that was left as a TODO in last session's notes; FEAT-30's column landing was the natural moment to clear it.
+
+### Implementation details worth carrying
+
+- **Household scope via plan join, not a slot column.** `meal_plan_slots` has no `household_id` — scope flows through `plan_id → meal_plans.household_id`. The `loadHouseholdSlot` helper does the inner-join + scoped WHERE in one go and returns `NOT_FOUND` (`SLOT_NOT_FOUND`) on miss; cross-household isolation is identical to the existing pattern in `plans.get`.
+- **No `withTransaction`.** Reads-then-single-UPDATE — the cross-cutting #4 rule applies to multi-statement *writes*. A read followed by one mutating statement is allowed to skip the wrapper.
+- **Single UPDATE writes all five mutable columns**; the schema refines guarantee coherence before the SQL runs. DB CHECK constraints are the defence-in-depth layer if the refines ever drift.
+- **Re-select returns the full `PlanSlot` DTO.** Mirrors `selectPlanSlots` in `plans.ts` but for a single slot — gives the FEAT-31 optimistic-update hook a server-confirmed row to swap into the cache without re-fetching the whole plan.
+- **`assertRecipeAssignable` reads `householdId` + `isDeleted` in one query** and returns a cross-household error before the deleted check, so callers can't probe deletion state of foreign-household recipes. Same isolation discipline as the rest of the surface.
+- **Recipe pickability check skipped on edit-in-place** by comparing input `recipeId` to the slot's *existing* `recipeId`. The compare happens against the DB row loaded for scope validation, so no extra round-trip.
+
+### Open follow-ups
+
+- **FEAT-31 will need a slot-editor sheet that drives this procedure.** The full-replace input shape is friendly to a form-submit; the editor just collects the five fields and posts.
+- **`SLOT_COMMENT_MAX_LENGTH = 2000`** is a sensible default but isn't backed by a DEC. If field-usage patterns suggest a tighter cap (e.g. 200 chars for one-line "use the big pan" hints), revisit.
+- **`assertUserExists` does an existence-only check.** If we ever care that the chef belongs to *this* household (true multi-tenancy), this is the one site that needs widening — the FK alone won't catch it because users aren't yet scoped to a household.
+
+---
+
 ## 2026-06-15 — FEAT-29 (Plan duplication)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint` clean across all three workspaces. Backend: 41/41 in `plans-procedures.test.ts` (33 pre-existing + 8 new for `duplicate`); 19/19 in `date-utils.test.ts` (14 pre-existing + 5 new for `addDays`); 354/354 backend-wide. Testcontainers ran via the Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). DoD boxes in `docs/feature-specs.md §FEAT-29` left unticked — human action. Manual gate (duplicate a populated plan; new plan shows identical assignments offset by the date delta) is owed by the human.

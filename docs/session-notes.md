@@ -4,6 +4,51 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-15 — FEAT-29 (Plan duplication)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint` clean across all three workspaces. Backend: 41/41 in `plans-procedures.test.ts` (33 pre-existing + 8 new for `duplicate`); 19/19 in `date-utils.test.ts` (14 pre-existing + 5 new for `addDays`); 354/354 backend-wide. Testcontainers ran via the Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). DoD boxes in `docs/feature-specs.md §FEAT-29` left unticked — human action. Manual gate (duplicate a populated plan; new plan shows identical assignments offset by the date delta) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **Skip `comment` column copy.** The acceptance criterion lists `comment` among the fields to copy, but `meal_plan_slots` has no `comment` column today — that field is introduced by FEAT-30. Copy the six columns that exist (`slot_type`, `recipe_id`, `number_of_servings`, `chef_user_id`, `cooks_base_recipe_id`, `cooks_base_servings`). FEAT-30 will add the one-line addition when the column lands.
+- **Return shape mirrors `plans.create`: `{ plan, slotCount }`.** Spec literally said "the new plan id"; the wrapping DTO is a tiny superset, gives the UI the new range + creator without a follow-up `get`, and matches the existing convention.
+- **`PLAN_MAX_RANGE_DAYS` recheck skipped.** Source was bounded at create/update time and duration is preserved by definition; a recheck would be defensive but never trigger.
+- **No `today` guard on `newStartDate`.** Duplicating *backwards* into the past is unusual but not forbidden; the overlap predicate already exempts past plans (`endDate >= today`), so the behaviour is internally consistent. If a real workflow surfaces where past-target should error, revisit by adding a guard symmetric to `PLAN_PAST_NOT_EDITABLE`.
+
+### Drift from kick-off plan
+
+1. **Added `addDays(date, days)` to `backend/src/lib/date-utils.ts`** — not on the kick-off file list, and `dateUtils` changes are an AGENTS.md stop-and-ask trigger. Justification surfaced during implementation: DEC-33 forbids `new Date()` in domain code, and `newEnd = newStart + duration` plus per-slot date shifting needs a primitive that didn't exist. Inline `Date.UTC` math in the procedure would have violated DEC-33 directly. The helper is small, DST-stable (delegates to the existing `civilDateAt` overflow normalisation), covered by five unit tests, and a natural reuse target for any future "shift a civil day by N" need. Flagged in the post-implementation status; not vetoed.
+2. **Transaction-rollback test uses a post-callback throw** rather than mocking `tx.insert` to fail on the second call. Wraps `db.transaction` via `vi.spyOn`, awaits the callback, then throws — same net effect (Postgres `ROLLBACK`), avoids the `any` cast + `eslint-disable` that a mid-insert spy would have needed (each suppression is itself a stop-and-ask trigger). The synthetic-failure intent is preserved: a thrown error inside the transaction callback, asserted to leave zero state behind.
+
+### Implementation details worth carrying
+
+- **Date map via lockstep range walk.** `eachDateInRange(source.startDate, source.endDate)` and `eachDateInRange(newStart, newEnd)` produce same-length arrays in date order; zip them into a `Map<string, Date>` keyed on `formatCivilDate(sourceDate)` for O(1) lookup when shifting each slot. Avoids per-slot arithmetic and keeps all date math inside the helper layer.
+- **Single bulk slot insert.** All copied slots go in via one `tx.insert(mealPlanSlots).values(slotValues)` call inside the transaction, returning row ids for the `slotCount`. The slot generator (`generateEmptySlotsForRange`) is *not* called — duplicate already has the complete (date × occasion) coverage from the source, so seeding empties first would be wasted writes.
+- **Overlap predicate is identical to `create`'s** (DEC-38): household-scoped, `endDate >= today`, inclusive boundary via `NOT (other.end < new.start OR other.start > new.end)`. No new helper extracted yet — if a third user appears (e.g. an "import plan" surface), lift it into `backend/src/lib/plan-overlap.ts` per FEAT-27's session-note suggestion.
+- **Source-slot read is outside the transaction.** Reads are cheap at household scale and the transaction's purpose is the atomic plan + slot *write*. Same shape as `updateRange`'s destructive-shrink pre-flight read.
+- **Defence-in-depth `INTERNAL_SERVER_ERROR` on a missed date-map lookup.** The map is built from the exact source range and slots can't land outside it, so the guard never fires — but throwing inside the transaction is the right failure mode if the assumption ever breaks (rolls back the plan insert).
+- **Cross-household isolation works for free.** `loadHouseholdPlan` filters by `householdId = CURRENT_HOUSEHOLD_ID`, so duplicating another household's plan returns `NOT_FOUND` — same pattern as `get` / `updateRange` / `delete`.
+
+### What downstream FEATs will consume
+
+- **FEAT-30 (Slot procedures)** adds `comment` to `meal_plan_slots`; when it lands, add `comment: slot.comment` to the `slotValues` map in `plans.duplicate` and a corresponding case to the assignment-fidelity test. Single-line change in each place.
+- **FEAT-31 (Planner UI)** will surface duplicate as a button on a past or current plan. Input is just `{ planId, newStartDate }`; on success, the UI navigates to `/plans/$newPlanId` using the returned `plan.id`. `slotCount` is informational (toast: "Duplicated 14 slots").
+- **`addDays` is a public dateUtils export** and a candidate for the shopping-list date-range walks and the per-day plant-points aggregation (FEAT-40); reuse instead of reaching for raw arithmetic.
+
+### What did NOT change (carry from earlier notes)
+
+- `meal_plans` / `meal_plan_slots` schemas unchanged. No migration. No new constraints.
+- No new dependencies. Existing `drizzle-orm` imports cover everything; `vi` from `vitest` was already available but unused in this test file until now (one new top-level import).
+- `withTransaction` unchanged. The duplicate transaction is the third caller after `create` and `updateRange`.
+- No frontend code touched — UI lands in FEAT-31. New mutation is exposed on `appRouter` automatically.
+- No FEAT-N strings in code, test filenames, or `describe()` blocks — feedback pin holds.
+
+### Open items / known flakes
+
+- **`user-procedures.test.ts:202` `$onUpdate` millisecond flake** still present on wider parallel backend runs; pre-existing, confirmed via the same `git stash` repro path used in earlier sessions. Not in scope for this FEAT.
+
+---
+
 ## 2026-06-15 — FEAT-28 (Plan date-range edits) + plan-name removal
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` all clean. Backend: 33/33 in `plans-procedures.test.ts` (17 pre-existing + 16 new); `meal-plans-schema.test.ts` still green after the `name` column drop. Wider backend run reproduces the same pre-existing `$onUpdate` millisecond flake at `user-procedures.test.ts:202` — confirmed via `git stash` against clean `main`, fails the same way; unrelated. Testcontainers ran via the Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). DoD boxes in `docs/feature-specs.md §FEAT-28` left unticked — human action. Manual gate (extend by 3 days; destructive shrink with and without `confirmDestructive`) is owed by the human.

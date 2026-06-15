@@ -41,6 +41,22 @@ vi.mock('@/components/recipe-comments.tsx', () => ({
   ),
 }));
 
+vi.mock('@/components/related-recipes.tsx', () => ({
+  RelatedRecipes: ({
+    recipeId,
+    isDisabled,
+  }: {
+    recipeId: number;
+    isDisabled?: boolean;
+  }) => (
+    <div
+      data-testid="related-recipes-mock"
+      data-recipe-id={String(recipeId)}
+      data-disabled={isDisabled ? 'true' : 'false'}
+    />
+  ),
+}));
+
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>(
     '@tanstack/react-router',

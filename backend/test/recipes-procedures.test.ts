@@ -1831,4 +1831,272 @@ describe('recipes procedures', () => {
       expect(result.items).toEqual([]);
     });
   });
+
+  describe('addRelated', () => {
+    it('links two recipes regardless of input order, stored as (min, max)', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const b = await insertRecipe({ name: 'Biryani' });
+      const high = Math.max(a, b);
+      const low = Math.min(a, b);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.addRelated({
+        recipeId: high,
+        otherRecipeId: low,
+      });
+
+      expect(result).toEqual({ recipeId: high, otherRecipeId: low });
+      const rows = await db.select().from(relatedRecipes);
+      expect(rows).toEqual([{ recipeOneId: low, recipeTwoId: high }]);
+    });
+
+    it('surfaces the link from either anchor via listRelated', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const b = await insertRecipe({ name: 'Biryani' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.addRelated({ recipeId: a, otherRecipeId: b });
+
+      const fromA = await caller.recipes.listRelated({ recipeId: a });
+      const fromB = await caller.recipes.listRelated({ recipeId: b });
+
+      expect(fromA.items.map((r) => r.id)).toEqual([b]);
+      expect(fromB.items.map((r) => r.id)).toEqual([a]);
+    });
+
+    it('rejects a self-link with RELATED_RECIPE_SELF_LINK', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.addRelated({ recipeId: a, otherRecipeId: a }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RELATED_RECIPE_SELF_LINK' },
+      });
+    });
+
+    it('rejects a duplicate pair regardless of input order', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const b = await insertRecipe({ name: 'Biryani' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.addRelated({ recipeId: a, otherRecipeId: b });
+
+      await expect(
+        caller.recipes.addRelated({ recipeId: b, otherRecipeId: a }),
+      ).rejects.toMatchObject({
+        code: 'CONFLICT',
+        cause: { code: 'RELATED_RECIPE_DUPLICATE' },
+      });
+    });
+
+    it('rejects linking to a recipe in a different household', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const stranger = await insertRecipe({
+        name: 'Stranger',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.addRelated({ recipeId: a, otherRecipeId: stranger }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RELATED_RECIPE_NOT_PICKABLE' },
+      });
+    });
+
+    it('rejects linking from a recipe in a different household', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const stranger = await insertRecipe({
+        name: 'Stranger',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.addRelated({ recipeId: stranger, otherRecipeId: a }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RELATED_RECIPE_NOT_PICKABLE' },
+      });
+    });
+
+    it('rejects linking to a soft-deleted recipe', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const ghost = await insertRecipe({ name: 'Ghost', isDeleted: true });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.addRelated({ recipeId: a, otherRecipeId: ghost }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RELATED_RECIPE_NOT_PICKABLE' },
+      });
+    });
+
+    it('rejects linking from a soft-deleted anchor', async () => {
+      const ghost = await insertRecipe({ name: 'Ghost', isDeleted: true });
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.addRelated({ recipeId: ghost, otherRecipeId: a }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RELATED_RECIPE_NOT_PICKABLE' },
+      });
+    });
+
+    it('rejects unauthenticated callers', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const b = await insertRecipe({ name: 'Biryani' });
+      const caller = createCaller(makeContext({ authenticated: false }));
+
+      await expect(
+        caller.recipes.addRelated({ recipeId: a, otherRecipeId: b }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+  });
+
+  describe('removeRelated', () => {
+    it('deletes the row regardless of which side is passed as anchor', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const b = await insertRecipe({ name: 'Biryani' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.addRelated({ recipeId: a, otherRecipeId: b });
+
+      await caller.recipes.removeRelated({ recipeId: b, otherRecipeId: a });
+
+      const rows = await db.select().from(relatedRecipes);
+      expect(rows).toEqual([]);
+    });
+
+    it('is a no-op when no link exists', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const b = await insertRecipe({ name: 'Biryani' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.removeRelated({ recipeId: a, otherRecipeId: b }),
+      ).resolves.toEqual({ recipeId: a, otherRecipeId: b });
+    });
+
+    it('rejects a cross-household anchor', async () => {
+      const stranger = await insertRecipe({
+        name: 'Stranger',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.removeRelated({
+          recipeId: stranger,
+          otherRecipeId: a,
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RELATED_RECIPE_NOT_PICKABLE' },
+      });
+    });
+
+    it('rejects a self-link', async () => {
+      const a = await insertRecipe({ name: 'Aloo Gobi' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.removeRelated({ recipeId: a, otherRecipeId: a }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RELATED_RECIPE_SELF_LINK' },
+      });
+    });
+  });
+
+  describe('listRelated', () => {
+    it('returns the other side of every pair ordered by name', async () => {
+      const anchor = await insertRecipe({ name: 'Anchor' });
+      const zucchini = await insertRecipe({ name: 'Zucchini Bake' });
+      const aloo = await insertRecipe({ name: 'Aloo Gobi' });
+      const minestrone = await insertRecipe({ name: 'Minestrone' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.addRelated({
+        recipeId: anchor,
+        otherRecipeId: zucchini,
+      });
+      await caller.recipes.addRelated({
+        recipeId: anchor,
+        otherRecipeId: aloo,
+      });
+      await caller.recipes.addRelated({
+        recipeId: anchor,
+        otherRecipeId: minestrone,
+      });
+
+      const result = await caller.recipes.listRelated({ recipeId: anchor });
+
+      expect(result.items.map((r) => r.name)).toEqual([
+        'Aloo Gobi',
+        'Minestrone',
+        'Zucchini Bake',
+      ]);
+    });
+
+    it('hides pairs whose other side is soft-deleted, surfaces them on restore', async () => {
+      const anchor = await insertRecipe({ name: 'Anchor' });
+      const partner = await insertRecipe({ name: 'Partner' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.addRelated({
+        recipeId: anchor,
+        otherRecipeId: partner,
+      });
+
+      await caller.recipes.softDelete({ id: partner });
+      let result = await caller.recipes.listRelated({ recipeId: anchor });
+      expect(result.items).toEqual([]);
+      // Row still in the table for historical reads.
+      const rows = await db.select().from(relatedRecipes);
+      expect(rows).toHaveLength(1);
+
+      await caller.recipes.restore({ id: partner });
+      result = await caller.recipes.listRelated({ recipeId: anchor });
+      expect(result.items.map((r) => r.id)).toEqual([partner]);
+    });
+
+    it('returns an empty list when no pairs exist', async () => {
+      const a = await insertRecipe({ name: 'Lonely' });
+      const caller = createCaller(makeContext());
+
+      const result = await caller.recipes.listRelated({ recipeId: a });
+
+      expect(result.items).toEqual([]);
+    });
+
+    it('rejects a cross-household anchor as NOT_FOUND', async () => {
+      const stranger = await insertRecipe({
+        name: 'Stranger',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.listRelated({ recipeId: stranger }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('still works for a soft-deleted anchor (historical reads)', async () => {
+      const anchor = await insertRecipe({ name: 'Anchor' });
+      const partner = await insertRecipe({ name: 'Partner' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.addRelated({
+        recipeId: anchor,
+        otherRecipeId: partner,
+      });
+      await caller.recipes.softDelete({ id: anchor });
+
+      const result = await caller.recipes.listRelated({ recipeId: anchor });
+
+      expect(result.items.map((r) => r.id)).toEqual([partner]);
+    });
+  });
 });

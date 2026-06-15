@@ -3,6 +3,7 @@ import { Link, useParams } from '@tanstack/react-router';
 
 import { RecipeComments } from '@/components/recipe-comments.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
+import { RelatedRecipes } from '@/components/related-recipes.tsx';
 import { formatQuantity } from '@/lib/format-quantity.ts';
 import { formatAverageRating } from '@/lib/format-rating.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -145,6 +146,8 @@ export function RecipeDetailPage(): React.ReactElement {
           </ol>
         )}
       </section>
+
+      <RelatedRecipes recipeId={recipe.id} isDisabled={recipe.isDeleted} />
 
       <RecipeComments recipeId={recipe.id} />
     </article>

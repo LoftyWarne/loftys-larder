@@ -5,6 +5,8 @@ import { alias } from 'drizzle-orm/pg-core';
 import {
   addRecipeCommentInputSchema,
   addRecipeCommentResultSchema,
+  addRelatedRecipeInputSchema,
+  addRelatedRecipeResultSchema,
   createRecipeInputSchema,
   createRecipeResultSchema,
   deleteRecipeCommentInputSchema,
@@ -16,10 +18,14 @@ import {
   listRecipeCommentsResultSchema,
   listRecipesInputSchema,
   listRecipesResultSchema,
+  listRelatedRecipesInputSchema,
+  listRelatedRecipesResultSchema,
   rateRecipeInputSchema,
   rateRecipeResultSchema,
   recipeReferencesSchema,
   recipeSchema,
+  removeRelatedRecipeInputSchema,
+  removeRelatedRecipeResultSchema,
   replaceRecipeIngredientsInputSchema,
   replaceRecipeIngredientsResultSchema,
   replaceRecipeMethodInputSchema,
@@ -33,15 +39,18 @@ import {
   updateRecipeHeaderInputSchema,
   updateRecipeHeaderResultSchema,
   type AddRecipeCommentResult,
+  type AddRelatedRecipeResult,
   type CreateRecipeResult,
   type DeleteRecipeCommentResult,
   type DomainErrorCode,
   type EditRecipeCommentResult,
   type ListRecipeCommentsResult,
   type ListRecipesResult,
+  type ListRelatedRecipesResult,
   type RateRecipeResult,
   type Recipe,
   type RecipeReferences,
+  type RemoveRelatedRecipeResult,
   type ReplaceRecipeIngredientsResult,
   type ReplaceRecipeMethodResult,
   type SetRecipeBatchFieldsResult,
@@ -61,6 +70,7 @@ import {
 import {
   recipeComments,
   recipeRatings,
+  relatedRecipes,
 } from '../../db/schema/recipe-social.ts';
 import {
   recipeIngredients,
@@ -883,6 +893,121 @@ export const recipesRouter = router({
         })),
       };
     }),
+
+  // Manually-linked symmetric pairs (DEC-27). The DB enforces uniqueness and
+  // the no-self-link CHECK via composite PK + `recipe_one_id < recipe_two_id`;
+  // the procedure normalises ordering and translates conflicts into typed
+  // domain errors. Both sides must be pickable (in-household + not
+  // soft-deleted) at link time — historical reads on soft-deleted pairs keep
+  // the row, but the picker hides them.
+  addRelated: protectedProcedure
+    .input(addRelatedRecipeInputSchema)
+    .output(addRelatedRecipeResultSchema)
+    .mutation(async ({ ctx, input }): Promise<AddRelatedRecipeResult> => {
+      const { recipeId, otherRecipeId } = input;
+      if (recipeId === otherRecipeId) {
+        throw domainBadRequest(
+          'RELATED_RECIPE_SELF_LINK',
+          'A recipe cannot be related to itself',
+        );
+      }
+      await assertBothRelatedPickable(ctx.db, recipeId, otherRecipeId);
+
+      const [recipeOneId, recipeTwoId] =
+        recipeId < otherRecipeId
+          ? [recipeId, otherRecipeId]
+          : [otherRecipeId, recipeId];
+
+      const inserted = await ctx.db
+        .insert(relatedRecipes)
+        .values({ recipeOneId, recipeTwoId })
+        .onConflictDoNothing()
+        .returning({ recipeOneId: relatedRecipes.recipeOneId });
+
+      if (inserted.length === 0) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'These recipes are already linked',
+          cause: { code: 'RELATED_RECIPE_DUPLICATE' satisfies DomainErrorCode },
+        });
+      }
+
+      return { recipeId, otherRecipeId };
+    }),
+
+  removeRelated: protectedProcedure
+    .input(removeRelatedRecipeInputSchema)
+    .output(removeRelatedRecipeResultSchema)
+    .mutation(async ({ ctx, input }): Promise<RemoveRelatedRecipeResult> => {
+      const { recipeId, otherRecipeId } = input;
+      if (recipeId === otherRecipeId) {
+        throw domainBadRequest(
+          'RELATED_RECIPE_SELF_LINK',
+          'A recipe cannot be related to itself',
+        );
+      }
+      // The anchor must be pickable (in-household + not soft-deleted). The
+      // other side could be anything (the user might be tidying up after a
+      // restore + re-delete) — the delete is a no-op if no row matches.
+      await assertRecipePickable(ctx.db, recipeId);
+
+      const [recipeOneId, recipeTwoId] =
+        recipeId < otherRecipeId
+          ? [recipeId, otherRecipeId]
+          : [otherRecipeId, recipeId];
+
+      await ctx.db
+        .delete(relatedRecipes)
+        .where(
+          and(
+            eq(relatedRecipes.recipeOneId, recipeOneId),
+            eq(relatedRecipes.recipeTwoId, recipeTwoId),
+          ),
+        );
+
+      return { recipeId, otherRecipeId };
+    }),
+
+  listRelated: protectedProcedure
+    .input(listRelatedRecipesInputSchema)
+    .output(listRelatedRecipesResultSchema)
+    .query(async ({ ctx, input }): Promise<ListRelatedRecipesResult> => {
+      // Anchor must be in-household — soft-deleted anchors are still readable
+      // (historical render). `assertRecipeInHousehold` (not `Pickable`) so a
+      // soft-deleted recipe's detail page can still show its related list.
+      await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+      // CASE picks "the other side" of each pair. The join target is the
+      // recipes row for the other id, filtered to the current household and
+      // not soft-deleted per the acceptance criteria.
+      const otherIdExpr = sql<number>`CASE
+        WHEN ${relatedRecipes.recipeOneId} = ${input.recipeId}
+          THEN ${relatedRecipes.recipeTwoId}
+        ELSE ${relatedRecipes.recipeOneId}
+      END`;
+
+      const rows = await ctx.db
+        .select({
+          id: recipes.id,
+          name: recipes.name,
+          imageUrl: recipes.imageUrl,
+        })
+        .from(relatedRecipes)
+        .innerJoin(recipes, eq(recipes.id, otherIdExpr))
+        .where(
+          and(
+            or(
+              eq(relatedRecipes.recipeOneId, input.recipeId),
+              eq(relatedRecipes.recipeTwoId, input.recipeId),
+            ),
+            eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+            eq(recipes.isDeleted, false),
+          ),
+        )
+        .orderBy(asc(sql`lower(${recipes.name})`), asc(recipes.id));
+
+      return { items: rows };
+    }),
 });
 
 function domainBadRequest(
@@ -932,6 +1057,53 @@ async function assertRecipeInHousehold(
     .limit(1);
   if (rows.length === 0) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipe not found' });
+  }
+}
+
+// Both-sides check for the related-recipes link: each id must exist in the
+// current household and not be soft-deleted. One query covers both ids so a
+// cross-household / soft-deleted partner is rejected without a second probe.
+async function assertBothRelatedPickable(
+  db: Db,
+  recipeId: number,
+  otherRecipeId: number,
+): Promise<void> {
+  const rows = await db
+    .select({ id: recipes.id })
+    .from(recipes)
+    .where(
+      and(
+        inArray(recipes.id, [recipeId, otherRecipeId]),
+        eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+        eq(recipes.isDeleted, false),
+      ),
+    );
+  const found = new Set(rows.map((row) => row.id));
+  if (!found.has(recipeId) || !found.has(otherRecipeId)) {
+    throw domainBadRequest(
+      'RELATED_RECIPE_NOT_PICKABLE',
+      'Recipe is not available to link',
+    );
+  }
+}
+
+async function assertRecipePickable(db: Db, recipeId: number): Promise<void> {
+  const rows = await db
+    .select({ id: recipes.id })
+    .from(recipes)
+    .where(
+      and(
+        eq(recipes.id, recipeId),
+        eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+        eq(recipes.isDeleted, false),
+      ),
+    )
+    .limit(1);
+  if (rows.length === 0) {
+    throw domainBadRequest(
+      'RELATED_RECIPE_NOT_PICKABLE',
+      'Recipe is not available to link',
+    );
   }
 }
 

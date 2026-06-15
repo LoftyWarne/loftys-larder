@@ -466,3 +466,65 @@ export const listRecipeCommentsResultSchema = z.object({
 export type ListRecipeCommentsResult = z.infer<
   typeof listRecipeCommentsResultSchema
 >;
+
+// Related recipes. The DB table `related_recipes` enforces the symmetric pair
+// (composite PK + CHECK recipe_one_id < recipe_two_id, DEC-27); these DTOs
+// carry the unordered pair as seen by the caller — `recipeId` is whichever
+// side is anchoring the read or write.
+export const addRelatedRecipeInputSchema = z.object({
+  recipeId: recipeIdSchema,
+  otherRecipeId: recipeIdSchema,
+});
+
+export type AddRelatedRecipeInput = z.infer<typeof addRelatedRecipeInputSchema>;
+
+export const addRelatedRecipeResultSchema = z.object({
+  recipeId: recipeIdSchema,
+  otherRecipeId: recipeIdSchema,
+});
+
+export type AddRelatedRecipeResult = z.infer<
+  typeof addRelatedRecipeResultSchema
+>;
+
+export const removeRelatedRecipeInputSchema = z.object({
+  recipeId: recipeIdSchema,
+  otherRecipeId: recipeIdSchema,
+});
+
+export type RemoveRelatedRecipeInput = z.infer<
+  typeof removeRelatedRecipeInputSchema
+>;
+
+export const removeRelatedRecipeResultSchema = z.object({
+  recipeId: recipeIdSchema,
+  otherRecipeId: recipeIdSchema,
+});
+
+export type RemoveRelatedRecipeResult = z.infer<
+  typeof removeRelatedRecipeResultSchema
+>;
+
+export const listRelatedRecipesInputSchema = z.object({
+  recipeId: recipeIdSchema,
+});
+
+export type ListRelatedRecipesInput = z.infer<
+  typeof listRelatedRecipesInputSchema
+>;
+
+export const relatedRecipeItemSchema = z.object({
+  id: recipeIdSchema,
+  name: z.string(),
+  imageUrl: z.string().nullable(),
+});
+
+export type RelatedRecipeItem = z.infer<typeof relatedRecipeItemSchema>;
+
+export const listRelatedRecipesResultSchema = z.object({
+  items: z.array(relatedRecipeItemSchema),
+});
+
+export type ListRelatedRecipesResult = z.infer<
+  typeof listRelatedRecipesResultSchema
+>;

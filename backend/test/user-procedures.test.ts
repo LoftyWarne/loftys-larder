@@ -220,4 +220,46 @@ describe('user procedures', () => {
       expect(other[0]?.name).toBe('Other User');
     });
   });
+
+  describe('listHouseholdMembers', () => {
+    it('returns the seeded user as a member', async () => {
+      const caller = createCaller(makeContext());
+      const result = await caller.user.listHouseholdMembers();
+      expect(result.members).toEqual([
+        { id: USER_ID, name: 'Test User', email: USER_EMAIL },
+      ]);
+    });
+
+    it('returns members ordered by name', async () => {
+      await db.insert(users).values([
+        {
+          id: OTHER_USER_ID,
+          email: 'other@example.com',
+          name: 'Alice',
+          emailVerified: true,
+        },
+        {
+          id: 'user-test-3',
+          email: 'third@example.com',
+          name: 'Zara',
+          emailVerified: true,
+        },
+      ]);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.user.listHouseholdMembers();
+      expect(result.members.map((m) => m.name)).toEqual([
+        'Alice',
+        'Test User',
+        'Zara',
+      ]);
+    });
+
+    it('rejects without a session', async () => {
+      const caller = createCaller(makeContext({ authenticated: false }));
+      await expect(caller.user.listHouseholdMembers()).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+  });
 });

@@ -1,10 +1,14 @@
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import {
   meSchema,
   updateProfileInputSchema,
   type Me,
 } from '../../../../shared/src/schemas/user.ts';
+import {
+  listHouseholdMembersResultSchema,
+  type ListHouseholdMembersResult,
+} from '../../../../shared/src/schemas/users.ts';
 import { users } from '../../db/schema/auth.ts';
 import { protectedProcedure, router } from '../init.ts';
 
@@ -65,5 +69,23 @@ export const userRouter = router({
         });
       }
       return me;
+    }),
+
+  // Members eligible for the planner's chef dropdown. Single-household MVP
+  // (DEC-17): every auth user is implicitly a member. When multi-household
+  // lands, this query gains a household_members join — the wire shape doesn't
+  // change.
+  listHouseholdMembers: protectedProcedure
+    .output(listHouseholdMembersResultSchema)
+    .query(async ({ ctx }): Promise<ListHouseholdMembersResult> => {
+      const rows = await ctx.db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        })
+        .from(users)
+        .orderBy(asc(users.name));
+      return { members: rows };
     }),
 });

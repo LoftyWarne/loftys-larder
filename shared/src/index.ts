@@ -10,6 +10,12 @@ export {
   type Me,
 } from './schemas/user.ts';
 export {
+  householdMemberSchema,
+  type HouseholdMember,
+  listHouseholdMembersResultSchema,
+  type ListHouseholdMembersResult,
+} from './schemas/users.ts';
+export {
   DOMAIN_ERROR_CODES,
   domainErrorCodeSchema,
   type DomainErrorCode,
@@ -184,6 +190,10 @@ export {
   updateSlotResultSchema,
   type UpdateSlotResult,
 } from './schemas/slots.ts';
+export {
+  plannerSearchSchema,
+  type PlannerSearch,
+} from './schemas/planner-search.ts';
 export {
   ingredientNameSchema,
   ingredientShelfLifeSchema,

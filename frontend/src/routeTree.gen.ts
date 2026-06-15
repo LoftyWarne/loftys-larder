@@ -17,6 +17,7 @@ import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedIngredientsRouteImport } from './routes/_authed/ingredients'
 import { Route as AuthedRecipesIndexRouteImport } from './routes/_authed/recipes/index'
 import { Route as AuthedRecipesNewRouteImport } from './routes/_authed/recipes/new'
+import { Route as AuthedPlansPlanIdRouteImport } from './routes/_authed/plans/$planId'
 import { Route as AuthedRecipesRecipeIdIndexRouteImport } from './routes/_authed/recipes/$recipeId.index'
 import { Route as AuthedRecipesRecipeIdEditRouteImport } from './routes/_authed/recipes/$recipeId.edit'
 
@@ -59,6 +60,11 @@ const AuthedRecipesNewRoute = AuthedRecipesNewRouteImport.update({
   path: '/recipes/new',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedPlansPlanIdRoute = AuthedPlansPlanIdRouteImport.update({
+  id: '/plans/$planId',
+  path: '/plans/$planId',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedRecipesRecipeIdIndexRoute =
   AuthedRecipesRecipeIdIndexRouteImport.update({
     id: '/recipes/$recipeId/',
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/ingredients': typeof AuthedIngredientsRoute
   '/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
+  '/plans/$planId': typeof AuthedPlansPlanIdRoute
   '/recipes/new': typeof AuthedRecipesNewRoute
   '/recipes/': typeof AuthedRecipesIndexRoute
   '/recipes/$recipeId/edit': typeof AuthedRecipesRecipeIdEditRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/': typeof AuthedIndexRoute
+  '/plans/$planId': typeof AuthedPlansPlanIdRoute
   '/recipes/new': typeof AuthedRecipesNewRoute
   '/recipes': typeof AuthedRecipesIndexRoute
   '/recipes/$recipeId/edit': typeof AuthedRecipesRecipeIdEditRoute
@@ -102,6 +110,7 @@ export interface FileRoutesById {
   '/_authed/settings': typeof AuthedSettingsRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/_authed/': typeof AuthedIndexRoute
+  '/_authed/plans/$planId': typeof AuthedPlansPlanIdRoute
   '/_authed/recipes/new': typeof AuthedRecipesNewRoute
   '/_authed/recipes/': typeof AuthedRecipesIndexRoute
   '/_authed/recipes/$recipeId/edit': typeof AuthedRecipesRecipeIdEditRoute
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
     | '/ingredients'
     | '/settings'
     | '/auth/verify'
+    | '/plans/$planId'
     | '/recipes/new'
     | '/recipes/'
     | '/recipes/$recipeId/edit'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/auth/verify'
     | '/'
+    | '/plans/$planId'
     | '/recipes/new'
     | '/recipes'
     | '/recipes/$recipeId/edit'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/_authed/settings'
     | '/auth/verify'
     | '/_authed/'
+    | '/_authed/plans/$planId'
     | '/_authed/recipes/new'
     | '/_authed/recipes/'
     | '/_authed/recipes/$recipeId/edit'
@@ -208,6 +220,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedRecipesNewRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/plans/$planId': {
+      id: '/_authed/plans/$planId'
+      path: '/plans/$planId'
+      fullPath: '/plans/$planId'
+      preLoaderRoute: typeof AuthedPlansPlanIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/recipes/$recipeId/': {
       id: '/_authed/recipes/$recipeId/'
       path: '/recipes/$recipeId'
@@ -229,6 +248,7 @@ interface AuthedRouteChildren {
   AuthedIngredientsRoute: typeof AuthedIngredientsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
+  AuthedPlansPlanIdRoute: typeof AuthedPlansPlanIdRoute
   AuthedRecipesNewRoute: typeof AuthedRecipesNewRoute
   AuthedRecipesIndexRoute: typeof AuthedRecipesIndexRoute
   AuthedRecipesRecipeIdEditRoute: typeof AuthedRecipesRecipeIdEditRoute
@@ -239,6 +259,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedIngredientsRoute: AuthedIngredientsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedIndexRoute: AuthedIndexRoute,
+  AuthedPlansPlanIdRoute: AuthedPlansPlanIdRoute,
   AuthedRecipesNewRoute: AuthedRecipesNewRoute,
   AuthedRecipesIndexRoute: AuthedRecipesIndexRoute,
   AuthedRecipesRecipeIdEditRoute: AuthedRecipesRecipeIdEditRoute,

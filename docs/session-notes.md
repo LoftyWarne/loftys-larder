@@ -4,6 +4,63 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-15 — FEAT-31 (Meal Planner UI: Recipe Bank + Grid + click-to-assign)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` all clean across the three workspaces. Frontend: 197/197 passing (30 test files); new coverage in `date-utils.test.ts` (16), `use-optimistic-slot-update.test.ts` (5), `slot-cell.test.tsx` (4), `recipe-bank.test.tsx` (7), `planner-page.test.tsx` (6). Backend non-container suites pass (58/58); the 11 Testcontainers suites — including the `listHouseholdMembers` tests in `user-procedures.test.ts` — couldn't launch in this environment ("Could not find a working container runtime strategy"); needs the Colima socket workaround on the next dev box. DoD boxes in `docs/feature-specs.md §FEAT-31` left unticked — human action. Manual gate (open a plan, two-tap assign, edit, switch state, clear; soft-delete a recipe in another tab and confirm historical render survives) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **Chef dropdown sourced via a thin `user.listHouseholdMembers` procedure.** Single-household MVP (DEC-17) means every auth user is implicitly a member; the procedure just `select … from users order by name`. Forward-compatible with future invites without changing the wire shape. Chose this over (a) deferring the control entirely or (b) hardcoding `[ctx.user]` on the client — the procedure path means the editor's chef select is a real control from v1.
+- **Recipe Bank uses `useInfiniteQuery`**, not first-page-only. `recipes.list` already paginates by `(lower(name), id)` keyset; the sidebar just consumes pages on demand. Search input filters the same query.
+- **Frontend `date-utils.ts` is a parallel module, not a `/shared` promotion.** DEC-80 keeps `/shared` runtime-leaf, with the AppRouter as the one type-only exception; promoting the backend date-utils would have been more invasive. Both sides carry the same Europe/London civil-day contract; if they drift, it's a one-file delta to reconcile.
+- **No shadcn `Drawer` / `vaul`.** Plan called for it; in implementation I reused the already-installed Radix `Dialog`, positioned as a bottom sheet on small screens via Tailwind classes (`bottom-0` + `rounded-t-lg` on mobile, centred on `sm:`). AGENTS.md treats new deps as a stop-and-ask trigger and the existing primitive covers the modal pattern. The touch-first UX is preserved without the dependency.
+- **`user.listHouseholdMembers` lives on the existing `user` router, not a new `users` router.** The kick-off plan said `procedures/users.ts`; in code I added the procedure to `procedures/user.ts` alongside `getMe` / `updateProfile`. Avoids two near-identical routers and keeps the root router barrel unchanged.
+- **Page body lives at `routes/-components/planner-page.tsx`, not under `routes/_authed/plans/-components/`.** Followed the existing project convention (every page body sits in the one flat `routes/-components/` directory next to `recipes-page.tsx`); planner sub-components live under `components/planner/`. Route file stays a thin shell exporting only `Route` with the search-param validator (AGENTS.md route trap).
+
+### Drift from kick-off plan
+
+1. **Skipped the `shadcn Drawer` install.** Plan: install vaul + add the Drawer component. Code: reused the existing `Dialog`. Reason in the decisions above.
+2. **`users` procedure collapsed into existing `user` router.** Plan called for `users.listHouseholdMembers`; in code it's `user.listHouseholdMembers`. Trivial rename, but worth recording for downstream FEAT-32 / FEAT-33 docs that may reference it.
+3. **`routes/_authed/plans/-components/` directory not created.** Page bodies follow the project's flat `routes/-components/` convention; planner sub-components went to `components/planner/`. Same net result, matches the codebase pattern.
+
+### Implementation details worth carrying
+
+- **`useOptimisticSlotUpdate` is the canonical hook** (cross-cutting #7). `onMutate` snapshots the previous `plans.get` cache, applies the patch (including the optimistic recipe sub-object), and stores the snapshot in the context. `onError` restores the snapshot. `onSettled` calls `setQueryData` with the server-returned slot — no `invalidate()` — encoding DEC-36 LWW: the server response is canonical. A concurrent edit on another client surfaces on the next `plans.get` mount, not via a refetch storm.
+- **Side-channel for the optimistic recipe.** `mutate(input)` only forwards the input to `onMutate`; the preview `PlanSlotRecipe` (typically picked from the bank) goes through a ref (`pendingOptimisticRecipe`). Mutations are user-driven and sequential, so a ref is enough — no overlap between `update(...)` and the adjacent `onMutate` runtime. Two test cases exercise the contract.
+- **Slot card has explicit content slots** (cross-cutting #14): `baseCookLine`, `chefChip`, `commentLine` props. FEAT-32 fills `baseCookLine`; FEAT-33 fills `chefChip`. The base body owns name/servings/state label; deleted-recipe hint is in-band on the recipe name span.
+- **Planner grid is a CSS grid with `display: contents` rows.** `gridTemplateColumns` is computed from the occasion count (`minmax(6rem, max-content) repeat(N, minmax(10rem, 1fr))`). Row headers (`formatDayLabel`) sit on the left; column headers along the top. Slots are looked up by `(date, occasionId)` from a Map built once per render.
+- **`clampRange` collapses correctly when search params are outside the plan.** Returns `null` when `start > end`; the page renders a tiny status message rather than the empty grid. The TanStack search-param schema rejects `start > end` upstream, so the only way to hit `null` here is a plan that's been shrunk to a single day with the URL still pointing at a wider range.
+- **`recipes.list` infinite-query input always carries `includePickerHidden: true`** — soft-deleted recipes and batch-versions of deleted bases never appear in the bank. Verified by `recipe-bank.test.tsx`: the test asserts the first call's input.
+- **Slot editor's recipe combobox uses `utils.recipes.list.fetch`** (imperative tRPC fetch on every keystroke, debounced inside `SearchableCombobox`) rather than a `useQuery` watcher. Reuses the existing combobox primitive verbatim (cross-cutting #6); no per-picker fork.
+- **Bottom-sheet styling via Tailwind responsive classes**, not a separate component. `bottom-0 max-w-none rounded-t-lg rounded-b-none sm:bottom-auto sm:top-[50%] sm:translate-y-[-50%] sm:max-w-lg sm:rounded-lg`. Easy to swap to vaul later without touching the editor's interaction code.
+
+### Open follow-ups
+
+- **Run the new backend Testcontainers tests** (`user-procedures.test.ts` `describe('listHouseholdMembers', …)`) on a Docker-enabled box before considering FEAT-31 truly green. Three assertions: seeded user round-trip, name-ordered listing with extra users, unauthenticated rejection.
+- **Manual smoke** of the URL search-param flow — drag `?start` and `?end` in the location bar and confirm the grid re-renders without remounting the editor or losing the bank's scroll position.
+- **FEAT-32 will extend `slot-cell.tsx` via the `baseCookLine` prop** and the slot editor with `cooksBaseRecipeId` / `cooksBaseServings` controls. The cell's content-slot shape is the contract; don't add a second editor or fork the cell.
+- **FEAT-33 (chef) will fill `chefChip`** on the slot card and may consider whether `user.listHouseholdMembers` should grow filtering (e.g. exclude tombstoned users). For now it returns all `users` rows.
+- **A separate frontend `date-utils` carries the duplication risk DEC-33 was meant to prevent.** If the backend / frontend implementations drift on Europe/London civil-day semantics, a `/shared/src/util/` promotion becomes the cleanup — flag, don't pre-optimise.
+- **AGENTS.md trap addition candidate:** "Adding `vaul` / a second drawer primitive when shadcn `Dialog` already covers the case." The Dialog-as-bottom-sheet pattern landed here; revisit if a future FEAT genuinely needs the swipe-to-dismiss behaviour vaul provides.
+
+### What did NOT change (carry from earlier notes)
+
+- `meal_plan_slots` / `meal_plans` schemas unchanged. No migration.
+- `slots.update` procedure unchanged from FEAT-30 — the planner UI consumes it as-is.
+- `recipes.list` and `pickableRecipesWhere` unchanged — bank passes `includePickerHidden: true`.
+- `plans.get` unchanged — already returns plan + hydrated `slots` in the shape the planner needs.
+- No `withTransaction` calls added; no new domain error codes; no new dependencies.
+- No FEAT-N strings in code, test filenames, or `describe()` blocks — feedback pin holds.
+
+### Known limitations / not in scope
+
+- **Base-cook fields** (`cooks_base_recipe_id`, `cooks_base_servings`) — surfaced in FEAT-32. The slot editor doesn't expose them yet.
+- **Plant-points display on the planner** — FEAT-40.
+- **Aggregated shopping list view** — FEAT-36 onwards.
+- **Drag-and-drop slot assignment** — explicitly excluded (DEC-52); click-to-assign only.
+
+---
+
 ## 2026-06-15 — FEAT-30 (Slot procedures — recipe only)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean. Backend: 20/20 in the new `slots-procedures.test.ts`; 71/71 in `plans-procedures.test.ts` + `meal-plans-schema.test.ts` (no regressions from the new `comment` column). Testcontainers ran via the now-familiar Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). DoD boxes in `docs/feature-specs.md §FEAT-30` left unticked — human action.

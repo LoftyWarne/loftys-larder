@@ -858,6 +858,16 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** typescript-eslint upstream supports typing-based allow-matching for tagged Response-likes (so `redirect()`'s return can be allowlisted by type rather than by import name); or if `frontend/src/routes/` grows enough non-trivial logic that the global-off bites.
 - **Cross-refs:** FEAT-07 (lint contract this overrides), FEAT-15 (introducer), AGENTS.md "Formatting and linting".
 
+### DEC-82 — Plans hard-delete; no tombstoning column on `meal_plans`
+
+- **Chosen:** `plans.delete` is a hard `DELETE FROM meal_plans WHERE id = ? AND household_id = ?`. The FK cascade on `meal_plan_slots.plan_id` and `shopping_list_items.plan_id` cleans up dependent rows. No `is_deleted` column on `meal_plans`. The overlap rule's "non-deleted" predicate collapses to "exists" — trivially true.
+- **Alternatives:** Tombstone via `is_deleted` (the FEAT-27 spec wording and the `plan.md` schema sketch both originally said this).
+- **Why it won:** Tombstoning recipes is forced by referential integrity — `meal_plan_slots.recipe_id` is `ON DELETE RESTRICT` because past plans must keep rendering after a recipe is removed (DEC-21). Plans have no inverse: nothing in the schema references `meal_plans.id` outside of slots and shopping-list items, both of which cascade. Without a downstream consumer of a tombstoned plan row (no trash UI, no historical aggregate that breaks, FEAT-29 duplication copies forward not by reference) the only argument for soft-delete is reversibility — and the spec set contains no "restore" affordance for plans. Hard delete keeps the schema and the overlap rule both simpler.
+- **Consequences (+):** No migration to add or maintain `is_deleted`. Overlap query is `household_id = ? AND end_date >= today AND NOT (...)` — no extra predicate. `plans.list({ status: 'past' })` shows exactly the plans the cook chose to keep, not "all plans I once made minus those I trashed".
+- **Consequences (−):** A mis-clicked delete is unrecoverable unless restored from backup. Acceptable because (a) the delete affordance will be a confirm dialog (FEAT-31), (b) the FEAT-29 duplicate path means a "I deleted last week's plan and want it back" workflow has a manual re-creation route via the past-plan list, and (c) FEAT-50's nightly `pg_dump` to R2 (DEC-73) is the disaster floor.
+- **Revisit when:** A "trash / restore" UI gets proposed, or a usage pattern emerges where the cook routinely deletes plans they later regret. The migration to tombstoning is additive — add a column, flip `delete` to update, gate overlap on it.
+- **Cross-refs:** FEAT-27 (origin), DEC-21 (contrast: recipes *do* tombstone because slots reference them), DEC-29 (account-deletion tombstoning has independent motivation — user-row preservation for audit-trace).
+
 ---
 
 ## Most Worth Deep Consideration on Revisit

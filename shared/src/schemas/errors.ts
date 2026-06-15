@@ -17,6 +17,8 @@ export const DOMAIN_ERROR_CODES = [
   'RELATED_RECIPE_SELF_LINK',
   'RELATED_RECIPE_DUPLICATE',
   'RELATED_RECIPE_NOT_PICKABLE',
+  'PLAN_DATE_OVERLAP',
+  'PLAN_RANGE_TOO_LONG',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

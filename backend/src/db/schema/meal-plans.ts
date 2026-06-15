@@ -42,6 +42,7 @@ export const mealPlans = pgTable(
     createdByUserId: text().references(() => users.id, {
       onDelete: 'set null',
     }),
+    name: text().notNull(),
     startDate: date({ mode: 'date' }).notNull(),
     endDate: date({ mode: 'date' }).notNull(),
     createdAt: timestamp({ withTimezone: true })

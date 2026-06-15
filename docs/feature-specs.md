@@ -1091,46 +1091,47 @@ Conventions:
 
 ## Phase 4 — Meal planner
 
-### FEAT-27 — Plan procedures: create, list, get, soft-delete (with auto slot generation and overlap rule)
+### FEAT-27 — Plan procedures: create, list, get, delete (with auto slot generation and overlap rule)
 
-**Goal:** Procedures `plans.create`, `plans.list`, `plans.get`, `plans.softDelete`. `create` auto-generates one `empty` slot per (date × occasion) inside a transaction and rejects overlap with any non-deleted plan whose `endDate >= today`. `[DEC-TBD: overlap rule, past-plan exemption]` `[DEC-TBD: slot auto-generation on plan creation]`
+**Goal:** Procedures `plans.create`, `plans.list`, `plans.get`, `plans.delete`. `create` auto-generates one `empty` slot per (date × occasion) inside a transaction and rejects overlap with any plan whose `endDate >= today`. Plans are hard-deleted (see DEC-82); the FK cascade on `meal_plan_slots.plan_id` and `shopping_list_items.plan_id` cleans up dependent rows.
 
 **Estimate:** 3 hr. **Depends on:** FEAT-12, 14. **Enables:** FEAT-28, 29, 30, 31.
 
-**Reuse note:** A `dateUtils` module centralises "today in Europe/London" semantics — first appears here, reused by shelf-life (FEAT-37). `[DEC-TBD: Europe/London time, single-tz v1; localised in dateUtils for future change]`
+**Reuse note:** A `dateUtils` module centralises "today in Europe/London" semantics — first appears here, reused by shelf-life (FEAT-37). The overlap rule and timezone choice are now codified in DEC-38 and DEC-33.
 
 **Files:**
-- `backend/src/trpc/routers/plans.ts`
+- `backend/src/trpc/procedures/plans.ts`
 - `shared/src/schemas/plans.ts`
-- `backend/src/lib/date-utils.ts` (`todayInLondon()`, helpers for date-range expansion)
+- `backend/src/lib/date-utils.ts` (`todayInLondon()`, `eachDateInRange`, `daysBetween`, `parseCivilDate`, `formatCivilDate`)
 - `backend/src/lib/slot-generation.ts` (`generateEmptySlotsForRange(planId, start, end, occasionIds)`)
+- `backend/src/db/schema/meal-plans.ts` (added the `name` column FEAT-12 missed; see migration `0004`)
 
 **Acceptance criteria:**
-- [ ] `create({ name, startDate, endDate })` validates start ≤ end; rejects with `CONFLICT` if any non-deleted plan with `endDate >= today` overlaps the range
-- [ ] On accept, inserts the plan and generates empty slots for every (date × meal occasion) inside a transaction
-- [ ] `list({ status: 'active' | 'past' | 'future' | 'all' })` filters per `todayInLondon()`: active = `today BETWEEN startDate AND endDate`, past = `endDate < today`, future = `startDate > today`
-- [ ] `get(planId)` returns the plan + all slots (with joined recipe data where assigned)
-- [ ] `softDelete` sets `is_deleted = true`
-- [ ] Overlap is checked against `is_deleted = false` plans only; past plans excluded from overlap
+- [ ] `create({ name, startDate, endDate })` validates start ≤ end; rejects with `CONFLICT` (`cause.code = 'PLAN_DATE_OVERLAP'`) if any plan with `endDate >= today` overlaps the range; rejects with `BAD_REQUEST` (`cause.code = 'PLAN_RANGE_TOO_LONG'`) if the range exceeds `PLAN_MAX_RANGE_DAYS` (14)
+- [ ] On accept, inserts the plan and generates empty slots for every (date × meal occasion) inside a `withTransaction`
+- [ ] `list({ status: 'active' | 'past' | 'future' | 'all' })` filters per `todayInLondon()`: active = `today BETWEEN startDate AND endDate` (inclusive), past = `endDate < today`, future = `startDate > today`
+- [ ] `get(planId)` returns the plan + all slots, including the joined recipe sub-shape on assigned slots (rendering soft-deleted recipes — DEC-21)
+- [ ] `delete(planId)` hard-deletes the plan; FK cascade removes slots and shopping-list items
+- [ ] Overlap is checked against past-plan-exempt rows only (`endDate >= today`); cross-household plans are excluded
 
 **Implementation notes:**
-- The overlap query: `WHERE NOT (other.endDate < new.startDate OR other.startDate > new.endDate)` filtered by `is_deleted = false AND endDate >= today`.
-- Slot generation: expand the range to dates × occasion ids; bulk insert.
-- `todayInLondon()` returns a `date` (no time component) in the Europe/London civil day.
+- The overlap query: `WHERE household_id = CURRENT_HOUSEHOLD_ID AND end_date >= :today AND NOT (end_date < :new_start OR start_date > :new_end)`. Inclusive-boundary semantics: a plan ending on D blocks a new plan starting on D.
+- Slot generation: expand the range to dates × occasion ids; bulk insert via Drizzle.
+- `todayInLondon()` returns a `Date` at UTC midnight whose UTC year/month/day match the Europe/London civil day, so it compares directly against the `date`-typed columns.
 
 **Manual verification:**
 1. Create a plan from today to today+6; observe slots auto-generated (14 slots for 2 occasions).
 2. Try creating an overlapping plan — `CONFLICT`.
 3. Create a fully-past plan (or wait till one becomes past) — allowed (overlap exempt for past).
-4. Soft-delete a plan; create one overlapping its range — allowed.
+4. Delete a plan; create one overlapping its range — allowed.
 
 **Common gotchas:**
 - "Today" computed from server clock without timezone awareness will drift around midnight; always go through `dateUtils`.
-- The bulk insert for slots can hit parameter limits if the range is huge — clamp the max range to something sensible (e.g. 90 days) and reject longer ranges with `BAD_REQUEST`.
+- The bulk insert for slots can hit parameter limits if the range is huge — `PLAN_MAX_RANGE_DAYS = 14` clamps this well below any limit.
 
 **Definition of done:**
-- Tests cover: slot generation count and contents; overlap rejection on active plans; past-plan exemption; deleted-plan exemption; status filter buckets correctly around midnight.
-- Commit: `feat(plans): create, list, soft-delete with auto slot generation and overlap rule`
+- Tests cover: slot generation count and contents; overlap rejection on active plans (with inclusive boundary); past-plan exemption; cross-household isolation; status filter buckets correctly around midnight; soft-deleted-recipe rendering on `get`; delete cascade on slots; same-range create after delete.
+- Commit: `feat(plans): create, list, get, delete with auto slot generation and overlap rule`
 - Gate check: create a plan via probe; query `meal_plan_slots` to see 2 × N empty slots.
 
 ---

@@ -102,6 +102,7 @@ async function insertPlan(
     .insert(mealPlans)
     .values({
       householdId: CURRENT_HOUSEHOLD_ID,
+      name: 'Test Plan',
       startDate: new Date('2026-06-01'),
       endDate: new Date('2026-06-07'),
       ...overrides,
@@ -595,6 +596,7 @@ describe('meal plans and shopping list schema', () => {
         .insert(mealPlans)
         .values({
           householdId: CURRENT_HOUSEHOLD_ID,
+          name: 'Test Plan',
           startDate: new Date('2026-06-01'),
           endDate: new Date('2026-06-07'),
           updatedAt: past,

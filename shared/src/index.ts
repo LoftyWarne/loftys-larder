@@ -178,6 +178,13 @@ export {
   type PlanSlotLoss,
 } from './schemas/plans.ts';
 export {
+  SLOT_COMMENT_MAX_LENGTH,
+  updateSlotInputSchema,
+  type UpdateSlotInput,
+  updateSlotResultSchema,
+  type UpdateSlotResult,
+} from './schemas/slots.ts';
+export {
   ingredientNameSchema,
   ingredientShelfLifeSchema,
   createIngredientInputSchema,

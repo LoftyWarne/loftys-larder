@@ -4,6 +4,7 @@ import { ingredientsRouter } from './procedures/ingredients.ts';
 import { plansRouter } from './procedures/plans.ts';
 import { recipeDraftsRouter } from './procedures/recipe-drafts.ts';
 import { recipesRouter } from './procedures/recipes.ts';
+import { slotsRouter } from './procedures/slots.ts';
 import { uploadsRouter } from './procedures/uploads.ts';
 import { userRouter } from './procedures/user.ts';
 
@@ -15,6 +16,7 @@ export const appRouter = router({
   recipeDrafts: recipeDraftsRouter,
   uploads: uploadsRouter,
   plans: plansRouter,
+  slots: slotsRouter,
 });
 
 export type AppRouter = typeof appRouter;

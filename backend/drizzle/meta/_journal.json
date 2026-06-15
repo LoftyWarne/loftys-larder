@@ -43,6 +43,13 @@
       "when": 1781531901946,
       "tag": "0005_yellow_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781545039589,
+      "tag": "0006_gigantic_william_stryker",
+      "breakpoints": true
     }
   ]
 }

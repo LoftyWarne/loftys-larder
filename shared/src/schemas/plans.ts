@@ -53,6 +53,7 @@ export const planSlotSchema = z.object({
   chefUserId: z.string().nullable(),
   cooksBaseRecipeId: recipeIdSchema.nullable(),
   cooksBaseServings: z.number().int().positive().nullable(),
+  comment: z.string().nullable(),
   recipe: planSlotRecipeSchema.nullable(),
 });
 export type PlanSlot = z.infer<typeof planSlotSchema>;

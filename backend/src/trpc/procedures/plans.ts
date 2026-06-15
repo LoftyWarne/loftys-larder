@@ -423,6 +423,7 @@ export const plansRouter = router({
           chefUserId: mealPlanSlots.chefUserId,
           cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
           cooksBaseServings: mealPlanSlots.cooksBaseServings,
+          comment: mealPlanSlots.comment,
         })
         .from(mealPlanSlots)
         .where(eq(mealPlanSlots.planId, sourceRow.id));
@@ -488,6 +489,7 @@ export const plansRouter = router({
             chefUserId: slot.chefUserId,
             cooksBaseRecipeId: slot.cooksBaseRecipeId,
             cooksBaseServings: slot.cooksBaseServings,
+            comment: slot.comment,
           };
         });
 
@@ -581,6 +583,7 @@ async function selectPlanSlots(
       chefUserId: mealPlanSlots.chefUserId,
       cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
       cooksBaseServings: mealPlanSlots.cooksBaseServings,
+      comment: mealPlanSlots.comment,
       recipeName: recipes.name,
       recipeImageUrl: recipes.imageUrl,
       recipeIsBase: recipes.isBase,
@@ -604,6 +607,7 @@ async function selectPlanSlots(
     chefUserId: row.chefUserId,
     cooksBaseRecipeId: row.cooksBaseRecipeId,
     cooksBaseServings: row.cooksBaseServings,
+    comment: row.comment,
     recipe:
       row.recipeId === null || row.recipeName === null
         ? null

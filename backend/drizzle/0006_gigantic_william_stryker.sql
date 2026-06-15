@@ -1,0 +1,1 @@
+ALTER TABLE "meal_plan_slots" ADD COLUMN "comment" text;

@@ -93,6 +93,7 @@ export const mealPlanSlots = pgTable(
       onDelete: 'restrict',
     }),
     cooksBaseServings: smallint(),
+    comment: text(),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`),

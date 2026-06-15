@@ -4,6 +4,54 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-15 — FEAT-28 (Plan date-range edits) + plan-name removal
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` all clean. Backend: 33/33 in `plans-procedures.test.ts` (17 pre-existing + 16 new); `meal-plans-schema.test.ts` still green after the `name` column drop. Wider backend run reproduces the same pre-existing `$onUpdate` millisecond flake at `user-procedures.test.ts:202` — confirmed via `git stash` against clean `main`, fails the same way; unrelated. Testcontainers ran via the Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). DoD boxes in `docs/feature-specs.md §FEAT-28` left unticked — human action. Manual gate (extend by 3 days; destructive shrink with and without `confirmDestructive`) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **Plans have no `name` column (`docs/design-decisions.md` DEC-83 added).** The kick-off question for FEAT-28 turned into a deeper challenge: is a plan name justified for the UX? Conclusion no, for the single-household MVP — the date range plus DEC-38's overlap rule is a sufficient unique identifier within the active window. Past plans are still distinguishable by date range. Migration `0005_yellow_lilandra.sql` drops the column; `planNameSchema` removed; `createPlanInput` is now `{ startDate, endDate }`. FEAT-27, 29, 31 specs updated. DEC-83 records the revisit trigger (semantic-label need, second user, or sharing surface).
+- **Past plans are immutable.** `updateRange` rejects with `BAD_REQUEST` + `cause.code = 'PLAN_PAST_NOT_EDITABLE'` when the *current* plan's `endDate < todayInLondon()`. Not in the FEAT-28 spec literal, but Conor's call during planning: re-planning the same dates from a past period is the FEAT-29 (duplicate) workflow, not a `updateRange` workflow. Same shape as DEC-38's past-plan exemption — the past is read-only.
+- **Destructive-shrink confirmation lives in the procedure contract.** `confirmDestructive?: boolean`. Without it, when shrinking would discard any slot with `slot_type <> 'empty'`, the procedure throws `BAD_REQUEST` with `cause = { code: 'PLAN_DESTRUCTIVE_RANGE_CHANGE', slots: [{ id, date, occasionId, slotType, recipeId }] }`. The list of lost slots ships with the error so FEAT-31 can render a confirm dialog without a second round-trip. Pre-flight read is outside the transaction (spec note: household-scale read is cheap); the transaction itself is purely the writes.
+- **Set-diff implementation, not "delete all, regenerate".** `eachDateInRange` on the current range and the new range; symmetric date-set diff (compared via `formatCivilDate` strings so set keys are stable). `datesToRemove` → `delete` slots `WHERE plan_id = ? AND date IN (...)`. `datesToAdd` → `generateEmptySlotsForDates(...)`. In-range slots and their assignments are preserved by id. A mixed shrink-one-side / extend-other-side call is a single `withTransaction`.
+- **Self-exclusion on the overlap check.** Re-uses `plans.create`'s overlap predicate with one addition: `ne(mealPlans.id, planRow.id)`. A no-op or pure-extend update never reports the plan itself as a conflict.
+
+### Drift from kick-off plan
+
+1. **Plan-name removal landed as a bundled prep, not a separate PR.** The kick-off question was "should `updateRange` also let the user rename?" — which surfaced a deeper question Conor pushed back on ("Can you justify why a plan name is required for the UX?"). The right answer was "no, drop it." DEC-83 captures the rationale; the spec edits and migration ship with the FEAT-28 work because the files overlap heavily (`plans.ts` procedure, `shared/src/schemas/plans.ts`, the test file). One commit, not two.
+2. **Helper refactor (`slot-generation.ts`).** Introduced `generateEmptySlotsForDates(tx, planId, dates[], occasionIds)`; `generateEmptySlotsForRange` is now a one-line wrapper that calls `eachDateInRange` then delegates. Anticipated in the kick-off; lands as planned. `plans.create` is functionally unchanged.
+3. **Helper extraction inside `plans.ts`.** Extracted `loadHouseholdPlan(db, id)`, `loadOccasionIds(db)`, and `selectPlanSlots(db, planId)` so `get` and `updateRange` share one source of truth for the slot projection (the LEFT JOIN over `recipes` without an `is_deleted` filter — DEC-21). All three helpers take a `DbHandle = NodePgDatabase<Schema> | Tx` so they work inside or outside a transaction.
+
+### Implementation details worth carrying
+
+- **`plans.updateRange` result is structurally identical to `plans.get`'s result.** Same `planSchema.extend({ slots: z.array(planSlotSchema) })` shape. The planner UI (FEAT-31) can use the response to refresh its cached plan view without a follow-up `get`.
+- **`PLAN_DESTRUCTIVE_RANGE_CHANGE` cause payload uses `planSlotLossSchema` (`shared/src/schemas/plans.ts`)** — `{ id, date, occasionId, slotType, recipeId }`. Tight shape; what the confirm dialog needs and nothing more. `loose()` on `domainErrorCauseSchema` (FEAT-17) still works — the extra `slots` field passes through.
+- **Set diff uses `formatCivilDate` strings as keys.** `eachDateInRange` returns `Date` objects whose identity differs by instance; comparing them in a `Set` would treat `2026-06-15T00:00:00.000Z` as not-equal to a fresh `Date` for the same civil day. Formatting to `YYYY-MM-DD` first normalises the keys.
+- **Pre-flight destructive check is `ne(mealPlanSlots.slotType, 'empty')`,** not `inArray(...)` over the non-empty enum values. Cheaper to write, identical result; the enum lives in the DB so there's no risk of an unknown variant slipping past.
+- **The `updatedAt` column on `meal_plans` bumps via Drizzle `$onUpdate` (DEC-16)** as a side effect of the `tx.update(mealPlans).set(...)`. No manual `updatedAt: new Date()` write; no trigger. Confirmed by re-reading the schema; the existing `meal-plans-schema.test.ts` `$onUpdate` test still passes.
+- **All `name` cleanup in test files preserved test intent.** The list-test's `expect(all.items.map((p) => p.name)).toEqual(['Mine'])` became `expect(all.items.map((p) => p.id)).toEqual([mineId])` — same isolation invariant, different observable column.
+
+### What downstream FEATs will consume
+
+- **FEAT-29 (Plan duplication)** can reuse `loadHouseholdPlan` and `loadOccasionIds` (lifted from `plans.create`/`get`/`updateRange`). Duplication is conceptually "compute an offset, copy slots inside a transaction" — the helper surface is now there.
+- **FEAT-31 (Planner UI)** gets two new touchpoints: the `updateRange` mutation and the `PLAN_DESTRUCTIVE_RANGE_CHANGE` confirm-dialog flow. Recommendation: render the dialog from the cause payload directly (lossy slots are described by `date` + `occasionId` + `slotType` + optional `recipeId`; resolve the recipe name via the existing recipe query cache rather than fetching). The shared `useOptimisticSlotUpdate` hook (FEAT-31) won't apply to `updateRange` — it's a plan-level mutation, not a slot-level one. A separate `useUpdatePlanRange` is appropriate.
+- **FEAT-50 (`OPERATIONS.md`)** should note migration `0005` drops `meal_plans.name`. Deployment ordering is automatic via Fly `release_command` (DEC-40); no manual step.
+
+### What did NOT change (carry from earlier notes)
+
+- `meal_plan_slots` table is unchanged. No new constraints; the existing biconditional CHECK on `(slot_type = 'recipe') = (recipe_id IS NOT NULL)` (FEAT-12) is what backstops a mistaken `updateRange` that tries to overwrite a slot's type.
+- No new dependencies. `inArray` from `drizzle-orm` is the only newly-imported symbol in the procedure file.
+- `dateUtils` is unchanged. `eachDateInRange`, `daysBetween`, `parseCivilDate`, `formatCivilDate`, `todayInLondon` all reused as-is.
+- No frontend code touched — UI lands in FEAT-31. The new mutation is exposed on `appRouter` automatically.
+- No FEAT-N strings in code, test filenames, or `describe()` blocks — feedback pin holds.
+
+### Open items / known flakes
+
+- **`user-procedures.test.ts:202` `bumps updatedAt via $onUpdate` reproducibly fails** with the new `updatedAt` value running 3-10ms *before* the captured initial. Confirmed via `git stash` against clean `main`. Pattern looks like a Postgres `now()` vs JS `Date.now()` precision quirk inside a single fast test run — possibly related to the `clock_timestamp()` vs `statement_timestamp()` distinction or just transaction-clock resolution. Out of scope for this session; worth filing as a separate fixup (probably: capture `now()` from Postgres rather than JS for the "before" timestamp, or relax to `>=`).
+- **Past-plan editability is now strictly forbidden by `PLAN_PAST_NOT_EDITABLE`.** If a real workflow surfaces where the user wants to extend a plan that just rolled into "past" (e.g. they didn't finish cooking through it), the current answer is "duplicate forward via FEAT-29." If duplication isn't actually a good answer there, revisit by adding a grace window (e.g. plans whose `endDate >= today - N days` remain editable) or by softening the guard to a warning.
+
+---
+
 ## 2026-06-15 — FEAT-27 (Plan procedures: create, list, get, delete)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck` + `pnpm -r lint` clean across all three workspaces. Backend: 31 new tests green — 14 in `date-utils.test.ts`, 17 in `plans-procedures.test.ts`; the existing `meal-plans-schema.test.ts` (30 tests) still passes after the `meal_plans.name` column landed. Testcontainers ran via the Colima socket workaround (`DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). A wider parallel backend run again flagged the recurring `$onUpdate` millisecond flake in `user-procedures.test.ts:202` — confirmed pre-existing by re-running the file in isolation against an untouched test source (reproduces, same shape). DoD boxes in `docs/feature-specs.md §FEAT-27` left unticked — human action. Manual gate checks (create today→+6 → see `2 × 7` empty slots; overlap rejection; past-plan exemption; delete then re-create over the same range) are owed by the human.

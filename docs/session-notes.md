@@ -4,6 +4,64 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-17 — FEAT-32 (Base cooking on slots: model fields, editor, card rendering, soft warning)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across all three workspaces. Frontend: 205/205 passing (31 test files) — 7 new in `slot-editor-sheet.test.tsx`, +1 in `slot-cell.test.tsx`, fixtures updated in `use-optimistic-slot-update.test.ts` and `planner-page.test.tsx` for the wider DTOs. Backend: 396/396 passing across 17 files via Testcontainers (Colima socket workaround: `DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). New `batch-supply.test.ts` (7 cases for `hasBaseSupply`); `slots-procedures.test.ts` grew 8 new tests for the base-cook surface (round-trip, clear, joint-set refine, non-base / cross-household / deleted-base rejections, edit-in-place when the base is later soft-deleted, non-recipe-slot defence); one assertion in `plans-procedures.test.ts` updated for the new `recipe.baseRecipeId` field. DoD boxes in `docs/feature-specs.md §FEAT-32` left unticked — human action. Manual gate (batch-version meal → suggestion hint shows linked base; click apply; save; card renders two lines; remove base cook upstream → warning re-appears) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **Suggestion UX is an explicit hint button, not a pre-fill.** The FEAT-32 spec's "must not auto-set; it's a hint" wording is most faithfully expressed as a `Suggested: <name> — use this?` button beside an empty picker. Click → fetches the base recipe via `recipes.get` and populates both the picker and the base-servings input (defaulted from `recipe.baseServings`). Opt-in, not opt-out.
+- **Base-cook fields restricted to `slot_type='recipe'`** at both the input schema refine and the procedure layer. The DB joint-set CHECK is unconditional, but cooking a base on an `eat_out` slot is nonsensical for the v1 mental model. Defence in depth: the input schema rejects with a clear refine message before the procedure even loads the slot.
+- **Warning lives backend + frontend, with `OCCASION_ORDER` as the shared source of truth.** Backend `hasBaseSupply` SQL helper is the reusable predicate for FEAT-36 (aggregation) and FEAT-40 (plant-points). For the planner UI's per-slot warning the frontend computes it client-side from the already-loaded `plans.get` data — no extra round-trip, no extra cache entry. Both consume `shared/src/lib/occasion-order.ts`'s `OCCASION_ORDER = { Lunch: 0, Dinner: 1 }` so a third occasion drops in once in one file.
+- **Occasion ordering hardcoded as a constant**, not a DB column. Spec's common-gotcha note already flags this: "if a future occasion (breakfast?) is added, the ordering needs an explicit column." A `display_order` column on `meal_occasions` is the upgrade path; for two occasions the constant is cheaper and equally correct.
+- **`SLOT_BASE_*` domain error codes (three new)** ride the existing `domainErrorCauseSchema`: `SLOT_BASE_CROSS_HOUSEHOLD`, `SLOT_BASE_NOT_PICKABLE`, `SLOT_BASE_NOT_BASE`. Same shape as the existing `SLOT_RECIPE_*` codes from FEAT-30.
+
+### Drift from kick-off plan
+
+1. **Added `PlanSlot.cooksBaseRecipe` (id + name + isDeleted) to the slot DTO.** Kick-off plan added `recipe.baseRecipeId` (so the UI can detect a batch-version meal) but didn't call out a separate "cooked-base name" carrier. The slot card needs the base recipe's *name* to render "Cook base: Y (×M)" and a "(deleted)" suffix when the base was soft-deleted post-assignment. Solution: new `planSlotCookedBaseSchema` ({ id, name, isDeleted }) projected via an aliased `LEFT JOIN` in both `selectPlanSlots` and `selectSlotById`. No constraint change; one extra projection per slot read.
+2. **Suggestion hint fetches via `recipes.get`, not a new thin `getHeader`.** Kick-off plan flagged this as "to verify in implementation, fallback OK." `recipes.get` already returns the full `Recipe` shape including `baseServings`, which the apply-suggestion path uses to default the base-servings input. No new procedure added.
+3. **`useOptimisticSlotUpdate` extended in place.** Not a drift exactly — the kick-off plan said the hook would "pass through unchanged because base-cook fields ride along" — but the optimistic `applySlotPatch` had to grow two assignments (cook-base FK + servings) and a small `cooksBaseRecipe` preservation rule (preserve when the FK is unchanged, null otherwise; server-returned slot replaces on settle). The hook's public interface didn't change.
+
+### Implementation details worth carrying
+
+- **`hasBaseSupply` semantics.** "Earlier-or-same" = (date < target) OR (date = target AND occasion order ≤ target's order) OR (same slot id; self-supply). Backend SQL mirrors the JS `OCCASION_ORDER` map via an inline `CASE name WHEN 'Lunch' THEN 0 WHEN 'Dinner' THEN 1 ELSE 999`. Returns `{ hasSupply, earliestSupplySlotId? }`; ordered ascending by (date, occasion order, id) so the earliest supply is deterministic when multiple slots cook the base.
+- **Frontend warning derivation is O(plan-slot²) per render** — acceptable for plans capped at 14 days × 2 occasions × 1 meal = 28 slots. Memoised on `planQuery.data`. Returns a `Set<number>` of warning slot ids consumed by both the grid (per-slot `baseCookLine`) and the editor sheet (`hasBaseSupply` prop).
+- **Slot card extension via `baseCookLine` slot, not `SlotCellProps` widening.** Cross-cutting #14 is honoured: the planner-grid composes the line (cook info + optional warning) and passes the node into the existing prop. `SlotCellProps` is unchanged; FEAT-33's `chefChip` will plug in the same way.
+- **Editor sheet's `EditorState` grew `baseRecipe` (id + name) and `baseServings` (string).** Initialised from `slot.cooksBaseRecipe` on open; the picker's value uses a `minimalRecipeListItem` stand-in (same trick as the meal-recipe picker) so the combobox renders the current selection without a full bank fetch.
+- **Editor's warning visibility** depends on three predicates: (a) the eating recipe is a batch-version (its `baseRecipeId !== null`), (b) the editor's local `baseRecipe` is null (user hasn't applied the suggestion or picked one), (c) the parent says supply is missing (`hasBaseSupply` prop). All three must hold for the warning to render. Adding the base inside the editor immediately silences it via predicate (b); saving without a base keeps it on the card via (c).
+- **Pickable-recipes helper unchanged.** Base picker calls `recipes.list` with `{ isBase: true, includePickerHidden: true }` — both options were already in `pickableRecipesWhere` from FEAT-23.
+- **`assertRecipeIsBase` mirrors `assertRecipeAssignable`** — same household + not-deleted checks, plus the `is_base = true` assertion. Re-validation only fires on FK change (`input.cooksBaseRecipeId !== existing.cooksBaseRecipeId`), preserving DEC-21 historical-render coherence: a slot whose base was later soft-deleted can still have its base-servings edited without re-validating the FK.
+- **`loadHouseholdSlot` extended** to return existing `cooksBaseRecipeId` so the "changed?" gate has the same shape as the existing `recipeId` gate. Single extra column in the select.
+- **No new dependencies, no migration.** All columns already existed from earlier feature work (DB joint-set CHECK has been in place since the original meal-plans migration). Frontend `BatchWarning` component is plain Tailwind + a Unicode warning glyph; no icon library added.
+
+### Open follow-ups
+
+- **FEAT-33 (pair switch) lands `<PairSwitchButton />` on the editor sheet** and `chefChip` on the slot card via the same content-slot pattern. After a pair switch the batch-supply warning may suddenly appear or disappear (spec's "correct behaviour, not a bug" note) — that's already handled by the per-render derivation; nothing extra needed in FEAT-33.
+- **FEAT-36 (aggregation) consumes `hasBaseSupply` differently** — it'll likely walk all slots and sum cook-base servings against the consumers of each base. Today's helper is single-slot-anchored; aggregation may want a "list all base-cook supplies in a plan" variant. Don't extend the helper signature pre-emptively; let FEAT-36 spec it.
+- **FEAT-40 (plant-points)** wants the same "earlier-or-same" predicate to attribute the plant-points of a cooked base to its consuming meals across the same date or earlier. Same helper, different aggregation. The shared `OCCASION_ORDER` is the contract.
+- **If a third meal occasion lands (Breakfast),** update `MEAL_OCCASIONS` in `backend/src/db/seeds/reference.ts`, `OCCASION_ORDER` in `shared/src/lib/occasion-order.ts`, and the SQL `CASE` in `backend/src/lib/batch-supply.ts`. Three files in lockstep. Alternative: promote to a `display_order` column on `meal_occasions` and read it everywhere — worth the migration when occasions become non-linear or user-editable.
+- **Backend Testcontainers needed the now-familiar Colima workaround** to run in this dev environment. Carry the env vars when running future backend integration tests locally.
+
+### What did NOT change
+
+- DB schema for `meal_plan_slots` unchanged; columns + joint-set CHECK already existed.
+- `slots.update`'s "edit in place" gate semantics unchanged — re-validation still scoped to "the FK is changing".
+- `useOptimisticSlotUpdate`'s public interface unchanged; `applySlotPatch` extended but no new hook shape.
+- `SlotCellProps` unchanged; the cell still has `baseCookLine`/`chefChip`/`commentLine` extension slots — FEAT-32 fills the first, FEAT-33 fills the second.
+- `pickable-recipes` helper unchanged.
+- No new domain error category — three new codes ride the existing `domainErrorCauseSchema`.
+- No new dependencies; no new migration; no `withTransaction` calls.
+- No FEAT-N strings in code, test filenames, or `describe()` blocks — feedback pin holds.
+
+### Known limitations / not in scope
+
+- **Pair switch UI** — FEAT-33.
+- **Aggregated shopping list view** — FEAT-36.
+- **Plant-points display on the planner** — FEAT-40.
+- **Multi-occasion ordering** — Lunch < Dinner hardcoded; a third occasion needs the three-file update above or a `display_order` column.
+
+---
+
 ## 2026-06-15 — FEAT-31 (Meal Planner UI: Recipe Bank + Grid + click-to-assign)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` all clean across the three workspaces. Frontend: 197/197 passing (30 test files); new coverage in `date-utils.test.ts` (16), `use-optimistic-slot-update.test.ts` (5), `slot-cell.test.tsx` (4), `recipe-bank.test.tsx` (7), `planner-page.test.tsx` (6). Backend non-container suites pass (58/58); the 11 Testcontainers suites — including the `listHouseholdMembers` tests in `user-procedures.test.ts` — couldn't launch in this environment ("Could not find a working container runtime strategy"); needs the Colima socket workaround on the next dev box. DoD boxes in `docs/feature-specs.md §FEAT-31` left unticked — human action. Manual gate (open a plan, two-tap assign, edit, switch state, clear; soft-delete a recipe in another tab and confirm historical render survives) is owed by the human.

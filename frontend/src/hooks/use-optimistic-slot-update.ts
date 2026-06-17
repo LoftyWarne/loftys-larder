@@ -101,19 +101,30 @@ function applySlotPatch(
 ): GetPlanResult {
   return {
     ...plan,
-    slots: plan.slots.map((slot) =>
-      slot.id === input.slotId
-        ? {
-            ...slot,
-            slotType: input.slotType,
-            recipeId: input.recipeId,
-            numberOfServings: input.numberOfServings,
-            chefUserId: input.chefUserId,
-            comment: input.comment,
-            recipe,
-          }
-        : slot,
-    ),
+    slots: plan.slots.map((slot) => {
+      if (slot.id !== input.slotId) return slot;
+      // Preserve the existing cooked-base sub-object when the base FK is
+      // unchanged so the card keeps rendering its name during the optimistic
+      // window; otherwise null it and let the server fill in the name on
+      // settle.
+      const cooksBaseRecipe =
+        input.cooksBaseRecipeId !== null &&
+        input.cooksBaseRecipeId === slot.cooksBaseRecipeId
+          ? slot.cooksBaseRecipe
+          : null;
+      return {
+        ...slot,
+        slotType: input.slotType,
+        recipeId: input.recipeId,
+        numberOfServings: input.numberOfServings,
+        chefUserId: input.chefUserId,
+        cooksBaseRecipeId: input.cooksBaseRecipeId,
+        cooksBaseServings: input.cooksBaseServings,
+        comment: input.comment,
+        recipe,
+        cooksBaseRecipe,
+      };
+    }),
   };
 }
 

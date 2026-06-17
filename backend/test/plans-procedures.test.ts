@@ -463,6 +463,7 @@ describe('plans procedures', () => {
         name: 'Tofu Stir Fry',
         imageUrl: null,
         isBase: false,
+        baseRecipeId: null,
         isDeleted: false,
       });
 

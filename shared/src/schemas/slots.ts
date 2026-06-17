@@ -18,11 +18,11 @@ const slotCommentSchema = z
   );
 
 // Full-replace semantics: every editable field on the slot is in the input,
-// and the caller declares the desired final state. The two refines encode the
-// biconditional already enforced in the DB CHECK constraints so the procedure
-// returns a clean domain error before the write hits the wire. Base-cook
-// fields (`cooksBaseRecipeId`, `cooksBaseServings`) land in FEAT-32 and are
-// deliberately absent here.
+// and the caller declares the desired final state. The refines encode the
+// biconditionals already enforced in the DB CHECK constraints so the
+// procedure returns a clean domain error before the write hits the wire. The
+// base-cook pair is restricted to `slot_type='recipe'` slots at this layer
+// (defence in depth above the unconditional DB joint-set CHECK).
 export const updateSlotInputSchema = z
   .object({
     slotId: slotIdSchema,
@@ -30,6 +30,8 @@ export const updateSlotInputSchema = z
     recipeId: recipeIdSchema.nullable(),
     numberOfServings: servingsSchema.nullable(),
     chefUserId: z.string().min(1).nullable(),
+    cooksBaseRecipeId: recipeIdSchema.nullable(),
+    cooksBaseServings: servingsSchema.nullable(),
     comment: slotCommentSchema.nullable(),
   })
   .refine(
@@ -52,6 +54,22 @@ export const updateSlotInputSchema = z
       path: ['numberOfServings'],
       message:
         'numberOfServings must be set when slotType is recipe, and null otherwise',
+    },
+  )
+  .refine(
+    (value) =>
+      (value.cooksBaseRecipeId === null) === (value.cooksBaseServings === null),
+    {
+      path: ['cooksBaseServings'],
+      message:
+        'cooksBaseRecipeId and cooksBaseServings must be set together or both null',
+    },
+  )
+  .refine(
+    (value) => value.slotType === 'recipe' || value.cooksBaseRecipeId === null,
+    {
+      path: ['cooksBaseRecipeId'],
+      message: 'Base-cook fields are only allowed on recipe slots',
     },
   );
 export type UpdateSlotInput = z.infer<typeof updateSlotInputSchema>;

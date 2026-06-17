@@ -1,6 +1,7 @@
 import type { PlanSlot } from '@loftys-larder/shared';
 import { useMemo } from 'react';
 
+import { BatchWarning } from '@/components/planner/batch-warning.tsx';
 import { SlotCell } from '@/components/planner/slot-cell.tsx';
 import { eachDateInRange, formatDayLabel } from '@/lib/date-utils.ts';
 
@@ -8,6 +9,7 @@ export interface PlannerGridProps {
   slots: readonly PlanSlot[];
   rangeStart: string;
   rangeEnd: string;
+  warningSlotIds?: ReadonlySet<number>;
   onSlotClick: (slot: PlanSlot) => void;
 }
 
@@ -20,6 +22,7 @@ export function PlannerGrid({
   slots,
   rangeStart,
   rangeEnd,
+  warningSlotIds,
   onSlotClick,
 }: PlannerGridProps): React.ReactElement {
   const visibleDates = useMemo(
@@ -93,6 +96,10 @@ export function PlannerGrid({
                   {slot ? (
                     <SlotCell
                       slot={slot}
+                      baseCookLine={renderBaseCookLine(
+                        slot,
+                        warningSlotIds?.has(slot.id) ?? false,
+                      )}
                       onClick={() => {
                         onSlotClick(slot);
                       }}
@@ -112,4 +119,28 @@ export function PlannerGrid({
 
 function slotKey(date: string, occasionId: number): string {
   return `${date}:${String(occasionId)}`;
+}
+
+function renderBaseCookLine(
+  slot: PlanSlot,
+  showWarning: boolean,
+): React.ReactNode {
+  const hasBaseCook =
+    slot.cooksBaseRecipeId !== null && slot.cooksBaseServings !== null;
+  if (!hasBaseCook && !showWarning) return null;
+  return (
+    <div className="flex flex-col gap-0.5">
+      {hasBaseCook && (
+        <span className="text-xs text-muted-foreground">
+          Cook base:{' '}
+          {slot.cooksBaseRecipe?.name ?? `#${String(slot.cooksBaseRecipeId)}`}
+          {slot.cooksBaseRecipe?.isDeleted && (
+            <span className="ml-1 text-muted-foreground/70">(deleted)</span>
+          )}{' '}
+          (×{String(slot.cooksBaseServings)})
+        </span>
+      )}
+      {showWarning && <BatchWarning />}
+    </div>
+  );
 }

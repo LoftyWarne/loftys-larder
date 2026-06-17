@@ -1,13 +1,15 @@
 import type {
   HouseholdMember,
   PlanSlot,
+  PlanSlotCookedBase,
   RecipeListItem,
   SlotType,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { SLOT_COMMENT_MAX_LENGTH } from '@loftys-larder/shared';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 
+import { BatchWarning } from '@/components/planner/batch-warning.tsx';
 import {
   SearchableCombobox,
   type SearchableComboboxOption,
@@ -37,11 +39,21 @@ interface RecipeOption extends SearchableComboboxOption {
   recipe: RecipeListItem;
 }
 
+// `baseRecipe` carries only what the picker needs (id + name) — the editor
+// never persists a full RecipeListItem for the cooked base, only the id +
+// servings via UpdateSlotInput.
+interface EditorBaseRecipe {
+  id: number;
+  name: string;
+}
+
 interface EditorState {
   slotType: SlotType;
   recipe: RecipeListItem | null;
   numberOfServings: string;
   chefUserId: string | null;
+  baseRecipe: EditorBaseRecipe | null;
+  baseServings: string;
   comment: string;
 }
 
@@ -50,6 +62,7 @@ export interface SlotEditorSheetProps {
   slot: PlanSlot | null;
   members: readonly HouseholdMember[];
   isSaving: boolean;
+  hasBaseSupply: boolean;
   onClose: () => void;
   onSave: (input: UpdateSlotInput, optimisticRecipe?: RecipeListItem) => void;
 }
@@ -59,6 +72,7 @@ export function SlotEditorSheet({
   slot,
   members,
   isSaving,
+  hasBaseSupply,
   onClose,
   onSave,
 }: SlotEditorSheetProps): React.ReactElement | null {
@@ -79,11 +93,59 @@ export function SlotEditorSheet({
       numberOfServings:
         slot.numberOfServings === null ? '' : String(slot.numberOfServings),
       chefUserId: slot.chefUserId,
+      baseRecipe: cookedBaseToEditor(slot.cooksBaseRecipe),
+      baseServings:
+        slot.cooksBaseServings === null ? '' : String(slot.cooksBaseServings),
       comment: slot.comment ?? '',
     });
   }, [slot]);
 
   const utils = trpc.useUtils();
+
+  // The meal-recipe header that informs the suggestion: prefer the freshly
+  // picked recipe (full RecipeListItem in editor state) so a brand-new
+  // batch-version pick can suggest its base on the same render; fall back to
+  // the slot's current recipe if the user hasn't changed it.
+  const mealRecipe = state?.recipe ?? null;
+  const slotRecipe = slot?.recipe ?? null;
+  const suggestedBaseRecipeId =
+    mealRecipe?.baseRecipeId ??
+    (slotRecipe && state?.recipe === null ? slotRecipe.baseRecipeId : null);
+
+  // Only fetch the suggested base when the user has space to act on it.
+  const showSuggestion =
+    state !== null &&
+    state.slotType === 'recipe' &&
+    state.baseRecipe === null &&
+    suggestedBaseRecipeId !== null;
+
+  const suggestionQuery = trpc.recipes.get.useQuery(
+    suggestedBaseRecipeId === null ? { id: 0 } : { id: suggestedBaseRecipeId },
+    { enabled: showSuggestion },
+  );
+
+  const showBatchWarning =
+    state !== null &&
+    state.slotType === 'recipe' &&
+    isBatchVersion(mealRecipe, slotRecipe, state.recipe) &&
+    state.baseRecipe === null &&
+    !hasBaseSupply;
+
+  const baseSearchQuery = useMemo(() => {
+    return async (query: string): Promise<readonly RecipeOption[]> => {
+      const result = await utils.recipes.list.fetch({
+        search: query || undefined,
+        isBase: true,
+        includePickerHidden: true,
+        limit: 20,
+      });
+      return result.items.map((recipe) => ({
+        id: recipe.id,
+        label: recipe.name,
+        recipe,
+      }));
+    };
+  }, [utils]);
 
   if (!slot || !state) return null;
 
@@ -103,7 +165,25 @@ export function SlotEditorSheet({
       recipeId: null,
       numberOfServings: null,
       chefUserId: null,
+      cooksBaseRecipeId: null,
+      cooksBaseServings: null,
       comment: null,
+    });
+  }
+
+  function handleApplySuggestion(): void {
+    const suggested = suggestionQuery.data;
+    if (!suggested) return;
+    setState((prev) => {
+      if (!prev) return prev;
+      const next: EditorState = {
+        ...prev,
+        baseRecipe: { id: suggested.id, name: suggested.name },
+      };
+      if (prev.baseServings === '') {
+        next.baseServings = String(suggested.baseServings);
+      }
+      return next;
     });
   }
 
@@ -115,8 +195,6 @@ export function SlotEditorSheet({
       }}
     >
       <DialogContent
-        // Bottom-sheet positioning on small screens; centered on larger ones.
-        // Replaces the default Dialog centered placement.
         className={cn(
           'left-0 right-0 top-auto bottom-0 max-w-none translate-x-0 translate-y-0 rounded-t-lg rounded-b-none sm:bottom-auto sm:left-[50%] sm:right-auto sm:top-[50%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg',
         )}
@@ -183,6 +261,7 @@ export function SlotEditorSheet({
                             recipe: minimalRecipeListItem(
                               slot.recipe.id,
                               slot.recipe.name,
+                              slot.recipe.baseRecipeId,
                             ),
                           }
                         : null
@@ -232,6 +311,79 @@ export function SlotEditorSheet({
                   required
                 />
               </label>
+
+              <fieldset className="flex flex-col gap-2 rounded-md border border-input bg-muted/30 p-2">
+                <legend className="text-sm font-medium">
+                  Cooking a base for batch use?
+                </legend>
+                <SearchableCombobox<RecipeOption>
+                  value={
+                    state.baseRecipe
+                      ? {
+                          id: state.baseRecipe.id,
+                          label: state.baseRecipe.name,
+                          recipe: minimalRecipeListItem(
+                            state.baseRecipe.id,
+                            state.baseRecipe.name,
+                            null,
+                          ),
+                        }
+                      : null
+                  }
+                  onChange={(option) => {
+                    setState((prev) => {
+                      if (!prev) return prev;
+                      if (!option) {
+                        return { ...prev, baseRecipe: null, baseServings: '' };
+                      }
+                      const next: EditorState = {
+                        ...prev,
+                        baseRecipe: {
+                          id: option.recipe.id,
+                          name: option.recipe.name,
+                        },
+                      };
+                      if (prev.baseServings === '') {
+                        next.baseServings = String(option.recipe.baseServings);
+                      }
+                      return next;
+                    });
+                  }}
+                  searchQuery={baseSearchQuery}
+                  ariaLabel="Search base recipe"
+                  placeholder="Search base recipe"
+                />
+                {showSuggestion && suggestionQuery.data && (
+                  <button
+                    type="button"
+                    onClick={handleApplySuggestion}
+                    data-testid="base-suggestion-hint"
+                    className="self-start rounded-md border border-dashed border-primary px-2 py-1 text-xs text-primary hover:bg-accent"
+                  >
+                    Suggested: {suggestionQuery.data.name} — use this?
+                  </button>
+                )}
+                {state.baseRecipe !== null && (
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">Base servings</span>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={state.baseServings}
+                      onChange={(event) => {
+                        setState((prev) =>
+                          prev
+                            ? { ...prev, baseServings: event.target.value }
+                            : prev,
+                        );
+                      }}
+                      required
+                    />
+                  </label>
+                )}
+                {showBatchWarning && <BatchWarning />}
+              </fieldset>
             </>
           )}
 
@@ -314,12 +466,24 @@ function buildInputForSave(
     if (recipeId === null || !Number.isInteger(servings) || servings <= 0) {
       return null;
     }
+    let cooksBaseRecipeId: number | null = null;
+    let cooksBaseServings: number | null = null;
+    if (state.baseRecipe !== null) {
+      const baseServings = Number.parseInt(state.baseServings, 10);
+      if (!Number.isInteger(baseServings) || baseServings <= 0) {
+        return null;
+      }
+      cooksBaseRecipeId = state.baseRecipe.id;
+      cooksBaseServings = baseServings;
+    }
     return {
       slotId: slot.id,
       slotType: 'recipe',
       recipeId,
       numberOfServings: servings,
       chefUserId: state.chefUserId,
+      cooksBaseRecipeId,
+      cooksBaseServings,
       comment: commentValue,
     };
   }
@@ -329,15 +493,40 @@ function buildInputForSave(
     recipeId: null,
     numberOfServings: null,
     chefUserId: state.chefUserId,
+    cooksBaseRecipeId: null,
+    cooksBaseServings: null,
     comment: commentValue,
   };
+}
+
+function cookedBaseToEditor(
+  cooked: PlanSlotCookedBase | null,
+): EditorBaseRecipe | null {
+  if (!cooked) return null;
+  return { id: cooked.id, name: cooked.name };
+}
+
+function isBatchVersion(
+  mealRecipe: RecipeListItem | null,
+  slotRecipe: PlanSlot['recipe'],
+  editorRecipe: RecipeListItem | null,
+): boolean {
+  if (mealRecipe) return mealRecipe.baseRecipeId !== null;
+  if (editorRecipe === null && slotRecipe) {
+    return slotRecipe.baseRecipeId !== null;
+  }
+  return false;
 }
 
 // Cheap stand-in when only the slot's PlanSlotRecipe is known. The combobox
 // only reads `id` + `label`; if the user keeps the existing recipe we pass the
 // existing slot's recipeId at save time, so the placeholder values are never
 // persisted.
-function minimalRecipeListItem(id: number, name: string): RecipeListItem {
+function minimalRecipeListItem(
+  id: number,
+  name: string,
+  baseRecipeId: number | null,
+): RecipeListItem {
   return {
     id,
     name,
@@ -346,7 +535,7 @@ function minimalRecipeListItem(id: number, name: string): RecipeListItem {
     activeTimeMins: null,
     totalTimeMins: null,
     isBase: false,
-    baseRecipeId: null,
+    baseRecipeId,
     pairedRecipeId: null,
     isDeleted: false,
     plantPointsCount: 0,

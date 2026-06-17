@@ -230,6 +230,8 @@ describe('slots procedures', () => {
         recipeId,
         numberOfServings: 4,
         chefUserId: USER_ID,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: 'extra coriander',
       });
 
@@ -254,6 +256,8 @@ describe('slots procedures', () => {
         recipeId,
         numberOfServings: 2,
         chefUserId: USER_ID,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: 'leftover marinade',
       });
 
@@ -264,6 +268,8 @@ describe('slots procedures', () => {
         recipeId: null,
         numberOfServings: null,
         chefUserId: USER_ID,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: 'pizza place',
       });
 
@@ -294,6 +300,8 @@ describe('slots procedures', () => {
         recipeId: null,
         numberOfServings: null,
         chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: null,
       });
 
@@ -318,6 +326,8 @@ describe('slots procedures', () => {
         recipeId: null,
         numberOfServings: null,
         chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: null,
       });
 
@@ -334,6 +344,8 @@ describe('slots procedures', () => {
         recipeId,
         numberOfServings: 3,
         chefUserId: USER_ID,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: 'use the big pan',
       });
 
@@ -344,6 +356,8 @@ describe('slots procedures', () => {
         recipeId: null,
         numberOfServings: null,
         chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: null,
       });
 
@@ -365,6 +379,8 @@ describe('slots procedures', () => {
         recipeId: null,
         numberOfServings: null,
         chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: null,
       });
 
@@ -385,6 +401,8 @@ describe('slots procedures', () => {
           recipeId: null,
           numberOfServings: 2,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -403,6 +421,8 @@ describe('slots procedures', () => {
           recipeId,
           numberOfServings: null,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -421,6 +441,8 @@ describe('slots procedures', () => {
           recipeId,
           numberOfServings: 0,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -439,6 +461,8 @@ describe('slots procedures', () => {
           recipeId,
           numberOfServings: null,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -459,6 +483,8 @@ describe('slots procedures', () => {
           recipeId,
           numberOfServings: 2,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({
@@ -482,6 +508,8 @@ describe('slots procedures', () => {
           recipeId: foreignRecipeId,
           numberOfServings: 2,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({
@@ -510,6 +538,8 @@ describe('slots procedures', () => {
         recipeId,
         numberOfServings: 5,
         chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: 'adjusted portions',
       });
 
@@ -536,6 +566,8 @@ describe('slots procedures', () => {
           recipeId: recipeB,
           numberOfServings: 2,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({
@@ -558,6 +590,8 @@ describe('slots procedures', () => {
           recipeId: null,
           numberOfServings: null,
           chefUserId: 'bogus-user-id',
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({
@@ -577,6 +611,8 @@ describe('slots procedures', () => {
         recipeId: null,
         numberOfServings: null,
         chefUserId: OTHER_USER_ID,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: null,
       });
       expect(result.slot.chefUserId).toBe(OTHER_USER_ID);
@@ -598,6 +634,8 @@ describe('slots procedures', () => {
           recipeId: null,
           numberOfServings: null,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({
@@ -618,6 +656,8 @@ describe('slots procedures', () => {
           recipeId: null,
           numberOfServings: null,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({
@@ -638,26 +678,58 @@ describe('slots procedures', () => {
           recipeId: null,
           numberOfServings: null,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });
 
-  describe('base-cook fields are untouched', () => {
-    it('preserves any pre-existing cooks_base_* values through state transitions', async () => {
+  describe('base-cook fields', () => {
+    async function insertBaseRecipe(
+      name: string,
+      options: { isDeleted?: boolean; householdId?: string } = {},
+    ): Promise<number> {
+      const id = await insertRecipe(name, options);
+      await db.update(recipes).set({ isBase: true }).where(eq(recipes.id, id));
+      return id;
+    }
+
+    it('round-trips cooksBaseRecipeId and cooksBaseServings on a recipe slot', async () => {
       const planId = await insertPlan();
-      const baseRecipeId = await insertRecipe('Tomato Base');
-      // The schema permits cooks_base_* alongside any slot type so long as
-      // the joint-set CHECK holds. FEAT-32 will validate is_base on the
-      // procedure layer; here we just confirm slots.update leaves the columns
-      // alone — they survive even when the slot transitions through states.
-      await db
-        .update(recipes)
-        .set({ isBase: true })
-        .where(eq(recipes.id, baseRecipeId));
+      const slotId = await insertSlot(planId);
+      const mealRecipeId = await insertRecipe('Tofu Bowl');
+      const baseRecipeId = await insertBaseRecipe('Curry Base');
+
+      const caller = createCaller(makeContext());
+      const result = await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        recipeId: mealRecipeId,
+        numberOfServings: 4,
+        chefUserId: null,
+        cooksBaseRecipeId: baseRecipeId,
+        cooksBaseServings: 8,
+        comment: null,
+      });
+
+      expect(result.slot.cooksBaseRecipeId).toBe(baseRecipeId);
+      expect(result.slot.cooksBaseServings).toBe(8);
+
+      const row = await readSlot(slotId);
+      expect(row.cooksBaseRecipeId).toBe(baseRecipeId);
+      expect(row.cooksBaseServings).toBe(8);
+    });
+
+    it('clears base-cook fields when both are set to null', async () => {
+      const planId = await insertPlan();
+      const mealRecipeId = await insertRecipe('Tofu Bowl');
+      const baseRecipeId = await insertBaseRecipe('Curry Base');
       const slotId = await insertSlot(planId, {
-        slotType: 'empty',
+        slotType: 'recipe',
+        recipeId: mealRecipeId,
+        numberOfServings: 4,
         cooksBaseRecipeId: baseRecipeId,
         cooksBaseServings: 8,
       });
@@ -665,16 +737,167 @@ describe('slots procedures', () => {
       const caller = createCaller(makeContext());
       await caller.slots.update({
         slotId,
-        slotType: 'eat_out',
-        recipeId: null,
-        numberOfServings: null,
+        slotType: 'recipe',
+        recipeId: mealRecipeId,
+        numberOfServings: 4,
         chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
         comment: null,
       });
 
       const row = await readSlot(slotId);
-      expect(row.cooksBaseRecipeId).toBe(baseRecipeId);
-      expect(row.cooksBaseServings).toBe(8);
+      expect(row.cooksBaseRecipeId).toBeNull();
+      expect(row.cooksBaseServings).toBeNull();
+    });
+
+    it('rejects setting one of cooksBaseRecipeId / cooksBaseServings without the other', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const mealRecipeId = await insertRecipe('Tofu Bowl');
+      const baseRecipeId = await insertBaseRecipe('Curry Base');
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'recipe',
+          recipeId: mealRecipeId,
+          numberOfServings: 4,
+          chefUserId: null,
+          cooksBaseRecipeId: baseRecipeId,
+          cooksBaseServings: null,
+          comment: null,
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects cooksBaseRecipeId pointing at a non-base recipe', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const mealRecipeId = await insertRecipe('Tofu Bowl');
+      const notABaseId = await insertRecipe('Just A Meal');
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'recipe',
+          recipeId: mealRecipeId,
+          numberOfServings: 4,
+          chefUserId: null,
+          cooksBaseRecipeId: notABaseId,
+          cooksBaseServings: 8,
+          comment: null,
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'SLOT_BASE_NOT_BASE' },
+      });
+    });
+
+    it('rejects cooksBaseRecipeId from another household', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const mealRecipeId = await insertRecipe('Tofu Bowl');
+      const foreignBaseId = await insertBaseRecipe('Foreign Base', {
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'recipe',
+          recipeId: mealRecipeId,
+          numberOfServings: 4,
+          chefUserId: null,
+          cooksBaseRecipeId: foreignBaseId,
+          cooksBaseServings: 8,
+          comment: null,
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'SLOT_BASE_CROSS_HOUSEHOLD' },
+      });
+    });
+
+    it('rejects cooksBaseRecipeId pointing at a soft-deleted base when changing it', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const mealRecipeId = await insertRecipe('Tofu Bowl');
+      const deletedBaseId = await insertBaseRecipe('Gone Base', {
+        isDeleted: true,
+      });
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'recipe',
+          recipeId: mealRecipeId,
+          numberOfServings: 4,
+          chefUserId: null,
+          cooksBaseRecipeId: deletedBaseId,
+          cooksBaseServings: 8,
+          comment: null,
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'SLOT_BASE_NOT_PICKABLE' },
+      });
+    });
+
+    it('allows editing servings on a slot whose base recipe became soft-deleted', async () => {
+      const planId = await insertPlan();
+      const mealRecipeId = await insertRecipe('Tofu Bowl');
+      const baseRecipeId = await insertBaseRecipe('Vanishing Base');
+      const slotId = await insertSlot(planId, {
+        slotType: 'recipe',
+        recipeId: mealRecipeId,
+        numberOfServings: 4,
+        cooksBaseRecipeId: baseRecipeId,
+        cooksBaseServings: 8,
+      });
+      await db
+        .update(recipes)
+        .set({ isDeleted: true })
+        .where(eq(recipes.id, baseRecipeId));
+
+      const caller = createCaller(makeContext());
+      const result = await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        recipeId: mealRecipeId,
+        numberOfServings: 4,
+        chefUserId: null,
+        cooksBaseRecipeId: baseRecipeId,
+        cooksBaseServings: 12,
+        comment: null,
+      });
+
+      expect(result.slot.cooksBaseServings).toBe(12);
+      expect(result.slot.cooksBaseRecipeId).toBe(baseRecipeId);
+    });
+
+    it('rejects setting cooksBaseRecipeId on a non-recipe slot', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const baseRecipeId = await insertBaseRecipe('Curry Base');
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'eat_out',
+          recipeId: null,
+          numberOfServings: null,
+          chefUserId: null,
+          cooksBaseRecipeId: baseRecipeId,
+          cooksBaseServings: 8,
+          comment: null,
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });
   });
 });

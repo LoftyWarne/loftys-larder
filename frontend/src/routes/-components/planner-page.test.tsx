@@ -56,7 +56,10 @@ vi.mock('@/lib/trpc.ts', () => ({
       },
     }),
     plans: { get: { useQuery: planUseQueryMock } },
-    recipes: { list: { useInfiniteQuery: recipesUseInfiniteQueryMock } },
+    recipes: {
+      list: { useInfiniteQuery: recipesUseInfiniteQueryMock },
+      get: { useQuery: vi.fn().mockReturnValue({ data: undefined }) },
+    },
     user: { listHouseholdMembers: { useQuery: membersUseQueryMock } },
     slots: {
       update: {
@@ -101,6 +104,7 @@ const EMPTY_SLOT: PlanSlot = {
   cooksBaseServings: null,
   comment: null,
   recipe: null,
+  cooksBaseRecipe: null,
 };
 
 const RECIPE_SLOT: PlanSlot = {
@@ -116,6 +120,7 @@ const RECIPE_SLOT: PlanSlot = {
     name: 'Tomato pasta',
     imageUrl: null,
     isBase: false,
+    baseRecipeId: null,
     isDeleted: false,
   },
 };
@@ -196,6 +201,8 @@ describe('PlannerPage', () => {
       recipeId: 10,
       numberOfServings: 2,
       chefUserId: null,
+      cooksBaseRecipeId: null,
+      cooksBaseServings: null,
       comment: null,
     });
   });
@@ -236,6 +243,8 @@ describe('PlannerPage', () => {
       recipeId: null,
       numberOfServings: null,
       chefUserId: null,
+      cooksBaseRecipeId: null,
+      cooksBaseServings: null,
       comment: null,
     });
   });

@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { and, asc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { alias } from 'drizzle-orm/pg-core';
 
 import {
   updateSlotInputSchema,
@@ -41,6 +42,17 @@ export const slotsRouter = router({
         }
       }
 
+      // Same coherence rule for the base-cook FK: only re-validate when the
+      // caller is *changing* it, so a historical slot whose cooked base was
+      // later soft-deleted can still be edited (DEC-21).
+      if (input.cooksBaseRecipeId !== null) {
+        const baseChanged =
+          input.cooksBaseRecipeId !== existing.cooksBaseRecipeId;
+        if (baseChanged) {
+          await assertRecipeIsBase(ctx.db, input.cooksBaseRecipeId);
+        }
+      }
+
       if (input.chefUserId !== null) {
         await assertUserExists(ctx.db, input.chefUserId);
       }
@@ -55,6 +67,8 @@ export const slotsRouter = router({
           recipeId: input.recipeId,
           numberOfServings: input.numberOfServings,
           chefUserId: input.chefUserId,
+          cooksBaseRecipeId: input.cooksBaseRecipeId,
+          cooksBaseServings: input.cooksBaseServings,
           comment: input.comment,
         })
         .where(eq(mealPlanSlots.id, existing.id))
@@ -75,6 +89,7 @@ export const slotsRouter = router({
 interface ExistingSlot {
   id: number;
   recipeId: number | null;
+  cooksBaseRecipeId: number | null;
 }
 
 async function loadHouseholdSlot(
@@ -85,6 +100,7 @@ async function loadHouseholdSlot(
     .select({
       id: mealPlanSlots.id,
       recipeId: mealPlanSlots.recipeId,
+      cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
     })
     .from(mealPlanSlots)
     .innerJoin(mealPlans, eq(mealPlanSlots.planId, mealPlans.id))
@@ -135,6 +151,43 @@ async function assertRecipeAssignable(
   }
 }
 
+async function assertRecipeIsBase(
+  db: DbHandle,
+  recipeId: number,
+): Promise<void> {
+  const rows = await db
+    .select({
+      householdId: recipes.householdId,
+      isDeleted: recipes.isDeleted,
+      isBase: recipes.isBase,
+    })
+    .from(recipes)
+    .where(eq(recipes.id, recipeId))
+    .limit(1);
+  const row = rows[0];
+  if (row?.householdId !== CURRENT_HOUSEHOLD_ID) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Base recipe not available in this household',
+      cause: { code: 'SLOT_BASE_CROSS_HOUSEHOLD' },
+    });
+  }
+  if (row.isDeleted) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Base recipe is deleted and cannot be assigned',
+      cause: { code: 'SLOT_BASE_NOT_PICKABLE' },
+    });
+  }
+  if (!row.isBase) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'cooksBaseRecipeId must reference a base recipe',
+      cause: { code: 'SLOT_BASE_NOT_BASE' },
+    });
+  }
+}
+
 async function assertUserExists(db: DbHandle, userId: string): Promise<void> {
   const rows = await db
     .select({ id: users.id })
@@ -154,6 +207,7 @@ async function assertUserExists(db: DbHandle, userId: string): Promise<void> {
 // reads the same shape after a mutation, so the optimistic cache can swap in
 // the server-returned row without re-fetching the whole plan.
 async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
+  const cookedBase = alias(recipes, 'cooked_base_recipe');
   const rows = await db
     .select({
       id: mealPlanSlots.id,
@@ -171,11 +225,15 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
       recipeName: recipes.name,
       recipeImageUrl: recipes.imageUrl,
       recipeIsBase: recipes.isBase,
+      recipeBaseRecipeId: recipes.baseRecipeId,
       recipeIsDeleted: recipes.isDeleted,
+      cookedBaseName: cookedBase.name,
+      cookedBaseIsDeleted: cookedBase.isDeleted,
     })
     .from(mealPlanSlots)
     .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
     .leftJoin(recipes, eq(mealPlanSlots.recipeId, recipes.id))
+    .leftJoin(cookedBase, eq(mealPlanSlots.cooksBaseRecipeId, cookedBase.id))
     .where(eq(mealPlanSlots.id, slotId))
     .orderBy(asc(mealPlanSlots.id))
     .limit(1);
@@ -207,7 +265,16 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
             name: row.recipeName,
             imageUrl: row.recipeImageUrl,
             isBase: row.recipeIsBase ?? false,
+            baseRecipeId: row.recipeBaseRecipeId ?? null,
             isDeleted: row.recipeIsDeleted ?? false,
+          },
+    cooksBaseRecipe:
+      row.cooksBaseRecipeId === null || row.cookedBaseName === null
+        ? null
+        : {
+            id: row.cooksBaseRecipeId,
+            name: row.cookedBaseName,
+            isDeleted: row.cookedBaseIsDeleted ?? false,
           },
   };
 }

@@ -19,6 +19,7 @@ const BASE_SLOT: PlanSlot = {
   cooksBaseServings: null,
   comment: null,
   recipe: null,
+  cooksBaseRecipe: null,
 };
 
 describe('SlotCell', () => {
@@ -35,6 +36,7 @@ describe('SlotCell', () => {
             name: 'Tomato pasta',
             imageUrl: null,
             isBase: false,
+            baseRecipeId: null,
             isDeleted: false,
           },
         }}
@@ -58,6 +60,7 @@ describe('SlotCell', () => {
             name: 'Old recipe',
             imageUrl: null,
             isBase: false,
+            baseRecipeId: null,
             isDeleted: true,
           },
         }}
@@ -83,5 +86,40 @@ describe('SlotCell', () => {
     render(<SlotCell slot={BASE_SLOT} onClick={onClick} />);
     await user.click(screen.getByRole('button'));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the baseCookLine prop when the parent provides one', () => {
+    render(
+      <SlotCell
+        slot={{
+          ...BASE_SLOT,
+          slotType: 'recipe',
+          recipeId: 10,
+          numberOfServings: 2,
+          cooksBaseRecipeId: 22,
+          cooksBaseServings: 8,
+          recipe: {
+            id: 10,
+            name: 'Curry',
+            imageUrl: null,
+            isBase: false,
+            baseRecipeId: 22,
+            isDeleted: false,
+          },
+          cooksBaseRecipe: {
+            id: 22,
+            name: 'Curry Base',
+            isDeleted: false,
+          },
+        }}
+        baseCookLine={
+          <span data-testid="cook-line">Cook base: Curry Base (×8)</span>
+        }
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('cook-line')).toHaveTextContent(
+      'Cook base: Curry Base (×8)',
+    );
   });
 });

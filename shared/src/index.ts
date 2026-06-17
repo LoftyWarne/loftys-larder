@@ -152,6 +152,8 @@ export {
   type SlotType,
   planSlotRecipeSchema,
   type PlanSlotRecipe,
+  planSlotCookedBaseSchema,
+  type PlanSlotCookedBase,
   planSlotSchema,
   type PlanSlot,
   planSchema,
@@ -194,6 +196,7 @@ export {
   plannerSearchSchema,
   type PlannerSearch,
 } from './schemas/planner-search.ts';
+export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export {
   ingredientNameSchema,
   ingredientShelfLifeSchema,

@@ -10,6 +10,7 @@ import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
 import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
+import { deriveBatchSupplyWarnings } from '@/lib/batch-supply.ts';
 import { clampRange } from '@/lib/date-utils.ts';
 import { trpc } from '@/lib/trpc.ts';
 
@@ -46,6 +47,17 @@ export function PlannerPage(): React.ReactElement {
       planQuery.data?.slots.find((slot) => slot.id === editingSlotId) ?? null
     );
   }, [editingSlotId, planQuery.data]);
+
+  // One pass per plan render — recomputed when the cache mutates. The set
+  // holds slot ids whose eating recipe is a batch-version (recipe.baseRecipeId
+  // !== null) with no earlier-or-same base cook in this plan.
+  const batchWarningSlots = useMemo(
+    () =>
+      planQuery.data
+        ? deriveBatchSupplyWarnings(planQuery.data.slots)
+        : new Set<number>(),
+    [planQuery.data],
+  );
 
   if (!idIsValid) {
     return <p role="alert">Invalid plan id.</p>;
@@ -84,6 +96,8 @@ export function PlannerPage(): React.ReactElement {
           recipeId: selectedRecipe.id,
           numberOfServings: selectedRecipe.baseServings,
           chefUserId: null,
+          cooksBaseRecipeId: null,
+          cooksBaseServings: null,
           comment: null,
         },
         optimisticRecipe: {
@@ -91,6 +105,7 @@ export function PlannerPage(): React.ReactElement {
           name: selectedRecipe.name,
           imageUrl: selectedRecipe.imageUrl,
           isBase: selectedRecipe.isBase,
+          baseRecipeId: selectedRecipe.baseRecipeId,
           isDeleted: selectedRecipe.isDeleted,
         },
       });
@@ -115,6 +130,7 @@ export function PlannerPage(): React.ReactElement {
             name: optimisticRecipe.name,
             imageUrl: optimisticRecipe.imageUrl,
             isBase: optimisticRecipe.isBase,
+            baseRecipeId: optimisticRecipe.baseRecipeId,
             isDeleted: optimisticRecipe.isDeleted,
           }
         : undefined,
@@ -151,6 +167,7 @@ export function PlannerPage(): React.ReactElement {
             slots={plan.slots}
             rangeStart={visible.start}
             rangeEnd={visible.end}
+            warningSlotIds={batchWarningSlots}
             onSlotClick={handleSlotClick}
           />
         ) : (
@@ -164,6 +181,9 @@ export function PlannerPage(): React.ReactElement {
         slot={editingSlot}
         members={membersQuery.data?.members ?? []}
         isSaving={isPending}
+        hasBaseSupply={
+          editingSlot === null || !batchWarningSlots.has(editingSlot.id)
+        }
         onClose={() => {
           setEditingSlotId(null);
         }}

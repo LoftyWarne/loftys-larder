@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { alias } from 'drizzle-orm/pg-core';
 
 import {
   createPlanInputSchema,
@@ -570,6 +571,7 @@ async function selectPlanSlots(
   db: DbHandle,
   planId: number,
 ): Promise<PlanSlot[]> {
+  const cookedBase = alias(recipes, 'cooked_base_recipe');
   const rows = await db
     .select({
       id: mealPlanSlots.id,
@@ -587,11 +589,15 @@ async function selectPlanSlots(
       recipeName: recipes.name,
       recipeImageUrl: recipes.imageUrl,
       recipeIsBase: recipes.isBase,
+      recipeBaseRecipeId: recipes.baseRecipeId,
       recipeIsDeleted: recipes.isDeleted,
+      cookedBaseName: cookedBase.name,
+      cookedBaseIsDeleted: cookedBase.isDeleted,
     })
     .from(mealPlanSlots)
     .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
     .leftJoin(recipes, eq(mealPlanSlots.recipeId, recipes.id))
+    .leftJoin(cookedBase, eq(mealPlanSlots.cooksBaseRecipeId, cookedBase.id))
     .where(eq(mealPlanSlots.planId, planId))
     .orderBy(asc(mealPlanSlots.date), asc(mealPlanSlots.occasionId));
 
@@ -616,7 +622,16 @@ async function selectPlanSlots(
             name: row.recipeName,
             imageUrl: row.recipeImageUrl,
             isBase: row.recipeIsBase ?? false,
+            baseRecipeId: row.recipeBaseRecipeId ?? null,
             isDeleted: row.recipeIsDeleted ?? false,
+          },
+    cooksBaseRecipe:
+      row.cooksBaseRecipeId === null || row.cookedBaseName === null
+        ? null
+        : {
+            id: row.cooksBaseRecipeId,
+            name: row.cookedBaseName,
+            isDeleted: row.cookedBaseIsDeleted ?? false,
           },
   }));
 }

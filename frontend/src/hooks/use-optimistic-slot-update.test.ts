@@ -56,6 +56,7 @@ const SLOT_EMPTY: PlanSlot = {
   cooksBaseServings: null,
   comment: null,
   recipe: null,
+  cooksBaseRecipe: null,
 };
 
 const PLAN: GetPlanResult = {
@@ -71,6 +72,7 @@ const RECIPE_PREVIEW: PlanSlotRecipe = {
   name: 'Tomato pasta',
   imageUrl: null,
   isBase: false,
+  baseRecipeId: null,
   isDeleted: false,
 };
 
@@ -80,6 +82,8 @@ const ASSIGN_INPUT: UpdateSlotInput = {
   recipeId: 10,
   numberOfServings: 2,
   chefUserId: null,
+  cooksBaseRecipeId: null,
+  cooksBaseServings: null,
   comment: null,
 };
 

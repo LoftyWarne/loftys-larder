@@ -4,6 +4,40 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-18 — FEAT-34 (Plan list / browse view)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across the three workspaces. Frontend: 222/222 passing (33 test files) — 7 new in `plans-page.test.tsx` (active default + summary render; status switch navigates with the new search param; per-filter empty-state copy; new-plan dialog success + PLAN_DATE_OVERLAP surfacing; duplicate dialog forwards `{ planId, newStartDate }` and navigates; delete optimistic onMutate + onError rollback), 2 new in `plan-list-card.test.tsx` (summary string, Open/Duplicate/Delete callbacks). Backend non-container suites pass (58/58); the 12 Testcontainers suites couldn't launch in this environment ("Could not find a working container runtime strategy" — same as the FEAT-33 session). The two new `plans-procedures.test.ts` list cases (`slotsTotal = range × occasions on a fresh plan`, `slotsAssigned across a mix of non-empty states`) sit in that suite and are owed a Docker-capable box. DoD boxes in `docs/feature-specs.md §FEAT-34` left unticked — human action. Manual gate (create three plans across past/active/future; verify filters; duplicate to a future start; delete and re-open All) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **Spec wording vs DEC-83: no `name` field on duplicate** (Q1). FEAT-34 spec says "asks for the new start date and name", but DEC-83 removed plan names and the existing `plans.duplicate` input is `{ planId, newStartDate }`. Dialog collects start date only; computes (and shows) the implied end date from the source duration as part of the description text.
+- **Spec wording vs DEC-82: hard-delete with AlertDialog confirm** (Q2). The spec says "Soft-delete prompts a confirm"; DEC-82 made plans hard-delete and `plans.delete` already hard-deletes. UI uses `<AlertDialog>` ("This removes all of its slots and cannot be undone"); no procedure change.
+- **Status filter lives in the URL search param** (Q3). `/plans?status=active|past|future|all`, default `active`, validated by a new `plansSearchSchema` in `/shared`. Matches DEC-10 (date range in URL for the planner) — back-button + shareable.
+
+### Drift from kick-off plan
+
+1. **Plan `list` row count is via single LEFT JOIN + `count(... ) filter (where ...)`.** Kick-off said "add slotsTotal/slotsAssigned via LEFT JOIN + GROUP BY"; in code that's exactly one statement returning both counts in one round-trip. `slotsAssigned` uses Postgres `FILTER (WHERE slot_type <> 'empty')`, which is the idiomatic aggregate-with-predicate form and avoids the CASE-WHEN-NULL trick. Parenthesised the FILTER clause before `::int` to keep the precedence unambiguous.
+2. **`planListItemSchema` is a distinct extension of `planSchema`**, not a widening. `get` / `updateRange` / `duplicate` outputs intentionally don't inherit `slotsTotal` / `slotsAssigned` — those callers already have the full slot array and don't need a denormalised count. Only `listPlansResultSchema.items` switched to the new schema.
+3. **`useNavigate` without a `from` clause.** Initial attempt used `useNavigate({ from: '/_authed/plans/' })` per the planner-page pattern, but TanStack Router's typed `from` wouldn't accept the trailing-slash index id (the equivalent `/_authed/plans/$planId` works fine for the planner). Worked around by dropping `from` and passing the absolute `to: '/plans'` on the search-param update — same nav behaviour, no type cast.
+4. **`STATUS_OPTIONS` typed as `readonly { … }[]`**, not `ReadonlyArray<…>`. The project's ESLint forbids the latter (`@typescript-eslint/array-type`); learn-on-first-touch.
+
+### Implementation details worth carrying
+
+- **Delete is optimistic against the current filter's cache only.** `onMutate` cancels + snapshots `plans.list({ status })` for the active filter, removes the row, returns the snapshot; `onError` restores it; `onSettled` invalidates `plans.list` (all filter keys). A user mid-delete who switches filters would see the deleted row re-appear under the new bucket until `onSettled` resolves — acceptable at household scale and parallel to the FEAT-23 `recipe-rating` pattern.
+- **Default new-plan range is today → today + 6 days** (a 7-day window). Picked to nudge the cook toward weekly planning without being prescriptive; the user can shrink or extend before submitting. `advance()` is an inline 6-liner over `Date.UTC` rather than widening `date-utils.ts` — the helper is single-use and the `eachDateInRange` / `formatCivilDate` pair didn't compose cleanly here.
+- **Server-error translation lives in one `translateError` helper** at the bottom of `plans-page.tsx`. Maps the three domain codes the planner-create/duplicate paths can surface (`PLAN_DATE_OVERLAP`, `PLAN_RANGE_TOO_LONG`, `PLAN_PAST_NOT_EDITABLE`) to friendly copy; everything else falls back to `err.message`. Kept domain-code → copy mapping in the page rather than the dialogs so the dialogs stay presentation-only.
+- **`Plans` nav link slotted between `Recipes` and `Ingredients`** in `authed-layout.tsx`. `authed-layout.test.tsx` only tests `authedBeforeLoad`, not the nav DOM — no test update needed.
+- **`<Link>` mocked in the page test as a plain `<a>`** so `Link` props don't trip TanStack Router's strict typing at render time; same pattern used in `plan-list-card.test.tsx`. Avoids pulling the real router setup into a unit test.
+- **No new dependencies, no migration.** Schema change is shared-Zod-only; backend change is one SQL aggregate.
+
+### Open follow-ups
+
+- **Run the backend Testcontainers suites** on a Docker-enabled box. The two new `plans-procedures.test.ts` cases (`reports slotsTotal = range × occasions and slotsAssigned = 0 for a fresh plan`, `reports slotsAssigned across a mix of non-empty slot states`) sit alongside the existing 36 `plans.*` cases in the same `describe`; carry the FEAT-32-era Colima env-var workaround.
+- **Manual smoke** per the FEAT-34 verification steps: create past/active/future plans, exercise each filter, duplicate to a future start, hard-delete and confirm via the `all` filter, attempt an overlapping create to see the inline error.
+- **Plant-points / shopping-list summary on the card** is intentionally absent — those derive in FEAT-36/40. The card has space for a single line of secondary text today; when those land, slot in alongside the slot-fill summary rather than below it.
+
+---
+
 ## 2026-06-18 — FEAT-33 (Pair switch UI: full ↔ batch toggle on slot)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format` clean across the three workspaces. Frontend: 213/213 passing (31 test files) — 7 new in `slot-editor-sheet.test.tsx` (visibility on pair present / absent / soft-deleted, both label framings, click-fires-input shape with reset servings + cleared base-cook, hidden in non-recipe slot states), +1 in `use-optimistic-slot-update.test.ts` for the new `optimisticPairedRecipe` arg. Fixtures gained `pairedRecipeId` on `PlanSlotRecipe` literals and a `pairedRecipe` field on `PlanSlot` literals across `slot-cell.test.tsx`, `slot-editor-sheet.test.tsx`, `planner-page.test.tsx`, and `use-optimistic-slot-update.test.ts`. Backend non-container suites pass (5/5); the 12 Testcontainers suites couldn't launch in this environment (Colima socket mount-source error during this session — the workaround that worked for FEAT-32 didn't trigger here, needs re-attempt on a Docker-enabled box). One assertion in `plans-procedures.test.ts` updated for the new `recipe.pairedRecipeId` field. DoD boxes in `docs/feature-specs.md §FEAT-33` left unticked — human action. Manual gate (pair two recipes, assign one, click the switch — slot shows the other; soft-delete a pair member and re-open the editor to confirm the affordance hides) is owed by the human.

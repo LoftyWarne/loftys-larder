@@ -126,6 +126,22 @@ describe('SignInPage submission', () => {
   });
 });
 
+describe('SignInPage deletion banner', () => {
+  it('shows the "Your account has been deleted" banner when justDeleted is true', () => {
+    render(<SignInPage justDeleted />);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /your account has been deleted/i,
+    );
+  });
+
+  it('omits the deletion banner on a normal visit', () => {
+    render(<SignInPage />);
+    expect(
+      screen.queryByText(/your account has been deleted/i),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe('signInBeforeLoad', () => {
   it('does nothing when there is no session', async () => {
     getSessionMock.mockResolvedValue({ data: null });

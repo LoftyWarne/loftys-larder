@@ -8,6 +8,12 @@ export {
   type UpdateProfileInput,
   meSchema,
   type Me,
+  deleteAccountInputSchema,
+  type DeleteAccountInput,
+  deleteAccountResultSchema,
+  type DeleteAccountResult,
+  deletionSummarySchema,
+  type DeletionSummary,
 } from './schemas/user.ts';
 export {
   householdMemberSchema,

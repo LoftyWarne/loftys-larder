@@ -3,9 +3,19 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { redirect } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { z } from 'zod';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { authClient } from '@/lib/auth-client.ts';
+
+// Surfaces the deletion-complete banner — set by the Settings page after a
+// successful `user.deleteAccount` mutation. `.optional().catch(undefined)`
+// keeps unrelated visits to /sign-in immune to malformed search input.
+export const signInSearchSchema = z.object({
+  deleted: z.literal('1').optional().catch(undefined),
+});
+
+export type SignInSearch = z.infer<typeof signInSearchSchema>;
 
 export async function signInBeforeLoad(): Promise<void> {
   const { data } = await authClient.getSession();
@@ -20,7 +30,13 @@ type SubmitState =
   | { kind: 'sent'; email: string }
   | { kind: 'error'; message: string };
 
-export function SignInPage(): React.ReactElement {
+export interface SignInPageProps {
+  justDeleted?: boolean;
+}
+
+export function SignInPage({
+  justDeleted = false,
+}: SignInPageProps = {}): React.ReactElement {
   const [state, setState] = useState<SubmitState>({ kind: 'idle' });
   const form = useForm<SignInInput>({
     resolver: zodResolver(signInSchema),
@@ -64,6 +80,14 @@ export function SignInPage(): React.ReactElement {
   return (
     <section className="mx-auto max-w-md space-y-4">
       <h1 className="text-2xl font-semibold">Sign in</h1>
+      {justDeleted && (
+        <p
+          role="status"
+          className="rounded-md border border-border bg-muted p-3 text-sm"
+        >
+          Your account has been deleted.
+        </p>
+      )}
       <p>Enter your email and we&apos;ll send you a sign-in link.</p>
       <form
         onSubmit={(event) => {

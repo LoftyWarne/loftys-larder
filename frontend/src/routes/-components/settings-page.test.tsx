@@ -2,10 +2,22 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getMeMock, updateProfileMock, useUtilsMock } = vi.hoisted(() => ({
+const {
+  getMeMock,
+  updateProfileMock,
+  getDeletionSummaryMock,
+  deleteAccountMock,
+  useUtilsMock,
+  signOutMock,
+  navigateMock,
+} = vi.hoisted(() => ({
   getMeMock: vi.fn(),
   updateProfileMock: vi.fn(),
+  getDeletionSummaryMock: vi.fn(),
+  deleteAccountMock: vi.fn(),
   useUtilsMock: vi.fn(),
+  signOutMock: vi.fn(),
+  navigateMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
@@ -13,9 +25,21 @@ vi.mock('@/lib/trpc.ts', () => ({
     user: {
       getMe: { useQuery: getMeMock },
       updateProfile: { useMutation: updateProfileMock },
+      getDeletionSummary: { useQuery: getDeletionSummaryMock },
+      deleteAccount: { useMutation: deleteAccountMock },
     },
     useUtils: useUtilsMock,
   },
+}));
+
+vi.mock('@/lib/auth-client.ts', () => ({
+  authClient: {
+    signOut: signOutMock,
+  },
+}));
+
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => navigateMock,
 }));
 
 import { SettingsPage } from './settings-page.tsx';
@@ -27,16 +51,28 @@ const ME = {
   themePreference: 'system' as const,
 };
 
+const SUMMARY = { commentCount: 2, recipeCount: 3, planCount: 1 };
+
 interface SetupOptions {
   mutateAsync?: ReturnType<typeof vi.fn>;
+  deleteMutateAsync?: ReturnType<typeof vi.fn>;
+  deletePending?: boolean;
+  summary?: typeof SUMMARY | undefined;
+  summaryLoading?: boolean;
 }
 
 function setup(options: SetupOptions = {}): {
   mutateAsync: ReturnType<typeof vi.fn>;
+  deleteMutateAsync: ReturnType<typeof vi.fn>;
 } {
   getMeMock.mockReturnValue({
     data: ME,
     isLoading: false,
+    error: null,
+  });
+  getDeletionSummaryMock.mockReturnValue({
+    data: options.summary ?? SUMMARY,
+    isLoading: options.summaryLoading ?? false,
     error: null,
   });
   const invalidate = vi.fn().mockResolvedValue(undefined);
@@ -45,13 +81,25 @@ function setup(options: SetupOptions = {}): {
   });
   const mutateAsync = options.mutateAsync ?? vi.fn().mockResolvedValue(ME);
   updateProfileMock.mockReturnValue({ mutateAsync });
-  return { mutateAsync };
+  const deleteMutateAsync =
+    options.deleteMutateAsync ?? vi.fn().mockResolvedValue({ deleted: true });
+  deleteAccountMock.mockReturnValue({
+    mutateAsync: deleteMutateAsync,
+    isPending: options.deletePending ?? false,
+  });
+  signOutMock.mockResolvedValue(undefined);
+  navigateMock.mockResolvedValue(undefined);
+  return { mutateAsync, deleteMutateAsync };
 }
 
 beforeEach(() => {
   getMeMock.mockReset();
   updateProfileMock.mockReset();
+  getDeletionSummaryMock.mockReset();
+  deleteAccountMock.mockReset();
   useUtilsMock.mockReset();
+  signOutMock.mockReset();
+  navigateMock.mockReset();
 });
 
 describe('SettingsPage', () => {
@@ -164,6 +212,106 @@ describe('SettingsPage', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/saved/i);
+    });
+  });
+
+  describe('Danger zone', () => {
+    it('renders the heading, summary counts, and a Delete account button', async () => {
+      setup();
+      render(<SettingsPage />);
+      await screen.findByLabelText('Name');
+
+      expect(
+        screen.getByRole('heading', { name: /danger zone/i }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/2 comments will become/i)).toBeInTheDocument();
+      expect(screen.getByText(/3 recipes/i)).toBeInTheDocument();
+      expect(screen.getByText(/1 meal plan/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /delete account/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('keeps the confirm button disabled until the typed email matches', async () => {
+      setup();
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      await screen.findByLabelText('Name');
+
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      const confirmButton = await screen.findByRole('button', {
+        name: /^delete account$/i,
+      });
+      expect(confirmButton).toBeDisabled();
+
+      const input = screen.getByLabelText(/your email/i);
+      await user.type(input, 'me@example.com');
+      expect(confirmButton).toBeEnabled();
+    });
+
+    it('runs deleteAccount, signs out, and navigates to /sign-in?deleted=1', async () => {
+      const { deleteMutateAsync } = setup();
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      await screen.findByLabelText('Name');
+
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      await user.type(screen.getByLabelText(/your email/i), 'me@example.com');
+      const confirmButton = await screen.findByRole('button', {
+        name: /^delete account$/i,
+      });
+      await user.click(confirmButton);
+
+      await waitFor(() => {
+        expect(deleteMutateAsync).toHaveBeenCalledWith({
+          emailConfirmation: 'me@example.com',
+        });
+      });
+      await waitFor(() => {
+        expect(signOutMock).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(navigateMock).toHaveBeenCalledWith({
+          to: '/sign-in',
+          search: { deleted: '1' },
+        });
+      });
+    });
+
+    it('renders a server error in the dialog without closing it', async () => {
+      const deleteMutateAsync = vi.fn().mockRejectedValue(new Error('Boom'));
+      setup({ deleteMutateAsync });
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      await screen.findByLabelText('Name');
+
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      await user.type(screen.getByLabelText(/your email/i), 'me@example.com');
+      await user.click(
+        await screen.findByRole('button', { name: /^delete account$/i }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent('Boom');
+      });
+      // Dialog is still open; the input is still rendered.
+      expect(screen.getByLabelText(/your email/i)).toBeInTheDocument();
+      expect(navigateMock).not.toHaveBeenCalled();
+      expect(signOutMock).not.toHaveBeenCalled();
+    });
+
+    it('disables the confirm button while the mutation is pending', async () => {
+      setup({ deletePending: true });
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      await screen.findByLabelText('Name');
+
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      await user.type(screen.getByLabelText(/your email/i), 'me@example.com');
+      const confirmButton = await screen.findByRole('button', {
+        name: /deleting…/i,
+      });
+      expect(confirmButton).toBeDisabled();
     });
   });
 });

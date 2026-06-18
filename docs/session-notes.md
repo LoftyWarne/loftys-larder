@@ -4,6 +4,60 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-18 — FEAT-33 (Pair switch UI: full ↔ batch toggle on slot)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format` clean across the three workspaces. Frontend: 213/213 passing (31 test files) — 7 new in `slot-editor-sheet.test.tsx` (visibility on pair present / absent / soft-deleted, both label framings, click-fires-input shape with reset servings + cleared base-cook, hidden in non-recipe slot states), +1 in `use-optimistic-slot-update.test.ts` for the new `optimisticPairedRecipe` arg. Fixtures gained `pairedRecipeId` on `PlanSlotRecipe` literals and a `pairedRecipe` field on `PlanSlot` literals across `slot-cell.test.tsx`, `slot-editor-sheet.test.tsx`, `planner-page.test.tsx`, and `use-optimistic-slot-update.test.ts`. Backend non-container suites pass (5/5); the 12 Testcontainers suites couldn't launch in this environment (Colima socket mount-source error during this session — the workaround that worked for FEAT-32 didn't trigger here, needs re-attempt on a Docker-enabled box). One assertion in `plans-procedures.test.ts` updated for the new `recipe.pairedRecipeId` field. DoD boxes in `docs/feature-specs.md §FEAT-33` left unticked — human action. Manual gate (pair two recipes, assign one, click the switch — slot shows the other; soft-delete a pair member and re-open the editor to confirm the affordance hides) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **Servings reset to `paired.baseServings` on switch** (D1). Full vs. batch siblings often have different yields; carrying the existing count produces a wrong number more often than not. Symmetric with the in-editor recipe-pick path (`slot-editor-sheet.tsx` combobox onChange).
+- **Button label frames the destination** (D2). If `currentRecipe.baseRecipeId !== null` (current is the batch version) → "Switch to full version"; otherwise → "Switch to batch version". The destination name rides as `aria-label` only.
+- **Base-cook fields cleared on switch** (D3). The implementation note "Don't auto-set the base picker on pair switch — let the user decide separately" reads as "clear", not "preserve". The suggestion hint re-appears on the next render for the new recipe and the user picks fresh.
+- **Pair data delivered as a slot sub-object via a third LEFT JOIN** (D5), mirroring `cooksBaseRecipe` from FEAT-32. One render, no extra round-trip per editor open. Adds ~70 bytes/slot to `plans.get`.
+
+### Drift from kick-off plan
+
+1. **Visibility scope narrowed from "active recipe" to "saved recipe"** (D4 relaxed). Kick-off plan said visibility tracks `state.recipe ?? slot.recipe`, matching how `showBatchWarning` reads. In code: the affordance only renders when `state.recipe === null` (no fresh combobox pick) — the joined `pairedRecipe` sub-object reflects only the *saved* recipe's sibling, so a freshly-picked recipe's pair would need a lazy `recipes.get` fetch. Practical effect: pick a new recipe → save → then pair-switch. Reasoning: the freshly-picked-then-immediately-pair-switch flow is unusual and the lazy-fetch parallel to the FEAT-32 base-suggestion pattern wasn't worth the added complexity for v1.
+2. **`SlotEditorSheetProps.onSave` signature widened to an options object.** Plan called for an additional positional arg (`optimisticPairedRecipe`). In code: replaced the existing `optimisticRecipe?` positional with an options bag `{ optimisticRecipe?, optimisticPairedRecipe? }`. The planner-page caller updated to match. Same data flow, less argument-list growth — `chefChip` (FEAT-33 sibling work, see open follow-ups) and any future per-update sub-object plug in by name.
+3. **`PlanSlotRecipe` extended in addition to the new sub-object.** Plan added `pairedRecipe` on `PlanSlot`; in code `planSlotRecipeSchema` also grew `pairedRecipeId` so the optimistic two-tap-assign path can preserve it on the cached `recipe` field, and so the visibility gate doesn't depend on the FK round-trip via `state.recipe`. Trivial schema additive; one extra column in the planner-side select.
+
+### Implementation details worth carrying
+
+- **`pairedRecipe` projection covers `{ id, name, imageUrl, isBase, baseRecipeId, baseServings, isDeleted }`** — the superset of what the editor needs (`baseServings` for the servings default, `isBase` for any future "is this a base?" checks, `imageUrl` so the slot card can later render a paired-thumbnail hint). Adding the columns now means future consumers (FEAT-36 aggregation walking pair links, anything that wants the pair's image on the editor) don't need a schema bump.
+- **Pair-switch fires through the existing `slots.update` procedure** — no new mutation. The procedure already validates pickability on recipe-FK changes (`assertRecipeAssignable`), so the switch path enjoys the same household + soft-deleted defence-in-depth without an extra check.
+- **Optimistic side-channel pattern extended** — `useOptimisticSlotUpdate` now holds two refs (`pendingOptimisticRecipe`, `pendingOptimisticPaired`). `undefined` on the paired ref means "no opinion — reuse the existing sub-object if the recipe FK is unchanged"; `null` means "no pair on this recipe". The distinction matters: a servings-only edit shouldn't blink off the affordance, and a non-recipe state-change shouldn't keep stale paired data live.
+- **`resolveExistingPaired`** mirrors `resolveExistingRecipe` — when the caller doesn't pass an `optimisticPairedRecipe` and the recipe FK is unchanged, reuse the cached sub-object. The two together preserve the slot's pair affordance across in-place edits while letting a recipe change clear it.
+- **Pair-switch `onSave` payload builds the optimistic recipe + paired sub-object from the slot's existing `recipe` and `pairedRecipe`** — both directions are known at click time without any extra fetch. The new optimistic `pairedRecipe.baseServings` falls back to `1` because the surviving (former) pair side's `baseServings` isn't carried on `PlanSlotRecipe`; the field is essentially write-only here, and the next switch would re-read the freshly-settled row.
+- **No new dependencies, no migration.** All FK columns already existed on `recipes` from FEAT-11 / FEAT-23; the only data-shape changes are additive zod fields + a third aliased LEFT JOIN in two slot-select sites.
+- **No new domain error code.** Pair switch is a recipe-FK change through `slots.update`; existing `SLOT_RECIPE_*` codes cover the failure modes.
+- **`PairSwitchButton` is purely presentational** — no tRPC, no state. It accepts `currentIsBatchVersion`, `pairedRecipeName`, `disabled`, and `onClick`; the editor sheet owns the visibility logic and payload construction.
+
+### Open follow-ups
+
+- **Lazy-fetch the freshly-picked recipe's pair** if the "pick → immediately pair-switch (before save)" flow turns out to matter. Parallel to the FEAT-32 base-suggestion pattern: gated `trpc.recipes.get.useQuery({ id: state.recipe.pairedRecipeId })`, fall back to `slot.pairedRecipe` when `state.recipe === null`. Cheap to add later if user feedback surfaces it.
+- **Run the backend Testcontainers suites** on a Docker-enabled box. The only assertion that needed updating was `plans-procedures.test.ts:467` for the new `pairedRecipeId: null` on the recipe sub-object; the schema additions are purely additive so other suites should pass. Carry the FEAT-32-era Colima env-var workaround.
+- **Manual smoke** of: pair two recipes in the editor, assign one to a slot, open the editor, observe the button + label, click → slot card shows the sibling with `paired.baseServings`. Then soft-delete one of the pair and confirm the affordance hides on the surviving member.
+- **Slot-card thumbnail for the paired sibling** — the `pairedRecipe.imageUrl` column is projected but not yet rendered anywhere. Could plug into the slot card as a small "switch to ↔" affordance if the editor-sheet flow proves too slow. Not in v1 scope.
+- **`chefChip` content slot on the slot card is still unfilled** — FEAT-33's spec was the pair-switch button (editor-side), but the original FEAT-31 plan reserved `chefChip` for a future iteration that surfaces the assigned chef on the card. If a later FEAT picks it up, plug in via the existing `SlotCellProps.chefChip` extension slot — no rewrite needed.
+
+### What did NOT change
+
+- DB schema for `recipes` / `meal_plan_slots` unchanged — only additive projection.
+- `slots.update`'s "edit in place" gate semantics unchanged — recipe-FK re-validation already covers the pair-switch path.
+- `useOptimisticSlotUpdate`'s public interface gained one optional arg; existing callers continue to work without changes.
+- `SlotCellProps` unchanged.
+- `pickable-recipes` helper unchanged.
+- No new dependencies, no new migration, no `withTransaction` calls, no `dangerouslySetInnerHTML`, no `eslint-disable`.
+- No FEAT-N strings in code, test filenames, or `describe()` blocks — feedback pin holds.
+
+### Known limitations / not in scope
+
+- **Pair switch on a freshly-picked-but-not-yet-saved recipe** — see the drift note above. Save first, then switch.
+- **Pair-switch button on the slot card itself** — editor-only, per the FEAT-33 file list. The card's `chefChip` slot is the next obvious affordance hook.
+- **Concurrent pair-symmetry break during the optimistic window** — if a second client renames the paired recipe between the click and the settle, the editor reverts to the server-canonical sub-object on settle. LWW (DEC-36) holds.
+
+---
+
 ## 2026-06-17 — FEAT-32 (Base cooking on slots: model fields, editor, card rendering, soft warning)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across all three workspaces. Frontend: 205/205 passing (31 test files) — 7 new in `slot-editor-sheet.test.tsx`, +1 in `slot-cell.test.tsx`, fixtures updated in `use-optimistic-slot-update.test.ts` and `planner-page.test.tsx` for the wider DTOs. Backend: 396/396 passing across 17 files via Testcontainers (Colima socket workaround: `DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). New `batch-supply.test.ts` (7 cases for `hasBaseSupply`); `slots-procedures.test.ts` grew 8 new tests for the base-cook surface (round-trip, clear, joint-set refine, non-base / cross-household / deleted-base rejections, edit-in-place when the base is later soft-deleted, non-recipe-slot defence); one assertion in `plans-procedures.test.ts` updated for the new `recipe.baseRecipeId` field. DoD boxes in `docs/feature-specs.md §FEAT-32` left unticked — human action. Manual gate (batch-version meal → suggestion hint shows linked base; click apply; save; card renders two lines; remove base cook upstream → warning re-appears) is owed by the human.

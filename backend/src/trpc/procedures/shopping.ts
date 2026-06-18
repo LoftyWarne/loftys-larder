@@ -37,21 +37,22 @@ export const shoppingRouter = router({
         selectCooksBaseContributions(ctx.db, planRow.id),
       ]);
 
-      const categories = aggregateContributions([
-        ...mealContribs,
-        ...baseContribs,
-      ]);
+      const categories = aggregateContributions(
+        [...mealContribs, ...baseContribs],
+        { planStart: planRow.startDate },
+      );
       return { planId: planRow.id, categories };
     }),
 });
 
 interface PlanRow {
   id: number;
+  startDate: Date;
 }
 
 async function loadHouseholdPlan(db: Db, id: number): Promise<PlanRow> {
   const rows = await db
-    .select({ id: mealPlans.id })
+    .select({ id: mealPlans.id, startDate: mealPlans.startDate })
     .from(mealPlans)
     .where(
       and(
@@ -91,6 +92,7 @@ async function selectMealRecipeContributions(
       categoryName: ingredientCategories.name,
       unitId: unitsOfMeasurement.id,
       unitName: unitsOfMeasurement.name,
+      averageShelfLifeDays: ingredients.averageShelfLifeDays,
       // numeric arithmetic preserves precision; round to the column's
       // numeric(10,3) scale so the helper's integer-milli math is exact.
       scaledQuantity: sql<string>`round(${recipeIngredients.quantity} * ${mealPlanSlots.numberOfServings}::numeric / ${recipes.baseServings}::numeric, 3)`,
@@ -139,6 +141,7 @@ async function selectCooksBaseContributions(
       categoryName: ingredientCategories.name,
       unitId: unitsOfMeasurement.id,
       unitName: unitsOfMeasurement.name,
+      averageShelfLifeDays: ingredients.averageShelfLifeDays,
       scaledQuantity: sql<string>`round(${recipeIngredients.quantity} * ${mealPlanSlots.cooksBaseServings}::numeric / ${recipes.baseServings}::numeric, 3)`,
     })
     .from(mealPlanSlots)
@@ -176,6 +179,7 @@ interface ContributionRow {
   categoryName: string;
   unitId: number;
   unitName: string;
+  averageShelfLifeDays: number | null;
   scaledQuantity: string;
 }
 
@@ -191,6 +195,7 @@ function toContribution(row: ContributionRow): ShoppingContribution {
     categoryName: row.categoryName,
     unitId: row.unitId,
     unitName: row.unitName,
+    averageShelfLifeDays: row.averageShelfLifeDays,
     scaledQuantity: row.scaledQuantity,
   };
 }

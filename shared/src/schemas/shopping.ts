@@ -32,6 +32,17 @@ export type ShoppingListContributingSlot = z.infer<
   typeof shoppingListContributingSlotSchema
 >;
 
+// Shelf-life decoration on a line. Present only when the ingredient has a
+// shelf life set AND at least one contributing slot lands strictly past the
+// `(planStart + shelfLifeDays)` boundary (DEC-37). `daysOverflow` is the
+// whole-day gap from the boundary to `latestNeededDate` (boundary +1 → 1).
+// Absent — not `null` — when the ingredient fits within shelf life.
+export const shelfLifeWarningSchema = z.object({
+  latestNeededDate: civilDateSchema,
+  daysOverflow: z.number().int().positive(),
+});
+export type ShelfLifeWarning = z.infer<typeof shelfLifeWarningSchema>;
+
 export const shoppingListLineSchema = z.object({
   ingredient: z.object({
     id: ingredientIdSchema,
@@ -43,6 +54,7 @@ export const shoppingListLineSchema = z.object({
   }),
   totalQuantity: quantitySchema,
   contributingSlots: z.array(shoppingListContributingSlotSchema),
+  shelfLifeWarning: shelfLifeWarningSchema.optional(),
 });
 export type ShoppingListLine = z.infer<typeof shoppingListLineSchema>;
 

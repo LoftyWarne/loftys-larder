@@ -1,8 +1,10 @@
 import type {
+  ShelfLifeWarning,
   ShoppingListCategory,
   ShoppingListContributingSlot,
   ShoppingListLine,
 } from '../../../shared/src/index.ts';
+import { addDays, parseCivilDate } from './date-utils.ts';
 
 // Pure aggregation for `shopping.getForPlan`. Takes the flat contribution rows
 // produced by the procedure's two SELECTs (meal-recipe contributions + cooks-
@@ -29,7 +31,18 @@ export interface ShoppingContribution {
   unitName: string;
   // numeric(10,3) as string, already scaled by the SQL projection.
   scaledQuantity: string;
+  // Ingredient's `average_shelf_life_days`; `null` means the cook hasn't set
+  // one, in which case no shelf-life warning is computed for the line.
+  averageShelfLifeDays: number | null;
 }
+
+export interface AggregateOptions {
+  // The plan's `start_date` as a civil-day Date (DEC-33 encoding). Acts as
+  // the shop-date anchor for shelf-life warnings (DEC-37, single-shop).
+  planStart: Date;
+}
+
+const MS_PER_DAY = 86_400_000;
 
 // Aggregate contribution rows into the nested category/line tree. Returns
 // `[]` for an empty input. Sorting:
@@ -39,6 +52,7 @@ export interface ShoppingContribution {
 // All comparisons are case-insensitive locale string compares for the names.
 export function aggregateContributions(
   contributions: ShoppingContribution[],
+  { planStart }: AggregateOptions,
 ): ShoppingListCategory[] {
   // ingredient bucket — accumulates one `ShoppingListLine` per ingredient_id.
   interface IngredientBucket {
@@ -46,6 +60,10 @@ export function aggregateContributions(
     category: { id: number; name: string };
     unit: { id: number; name: string };
     totalMilli: bigint;
+    // First non-null value wins; per-ingredient invariant — the procedure
+    // SELECTs always project the same column. The shelf-life pass treats
+    // `null` as "no warning, ever" regardless of slot dates.
+    averageShelfLifeDays: number | null;
     // per (slotId, recipeId) — collapses within-slot duplicates of the same
     // recipe ("onion sliced" + "onion diced" → one entry).
     contributingSlots: Map<string, ContributingAccumulator>;
@@ -70,6 +88,7 @@ export function aggregateContributions(
         category: { id: row.categoryId, name: row.categoryName },
         unit: { id: row.unitId, name: row.unitName },
         totalMilli: 0n,
+        averageShelfLifeDays: row.averageShelfLifeDays,
         contributingSlots: new Map(),
       };
       ingredientBuckets.set(row.ingredientId, bucket);
@@ -119,6 +138,15 @@ export function aggregateContributions(
       contributingSlots,
     };
 
+    const warning = computeShelfLifeWarning(
+      planStart,
+      ingredient.averageShelfLifeDays,
+      contributingSlots,
+    );
+    if (warning) {
+      line.shelfLifeWarning = warning;
+    }
+
     let cat = categoryBuckets.get(ingredient.category.id);
     if (!cat) {
       cat = { category: ingredient.category, lines: [] };
@@ -140,6 +168,35 @@ export function aggregateContributions(
   );
 
   return categories;
+}
+
+// Per DEC-37: warn when at least one contributing slot is strictly past
+// `(planStart + shelfLifeDays)`. The boundary day itself is treated as
+// fitting — a 3-day shelf life with usage on day 3 of the plan is fine.
+// `daysOverflow` is the whole-day gap from the boundary to the latest
+// slot date (boundary + 1 → 1), not the inclusive `daysBetween` count.
+function computeShelfLifeWarning(
+  planStart: Date,
+  shelfLifeDays: number | null,
+  contributingSlots: ShoppingListContributingSlot[],
+): ShelfLifeWarning | null {
+  if (shelfLifeDays === null) return null;
+  if (contributingSlots.length === 0) return null;
+
+  const boundary = addDays(planStart, shelfLifeDays);
+  let latestMs = -Infinity;
+  let latestIso = '';
+  for (const slot of contributingSlots) {
+    const slotMs = parseCivilDate(slot.date).getTime();
+    if (slotMs > latestMs) {
+      latestMs = slotMs;
+      latestIso = slot.date;
+    }
+  }
+  if (latestMs <= boundary.getTime()) return null;
+
+  const daysOverflow = Math.round((latestMs - boundary.getTime()) / MS_PER_DAY);
+  return { latestNeededDate: latestIso, daysOverflow };
 }
 
 function compareContribution(

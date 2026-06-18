@@ -211,6 +211,8 @@ export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export {
   shoppingListContributingSlotSchema,
   type ShoppingListContributingSlot,
+  shelfLifeWarningSchema,
+  type ShelfLifeWarning,
   shoppingListLineSchema,
   type ShoppingListLine,
   shoppingListCategorySchema,

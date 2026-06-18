@@ -1,6 +1,7 @@
 import type {
   GetPlanResult,
   PlanSlot,
+  PlanSlotPairedRecipe,
   PlanSlotRecipe,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
@@ -57,6 +58,7 @@ const SLOT_EMPTY: PlanSlot = {
   comment: null,
   recipe: null,
   cooksBaseRecipe: null,
+  pairedRecipe: null,
 };
 
 const PLAN: GetPlanResult = {
@@ -73,6 +75,7 @@ const RECIPE_PREVIEW: PlanSlotRecipe = {
   imageUrl: null,
   isBase: false,
   baseRecipeId: null,
+  pairedRecipeId: null,
   isDeleted: false,
 };
 
@@ -176,6 +179,34 @@ describe('useOptimisticSlotUpdate', () => {
     if (!call) throw new Error('expected setData call');
     const reconciled = call[1] as GetPlanResult;
     expect(reconciled.slots[0]).toEqual(serverSlot);
+  });
+
+  it('writes the optimistic paired recipe into the patched slot', async () => {
+    getDataMock.mockReturnValue(PLAN);
+    const { result } = renderHook(() => useOptimisticSlotUpdate({ planId: 9 }));
+    const onMutate = mutationOptions.onMutate as (
+      input: UpdateSlotInput,
+    ) => Promise<{ previous: GetPlanResult | undefined }>;
+    const paired: PlanSlotPairedRecipe = {
+      id: 11,
+      name: 'Sibling',
+      imageUrl: null,
+      isBase: false,
+      baseRecipeId: null,
+      baseServings: 2,
+      isDeleted: false,
+    };
+    result.current.update({
+      input: ASSIGN_INPUT,
+      optimisticRecipe: RECIPE_PREVIEW,
+      optimisticPairedRecipe: paired,
+    });
+    await onMutate(ASSIGN_INPUT);
+
+    const call = setDataMock.mock.calls[0];
+    if (!call) throw new Error('expected setData call');
+    const patched = call[1] as GetPlanResult;
+    expect(patched.slots[0]?.pairedRecipe).toEqual(paired);
   });
 
   it('invokes the caller onError when the mutation fails', () => {

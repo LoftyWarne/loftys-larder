@@ -20,6 +20,7 @@ const BASE_SLOT: PlanSlot = {
   comment: null,
   recipe: null,
   cooksBaseRecipe: null,
+  pairedRecipe: null,
 };
 
 describe('SlotCell', () => {
@@ -37,6 +38,7 @@ describe('SlotCell', () => {
             imageUrl: null,
             isBase: false,
             baseRecipeId: null,
+            pairedRecipeId: null,
             isDeleted: false,
           },
         }}
@@ -61,6 +63,7 @@ describe('SlotCell', () => {
             imageUrl: null,
             isBase: false,
             baseRecipeId: null,
+            pairedRecipeId: null,
             isDeleted: true,
           },
         }}
@@ -104,6 +107,7 @@ describe('SlotCell', () => {
             imageUrl: null,
             isBase: false,
             baseRecipeId: 22,
+            pairedRecipeId: null,
             isDeleted: false,
           },
           cooksBaseRecipe: {

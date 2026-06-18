@@ -154,6 +154,8 @@ export {
   type PlanSlotRecipe,
   planSlotCookedBaseSchema,
   type PlanSlotCookedBase,
+  planSlotPairedRecipeSchema,
+  type PlanSlotPairedRecipe,
   planSlotSchema,
   type PlanSlot,
   planSchema,

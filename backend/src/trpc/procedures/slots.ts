@@ -208,6 +208,7 @@ async function assertUserExists(db: DbHandle, userId: string): Promise<void> {
 // the server-returned row without re-fetching the whole plan.
 async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
   const cookedBase = alias(recipes, 'cooked_base_recipe');
+  const pairedRecipe = alias(recipes, 'paired_recipe');
   const rows = await db
     .select({
       id: mealPlanSlots.id,
@@ -226,14 +227,23 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
       recipeImageUrl: recipes.imageUrl,
       recipeIsBase: recipes.isBase,
       recipeBaseRecipeId: recipes.baseRecipeId,
+      recipePairedRecipeId: recipes.pairedRecipeId,
       recipeIsDeleted: recipes.isDeleted,
       cookedBaseName: cookedBase.name,
       cookedBaseIsDeleted: cookedBase.isDeleted,
+      pairedRecipeId: pairedRecipe.id,
+      pairedRecipeName: pairedRecipe.name,
+      pairedRecipeImageUrl: pairedRecipe.imageUrl,
+      pairedRecipeIsBase: pairedRecipe.isBase,
+      pairedRecipeBaseRecipeId: pairedRecipe.baseRecipeId,
+      pairedRecipeBaseServings: pairedRecipe.baseServings,
+      pairedRecipeIsDeleted: pairedRecipe.isDeleted,
     })
     .from(mealPlanSlots)
     .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
     .leftJoin(recipes, eq(mealPlanSlots.recipeId, recipes.id))
     .leftJoin(cookedBase, eq(mealPlanSlots.cooksBaseRecipeId, cookedBase.id))
+    .leftJoin(pairedRecipe, eq(recipes.pairedRecipeId, pairedRecipe.id))
     .where(eq(mealPlanSlots.id, slotId))
     .orderBy(asc(mealPlanSlots.id))
     .limit(1);
@@ -266,6 +276,7 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
             imageUrl: row.recipeImageUrl,
             isBase: row.recipeIsBase ?? false,
             baseRecipeId: row.recipeBaseRecipeId ?? null,
+            pairedRecipeId: row.recipePairedRecipeId ?? null,
             isDeleted: row.recipeIsDeleted ?? false,
           },
     cooksBaseRecipe:
@@ -275,6 +286,18 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
             id: row.cooksBaseRecipeId,
             name: row.cookedBaseName,
             isDeleted: row.cookedBaseIsDeleted ?? false,
+          },
+    pairedRecipe:
+      row.pairedRecipeId === null || row.pairedRecipeName === null
+        ? null
+        : {
+            id: row.pairedRecipeId,
+            name: row.pairedRecipeName,
+            imageUrl: row.pairedRecipeImageUrl,
+            isBase: row.pairedRecipeIsBase ?? false,
+            baseRecipeId: row.pairedRecipeBaseRecipeId ?? null,
+            baseServings: row.pairedRecipeBaseServings ?? 1,
+            isDeleted: row.pairedRecipeIsDeleted ?? false,
           },
   };
 }

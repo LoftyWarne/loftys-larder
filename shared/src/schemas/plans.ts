@@ -38,11 +38,29 @@ export const planSlotRecipeSchema = z.object({
   imageUrl: z.string().nullable(),
   isBase: z.boolean(),
   // Lets the planner UI recognise a batch-version meal (linked to a base) and
-  // surface FEAT-32's base-supply warning without a second fetch.
+  // surface the base-supply warning without a second fetch.
   baseRecipeId: recipeIdSchema.nullable(),
+  // Mirror of `baseRecipeId` for the full↔batch sibling link. Lets the slot
+  // editor gate the pair-switch affordance without a second fetch.
+  pairedRecipeId: recipeIdSchema.nullable(),
   isDeleted: z.boolean(),
 });
 export type PlanSlotRecipe = z.infer<typeof planSlotRecipeSchema>;
+
+// The slot's paired-recipe sibling, joined alongside `recipe`. Carries
+// `baseServings` so the editor can default servings to the destination
+// recipe's yield on switch, and `isDeleted` to hide the affordance when the
+// sibling is soft-deleted (DEC-21 historical-render coherence).
+export const planSlotPairedRecipeSchema = z.object({
+  id: recipeIdSchema,
+  name: z.string(),
+  imageUrl: z.string().nullable(),
+  isBase: z.boolean(),
+  baseRecipeId: recipeIdSchema.nullable(),
+  baseServings: z.number().int().positive(),
+  isDeleted: z.boolean(),
+});
+export type PlanSlotPairedRecipe = z.infer<typeof planSlotPairedRecipeSchema>;
 
 // Even smaller sub-shape for the slot's cooked base reference. Only `name` +
 // `isDeleted` are surfaced — the card renders "Cook base: <name> (×N)" and an
@@ -70,6 +88,7 @@ export const planSlotSchema = z.object({
   comment: z.string().nullable(),
   recipe: planSlotRecipeSchema.nullable(),
   cooksBaseRecipe: planSlotCookedBaseSchema.nullable(),
+  pairedRecipe: planSlotPairedRecipeSchema.nullable(),
 });
 export type PlanSlot = z.infer<typeof planSlotSchema>;
 

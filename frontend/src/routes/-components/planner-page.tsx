@@ -1,5 +1,6 @@
 import type {
   PlanSlot,
+  PlanSlotPairedRecipe,
   RecipeListItem,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
@@ -106,6 +107,7 @@ export function PlannerPage(): React.ReactElement {
           imageUrl: selectedRecipe.imageUrl,
           isBase: selectedRecipe.isBase,
           baseRecipeId: selectedRecipe.baseRecipeId,
+          pairedRecipeId: selectedRecipe.pairedRecipeId,
           isDeleted: selectedRecipe.isDeleted,
         },
       });
@@ -119,9 +121,13 @@ export function PlannerPage(): React.ReactElement {
 
   function handleSave(
     input: UpdateSlotInput,
-    optimisticRecipe?: RecipeListItem,
+    options?: {
+      optimisticRecipe?: RecipeListItem;
+      optimisticPairedRecipe?: PlanSlotPairedRecipe | null;
+    },
   ): void {
     setMutationError(null);
+    const optimisticRecipe = options?.optimisticRecipe;
     update({
       input,
       optimisticRecipe: optimisticRecipe
@@ -131,9 +137,11 @@ export function PlannerPage(): React.ReactElement {
             imageUrl: optimisticRecipe.imageUrl,
             isBase: optimisticRecipe.isBase,
             baseRecipeId: optimisticRecipe.baseRecipeId,
+            pairedRecipeId: optimisticRecipe.pairedRecipeId,
             isDeleted: optimisticRecipe.isDeleted,
           }
         : undefined,
+      optimisticPairedRecipe: options?.optimisticPairedRecipe,
     });
     setEditingSlotId(null);
   }

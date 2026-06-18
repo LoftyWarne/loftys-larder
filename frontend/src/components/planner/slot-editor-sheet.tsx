@@ -2,6 +2,7 @@ import type {
   HouseholdMember,
   PlanSlot,
   PlanSlotCookedBase,
+  PlanSlotPairedRecipe,
   RecipeListItem,
   SlotType,
   UpdateSlotInput,
@@ -10,6 +11,7 @@ import { SLOT_COMMENT_MAX_LENGTH } from '@loftys-larder/shared';
 import { useEffect, useId, useMemo, useState } from 'react';
 
 import { BatchWarning } from '@/components/planner/batch-warning.tsx';
+import { PairSwitchButton } from '@/components/planner/pair-switch-button.tsx';
 import {
   SearchableCombobox,
   type SearchableComboboxOption,
@@ -64,7 +66,13 @@ export interface SlotEditorSheetProps {
   isSaving: boolean;
   hasBaseSupply: boolean;
   onClose: () => void;
-  onSave: (input: UpdateSlotInput, optimisticRecipe?: RecipeListItem) => void;
+  onSave: (
+    input: UpdateSlotInput,
+    options?: {
+      optimisticRecipe?: RecipeListItem;
+      optimisticPairedRecipe?: PlanSlotPairedRecipe | null;
+    },
+  ) => void;
 }
 
 export function SlotEditorSheet({
@@ -131,6 +139,23 @@ export function SlotEditorSheet({
     state.baseRecipe === null &&
     !hasBaseSupply;
 
+  // Pair-switch destination — the slot's pairedRecipe sub-object joined by the
+  // server. Surfaces only when the saved recipe has a pair AND the sibling is
+  // not soft-deleted. If the user freshly picked a different recipe via the
+  // combobox (state.recipe set), its sibling hasn't been loaded yet — the
+  // affordance waits for save → re-select.
+  const pairedForRender =
+    state !== null &&
+    state.slotType === 'recipe' &&
+    state.recipe === null &&
+    slot?.recipe?.pairedRecipeId != null &&
+    slot.pairedRecipe !== null &&
+    !slot.pairedRecipe.isDeleted
+      ? slot.pairedRecipe
+      : null;
+  const currentIsBatchVersion =
+    pairedForRender !== null && (slot?.recipe?.baseRecipeId ?? null) !== null;
+
   const baseSearchQuery = useMemo(() => {
     return async (query: string): Promise<readonly RecipeOption[]> => {
       const result = await utils.recipes.list.fetch({
@@ -154,7 +179,7 @@ export function SlotEditorSheet({
     if (!slot || !state) return;
     const input = buildInputForSave(slot, state);
     if (!input) return;
-    onSave(input, state.recipe ?? undefined);
+    onSave(input, { optimisticRecipe: state.recipe ?? undefined });
   }
 
   function handleClear(): void {
@@ -169,6 +194,59 @@ export function SlotEditorSheet({
       cooksBaseServings: null,
       comment: null,
     });
+  }
+
+  function handlePairSwitch(): void {
+    if (!slot) return;
+    const paired = slot.pairedRecipe;
+    const current = state?.recipe ?? slot.recipe;
+    if (!paired || paired.isDeleted || !current) return;
+    // The destination of the switch is `paired`; its sibling is the recipe
+    // we're leaving (`current`). That's the optimistic-paired side until the
+    // server re-selects.
+    const optimisticRecipe: RecipeListItem = {
+      id: paired.id,
+      name: paired.name,
+      imageUrl: paired.imageUrl,
+      baseServings: paired.baseServings,
+      activeTimeMins: null,
+      totalTimeMins: null,
+      isBase: paired.isBase,
+      baseRecipeId: paired.baseRecipeId,
+      pairedRecipeId: current.id,
+      isDeleted: paired.isDeleted,
+      plantPointsCount: 0,
+      averageRating: null,
+      ratingCount: 0,
+    };
+    const optimisticPairedRecipe: PlanSlotPairedRecipe = {
+      id: current.id,
+      name: current.name,
+      imageUrl: current.imageUrl,
+      isBase: current.isBase,
+      baseRecipeId: current.baseRecipeId,
+      // The current slot's PlanSlotRecipe doesn't carry baseServings; we don't
+      // need it for the surviving (former) pair side because the next switch
+      // would re-read the freshly-settled row. Default 1 keeps the type whole.
+      baseServings: 1,
+      isDeleted: current.isDeleted,
+    };
+    const trimmedComment = state ? state.comment.trim() : (slot.comment ?? '');
+    onSave(
+      {
+        slotId: slot.id,
+        slotType: 'recipe',
+        recipeId: paired.id,
+        numberOfServings: paired.baseServings,
+        chefUserId: state?.chefUserId ?? slot.chefUserId,
+        // Clear base-cook fields on pair switch — the suggestion hint
+        // re-appears for the new recipe and the user picks fresh.
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
+        comment: trimmedComment === '' ? null : trimmedComment,
+      },
+      { optimisticRecipe, optimisticPairedRecipe },
+    );
   }
 
   function handleApplySuggestion(): void {
@@ -311,6 +389,15 @@ export function SlotEditorSheet({
                   required
                 />
               </label>
+
+              {pairedForRender && (
+                <PairSwitchButton
+                  currentIsBatchVersion={currentIsBatchVersion}
+                  pairedRecipeName={pairedForRender.name}
+                  disabled={isSaving}
+                  onClick={handlePairSwitch}
+                />
+              )}
 
               <fieldset className="flex flex-col gap-2 rounded-md border border-input bg-muted/30 p-2">
                 <legend className="text-sm font-medium">

@@ -105,6 +105,7 @@ const EMPTY_SLOT: PlanSlot = {
   comment: null,
   recipe: null,
   cooksBaseRecipe: null,
+  pairedRecipe: null,
 };
 
 const RECIPE_SLOT: PlanSlot = {
@@ -121,6 +122,7 @@ const RECIPE_SLOT: PlanSlot = {
     imageUrl: null,
     isBase: false,
     baseRecipeId: null,
+    pairedRecipeId: null,
     isDeleted: false,
   },
 };

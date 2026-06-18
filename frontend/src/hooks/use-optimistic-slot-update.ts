@@ -1,6 +1,7 @@
 import type {
   GetPlanResult,
   PlanSlot,
+  PlanSlotPairedRecipe,
   PlanSlotRecipe,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
@@ -35,6 +36,13 @@ export interface OptimisticUpdateArgs {
    * Omit when the recipe isn't changing (servings/chef/comment edit).
    */
   optimisticRecipe?: PlanSlotRecipe;
+  /**
+   * Preview paired-recipe sub-object — used by the pair-switch flow to keep
+   * the switch affordance live during the optimistic window. After a switch,
+   * the destination recipe's pair points back at the original, so the caller
+   * knows this without an extra fetch. Omit when the recipe isn't changing.
+   */
+  optimisticPairedRecipe?: PlanSlotPairedRecipe | null;
 }
 
 export interface UseOptimisticSlotUpdateResult {
@@ -52,6 +60,13 @@ export function useOptimisticSlotUpdate({
   // user-driven and sequential — no overlap between a `mutate` call and the
   // adjacent `onMutate` runtime — so a ref is enough.
   const pendingOptimisticRecipe = useRef<PlanSlotRecipe | undefined>(undefined);
+  // Same side-channel trick for the paired-recipe preview: callers pass the
+  // pair affordance's destination so the button stays in the right state
+  // until settle. `undefined` = "no opinion, reuse existing"; `null` = "no
+  // pair on this recipe".
+  const pendingOptimisticPaired = useRef<
+    PlanSlotPairedRecipe | null | undefined
+  >(undefined);
 
   const mutation = trpc.slots.update.useMutation({
     onMutate: async (input) => {
@@ -63,8 +78,18 @@ export function useOptimisticSlotUpdate({
       const recipeForOptimistic =
         pendingOptimisticRecipe.current ??
         resolveExistingRecipe(previous, input);
+      const pairedForOptimistic =
+        pendingOptimisticPaired.current !== undefined
+          ? pendingOptimisticPaired.current
+          : resolveExistingPaired(previous, input);
       pendingOptimisticRecipe.current = undefined;
-      const patched = applySlotPatch(previous, input, recipeForOptimistic);
+      pendingOptimisticPaired.current = undefined;
+      const patched = applySlotPatch(
+        previous,
+        input,
+        recipeForOptimistic,
+        pairedForOptimistic,
+      );
       utils.plans.get.setData({ id: planId }, patched);
       return { previous };
     },
@@ -86,8 +111,9 @@ export function useOptimisticSlotUpdate({
   });
 
   return {
-    update: ({ input, optimisticRecipe }) => {
+    update: ({ input, optimisticRecipe, optimisticPairedRecipe }) => {
       pendingOptimisticRecipe.current = optimisticRecipe;
+      pendingOptimisticPaired.current = optimisticPairedRecipe;
       mutation.mutate(input);
     },
     isPending: mutation.isPending,
@@ -98,6 +124,7 @@ function applySlotPatch(
   plan: GetPlanResult,
   input: UpdateSlotInput,
   recipe: PlanSlotRecipe | null,
+  pairedRecipe: PlanSlotPairedRecipe | null,
 ): GetPlanResult {
   return {
     ...plan,
@@ -123,6 +150,7 @@ function applySlotPatch(
         comment: input.comment,
         recipe,
         cooksBaseRecipe,
+        pairedRecipe,
       };
     }),
   };
@@ -149,6 +177,24 @@ function resolveExistingRecipe(
   const existing = plan.slots.find((slot) => slot.id === input.slotId);
   if (existing?.recipe?.id === input.recipeId) {
     return existing.recipe;
+  }
+  return null;
+}
+
+// Sibling of `resolveExistingRecipe`: when the caller doesn't pass an
+// `optimisticPairedRecipe`, reuse the stored sub-object if the recipe FK is
+// unchanged so the pair-switch affordance doesn't blink off during a
+// servings/chef/comment edit.
+function resolveExistingPaired(
+  plan: GetPlanResult,
+  input: UpdateSlotInput,
+): PlanSlotPairedRecipe | null {
+  if (input.slotType !== 'recipe' || input.recipeId === null) {
+    return null;
+  }
+  const existing = plan.slots.find((slot) => slot.id === input.slotId);
+  if (existing?.recipe?.id === input.recipeId) {
+    return existing.pairedRecipe;
   }
   return null;
 }

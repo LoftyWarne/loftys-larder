@@ -464,6 +464,7 @@ describe('plans procedures', () => {
         imageUrl: null,
         isBase: false,
         baseRecipeId: null,
+        pairedRecipeId: null,
         isDeleted: false,
       });
 

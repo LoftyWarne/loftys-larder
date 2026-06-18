@@ -100,6 +100,16 @@ export const planSchema = z.object({
 });
 export type Plan = z.infer<typeof planSchema>;
 
+// `list` rows carry a slot-fill summary so the index page renders
+// "X / Y slots assigned" without an N+1 follow-up per card. `get` /
+// `updateRange` / `duplicate` outputs intentionally don't inherit these
+// fields — those callers already have the full slot array.
+export const planListItemSchema = planSchema.extend({
+  slotsTotal: z.number().int().nonnegative(),
+  slotsAssigned: z.number().int().nonnegative(),
+});
+export type PlanListItem = z.infer<typeof planListItemSchema>;
+
 export const createPlanInputSchema = z
   .object({
     startDate: civilDateSchema,
@@ -123,7 +133,7 @@ export const listPlansInputSchema = z.object({
 export type ListPlansInput = z.infer<typeof listPlansInputSchema>;
 
 export const listPlansResultSchema = z.object({
-  items: z.array(planSchema),
+  items: z.array(planListItemSchema),
 });
 export type ListPlansResult = z.infer<typeof listPlansResultSchema>;
 

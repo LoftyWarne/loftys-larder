@@ -27,6 +27,13 @@ export function AuthedLayout(): React.ReactElement {
           Recipes
         </Link>
         <Link
+          to="/plans"
+          activeProps={{ className: 'text-primary' }}
+          className="hover:underline"
+        >
+          Plans
+        </Link>
+        <Link
           to="/ingredients"
           activeProps={{ className: 'text-primary' }}
           className="hover:underline"

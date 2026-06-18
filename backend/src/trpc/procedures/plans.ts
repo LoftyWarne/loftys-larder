@@ -15,6 +15,7 @@ import {
   listPlansInputSchema,
   listPlansResultSchema,
   PLAN_MAX_RANGE_DAYS,
+  planListItemSchema,
   planSchema,
   updatePlanRangeInputSchema,
   updatePlanRangeResultSchema,
@@ -24,6 +25,7 @@ import {
   type GetPlanResult,
   type ListPlansResult,
   type Plan,
+  type PlanListItem,
   type PlanSlot,
   type PlanSlotLoss,
   type UpdatePlanRangeResult,
@@ -156,18 +158,27 @@ export const plansRouter = router({
       }
       // status === 'all' adds no extra predicate.
 
+      // LEFT JOIN + aggregate the slot counts in one round-trip so the
+      // browse-view cards don't N+1. `slotsAssigned` counts every slot whose
+      // `slot_type <> 'empty'` (recipe, eat_out, takeaway, leftovers — i.e.
+      // anything the cook has consciously chosen). `slotsTotal` covers all
+      // generated slots for the plan's range × occasions.
       const rows = await ctx.db
         .select({
           id: mealPlans.id,
           startDate: mealPlans.startDate,
           endDate: mealPlans.endDate,
           createdByUserId: mealPlans.createdByUserId,
+          slotsTotal: sql<number>`count(${mealPlanSlots.id})::int`,
+          slotsAssigned: sql<number>`(count(${mealPlanSlots.id}) filter (where ${mealPlanSlots.slotType} <> 'empty'))::int`,
         })
         .from(mealPlans)
+        .leftJoin(mealPlanSlots, eq(mealPlanSlots.planId, mealPlans.id))
         .where(and(...conditions))
+        .groupBy(mealPlans.id)
         .orderBy(desc(mealPlans.startDate), desc(mealPlans.id));
 
-      return { items: rows.map(toPlanDto) };
+      return { items: rows.map(toPlanListItemDto) };
     }),
 
   get: protectedProcedure
@@ -519,6 +530,22 @@ function toPlanDto(row: PlanRow): Plan {
     startDate: formatCivilDate(row.startDate),
     endDate: formatCivilDate(row.endDate),
     createdByUserId: row.createdByUserId,
+  });
+}
+
+interface PlanListRow extends PlanRow {
+  slotsTotal: number;
+  slotsAssigned: number;
+}
+
+function toPlanListItemDto(row: PlanListRow): PlanListItem {
+  return planListItemSchema.parse({
+    id: row.id,
+    startDate: formatCivilDate(row.startDate),
+    endDate: formatCivilDate(row.endDate),
+    createdByUserId: row.createdByUserId,
+    slotsTotal: row.slotsTotal,
+    slotsAssigned: row.slotsAssigned,
   });
 }
 

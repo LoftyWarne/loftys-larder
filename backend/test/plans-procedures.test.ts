@@ -407,6 +407,63 @@ describe('plans procedures', () => {
       const all = await caller.plans.list({ status: 'all' });
       expect(all.items.map((p) => p.id)).toEqual([mineId]);
     });
+
+    it('reports slotsTotal = range × occasions and slotsAssigned = 0 for a fresh plan', async () => {
+      const today = todayInLondon();
+      const caller = createCaller(makeContext());
+      // 4 days × 2 occasions = 8 slots, all empty.
+      const { plan, slotCount } = await caller.plans.create({
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 3)),
+      });
+      expect(slotCount).toBe(8);
+
+      const result = await caller.plans.list({ status: 'active' });
+      const row = result.items.find((p) => p.id === plan.id);
+      expect(row).toBeDefined();
+      expect(row?.slotsTotal).toBe(8);
+      expect(row?.slotsAssigned).toBe(0);
+    });
+
+    it('reports slotsAssigned across a mix of non-empty slot states', async () => {
+      const today = todayInLondon();
+      const caller = createCaller(makeContext());
+      const { plan, slotCount } = await caller.plans.create({
+        startDate: formatCivilDate(today),
+        endDate: formatCivilDate(addDays(today, 3)),
+      });
+      expect(slotCount).toBe(8);
+
+      // Flip 3 of the 8 slots to non-empty states (eat_out / takeaway /
+      // leftovers — no recipe required) directly via SQL so we don't depend
+      // on the slots router contract.
+      const slotRows = await db
+        .select({ id: mealPlanSlots.id })
+        .from(mealPlanSlots)
+        .where(eq(mealPlanSlots.planId, plan.id))
+        .orderBy(mealPlanSlots.id);
+      const [firstSlot, secondSlot, thirdSlot] = slotRows;
+      if (!firstSlot || !secondSlot || !thirdSlot) {
+        throw new Error('expected at least three slots');
+      }
+      await db
+        .update(mealPlanSlots)
+        .set({ slotType: 'eat_out' })
+        .where(eq(mealPlanSlots.id, firstSlot.id));
+      await db
+        .update(mealPlanSlots)
+        .set({ slotType: 'takeaway' })
+        .where(eq(mealPlanSlots.id, secondSlot.id));
+      await db
+        .update(mealPlanSlots)
+        .set({ slotType: 'leftovers' })
+        .where(eq(mealPlanSlots.id, thirdSlot.id));
+
+      const result = await caller.plans.list({ status: 'active' });
+      const row = result.items.find((p) => p.id === plan.id);
+      expect(row?.slotsTotal).toBe(8);
+      expect(row?.slotsAssigned).toBe(3);
+    });
   });
 
   describe('get', () => {

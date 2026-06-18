@@ -160,6 +160,8 @@ export {
   type PlanSlot,
   planSchema,
   type Plan,
+  planListItemSchema,
+  type PlanListItem,
   createPlanInputSchema,
   type CreatePlanInput,
   createPlanResultSchema,
@@ -198,6 +200,7 @@ export {
   plannerSearchSchema,
   type PlannerSearch,
 } from './schemas/planner-search.ts';
+export { plansSearchSchema, type PlansSearch } from './schemas/plans-search.ts';
 export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export {
   ingredientNameSchema,

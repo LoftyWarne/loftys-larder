@@ -209,6 +209,18 @@ export {
 export { plansSearchSchema, type PlansSearch } from './schemas/plans-search.ts';
 export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export {
+  shoppingListContributingSlotSchema,
+  type ShoppingListContributingSlot,
+  shoppingListLineSchema,
+  type ShoppingListLine,
+  shoppingListCategorySchema,
+  type ShoppingListCategory,
+  getShoppingListForPlanInputSchema,
+  type GetShoppingListForPlanInput,
+  getShoppingListForPlanResultSchema,
+  type GetShoppingListForPlanResult,
+} from './schemas/shopping.ts';
+export {
   ingredientNameSchema,
   ingredientShelfLifeSchema,
   createIngredientInputSchema,

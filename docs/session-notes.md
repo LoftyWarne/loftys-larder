@@ -4,6 +4,44 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-18 — FEAT-37 (Shelf-life warnings)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across the three workspaces. Backend pure-helper suite `test/shopping-aggregation.test.ts`: 15/15 passing (9 pre-existing + 6 new shelf-life cases). Testcontainer-backed procedure suites (`shopping-procedures.test.ts` et al.) not exercised in this session — Docker wasn't running locally; the FEAT-37 change at the procedure layer is one new column projected through two SELECTs plus a `startDate` plumb-through, no SQL semantics changed. DoD boxes in `docs/feature-specs.md §FEAT-37` left unticked — human action. Manual gate (set an ingredient shelf life to 3 days, use it on day 5, confirm the warning surfaces) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **`daysOverflow` is exclusive whole-day diff.** Defined as `latestNeededDate − (planStart + shelfLifeDays)` measured by raw UTC-ms / 86_400_000 on the civil-day Dates. With `planStart=2026-06-01, shelfLifeDays=3, latestNeededDate=2026-06-05` the boundary is `2026-06-04` and the answer is `1`. Deliberately **not** `dateUtils.daysBetween` — that helper is inclusive (`daysBetween(d, d) === 1`) and would yield `2` for the same input. Confirmed pre-implementation via AskUserQuestion.
+- **Boundary is strict-greater-than.** Usage on `(planStart + shelfLifeDays)` is treated as fitting; only strictly later dates warn. Matches the common-gotcha note in the spec and aligns with the cook's intuition (a 3-day shelf life means it's fine on day 3).
+- **Warning is `optional`, not `nullable`.** When the line fits, the field is **absent** on the DTO rather than serialised as `null`. Pinned by a test (`expect('shelfLifeWarning' in line).toBe(false)`). Cuts wire size on the common case and gives the UI a straightforward `if (line.shelfLifeWarning)` discriminator.
+- **`averageShelfLifeDays` rides through the contribution row.** Both contribution SELECTs already join `ingredients`; projecting one more column is free. No second query, no procedure-layer redesign — the helper picks up the value from the first contribution row per ingredient (per-ingredient invariant: the column is functionally dependent on `ingredient_id`).
+- **`planStart` is required on the helper signature.** Tightening `aggregateContributions(rows)` → `aggregateContributions(rows, { planStart })` makes the dependency explicit at every callsite. No optional default — a silent "no planStart, no warnings ever" behaviour would mask a wiring bug.
+
+### Drift from kick-off plan
+
+None of consequence. Two minor deviations worth noting:
+
+1. **No new domain helper.** Plan said the warning math would live inside `shopping-aggregation.ts`. Resisted the urge to factor `computeShelfLifeWarning` into `date-utils` or a new module — it's a one-call-site helper tightly coupled to the bucket's `contributingSlots` shape. If a second consumer appears (FEAT-38's reset logic doesn't need it), promote it.
+2. **Test-local `civilDate(iso)` parser.** The plan didn't anticipate a test helper. Added a small regex-based parser (mirroring `parseCivilDate` in shape, separate to keep the test file independent of `date-utils`). The first version used array-destructure + `!` non-null assertions; ESLint's `no-non-null-assertion` rule flagged it, replaced with explicit `RegExp.exec` per AGENTS.md "don't silence the linter".
+
+### Implementation details worth carrying
+
+- **`ShoppingContribution.averageShelfLifeDays: number | null`.** Threading the per-ingredient column through the contribution row keeps the SQL projection and helper input shape parallel — same column shape in both meal-recipe and cooks-base SELECTs.
+- **`AggregateOptions` type exported for callers.** Single option for now (`planStart`); reserving the shape for FEAT-38's lazy-create reset (likely `{ planStart, existingChecked: …}` or similar) without another signature break.
+- **Latest-date scan, not max-on-sort.** The helper does a linear `latestMs` scan over `contributingSlots` after they've already been sorted by `(date, slotId)`. Could in principle read `contributingSlots[contributingSlots.length - 1].date`, but the explicit max is robust to a future sort change and reads more clearly at the cost of N comparisons (always tiny).
+- **No `dateUtils.daysBetween` used for overflow** — that helper is inclusive. Used raw `(latestMs − boundary.getTime()) / MS_PER_DAY` with `Math.round` to absorb any DST-driven 23-/25-hour-day skew (Europe/London civil days are UTC-midnight encoded, so DST is structurally irrelevant here, but the `round` makes the contract obvious without a comment).
+- **Procedure-layer change is mechanical.** `loadHouseholdPlan` projects `startDate`; both SELECTs project `ingredients.averageShelfLifeDays`; the call to `aggregateContributions` becomes `aggregateContributions([...], { planStart: planRow.startDate })`. No new error path, no transaction (still a pure read), no `withTransaction` need (deferred to FEAT-38 as per session-notes-1341).
+- **Pre-existing tests updated minimally.** Default `averageShelfLifeDays: null` on the test factory + a `DEFAULT_PLAN_START` constant far enough in the past that no realistic shelf life triggers. Nine call sites updated; semantics unchanged for those cases.
+
+### Open follow-ups
+
+- **Manual gate** per the FEAT-37 verification steps: in dev, set an ingredient's `averageShelfLifeDays` to 3, attach it to a recipe assigned to a slot on plan-day 5, call `shopping.getForPlan` via tRPC devtools — confirm `shelfLifeWarning.latestNeededDate` matches the slot date and `daysOverflow` is 2. Remove the shelf-life value; warning disappears.
+- **Procedure-layer integration test.** A Testcontainers-backed test in `shopping-procedures.test.ts` that seeds an ingredient with a shelf life, places it past the boundary on a slot, and asserts the warning surfaces end-to-end. Not added this session because Docker wasn't running locally; the helper coverage and the mechanical procedure change keep the risk low, but a procedure-level pin would be cheap and worth picking up next time Testcontainers are exercised.
+- **FEAT-39 UI surface.** The `<ShelfLifeBadge>` component (FEAT-39 file list) is the consumer. With the field optional, the component contract is `props: { warning?: ShelfLifeWarning }` and the parent renders only when set.
+- **FEAT-38's lazy-create reset.** The quantity-bound reset (`is_checked → false` when current total differs from `last_checked_quantity`) wraps `getForPlan` in `withTransaction`. The shelf-life pass is read-only and not affected by the transaction boundary — runs identically inside or outside.
+- **DEC-37's single-shop assumption.** Top-up shops still warn against `planStart`. The "instrument how often warnings are dismissed without action" idea named in DEC-37's revisit-when can layer on top of the line shape later (no DTO change needed if the metric is fire-and-forget).
+
+---
+
 ## 2026-06-18 — FEAT-36 (Shopping list aggregation procedure)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck` and `pnpm -r lint` clean across the three workspaces. Backend Testcontainers run (with the FEAT-32-era Colima env vars: `DOCKER_HOST=unix:///.../colima/default/docker.sock TESTCONTAINERS_RYUK_DISABLED=true`): 430/431 passing — the 14 new `shopping-procedures.test.ts` cases and 9 new `shopping-aggregation.test.ts` cases all pass; the one failure is the pre-existing `user-procedures.test.ts:235` `$onUpdate` timing race (`expected 1781815476317 to be greater than 1781815476337`) which passes on isolated re-run, unrelated to FEAT-36. DoD boxes in `docs/feature-specs.md §FEAT-36` left unticked — human action. Manual gate (hand-compute a non-trivial plan's totals against the procedure output) is owed by the human.

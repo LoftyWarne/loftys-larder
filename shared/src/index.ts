@@ -221,6 +221,10 @@ export {
   type GetShoppingListForPlanInput,
   getShoppingListForPlanResultSchema,
   type GetShoppingListForPlanResult,
+  toggleShoppingItemCheckedInputSchema,
+  type ToggleShoppingItemCheckedInput,
+  toggleShoppingItemCheckedResultSchema,
+  type ToggleShoppingItemCheckedResult,
 } from './schemas/shopping.ts';
 export {
   ingredientNameSchema,

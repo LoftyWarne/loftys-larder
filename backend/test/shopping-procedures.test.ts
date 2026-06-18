@@ -5,7 +5,7 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
@@ -772,6 +772,436 @@ describe('shopping procedures', () => {
           { planId },
         ),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+  });
+
+  describe('getForPlan check-state', () => {
+    async function buildOnionCurryPlan(options?: {
+      numberOfServings?: number;
+    }): Promise<{ planId: number; onionId: number; recipeId: number }> {
+      const onionId = await insertIngredient('Onion');
+      const recipeId = await insertRecipe('Curry', { baseServings: 4 });
+      await insertRecipeIngredient(recipeId, onionId, '2.000');
+      const planId = await insertPlan({
+        startDate: civilDate(2026, 1, 1),
+        endDate: civilDate(2026, 1, 1),
+      });
+      await insertSlot({
+        planId,
+        date: civilDate(2026, 1, 1),
+        occasionId: dinnerId,
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: options?.numberOfServings ?? 4,
+      });
+      return { planId, onionId, recipeId };
+    }
+
+    it('lazy-creates one row per aggregated ingredient on first call', async () => {
+      const onionId = await insertIngredient('Onion');
+      const carrotId = await insertIngredient('Carrot');
+      const recipeId = await insertRecipe('Stew', { baseServings: 4 });
+      await insertRecipeIngredient(recipeId, onionId, '2.000');
+      await insertRecipeIngredient(recipeId, carrotId, '3.000');
+      const planId = await insertPlan({
+        startDate: civilDate(2026, 1, 1),
+        endDate: civilDate(2026, 1, 1),
+      });
+      await insertSlot({
+        planId,
+        date: civilDate(2026, 1, 1),
+        occasionId: dinnerId,
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: 4,
+      });
+
+      const before = await db.select().from(shoppingListItems);
+      expect(before).toEqual([]);
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+
+      const lines = result.categories.flatMap((c) => c.lines);
+      expect(lines.every((line) => !line.isChecked)).toBe(true);
+
+      const after = await db.select().from(shoppingListItems);
+      expect(after).toHaveLength(2);
+      expect(after.every((row) => !row.isChecked)).toBe(true);
+      expect(after.every((row) => row.lastCheckedQuantity === null)).toBe(true);
+      expect(
+        after.map((row) => row.ingredientId).sort((a, b) => a - b),
+      ).toEqual([onionId, carrotId].sort((a, b) => a - b));
+    });
+
+    it('is idempotent — calling twice does not duplicate rows', async () => {
+      const { planId } = await buildOnionCurryPlan();
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      const rows = await db.select().from(shoppingListItems);
+      expect(rows).toHaveLength(1);
+    });
+
+    it('surfaces persisted check state without resetting when total matches', async () => {
+      const { planId, onionId } = await buildOnionCurryPlan();
+      // First call lazy-creates the row.
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      // Seed it to checked with a matching total (current is '2.000' at
+      // baseServings 4, numberOfServings 4).
+      await db
+        .update(shoppingListItems)
+        .set({ isChecked: true, lastCheckedQuantity: '2.000' })
+        .where(eq(shoppingListItems.ingredientId, onionId));
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      const line = result.categories[0]?.lines[0];
+      expect(line?.isChecked).toBe(true);
+
+      const persisted = await db
+        .select()
+        .from(shoppingListItems)
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      expect(persisted[0]?.isChecked).toBe(true);
+      expect(persisted[0]?.lastCheckedQuantity).toBe('2.000');
+    });
+
+    it('resets check-state when current total grows past last-checked', async () => {
+      const { planId, onionId } = await buildOnionCurryPlan();
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      await db
+        .update(shoppingListItems)
+        .set({ isChecked: true, lastCheckedQuantity: '2.000' })
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      // Bump the slot to 8 servings → 4.000 total.
+      await db
+        .update(mealPlanSlots)
+        .set({ numberOfServings: 8 })
+        .where(eq(mealPlanSlots.planId, planId));
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      const line = result.categories[0]?.lines[0];
+      expect(line?.isChecked).toBe(false);
+      expect(line?.totalQuantity).toBe('4.000');
+
+      const persisted = await db
+        .select()
+        .from(shoppingListItems)
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      expect(persisted[0]?.isChecked).toBe(false);
+      expect(persisted[0]?.lastCheckedQuantity).toBeNull();
+    });
+
+    it('resets check-state when current total shrinks below last-checked', async () => {
+      const { planId, onionId } = await buildOnionCurryPlan();
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      await db
+        .update(shoppingListItems)
+        .set({ isChecked: true, lastCheckedQuantity: '2.000' })
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      await db
+        .update(mealPlanSlots)
+        .set({ numberOfServings: 2 })
+        .where(eq(mealPlanSlots.planId, planId));
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      const line = result.categories[0]?.lines[0];
+      expect(line?.isChecked).toBe(false);
+      expect(line?.totalQuantity).toBe('1.000');
+    });
+
+    it('does not reset other lines when one ingredient changes', async () => {
+      const onionId = await insertIngredient('Onion');
+      const carrotId = await insertIngredient('Carrot');
+      const recipeId = await insertRecipe('Stew', { baseServings: 4 });
+      await insertRecipeIngredient(recipeId, onionId, '2.000');
+      await insertRecipeIngredient(recipeId, carrotId, '3.000');
+      const planId = await insertPlan({
+        startDate: civilDate(2026, 1, 1),
+        endDate: civilDate(2026, 1, 1),
+      });
+      const slotId = await insertSlot({
+        planId,
+        date: civilDate(2026, 1, 1),
+        occasionId: dinnerId,
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: 4,
+      });
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      // Check both at their current totals.
+      await db
+        .update(shoppingListItems)
+        .set({ isChecked: true, lastCheckedQuantity: '2.000' })
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      await db
+        .update(shoppingListItems)
+        .set({ isChecked: true, lastCheckedQuantity: '3.000' })
+        .where(eq(shoppingListItems.ingredientId, carrotId));
+      // Add a second slot that touches only Onion via a new recipe.
+      const onionOnlyId = await insertRecipe('Onion soup', { baseServings: 2 });
+      await insertRecipeIngredient(onionOnlyId, onionId, '1.000');
+      await db
+        .update(mealPlanSlots)
+        .set({ numberOfServings: 4 })
+        .where(eq(mealPlanSlots.id, slotId));
+      await insertSlot({
+        planId,
+        date: civilDate(2026, 1, 1),
+        occasionId: lunchId,
+        slotType: 'recipe',
+        recipeId: onionOnlyId,
+        numberOfServings: 2,
+      });
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      const allLines = result.categories.flatMap((c) => c.lines);
+      const onionLine = allLines.find((l) => l.ingredient.id === onionId);
+      const carrotLine = allLines.find((l) => l.ingredient.id === carrotId);
+      // Onion total moved to 3.000; reset to false.
+      expect(onionLine?.totalQuantity).toBe('3.000');
+      expect(onionLine?.isChecked).toBe(false);
+      // Carrot total unchanged at 3.000; check preserved.
+      expect(carrotLine?.totalQuantity).toBe('3.000');
+      expect(carrotLine?.isChecked).toBe(true);
+    });
+
+    it('compares lastCheckedQuantity by numeric value, not string representation', async () => {
+      const { planId, onionId } = await buildOnionCurryPlan();
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      // Postgres can emit "1.5" or "1.500" for the same numeric value;
+      // seed the lopsided form and confirm no reset fires when the current
+      // total is "2.000" vs stored "2.0".
+      await db
+        .update(shoppingListItems)
+        .set({ isChecked: true, lastCheckedQuantity: '2.0' })
+        .where(eq(shoppingListItems.ingredientId, onionId));
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      expect(result.categories[0]?.lines[0]?.isChecked).toBe(true);
+    });
+
+    it('does not affect rows whose ingredient no longer contributes to the plan', async () => {
+      const { planId, onionId, recipeId } = await buildOnionCurryPlan();
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      await db
+        .update(shoppingListItems)
+        .set({ isChecked: true, lastCheckedQuantity: '2.000' })
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      // Remove the only recipe ingredient. Onion no longer contributes; the
+      // row stays put.
+      await db
+        .delete(recipeIngredients)
+        .where(eq(recipeIngredients.recipeId, recipeId));
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      expect(result.categories).toEqual([]);
+
+      const persisted = await db.select().from(shoppingListItems);
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0]?.isChecked).toBe(true);
+      expect(persisted[0]?.lastCheckedQuantity).toBe('2.000');
+    });
+
+    it('does not lazy-create rows in another household', async () => {
+      const { planId } = await buildOnionCurryPlan();
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+
+      // Bare assertion that there is exactly one row for this plan and that
+      // no rows leaked to a sibling household plan that does not exist.
+      const rows = await db.select().from(shoppingListItems);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.planId).toBe(planId);
+    });
+  });
+
+  describe('toggleChecked', () => {
+    async function setupPlanWithIngredient(): Promise<{
+      planId: number;
+      onionId: number;
+    }> {
+      const onionId = await insertIngredient('Onion');
+      const recipeId = await insertRecipe('Curry', { baseServings: 4 });
+      await insertRecipeIngredient(recipeId, onionId, '2.500');
+      const planId = await insertPlan({
+        startDate: civilDate(2026, 1, 1),
+        endDate: civilDate(2026, 1, 1),
+      });
+      await insertSlot({
+        planId,
+        date: civilDate(2026, 1, 1),
+        occasionId: dinnerId,
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: 4,
+      });
+      return { planId, onionId };
+    }
+
+    it('records current total when checking a line for the first time', async () => {
+      const { planId, onionId } = await setupPlanWithIngredient();
+      // First, run getForPlan so the row exists (lazy-create).
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+
+      const result = await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: true,
+      });
+      expect(result).toEqual({
+        planId,
+        ingredientId: onionId,
+        isChecked: true,
+      });
+
+      const row = await db
+        .select()
+        .from(shoppingListItems)
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      expect(row[0]?.isChecked).toBe(true);
+      expect(row[0]?.lastCheckedQuantity).toBe('2.500');
+    });
+
+    it('clears lastCheckedQuantity when unchecking', async () => {
+      const { planId, onionId } = await setupPlanWithIngredient();
+      await createCaller(makeContext()).shopping.getForPlan({ planId });
+      await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: true,
+      });
+      await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: false,
+      });
+
+      const row = await db
+        .select()
+        .from(shoppingListItems)
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      expect(row[0]?.isChecked).toBe(false);
+      expect(row[0]?.lastCheckedQuantity).toBeNull();
+    });
+
+    it('upserts on first toggle when no row exists yet', async () => {
+      const { planId, onionId } = await setupPlanWithIngredient();
+      // No getForPlan first — caller toggles directly.
+      const before = await db.select().from(shoppingListItems);
+      expect(before).toEqual([]);
+
+      await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: true,
+      });
+
+      const after = await db.select().from(shoppingListItems);
+      expect(after).toHaveLength(1);
+      expect(after[0]?.isChecked).toBe(true);
+      expect(after[0]?.lastCheckedQuantity).toBe('2.500');
+    });
+
+    it('throws NOT_FOUND for a plan belonging to another household', async () => {
+      const onionId = await insertIngredient('Onion');
+      const otherPlanId = await insertPlan({
+        startDate: civilDate(2026, 1, 1),
+        endDate: civilDate(2026, 1, 1),
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      await expect(
+        createCaller(makeContext()).shopping.toggleChecked({
+          planId: otherPlanId,
+          ingredientId: onionId,
+          isChecked: true,
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('throws NOT_FOUND for an ingredient that does not contribute to the plan', async () => {
+      const { planId } = await setupPlanWithIngredient();
+      const carrotId = await insertIngredient('Carrot');
+      await expect(
+        createCaller(makeContext()).shopping.toggleChecked({
+          planId,
+          ingredientId: carrotId,
+          isChecked: true,
+        }),
+      ).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+        cause: { code: 'SHOPPING_INGREDIENT_NOT_IN_PLAN' },
+      });
+
+      const rows = await db.select().from(shoppingListItems);
+      expect(rows).toEqual([]);
+    });
+
+    it('round-trips through getForPlan: toggled state is reflected on next read', async () => {
+      const { planId, onionId } = await setupPlanWithIngredient();
+      await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: true,
+      });
+      const checked = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      expect(checked.categories[0]?.lines[0]?.isChecked).toBe(true);
+
+      await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: false,
+      });
+      const unchecked = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      expect(unchecked.categories[0]?.lines[0]?.isChecked).toBe(false);
+    });
+
+    it('advances updatedAt on every write', async () => {
+      const { planId, onionId } = await setupPlanWithIngredient();
+      await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: true,
+      });
+      const first = await db
+        .select()
+        .from(shoppingListItems)
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      const firstUpdatedAt = first[0]?.updatedAt;
+      if (!firstUpdatedAt) throw new Error('expected updatedAt on first read');
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await createCaller(makeContext()).shopping.toggleChecked({
+        planId,
+        ingredientId: onionId,
+        isChecked: false,
+      });
+      const second = await db
+        .select()
+        .from(shoppingListItems)
+        .where(eq(shoppingListItems.ingredientId, onionId));
+      const secondUpdatedAt = second[0]?.updatedAt;
+      if (!secondUpdatedAt) {
+        throw new Error('expected updatedAt on second read');
+      }
+      expect(secondUpdatedAt.getTime()).toBeGreaterThan(
+        firstUpdatedAt.getTime(),
+      );
     });
   });
 });

@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   integer,
+  numeric,
   pgTable,
   primaryKey,
   timestamp,
@@ -10,11 +11,12 @@ import {
 import { ingredients } from './ingredients.ts';
 import { mealPlans } from './meal-plans.ts';
 
-// Per-plan-per-ingredient checked state. Rows are lazy-created on first call
-// to `shopping.getForPlan(planId)` in FEAT-38 (DEC-30) — this FEAT only
-// defines the shape. Quantities are computed from recipes on read; the table
-// stores nothing more than the composite-PK pair and the `is_checked` flag
-// (plus housekeeping timestamps).
+// Per-plan-per-ingredient checked state. Rows are lazy-created on the first
+// call to `shopping.getForPlan(planId)` (DEC-30). Quantities themselves are
+// recomputed from recipes on every read — the table only persists `isChecked`
+// plus `lastCheckedQuantity`, the aggregated total recorded at the moment the
+// line was checked. On a subsequent aggregation, a mismatch between the
+// current total and `lastCheckedQuantity` silently resets the check (DEC-31).
 export const shoppingListItems = pgTable(
   'shopping_list_items',
   {
@@ -25,6 +27,7 @@ export const shoppingListItems = pgTable(
       .notNull()
       .references(() => ingredients.id, { onDelete: 'restrict' }),
     isChecked: boolean().notNull().default(false),
+    lastCheckedQuantity: numeric({ precision: 10, scale: 3 }),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`),

@@ -1,0 +1,1 @@
+ALTER TABLE "shopping_list_items" ADD COLUMN "last_checked_quantity" numeric(10, 3);

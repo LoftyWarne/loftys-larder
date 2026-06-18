@@ -29,6 +29,7 @@ export const DOMAIN_ERROR_CODES = [
   'SLOT_BASE_NOT_PICKABLE',
   'SLOT_BASE_NOT_BASE',
   'ACCOUNT_DELETE_EMAIL_MISMATCH',
+  'SHOPPING_INGREDIENT_NOT_IN_PLAN',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

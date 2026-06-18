@@ -54,6 +54,11 @@ export const shoppingListLineSchema = z.object({
   }),
   totalQuantity: quantitySchema,
   contributingSlots: z.array(shoppingListContributingSlotSchema),
+  // Persistent check-state for the line (DEC-30 lazy-create, DEC-31
+  // quantity-bound reset). Always present on the read DTO; the procedure
+  // performs any reset before returning, so the value reflects post-reset
+  // truth.
+  isChecked: z.boolean(),
   shelfLifeWarning: shelfLifeWarningSchema.optional(),
 });
 export type ShoppingListLine = z.infer<typeof shoppingListLineSchema>;
@@ -80,4 +85,26 @@ export const getShoppingListForPlanResultSchema = z.object({
 });
 export type GetShoppingListForPlanResult = z.infer<
   typeof getShoppingListForPlanResultSchema
+>;
+
+// Toggle a single line's checked state. The server stamps the current
+// aggregated total into `last_checked_quantity` on transition to true and
+// clears it on transition to false (DEC-31). The client never supplies the
+// quantity — preventing a stale snapshot from poisoning the reset invariant.
+export const toggleShoppingItemCheckedInputSchema = z.object({
+  planId: planIdSchema,
+  ingredientId: ingredientIdSchema,
+  isChecked: z.boolean(),
+});
+export type ToggleShoppingItemCheckedInput = z.infer<
+  typeof toggleShoppingItemCheckedInputSchema
+>;
+
+export const toggleShoppingItemCheckedResultSchema = z.object({
+  planId: planIdSchema,
+  ingredientId: ingredientIdSchema,
+  isChecked: z.boolean(),
+});
+export type ToggleShoppingItemCheckedResult = z.infer<
+  typeof toggleShoppingItemCheckedResultSchema
 >;

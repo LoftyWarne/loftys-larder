@@ -6,6 +6,17 @@ import type {
 } from '../../../shared/src/index.ts';
 import { addDays, parseCivilDate } from './date-utils.ts';
 
+// Helper-local view of `ShoppingListLine` without the persistent `isChecked`
+// flag — that's stamped by the procedure after lazy-create + reset. Keeping
+// the helper output narrower than the wire DTO matches reality: the pure
+// aggregation knows nothing about check state.
+export type AggregatedShoppingListLine = Omit<ShoppingListLine, 'isChecked'>;
+
+export interface AggregatedShoppingListCategory {
+  category: ShoppingListCategory['category'];
+  lines: AggregatedShoppingListLine[];
+}
+
 // Pure aggregation for `shopping.getForPlan`. Takes the flat contribution rows
 // produced by the procedure's two SELECTs (meal-recipe contributions + cooks-
 // base contributions, unioned) and produces the nested-by-category output.
@@ -53,7 +64,7 @@ const MS_PER_DAY = 86_400_000;
 export function aggregateContributions(
   contributions: ShoppingContribution[],
   { planStart }: AggregateOptions,
-): ShoppingListCategory[] {
+): AggregatedShoppingListCategory[] {
   // ingredient bucket — accumulates one `ShoppingListLine` per ingredient_id.
   interface IngredientBucket {
     ingredient: { id: number; name: string };
@@ -114,7 +125,7 @@ export function aggregateContributions(
   // category bucket — accumulates lines per category_id.
   interface CategoryBucket {
     category: { id: number; name: string };
-    lines: ShoppingListLine[];
+    lines: AggregatedShoppingListLine[];
   }
   const categoryBuckets = new Map<number, CategoryBucket>();
 
@@ -131,7 +142,7 @@ export function aggregateContributions(
         scaledQuantity: formatFixed3FromMilli(entry.scaledMilli),
       }));
 
-    const line: ShoppingListLine = {
+    const line: AggregatedShoppingListLine = {
       ingredient: ingredient.ingredient,
       unit: ingredient.unit,
       totalQuantity: formatFixed3FromMilli(ingredient.totalMilli),
@@ -155,14 +166,14 @@ export function aggregateContributions(
     cat.lines.push(line);
   }
 
-  const categories: ShoppingListCategory[] = [...categoryBuckets.values()].map(
-    (cat) => ({
-      category: cat.category,
-      lines: cat.lines.sort((a, b) =>
-        compareIgnoreCase(a.ingredient.name, b.ingredient.name),
-      ),
-    }),
-  );
+  const categories: AggregatedShoppingListCategory[] = [
+    ...categoryBuckets.values(),
+  ].map((cat) => ({
+    category: cat.category,
+    lines: cat.lines.sort((a, b) =>
+      compareIgnoreCase(a.ingredient.name, b.ingredient.name),
+    ),
+  }));
   categories.sort((a, b) =>
     compareIgnoreCase(a.category.name, b.category.name),
   );
@@ -218,7 +229,7 @@ function compareIgnoreCase(a: string, b: string): number {
 // leading `+`/`-` defensively. Throws on malformed input rather than
 // silently producing 0 — a malformed contribution row would skew the total
 // by exactly the missing value.
-function parseMilliFromFixed3(value: string): bigint {
+export function parseMilliFromFixed3(value: string): bigint {
   const match = /^([+-]?)(\d+)(?:\.(\d{1,3}))?$/.exec(value);
   if (!match) {
     throw new Error(`shopping-aggregation: invalid numeric "${value}"`);

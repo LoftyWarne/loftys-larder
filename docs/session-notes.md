@@ -4,6 +4,44 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-18 — FEAT-36 (Shopping list aggregation procedure)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck` and `pnpm -r lint` clean across the three workspaces. Backend Testcontainers run (with the FEAT-32-era Colima env vars: `DOCKER_HOST=unix:///.../colima/default/docker.sock TESTCONTAINERS_RYUK_DISABLED=true`): 430/431 passing — the 14 new `shopping-procedures.test.ts` cases and 9 new `shopping-aggregation.test.ts` cases all pass; the one failure is the pre-existing `user-procedures.test.ts:235` `$onUpdate` timing race (`expected 1781815476317 to be greater than 1781815476337`) which passes on isolated re-run, unrelated to FEAT-36. DoD boxes in `docs/feature-specs.md §FEAT-36` left unticked — human action. Manual gate (hand-compute a non-trivial plan's totals against the procedure output) is owed by the human.
+
+### Decisions taken at kick-off
+
+- **Output DTO is nested-by-category** (Q1): `{ planId, categories: [{ category, lines: [{ ingredient, unit, totalQuantity, contributingSlots[] }] }] }`. FEAT-39 will render section headers directly; FEAT-37 can attach `shelfLifeWarning?` to the existing `line` shape without restructuring. Confirmed pre-implementation.
+- **Same-slot dual contribution renders as two `contributingSlots` entries** (Q2). A slot eating recipe A and cooking base B with a shared ingredient produces two entries on the same `slotId` with different `recipeId` / `recipeName`. Preserves traceability ("the 3 onions split as: 1 from the meal + 2 from the base cook"). Confirmed pre-implementation.
+- **Soft-deleted recipes still contribute.** Aggregation joins `recipes` without an `is_deleted` filter so DEC-21 / DEC-22 historical-render coherence holds — a slot whose recipe was soft-deleted after assignment still aggregates its ingredients. Pinned by a test.
+- **No `withTransaction`.** FEAT-36 is a pure read; the session-notes-1341 obligation ("getForPlan must run inside withTransaction so concurrent first-reads can't race on insert") applies to FEAT-38's lazy-create write, not the FEAT-36 aggregation. Will wrap at FEAT-38.
+- **No `hasBaseSupply` call.** Per DEC-26 / session-notes-166, FEAT-36 doesn't warn on missing base supply ("the cook is presumed to know") — it sums whatever's set on `cooks_base_recipe_id`.
+
+### Drift from kick-off plan
+
+1. **No `PLAN_NOT_FOUND` domain code.** The plan said `TRPCError({ code: 'NOT_FOUND', cause: { code: 'PLAN_NOT_FOUND' } })` with a "will verify at implementation time" hedge. Followed the `plans.get` / `plans.delete` precedent (`loadHouseholdPlan` throws plain `TRPCError NOT_FOUND` with no `cause`). Adding a code is a closed-enum edit to `shared/src/schemas/errors.ts`'s `DOMAIN_ERROR_CODES` — held off because no existing read-side `NOT_FOUND` uses a domain cause and the UI (FEAT-39) hasn't asked for the disambiguation yet. Easy to add when needed.
+2. **Decimal precision via bigint integer-milli, not `decimal.js`.** Plan flagged decimal libs as a stop-and-ask trigger; the helper parses the `numeric(10,3)` SQL strings into `bigint` (×1000), sums, and reformats. Exact at every plausible recipe scale (10^13 headroom), no float drift, zero dependency cost. `0.1 + 0.2 === 0.300` is pinned by a test.
+3. **Per-line scaled qty rounded in SQL to 3 decimals** (`round(... , 3)`). Needed so the bigint integer-milli math is exact — without `round`, Postgres's `numeric` division can emit values beyond 3 decimals (e.g. `1/3 → 0.33333...`) and the helper's parser would reject them. Documented in the helper comment.
+
+### Implementation details worth carrying
+
+- **Two SELECTs, one helper.** `selectMealRecipeContributions` joins `meal_plan_slots → meal_plans → recipes (eating) → recipe_ingredients → ingredients → ingredient_categories → units_of_measurement` filtered `slot_type = 'recipe' AND plan_id = ? AND household_id = CURRENT_HOUSEHOLD_ID`. `selectCooksBaseContributions` is the same shape but joins `recipes` via `cooks_base_recipe_id` and filters `cooks_base_recipe_id IS NOT NULL`. Both run in `Promise.all`; the helper concats and aggregates.
+- **Plan pre-flight is its own one-row read.** Household-scoped `SELECT id FROM meal_plans WHERE id = ? AND household_id = ?` runs before the contribution queries — keeps the `NOT_FOUND` path clean and means an empty plan returns `{ planId, categories: [] }` instead of a confusing "no rows" silence.
+- **Within-slot duplicate ingredient lines collapse by `(slotId, recipeId)` key in the helper.** "Onion sliced" + "onion diced" on the same recipe in the same slot becomes one `contributingSlots` entry with the summed quantity. Cross-recipe (slot eating recipe A + cooking base B, both with onion) stays as two entries because the key differs. Both pinned by tests (unit + integration).
+- **Batch-no-double-count is structural, not enforced.** The meal-path SELECT joins `recipes` via `slot.recipe_id` only — it never traverses `recipes.base_recipe_id` to pull the base's ingredients. The base-path SELECT joins via `slot.cooks_base_recipe_id`. The two paths can't see each other's data, so a batch-version meal without a corresponding `cooks_base_*` slot will silently underprovision the base (the DEC-26 trade-off). Test #8 pins the no-double-count case explicitly.
+- **Nested-by-category sorting:** categories by category name (locale-aware case-insensitive), lines within category by ingredient name, `contributingSlots` by `(date, slotId)`. All in the pure helper; SQL returns rows in any order.
+- **No new dependencies, no migration.** Pure additive: one shared schema file, one helper, one router file, one router-composition edit, two test files.
+- **`shopping_list_items` untouched.** Table exists from FEAT-12 but FEAT-36 doesn't read or write it. Lazy-create + check-state arrives in FEAT-38.
+
+### Open follow-ups
+
+- **Manual gate** per the FEAT-36 verification steps: create a plan with one full recipe + one batch-version meal whose base is cooked in another slot + one eat-out slot; hand-compute the totals for one ingredient; call `shopping.getForPlan` and diff line-for-line. The integration test for the batch + base-cook case (#8) is the codified version; the manual probe via the production stack confirms the SQL composes correctly outside test seeding.
+- **`PLAN_NOT_FOUND` domain code.** Add to `DOMAIN_ERROR_CODES` when FEAT-39's UI needs to distinguish "plan deleted" from "plan never existed" from other failure modes. Cheap retrofit.
+- **`pickableRecipesWhere` not consumed.** Pickability is enforced at slot-update time (FEAT-30/32); FEAT-36 reads the assignments. If a future change soft-deletes a recipe between slot assignment and shopping, the slot still references the recipe (DEC-21 historical render) and the aggregation includes it — confirmed by test "still includes ingredients from a soft-deleted recipe".
+- **FEAT-37 (shelf-life warnings)** will extend the helper. Plan to attach `shelfLifeWarning?: { latestNeededDate, daysOverflow }` to `shoppingListLineSchema`; the line shape doesn't carry the slot dates as aggregates yet, but `contributingSlots[].date` is enough to compute the max. No DTO restructure needed.
+- **FEAT-38 (lazy-create + check-state)** will wrap `getForPlan` in `withTransaction` (cross-cutting #13 / session-notes-1341) so concurrent first-reads can't race on the `shopping_list_items` insert. The current procedure is a pure read; wrapping adds the lazy-insert pass over the aggregated lines and the quantity-bound check-state reset.
+
+---
+
 ## 2026-06-18 — FEAT-35 (Account deletion with tombstoning sequence)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across the three workspaces. Backend Testcontainers suite: 408/408 passing (10 new in `user-procedures.test.ts` — 4 covering `getDeletionSummary` and 6 covering `deleteAccount` end-to-end + rollback + email-mismatch). Frontend: 229/229 passing (33 test files) — 5 new in `settings-page.test.tsx` (heading + summary copy, email-gated enable, signOut + navigate, server-error stays-open, pending-state disables confirm) and 2 new in `sign-in-page.test.tsx` (banner present when `justDeleted`, absent on normal visit). One observed flake in `recipe-comments.test.tsx` (`edit flow swaps in a textarea …`) — re-ran clean; confirmed identical flake on a stashed `main` (pre-change), unrelated. DoD boxes in `docs/feature-specs.md §FEAT-35` left unticked — human action.

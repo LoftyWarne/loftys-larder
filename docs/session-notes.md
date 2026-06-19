@@ -4,6 +4,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-19 — Shopping list contributor row layout
+
+**Status:** implementation complete; not yet committed at write time. `list-line.test.tsx` 6/6 pass. Unrelated pre-existing flake in `recipe-comments.test.tsx` ("edit flow swaps in a textarea" — `userEvent.type` produced garbled input again under parallel load; same shape as the FEAT-39 note's flake). UI-only cosmetic change — no schema, no DTO, no helper.
+
+### What changed
+
+- `frontend/src/components/shopping/list-line.tsx`: the per-recipe contributor `<li>` inside the `<details>` disclosure was three flex children with mixed font sizes and no separation between the date and the amount. Now: `items-baseline justify-between gap-x-3`; recipe name on the left, date + amount grouped in a single trailing span with a hidden `·` separator. Dropped the per-span `text-xs` so the whole row inherits the disclosure's `text-sm`; metadata softened to `text-muted-foreground/80` for hierarchy against the recipe name.
+
+### Decisions taken inline
+
+- **Single font size for the row.** The previous mix (recipe text-sm, date/amount text-xs) created a baseline-stretch artefact under `align-items: stretch` and read as a cramped run. One size + `items-baseline` is what fixes the "looks odd".
+- **`·` separator is `aria-hidden`.** Screen readers already pause between sibling spans; the dot is purely visual. Avoids "Mon 15 Jun dot 300 g" being read out.
+- **No new helper.** The pairing pattern (label + metadata group with `justify-between`) is already present on the main shopping line above; replicating four lines of layout is cheaper than extracting at this scale.
+
+### Carry-forward gotchas
+
+- `list-line.test.tsx` `getByText('Tomato pasta')` still resolves because the recipe name remains in its own `<span>`. Tests that match the *raw* contributor string (e.g. `getByText(/Tomato pasta Mon 15 Jun/)`) would now fail since the spans are split across two flex groups; none in tree today, but worth knowing if a snapshot is ever added.
+
+---
+
 ## 2026-06-19 — Slot card clear affordance
 
 **Status:** implementation complete; not yet committed at write time. `pnpm --filter frontend typecheck`, `pnpm --filter frontend lint`, and the full Vitest suite (250 tests) all pass. No human probe owed beyond a tap to confirm the icon hit-target feels right.

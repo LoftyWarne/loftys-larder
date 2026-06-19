@@ -37,6 +37,14 @@ let mutationOptions: Record<string, unknown> = {};
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => paramsMock() as unknown,
   useSearch: () => searchMock() as unknown,
+  Link: ({
+    children,
+    ...rest
+  }: {
+    children: React.ReactNode;
+    to?: string;
+    params?: Record<string, string>;
+  }) => <a {...rest}>{children}</a>,
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({

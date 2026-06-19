@@ -33,6 +33,14 @@ export function PlanListCard({
             Open
           </Link>
         </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link
+            to="/plans/$planId/shopping"
+            params={{ planId: String(plan.id) }}
+          >
+            Shopping list
+          </Link>
+        </Button>
         <Button
           variant="outline"
           size="sm"

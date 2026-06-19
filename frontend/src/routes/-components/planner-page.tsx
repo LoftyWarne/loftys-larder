@@ -4,12 +4,13 @@ import type {
   RecipeListItem,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
-import { useParams, useSearch } from '@tanstack/react-router';
+import { Link, useParams, useSearch } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 
 import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
+import { Button } from '@/components/ui/button.tsx';
 import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
 import { deriveBatchSupplyWarnings } from '@/lib/batch-supply.ts';
 import { clampRange } from '@/lib/date-utils.ts';
@@ -159,11 +160,21 @@ export function PlannerPage(): React.ReactElement {
           <h1 className="text-2xl font-semibold">
             {plan.startDate} – {plan.endDate}
           </h1>
-          {selectedRecipe && (
-            <p className="text-sm text-muted-foreground" role="status">
-              Tap an empty slot to assign “{selectedRecipe.name}”.
-            </p>
-          )}
+          <div className="flex items-center gap-3">
+            {selectedRecipe && (
+              <p className="text-sm text-muted-foreground" role="status">
+                Tap an empty slot to assign “{selectedRecipe.name}”.
+              </p>
+            )}
+            <Button asChild size="sm" variant="outline">
+              <Link
+                to="/plans/$planId/shopping"
+                params={{ planId: String(plan.id) }}
+              >
+                Shopping list
+              </Link>
+            </Button>
+          </div>
         </header>
         {mutationError && (
           <p role="alert" className="text-sm text-destructive">

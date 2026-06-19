@@ -1,0 +1,67 @@
+/* Print stylesheet for the shopping list. Pre-shop print is a real flow
+ * — the goal is a clean, single-column checklist with category groupings
+ * and shelf-life warnings preserved, navigation and disclosures hidden.
+ */
+
+@media print {
+  /* Hide the app chrome: top nav and any explicit print-hide regions. */
+  nav,
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* Collapse the planner-page sidebar / shopping-page padding to plain
+   * black-on-white. */
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  body {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Single column on the shopping list, regardless of viewport. */
+  [data-shopping-list-page] {
+    max-width: none !important;
+    width: 100% !important;
+    padding: 1cm !important;
+  }
+
+  /* Each category stays grouped on the page where possible. */
+  [data-shopping-category] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 0.5cm;
+  }
+
+  /* Contributing-recipes disclosure is consult-only on-screen; on paper it
+   * just adds noise to the checklist. */
+  [data-shopping-contributors] {
+    display: none !important;
+  }
+
+  /* Show a printable check box even when the Radix checkbox renders as an
+   * SVG-only indicator. The native Radix root keeps its accessible label. */
+  [data-shopping-line] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Shelf-life badge stays visible — that's the whole point of printing
+   * before the shop. */
+  [data-shopping-shelf-life-badge] {
+    border: 1px solid #000 !important;
+    background: transparent !important;
+    color: #000 !important;
+  }
+
+  /* Anchors and buttons render as plain text. */
+  a,
+  button {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+}

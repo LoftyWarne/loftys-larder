@@ -13,6 +13,7 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthVerifyRouteImport } from './routes/auth.verify'
+import { Route as AuthedShoppingRouteImport } from './routes/_authed/shopping'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedIngredientsRouteImport } from './routes/_authed/ingredients'
 import { Route as AuthedRecipesIndexRouteImport } from './routes/_authed/recipes/index'
@@ -41,6 +42,11 @@ const AuthVerifyRoute = AuthVerifyRouteImport.update({
   id: '/auth/verify',
   path: '/auth/verify',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthedShoppingRoute = AuthedShoppingRouteImport.update({
+  id: '/shopping',
+  path: '/shopping',
+  getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
   id: '/settings',
@@ -96,6 +102,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/ingredients': typeof AuthedIngredientsRoute
   '/settings': typeof AuthedSettingsRoute
+  '/shopping': typeof AuthedShoppingRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/plans/$planId': typeof AuthedPlansPlanIdRoute
   '/recipes/new': typeof AuthedRecipesNewRoute
@@ -109,6 +116,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/ingredients': typeof AuthedIngredientsRoute
   '/settings': typeof AuthedSettingsRoute
+  '/shopping': typeof AuthedShoppingRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/': typeof AuthedIndexRoute
   '/plans/$planId': typeof AuthedPlansPlanIdRoute
@@ -125,6 +133,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/_authed/ingredients': typeof AuthedIngredientsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
+  '/_authed/shopping': typeof AuthedShoppingRoute
   '/auth/verify': typeof AuthVerifyRoute
   '/_authed/': typeof AuthedIndexRoute
   '/_authed/plans/$planId': typeof AuthedPlansPlanIdRoute
@@ -142,6 +151,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/ingredients'
     | '/settings'
+    | '/shopping'
     | '/auth/verify'
     | '/plans/$planId'
     | '/recipes/new'
@@ -155,6 +165,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/ingredients'
     | '/settings'
+    | '/shopping'
     | '/auth/verify'
     | '/'
     | '/plans/$planId'
@@ -170,6 +181,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/_authed/ingredients'
     | '/_authed/settings'
+    | '/_authed/shopping'
     | '/auth/verify'
     | '/_authed/'
     | '/_authed/plans/$planId'
@@ -216,6 +228,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth/verify'
       preLoaderRoute: typeof AuthVerifyRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authed/shopping': {
+      id: '/_authed/shopping'
+      path: '/shopping'
+      fullPath: '/shopping'
+      preLoaderRoute: typeof AuthedShoppingRouteImport
+      parentRoute: typeof AuthedRoute
     }
     '/_authed/settings': {
       id: '/_authed/settings'
@@ -286,6 +305,7 @@ declare module '@tanstack/react-router' {
 interface AuthedRouteChildren {
   AuthedIngredientsRoute: typeof AuthedIngredientsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
+  AuthedShoppingRoute: typeof AuthedShoppingRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
   AuthedPlansPlanIdRoute: typeof AuthedPlansPlanIdRoute
   AuthedRecipesNewRoute: typeof AuthedRecipesNewRoute
@@ -299,6 +319,7 @@ interface AuthedRouteChildren {
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedIngredientsRoute: AuthedIngredientsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
+  AuthedShoppingRoute: AuthedShoppingRoute,
   AuthedIndexRoute: AuthedIndexRoute,
   AuthedPlansPlanIdRoute: AuthedPlansPlanIdRoute,
   AuthedRecipesNewRoute: AuthedRecipesNewRoute,

@@ -13,7 +13,7 @@ import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
 import { deriveBatchSupplyWarnings } from '@/lib/batch-supply.ts';
-import { clampRange } from '@/lib/date-utils.ts';
+import { clampRange, formatDayRangeLabel } from '@/lib/date-utils.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 export function PlannerPage(): React.ReactElement {
@@ -158,7 +158,7 @@ export function PlannerPage(): React.ReactElement {
       <div className="space-y-4">
         <header className="flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-2xl font-semibold">
-            {plan.startDate} – {plan.endDate}
+            {formatDayRangeLabel(plan.startDate, plan.endDate)}
           </h1>
           <div className="flex items-center gap-3">
             {selectedRecipe && (

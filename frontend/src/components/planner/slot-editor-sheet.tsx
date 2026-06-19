@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { formatLongDayLabel } from '@/lib/date-utils.ts';
 import { trpc } from '@/lib/trpc.ts';
 import { cn } from '@/lib/utils.ts';
 
@@ -279,7 +280,7 @@ export function SlotEditorSheet({
       >
         <DialogHeader>
           <DialogTitle>
-            {slot.occasionName} · {slot.date}
+            {slot.occasionName} · {formatLongDayLabel(slot.date)}
           </DialogTitle>
           <DialogDescription>
             Set what you&apos;re eating in this slot.

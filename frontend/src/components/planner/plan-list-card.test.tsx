@@ -25,7 +25,9 @@ describe('PlanListCard', () => {
     render(
       <PlanListCard plan={PLAN} onDuplicate={vi.fn()} onDelete={vi.fn()} />,
     );
-    expect(screen.getByText('2026-06-15 – 2026-06-21')).toBeInTheDocument();
+    expect(
+      screen.getByText('Mon 15th – Sun 21st Jun 2026'),
+    ).toBeInTheDocument();
     expect(screen.getByText('9/14 slots assigned')).toBeInTheDocument();
   });
 

@@ -114,3 +114,72 @@ export function formatDayLabel(iso: string): string {
   const instant = new Date(Date.UTC(year, month - 1, day));
   return WEEKDAY_FORMATTER.format(instant);
 }
+
+const LONG_WEEKDAY_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London',
+  weekday: 'short',
+});
+
+const LONG_MONTH_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London',
+  month: 'short',
+});
+
+function ordinalSuffix(day: number): string {
+  const mod100 = day % 100;
+  if (mod100 >= 11 && mod100 <= 13) return 'th';
+  switch (day % 10) {
+    case 1:
+      return 'st';
+    case 2:
+      return 'nd';
+    case 3:
+      return 'rd';
+    default:
+      return 'th';
+  }
+}
+
+// Long day label for headers and modals — "Fri 19th Jun 2026".
+export function formatLongDayLabel(iso: string): string {
+  const { year, month, day } = parseCivilDate(iso);
+  return `${formatDayWithoutYear(year, month, day)} ${String(year)}`;
+}
+
+function formatDayWithoutYear(
+  year: number,
+  month: number,
+  day: number,
+): string {
+  const instant = new Date(Date.UTC(year, month - 1, day));
+  const weekday = LONG_WEEKDAY_FORMATTER.format(instant);
+  const monthLabel = LONG_MONTH_FORMATTER.format(instant);
+  return `${weekday} ${String(day)}${ordinalSuffix(day)} ${monthLabel}`;
+}
+
+function formatDayOnly(year: number, month: number, day: number): string {
+  const instant = new Date(Date.UTC(year, month - 1, day));
+  const weekday = LONG_WEEKDAY_FORMATTER.format(instant);
+  return `${weekday} ${String(day)}${ordinalSuffix(day)}`;
+}
+
+// Date range label — collapses repeated month/year. Same month and year:
+// "Mon 15th – Sun 21st Jun 2026". Same year only: "Mon 30th Jun – Sun 6th Jul
+// 2026". Different years: both rendered in full.
+export function formatDayRangeLabel(start: string, end: string): string {
+  const s = parseCivilDate(start);
+  const e = parseCivilDate(end);
+  if (s.year === e.year && s.month === e.month) {
+    const left = formatDayOnly(s.year, s.month, s.day);
+    const monthLabel = LONG_MONTH_FORMATTER.format(
+      new Date(Date.UTC(e.year, e.month - 1, e.day)),
+    );
+    return `${left} – ${formatDayOnly(e.year, e.month, e.day)} ${monthLabel} ${String(s.year)}`;
+  }
+  if (s.year === e.year) {
+    const left = formatDayWithoutYear(s.year, s.month, s.day);
+    const right = formatDayWithoutYear(e.year, e.month, e.day);
+    return `${left} – ${right} ${String(s.year)}`;
+  }
+  return `${formatLongDayLabel(start)} – ${formatLongDayLabel(end)}`;
+}

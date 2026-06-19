@@ -229,7 +229,7 @@ describe('PlannerPage', () => {
     );
 
     expect(
-      screen.getByRole('heading', { name: /dinner.*2026-06-15/i }),
+      screen.getByRole('heading', { name: /dinner.*Mon 15th Jun 2026/i }),
     ).toBeInTheDocument();
   });
 

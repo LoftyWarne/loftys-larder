@@ -2,6 +2,7 @@ import type { PlanListItem } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 
 import { Button } from '@/components/ui/button.tsx';
+import { formatDayRangeLabel } from '@/lib/date-utils.ts';
 
 export interface PlanListCardProps {
   plan: PlanListItem;
@@ -23,7 +24,7 @@ export function PlanListCard({
     >
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">
-          {plan.startDate} – {plan.endDate}
+          {formatDayRangeLabel(plan.startDate, plan.endDate)}
         </h2>
         <p className="text-sm text-muted-foreground">{summary}</p>
       </div>

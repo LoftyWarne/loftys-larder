@@ -56,7 +56,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Plugins cover security, static serving, and rate-limiting without custom code. Per-request `req.id` is built in via Pino integration.
 - **Consequences (−):** Smaller community than Express; fewer Stack Overflow answers for unusual cases. Plugin encapsulation can surprise people used to Express middleware mutating context freely.
 - **Revisit when:** A required plugin disappears from maintenance with no replacement. Unlikely.
-- **Cross-refs:** FEAT-03; FEAT-14 (auth pre-handler), FEAT-45 (rate limit), FEAT-46 (health), FEAT-47 (CSP).
+- **Cross-refs:** FEAT-03; FEAT-14 (auth pre-handler), FEAT-46 (rate limit), FEAT-47 (health), FEAT-48 (CSP).
 
 ### DEC-06 — tRPC for the API contract (no codegen, no OpenAPI)
 
@@ -91,7 +91,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Optimistic updates, automatic refetch on focus, query invalidation are all idiomatic. The same primitive supports the offline mutation queue (a strict superset).
 - **Consequences (−):** Two mental models for state — server state in TanStack Query, client state in React. Easy to put something in the wrong place (e.g. derived UI state cached as a query). The optimistic-update pattern needs to be encapsulated in a shared hook or it drifts across five+ consumers.
 - **Revisit when:** Not anticipated.
-- **Cross-refs:** FEAT-04 (client setup), FEAT-31 onward (every mutation), FEAT-42 (offline queue); cross-cutting concern #7.
+- **Cross-refs:** FEAT-04 (client setup), FEAT-31 onward (every mutation), FEAT-43 (offline queue); cross-cutting concern #7.
 
 ### DEC-09 — React `useState` + Context for client state (no global store)
 
@@ -245,7 +245,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Aggregator and plant-points traversal are bounded (one level deep). The editor pair-switch is a simple FK lookup.
 - **Consequences (−):** A recipe pattern needing three-deep composition would force a model change. `paired_recipe_id` symmetry has to be maintained at the application layer in the recipe-save transaction (DEC-26). The batch-version-of-soft-deleted-base case adds a picker rule.
 - **Revisit when:** A real meal pattern needs three-deep composition. Re-evaluation should weigh nesting vs. a separate "prep step" abstraction.
-- **Cross-refs:** FEAT-11, FEAT-23, FEAT-32, FEAT-33, FEAT-36, FEAT-40; non-goal: "Nested base recipes".
+- **Cross-refs:** FEAT-11, FEAT-23, FEAT-32, FEAT-33, FEAT-36, FEAT-41; non-goal: "Nested base recipes".
 
 ### DEC-24 — Cooked-base contribution on slots, decoupled from the meal's referenced base
 
@@ -255,7 +255,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Plan flow matches kitchen reality. Plant-points traversal de-duplicates the common case where the eaten and cooked bases are the same recipe.
 - **Consequences (−):** Two recipe pickers on the slot editor instead of one. Aggregation has to add base contributions on top of meal-recipe contributions, and batch-version meals must not double-count.
 - **Revisit when:** Not anticipated.
-- **Cross-refs:** FEAT-12, FEAT-32, FEAT-36, FEAT-40.
+- **Cross-refs:** FEAT-12, FEAT-32, FEAT-36, FEAT-41.
 
 ### DEC-25 — Slot states modelled as an enum, not as dummy recipes
 
@@ -335,7 +335,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Always current. No invalidation logic.
 - **Consequences (−):** Every read does the count. At household scale, irrelevant.
 - **Revisit when:** Read volume on plant-points makes the cost visible. Not at household scale.
-- **Cross-refs:** FEAT-19 (recipe-level), FEAT-40 (day + plan with traversal); cross-cutting concern #10.
+- **Cross-refs:** FEAT-19 (recipe-level), FEAT-41 (day + plan with traversal); cross-cutting concern #10.
 
 ### DEC-33 — Europe/London time hardcoded, centralised in `dateUtils`
 
@@ -345,7 +345,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** All date logic agrees. DST-correct without library-of-the-day debates.
 - **Consequences (−):** A user travelling abroad sees "today" as Europe/London "today," which can be the wrong day for plan filtering on a transatlantic flight. Accepted.
 - **Revisit when:** Either cook moves abroad, or the app serves households outside the UK.
-- **Cross-refs:** FEAT-27, FEAT-34, FEAT-37, FEAT-40; cross-cutting concern #8; non-goal: "Per-user timezone".
+- **Cross-refs:** FEAT-27, FEAT-34, FEAT-37, FEAT-41; cross-cutting concern #8; non-goal: "Per-user timezone".
 
 ---
 
@@ -379,7 +379,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** No version columns, no merge logic, no conflict UI.
 - **Consequences (−):** A check-state line can flip from checked to unchecked because a partner's offline queue replayed an older state — user-visible weirdness possible. The plan names CRDT-lite as the upgrade path for that surface.
 - **Revisit when:** Real-world shopping-list conflicts produce user-visible regressions ("I just checked that"). Synthetic concern alone isn't enough.
-- **Cross-refs:** FEAT-31, FEAT-38, FEAT-42; non-goal: "Optimistic concurrency control", "Shopping-list conflict resolution beyond LWW".
+- **Cross-refs:** FEAT-31, FEAT-38, FEAT-43; non-goal: "Optimistic concurrency control", "Shopping-list conflict resolution beyond LWW".
 
 ### DEC-37 — Single-shop assumption for shelf-life warnings
 
@@ -419,7 +419,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** A failing migration aborts the deploy before the new code accepts traffic. Bad migrations don't half-apply on rolling machines.
 - **Consequences (−):** Migrations run against production directly — see DEC-65 (no staging). A migration that takes a long lock can stall deploys. Migration rollback is by code revert + new migration, not by re-running an "undo" — standard but worth knowing.
 - **Revisit when:** Migration mistakes become a real cost — at which point a staging environment (DEC-65) is the named upgrade.
-- **Cross-refs:** FEAT-48; non-goal: "Staging environment".
+- **Cross-refs:** FEAT-49; non-goal: "Staging environment".
 
 ---
 
@@ -473,7 +473,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Smaller abuse surface. Magic-link spam from a single email address is bounded.
 - **Consequences (−):** Genuine bursts (importing a large recipe list, scripted backfills) hit the limit. Per-IP limits hurt households behind a shared NAT — academic at two-user scale.
 - **Revisit when:** Cloudflare's edge sees patterns suggesting limits are wrong in either direction. Bulk-edit features would also force a revisit.
-- **Cross-refs:** FEAT-45.
+- **Cross-refs:** FEAT-46.
 
 ### DEC-46 — Explicit CSP policy
 
@@ -483,7 +483,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Tight XSS containment. Any new cross-origin dependency is a deliberate policy edit.
 - **Consequences (−):** Adding a third-party (analytics, a CMS, a chat widget) requires a CSP edit before it works in prod — easy to miss in dev where Vite serves with different headers. Inline styles needed by some shadcn components require `unsafe-inline` for `style-src` or a hash/nonce strategy — the plan accepts the minimum needed; if that turns out to be `unsafe-inline`, a hash/nonce upgrade is the harder path.
 - **Revisit when:** Adding a new cross-origin source; tightening `style-src` away from `unsafe-inline` if currently permitted.
-- **Cross-refs:** FEAT-47.
+- **Cross-refs:** FEAT-48.
 
 ### DEC-47 — `@fastify/helmet` for security headers
 
@@ -493,7 +493,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Standard security headers without per-route ceremony.
 - **Consequences (−):** Helmet's defaults must be reviewed when upgrading the plugin — a major version can change defaults.
 - **Revisit when:** Helmet major version upgrade.
-- **Cross-refs:** FEAT-03, FEAT-47.
+- **Cross-refs:** FEAT-03, FEAT-48.
 
 ### DEC-48 — Fastify pre-handler hook enforces auth outside `/api/auth/*`
 
@@ -503,7 +503,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Default-deny posture. A new procedure is authenticated by default.
 - **Consequences (−):** Any future public-readable surface (a shared recipe link, a public health endpoint beyond `/api/health`) requires an explicit allow-list edit at the hook.
 - **Revisit when:** A public-readable surface is needed.
-- **Cross-refs:** FEAT-14, FEAT-46 (`/api/health` is unauthenticated by Fly's requirement).
+- **Cross-refs:** FEAT-14, FEAT-47 (`/api/health` is unauthenticated by Fly's requirement).
 
 ### DEC-49 — All user-generated text rendered as plain text; no markdown, no HTML
 
@@ -548,6 +548,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Desktop power users may prefer DnD on first encounter. The two-step interaction (select, then place) is slightly less direct than dragging.
 - **Revisit when:** Usability testing shows the interaction confuses or slows users in practice. Desktop-power-user feedback alone is not a sufficient trigger.
 - **Cross-refs:** FEAT-31; non-goal: "Drag-and-drop slot assignment".
+- **Scope narrowed by DEC-84** — DnD added on `lg+` viewports as an additive affordance alongside click-to-assign (FEAT-40). Click-to-assign remains the only path below `lg` and remains intact on every viewport above it; the phone rationale ("one-handed in a kitchen") still binds. DEC-84 documents the user-level override and the per-tier behaviour.
 
 ### DEC-53 — Phone-first responsive design
 
@@ -577,7 +578,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Keyboard navigation, contrast, focus management are non-negotiable and enforced automatically. Catches regressions in CI.
 - **Consequences (−):** `axe-core` catches a subset of real a11y issues; some screen-reader-specific bugs slip through. Not a substitute for testing with assistive tech if the app's audience expands.
 - **Revisit when:** App is made publicly accessible to users with disabilities at any scale.
-- **Cross-refs:** FEAT-53.
+- **Cross-refs:** FEAT-54.
 
 ---
 
@@ -611,7 +612,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Confidence that the full stack works end-to-end before deploys.
 - **Consequences (−):** Slow to run. Flaky tests have outsize cost. Magic-link bypass via `storageState` means the auth flow itself is only exercised once (in the seed test).
 - **Revisit when:** Not anticipated.
-- **Cross-refs:** FEAT-52.
+- **Cross-refs:** FEAT-53.
 
 ### DEC-59 — Coverage is not a target; behaviour-focused tests on high-value surfaces
 
@@ -675,17 +676,17 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Minimal hosting cost.
 - **Consequences (−):** First request after idle pays cold-start latency. Lock interactions with pool size (DEC-71) and machine class — more connections = longer first-request — covered in cross-cutting concern #18.
 - **Revisit when:** Phase 6 measurement shows >3s. Also revisit if the household notices lag in practice; measured budgets and lived experience aren't always aligned.
-- **Cross-refs:** FEAT-05, FEAT-51; cross-cutting concern #18; non-goal: "Always-on vs. auto-stop".
+- **Cross-refs:** FEAT-05, FEAT-52; cross-cutting concern #18; non-goal: "Always-on vs. auto-stop".
 
 ### DEC-65 — No staging environment
 
-- **Chosen:** Migrations and code ship straight to production via `release_command` on push to `main`. Mitigation is Testcontainers integration tests (DEC-56) covering actual SQL Drizzle emits, plus rehearsed restore drills (DEC-73 / FEAT-50).
+- **Chosen:** Migrations and code ship straight to production via `release_command` on push to `main`. Mitigation is Testcontainers integration tests (DEC-56) covering actual SQL Drizzle emits, plus rehearsed restore drills (DEC-73 / FEAT-51).
 - **Alternatives:** Full staging environment (separate Fly app + Postgres); production-shadow / canary deploys.
 - **Why it won:** Staging doubles infra cost and operational surface (drift, seeding, secret rotation across two environments). For a household-scale app, the Testcontainers + restore-drill posture is a credible substitute.
 - **Consequences (+):** Half the infrastructure. No drift between staging and prod.
 - **Consequences (−):** Migration mistakes go straight to prod data. A bad migration that passes tests but loses data in production is the named failure mode. Restore drill is rehearsed; recovery is not zero-time.
 - **Revisit when:** Migration mistakes against prod become a real cost — even one production data-loss incident is a sufficient trigger.
-- **Cross-refs:** FEAT-48, FEAT-50, FEAT-49; non-goal: "Staging environment".
+- **Cross-refs:** FEAT-49, FEAT-51, FEAT-50; non-goal: "Staging environment".
 
 ### DEC-66 — GitHub Actions for CI/CD
 
@@ -695,7 +696,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** One vendor for source control and CI. Cheap.
 - **Consequences (−):** GitHub Actions outages stop deploys. Action-marketplace dependencies (e.g. for setting up flyctl) introduce supply-chain risk.
 - **Revisit when:** GitHub Actions limits become binding or pricing changes shift the calculus.
-- **Cross-refs:** FEAT-07, FEAT-48, FEAT-49.
+- **Cross-refs:** FEAT-07, FEAT-49, FEAT-50.
 
 ### DEC-67 — Vite `server.proxy` for dev same-origin
 
@@ -749,7 +750,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Predictable connection behaviour. No autotuning complexity. FEAT-09 unblocked without a measurement run that would mostly confirm headroom the runtime image footprint already implies.
 - **Consequences (−):** Estimate, not measurement — load behaviour under genuine concurrency is unverified. Locked-in until a Phase 6 (or FEAT-09 traffic) signal reveals problems. Interacts with cold-start (more eagerly-allocated connections = longer first-request) and machine class changes (cross-cutting concern #18).
 - **Revisit when:** Memory pressure or connection-exhaustion errors appear in Phase 6 observability. Also if Fly machine class is upgraded. FEAT-08-specific addendum (per `docs/measurements.md`): FEAT-09 ships, real traffic exercises `pg-pool`, and either peak RSS sits >70% of the machine's memory ceiling on the Fly dashboard, or `pg-pool` queue depth stays >0 in the logs.
-- **Cross-refs:** FEAT-08, FEAT-09, FEAT-51; cross-cutting concern #18; `docs/measurements.md`.
+- **Cross-refs:** FEAT-08, FEAT-09, FEAT-52; cross-cutting concern #18; `docs/measurements.md`.
 
 ### DEC-72 — Cloudflare in front: registrar, DNS, CDN, TLS — with `/api/*` cache bypass
 
@@ -769,7 +770,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Vendor-catastrophe insurance at trivial cost. Two recovery paths.
 - **Consequences (−):** `pg_dump` is logical — restore times grow with data. Restore drills require occasional re-rehearsal as procedures drift. `FLY_API_TOKEN` for the workflow is a sensitive secret to rotate.
 - **Revisit when:** Restore time becomes operationally problematic (much-larger dataset).
-- **Cross-refs:** FEAT-49, FEAT-50.
+- **Cross-refs:** FEAT-50, FEAT-51.
 
 ### DEC-74 — Docker Compose for local dev (Postgres only)
 
@@ -793,7 +794,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Searchable structured logs. Cheap.
 - **Consequences (−):** 30 days is a real ceiling — an incident requiring older logs has to make do without. Vendor dependency.
 - **Revisit when:** An incident requires logs older than 30 days and the answer would materially differ from "we'll know next time." Or if Axiom pricing changes.
-- **Cross-refs:** FEAT-43.
+- **Cross-refs:** FEAT-44.
 
 ### DEC-76 — Sentry frontend + backend with PII scrubbing; session replay disabled
 
@@ -803,7 +804,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Errors visible without manual log scraping. No cookie-consent banner needed.
 - **Consequences (−):** `beforeSend` is a custom function — drift between the redaction logic and what's actually in payloads is a real risk that needs occasional review. No session replay means some hard-to-reproduce bugs stay hard.
 - **Revisit when:** Multi-household / multi-user-per-household ships — at which point the PII vs. debug-value calculus changes and session replay may earn its consent banner.
-- **Cross-refs:** FEAT-44; non-goal: "Session replay in Sentry".
+- **Cross-refs:** FEAT-45; non-goal: "Session replay in Sentry".
 
 ### DEC-77 — `req.id` propagated end-to-end (Pino → Axiom → Sentry tag)
 
@@ -813,7 +814,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Cross-system debugging works ("find the Axiom logs for this Sentry error").
 - **Consequences (−):** Not full distributed tracing — no spans, no flame graphs. A future move to OTel is a non-trivial upgrade.
 - **Revisit when:** Distributed tracing becomes worth its cost (it should not at this scale).
-- **Cross-refs:** FEAT-03, FEAT-43, FEAT-44.
+- **Cross-refs:** FEAT-03, FEAT-44, FEAT-45.
 
 ### DEC-78 — Sentry alerts at absolute thresholds (>5 errors / 5 min), not percentages
 
@@ -823,7 +824,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** No flake-induced pages. Quiet by default.
 - **Consequences (−):** A genuinely-low-volume bug affecting a small percentage of requests at moderate volume could stay below the absolute threshold. At household scale, irrelevant.
 - **Revisit when:** Traffic grows past the point where 5 errors is invisibly small noise relative to volume.
-- **Cross-refs:** FEAT-44.
+- **Cross-refs:** FEAT-45.
 
 ### DEC-79 — `/api/health` endpoint backs Fly health checks (verifies DB connectivity)
 
@@ -833,7 +834,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Fly takes unhealthy machines out of rotation automatically.
 - **Consequences (−):** DB hiccups cascade into "machine unhealthy" — short transient blips can cause unnecessary restarts. The check timeout / threshold needs tuning.
 - **Revisit when:** Health-check flapping becomes operationally noisy.
-- **Cross-refs:** FEAT-46, FEAT-05.
+- **Cross-refs:** FEAT-47, FEAT-05.
 
 ### DEC-80 — `/shared` typechecks only (no dist emit); `AppRouter` reaches into backend via a type-only import
 
@@ -864,7 +865,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Alternatives:** Tombstone via `is_deleted` (the FEAT-27 spec wording and the `plan.md` schema sketch both originally said this).
 - **Why it won:** Tombstoning recipes is forced by referential integrity — `meal_plan_slots.recipe_id` is `ON DELETE RESTRICT` because past plans must keep rendering after a recipe is removed (DEC-21). Plans have no inverse: nothing in the schema references `meal_plans.id` outside of slots and shopping-list items, both of which cascade. Without a downstream consumer of a tombstoned plan row (no trash UI, no historical aggregate that breaks, FEAT-29 duplication copies forward not by reference) the only argument for soft-delete is reversibility — and the spec set contains no "restore" affordance for plans. Hard delete keeps the schema and the overlap rule both simpler.
 - **Consequences (+):** No migration to add or maintain `is_deleted`. Overlap query is `household_id = ? AND end_date >= today AND NOT (...)` — no extra predicate. `plans.list({ status: 'past' })` shows exactly the plans the cook chose to keep, not "all plans I once made minus those I trashed".
-- **Consequences (−):** A mis-clicked delete is unrecoverable unless restored from backup. Acceptable because (a) the delete affordance will be a confirm dialog (FEAT-31), (b) the FEAT-29 duplicate path means a "I deleted last week's plan and want it back" workflow has a manual re-creation route via the past-plan list, and (c) FEAT-50's nightly `pg_dump` to R2 (DEC-73) is the disaster floor.
+- **Consequences (−):** A mis-clicked delete is unrecoverable unless restored from backup. Acceptable because (a) the delete affordance will be a confirm dialog (FEAT-31), (b) the FEAT-29 duplicate path means a "I deleted last week's plan and want it back" workflow has a manual re-creation route via the past-plan list, and (c) FEAT-51's nightly `pg_dump` to R2 (DEC-73) is the disaster floor.
 - **Revisit when:** A "trash / restore" UI gets proposed, or a usage pattern emerges where the cook routinely deletes plans they later regret. The migration to tombstoning is additive — add a column, flip `delete` to update, gate overlap on it.
 - **Cross-refs:** FEAT-27 (origin), DEC-21 (contrast: recipes *do* tombstone because slots reference them), DEC-29 (account-deletion tombstoning has independent motivation — user-row preservation for audit-trace).
 
@@ -877,6 +878,26 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** No way to label "Christmas week" / "Whole30 reset" / etc. A future re-introduction is a small forward migration (`ALTER TABLE meal_plans ADD COLUMN name text`) and adding the field back to the create input, but cards, list views, and FEAT-29 will need to learn about it again.
 - **Revisit when:** A second user joins the household and naming a plan would disambiguate "whose week is this"; or a public-archive / sharing surface (currently a non-goal) is proposed where semantic labels matter; or the user reports actively wanting to label specific plans.
 - **Cross-refs:** FEAT-27 (`create` input now `{ startDate, endDate }`), FEAT-29 (duplication identifies by date range), FEAT-31 (new-plan dialog + plan card), DEC-17 (single-household assumption underpins the choice), DEC-38 (overlap rule guarantees range-as-identifier in the active window).
+
+### DEC-84 — Drag-and-drop as an additive slot affordance on `lg+` viewports, alongside click-to-assign
+
+- **Chosen:** On viewports `lg` (1024 px) and wider, the planner mounts a `@dnd-kit/core` `DndContext` with `PointerSensor`, `KeyboardSensor`, and a delay-activated `TouchSensor` (200 ms / 5 px tolerance). Recipe Bank rows become draggables; every slot cell becomes a droppable; populated slot cells are also draggables. Drop on an empty slot moves the source content; drop on a populated slot swaps. Click-to-assign and the slot editor remain unchanged on every viewport. Below `lg`, no DnD machinery mounts.
+- **Alternatives:** Hold DEC-52 firm (no DnD anywhere); enable DnD on every viewport including phones; introduce a separate desktop-only route shell with its own interaction model.
+- **Why it won:** A user override at the design-log level, not a usability-test outcome — DEC-52's revisit clause (which gates on usability evidence) is being deliberately set aside *for `lg+` viewports only*. The phone rationale ("one-handed in a kitchen", DEC-52 / DEC-53) still binds below `lg`. dnd-kit ships keyboard sensor + screen-reader announcements out of the box, satisfying DEC-55 / WCAG 2.1 AA without bespoke a11y machinery. Viewport gating (not pointer gating) catches touchscreen laptops and large tablets in landscape, where the deliberate touch-and-hold is a sensible affordance rather than the cramped-phone gesture DEC-52 rejected.
+- **Consequences (+):** Power-user ergonomics on desktop, touchscreen laptops, and tablets in landscape. Click-to-assign code path is untouched, so the touch-first story remains intact on small screens. Slot-swap is a first-class operation server-side (atomic transaction in one call) rather than two sequential `slots.update` calls.
+- **Consequences (−):** Two interaction models on `lg+` (drag *and* click-to-assign) to keep coherent. New runtime dependency (`@dnd-kit/core`). Bigger frontend test surface — three viewport tiers and a swap-vs-move branch on the drop handler. Rotation can change behaviour mid-session (tablet portrait ↔ landscape).
+- **Revisit when:** dnd-kit becomes unmaintained or is forced into a major migration; telemetry shows DnD essentially never used; the `lg` breakpoint proves wrong (e.g. tablets in portrait emerge as the dominant DnD context, suggesting `md` would be the better gate).
+- **Cross-refs:** FEAT-40 (the implementation), DEC-52 (scope narrowed by this DEC), DEC-53 (phone-first responsive, still binding below `lg`), DEC-55 (WCAG 2.1 AA — sensor a11y is in scope), DEC-36 (LWW reconciliation for the swap mutation), DEC-01 (dnd-kit must be ESM-compatible).
+
+### DEC-85 — Hide Recipe Bank below `md`; rely on the slot-editor sheet for recipe assignment on phones
+
+- **Chosen:** Below `md` (768 px), `<RecipeBank>` is not rendered and its `recipes.list` infinite query is not started. Tapping any slot opens the existing slot-editor sheet (FEAT-31), which already supports flipping `slot_type` and picking a recipe via the existing `SearchableCombobox`. From `md` upward the bank renders as today.
+- **Alternatives:** Keep the bank visible on phones above the grid (FEAT-31's original AC); collapse the bank into a sticky floating button that expands into a sheet; render a compact horizontal pill bar instead of the vertical bank.
+- **Why it won:** FEAT-31's bank-above-grid layout was crowding the grid on small viewports. The editor's combobox is the existing path for *changing* an assigned slot's recipe — collapsing that path and the assign-an-empty-slot path into one on phones removes a redundant interaction model on the tightest screen. Net taps to assign a recipe stay at two (tap slot, pick recipe in editor vs. tap recipe, tap slot); the cost is a modal context shift, the benefit is more grid real estate and one fewer surface to test.
+- **Consequences (+):** More vertical room for the day-occasion grid on phones. One assignment path on phones, easier to test and document. No Recipe Bank network round-trip on phones (small perf and bandwidth win on the kitchen-LTE case). Selection state (`selectedRecipe`) and the assignment-hint banner are not mounted on phone tier.
+- **Consequences (−):** Phone users no longer get a recipe-list-glance view of "what could I cook" without first opening a slot — they have to commit to a slot before browsing. The bank-as-browser affordance is gone on phones. The recipe combobox in the editor needs to feel as good as the bank did; if combobox typeahead is slow on a flaky connection, the trade is worse.
+- **Revisit when:** Usability testing shows phone users repeatedly opening multiple slots just to scan recipes; or the cook reports wanting to compare a few candidate recipes before committing to a slot.
+- **Cross-refs:** FEAT-40 (the implementation), FEAT-31 (the editor sheet this relies on, and the AC this narrows), DEC-53 (phone-first responsive — this is a phone-first refinement of FEAT-31, not a departure from DEC-53), DEC-49 (combobox primitive used by the editor).
 
 ---
 

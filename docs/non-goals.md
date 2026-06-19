@@ -8,10 +8,11 @@ Entries flagged `[→ decision log]` correspond to a deferred or contested decis
 
 ## 1. Features Considered and Explicitly Not Built
 
-### Drag-and-drop slot assignment
-What it is: dragging recipe cards from the sidebar onto planner slots, the conventional meal-planner UI.
-Why not: the primary use is one-handed on a phone in a kitchen. Click-to-assign is faster for bulk planning, works identically with touch / mouse / keyboard, and satisfies WCAG 2.1 AA without dedicated DnD a11y machinery. The plan treats touch-first as a load-bearing constraint, not a nice-to-have.
-Revisit: only if usability testing shows click-to-assign confuses or slows users in practice. Desktop-power-user feedback alone is not a sufficient trigger.
+### Drag-and-drop slot assignment on viewports below `lg` (phones and small portrait tablets)
+What it is: dragging recipe cards from the sidebar onto planner slots, or assigned slots onto other slots, on phone-sized and small-tablet screens.
+Why not: the primary use is one-handed on a phone in a kitchen. Click-to-assign (or, below `md`, the slot-editor sheet — see DEC-85) is faster for bulk planning, works identically with touch / mouse / keyboard, and satisfies WCAG 2.1 AA without dedicated DnD a11y machinery on the tightest screens. The plan treats touch-first as a load-bearing constraint on those viewports, not a nice-to-have.
+Scope: DnD *is* enabled on `lg+` viewports (desktops, touchscreen laptops, tablets in landscape, iPad Pro in portrait) per **DEC-84** and **FEAT-40**, alongside click-to-assign. This non-goal binds only below `lg`.
+Revisit: only if usability testing shows click-to-assign / editor-flow confuses or slows users on phones in practice. Desktop-power-user feedback alone is not a sufficient trigger.
 `[→ decision log]`
 
 ### Recipe snapshotting at slot assignment

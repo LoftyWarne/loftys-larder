@@ -9,7 +9,7 @@ import { trpc } from '@/lib/trpc.ts';
 // list's check toggles. The slot hook's preview args are plan-DTO-shaped, so
 // rather than generalise, the shopping path runs through its own hook with the
 // same `onMutate` / `onError` / `onSettled` skeleton — server-truth on settle,
-// no invalidation (DEC-36 LWW). The offline mutation queue (FEAT-42) will
+// no invalidation (DEC-36 LWW). The offline mutation queue (FEAT-43) will
 // extend this hook by adding a persistence layer.
 
 export interface OptimisticCheckToggleOptions {

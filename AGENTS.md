@@ -6,8 +6,8 @@ The doc set:
 
 - `README.md` — entry point, kept in sync with shipped features.
 - `docs/plan.md` — strategy. Source of hard constraints below.
-- `docs/feature-specs.md` — 53 executable units, FEAT-01 … FEAT-53.
-- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-79. Cross-refs to FEATs.
+- `docs/feature-specs.md` — 54 executable units, FEAT-01 … FEAT-54.
+- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-85. Cross-refs to FEATs.
 - `docs/non-goals.md` — deliberate exclusions. Useful to *prevent* work.
 - `docs/session-notes.md` — rolling working doc; pending questions, in-flight context.
 - `AGENTS.md` — this file.
@@ -40,7 +40,7 @@ These come from `docs/plan.md` and the corresponding DECs. They are non-negotiab
 20. **Last-write-wins on shared resources.** No row-version columns, no row-level locks. (DEC-36)
 21. **`req.id` propagates end-to-end** as `reqId`, identical across Pino, Axiom, and Sentry. Do not rename or regenerate along the way. (DEC-77, cross-cutting #1)
 22. **No staging environment.** Migrations run via Fly `release_command` on push to `main`. Tests against Testcontainers + restore drills are the mitigation. (DEC-40, DEC-65)
-23. **Single region (`lhr`); auto-stop enabled; 3-second cold-start budget.** Do not enable always-on without measurement (FEAT-51). (DEC-63, DEC-64)
+23. **Single region (`lhr`); auto-stop enabled; 3-second cold-start budget.** Do not enable always-on without measurement (FEAT-52). (DEC-63, DEC-64)
 24. **Direct browser→Cloudinary uploads.** Never proxy image bytes through Fastify. (DEC-50)
 25. **Do not change the tRPC URL shape.** `httpBatchLink` produces `/api/trpc/<procedure>?batch=1&input=...` and the PWA cache rules match on the procedure segment. Reconfiguring this needs a coordinated change. (cross-cutting #16)
 
@@ -207,7 +207,8 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 | Add a `getCurrentScope()` resolver or thread `scope` through repositories | `CURRENT_HOUSEHOLD_ID` constant is the discipline. (DEC-17) |
 | Enable Sentry session replay | PII / cookie-consent cost not worth it at this scale. (DEC-76) |
 | Add a coverage threshold | Coverage is not a target; behaviour is. (DEC-59) |
-| Introduce drag-and-drop slot assignment | Click-to-assign is touch-first and a11y-correct. (DEC-52) |
+| Introduce drag-and-drop slot assignment below the `lg` breakpoint | DnD is `lg+` only per DEC-52 / DEC-84 / FEAT-40. Phones and small portrait tablets stay click-only (or, on `<md`, editor-only). |
+| Render the Recipe Bank below `md` | Hidden on phones per DEC-85 / FEAT-40; recipe assignment on phones goes through the slot-editor sheet only. |
 | Create a staging Fly app | Testcontainers + restore drills are the chosen mitigation. (DEC-65) |
 | Use `tsx` in production | `esbuild` single bundle. (DEC-61) |
 | Add a build orchestrator (Turborepo, Nx) | Three workspaces is below the threshold. (DEC-03) |

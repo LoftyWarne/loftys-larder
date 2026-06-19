@@ -111,7 +111,7 @@ Conventions:
 **Acceptance criteria:**
 - [ ] Server boots and logs a startup line with the bound port
 - [ ] Pino HTTP plugin generates a `req.id` on every request and includes it in access logs
-- [ ] `@fastify/helmet` registered with default options (CSP customised in FEAT-47)
+- [ ] `@fastify/helmet` registered with default options (CSP customised in FEAT-48)
 - [ ] tRPC mounted at `/api/trpc/*` with one placeholder `health.ping` procedure returning `{ ok: true, reqId: string }`
 - [ ] Calling `health.ping` from a script using `@trpc/client` returns the expected shape
 - [ ] CORS enabled in dev with origin restricted to the Vite dev server URL; disabled in prod build
@@ -131,7 +131,7 @@ Conventions:
 **Common gotchas:**
 - Registering `@fastify/static` without a `prefix` swallows `/api/*` routes. Mount static at root and ensure tRPC's prefix wins by registration order or use `prefix: '/api/static'`.
 - Pino's `genReqId` must produce a non-empty string; the default is fine but verify it's enabled.
-- Avoid `console.log` anywhere — once Axiom transport lands (FEAT-43), only Pino entries get aggregated.
+- Avoid `console.log` anywhere — once Axiom transport lands (FEAT-44), only Pino entries get aggregated.
 
 **Definition of done:**
 - Tests cover: server boots, env validation rejects missing required vars, `health.ping` returns the expected shape (Vitest + supertest-style probe).
@@ -207,7 +207,7 @@ Conventions:
 - [ ] Final stage: minimal Node base image, copied bundle, copied `frontend/dist/`, runs the bundle directly with `node`
 - [ ] `@fastify/static` serves `frontend/dist/` at `/` in production
 - [ ] `docker build .` produces an image; `docker run -p 3000:3000 -e DATABASE_URL=... <image>` boots and serves the frontend at `/` and the API at `/api/*`
-- [ ] `fly.toml` declares region `lhr`, the listening port, `auto_stop_machines = "stop"`, `min_machines_running = 0`, and the health-check path (`/api/health` — endpoint built in FEAT-46)
+- [ ] `fly.toml` declares region `lhr`, the listening port, `auto_stop_machines = "stop"`, `min_machines_running = 0`, and the health-check path (`/api/health` — endpoint built in FEAT-47)
 - [ ] Image size is reasonable (< ~300 MB; smaller is better with `node:lts-slim` or `node:lts-alpine` + esbuild bundling)
 
 **Implementation notes:**
@@ -235,12 +235,12 @@ Conventions:
 
 **Goal:** A one-shot `flyctl deploy` puts the production image live, reachable via the registered domain through Cloudflare orange-cloud DNS with `/api/*` bypassing cache. `[DEC-TBD: Cloudflare in front of Fly with /api/* cache bypass]`
 
-**Estimate:** 3–4 hr (ops-heavy, includes domain purchase, DNS propagation waits). **Depends on:** FEAT-05. **Enables:** FEAT-13, FEAT-48.
+**Estimate:** 3–4 hr (ops-heavy, includes domain purchase, DNS propagation waits). **Depends on:** FEAT-05. **Enables:** FEAT-13, FEAT-49.
 
 **Files:**
 - `fly.toml` (updated with app name)
 - `README.md` deploy section
-- Notes captured to feed `OPERATIONS.md` later (FEAT-50)
+- Notes captured to feed `OPERATIONS.md` later (FEAT-51)
 
 **Acceptance criteria:**
 - [ ] Domain registered via Cloudflare Registrar
@@ -254,7 +254,7 @@ Conventions:
 **Implementation notes:**
 - Park the domain at this stage; email setup (SPF/DKIM/DMARC for Resend) lands in FEAT-13.
 - Use `flyctl secrets set DATABASE_URL=…` before attaching Postgres in FEAT-09 — or rely on `flyctl postgres attach` to inject it.
-- Document every CLI command run; many of these are not idempotent and will be needed for the restore drill (FEAT-50).
+- Document every CLI command run; many of these are not idempotent and will be needed for the restore drill (FEAT-51).
 
 **Manual verification:**
 1. `curl -I https://<domain>/` returns 200 with Cloudflare headers.
@@ -277,7 +277,7 @@ Conventions:
 
 **Goal:** Every push to any branch runs lint, typecheck, and one placeholder test in CI.
 
-**Estimate:** 1–2 hr. **Depends on:** FEAT-01. **Enables:** FEAT-48 (deploy workflow extends this).
+**Estimate:** 1–2 hr. **Depends on:** FEAT-01. **Enables:** FEAT-49 (deploy workflow extends this).
 
 **Files:**
 - `.github/workflows/ci.yml`
@@ -524,7 +524,7 @@ Conventions:
 
 **Estimate:** 1–2 hr (mostly DNS waiting). **Depends on:** FEAT-06. **Enables:** FEAT-14.
 
-**Files:** notes captured for `OPERATIONS.md` (FEAT-50).
+**Files:** notes captured for `OPERATIONS.md` (FEAT-51).
 
 **Acceptance criteria:**
 - [ ] Resend account created; domain added
@@ -774,7 +774,7 @@ Conventions:
 **Files:**
 - `backend/src/trpc/routers/recipes.ts` (read procedures only at this stage)
 - `shared/src/schemas/recipes.ts`
-- `backend/src/lib/plant-points.ts` (recipe-level calculation, reused in FEAT-40)
+- `backend/src/lib/plant-points.ts` (recipe-level calculation, reused in FEAT-41)
 - `frontend/src/routes/_authed/recipes/index.tsx`
 - `frontend/src/components/recipe-card.tsx`
 
@@ -784,7 +784,7 @@ Conventions:
 - [ ] Trigram search is fast and case-insensitive
 - [ ] Browse view: grid of cards, search box, no separate filters yet (delete/restore wired in FEAT-20)
 - [ ] Plant-points calculation: `COUNT(DISTINCT ingredient_id) WHERE is_plant = true` at recipe level
-- [ ] The `plant-points` helper is exported and importable by other routers (FEAT-40 will use it)
+- [ ] The `plant-points` helper is exported and importable by other routers (FEAT-41 will use it)
 
 **Implementation notes:**
 - Avoid N+1: `get` should fetch the recipe, its ingredients (with joined ingredient + prep type), its method, and aggregates in as few queries as the relational shape allows (typically 3–4).
@@ -944,7 +944,7 @@ Conventions:
 
 **Goal:** Surface and enforce `is_base`, `base_recipe_id`, and `paired_recipe_id` in the recipe editor; maintain `paired_recipe_id` symmetry within the recipe-save transaction; filter the base picker to recipes with `is_base = true`; hide soft-deleted bases from new picker contexts. `[DEC-TBD: recipe pairing symmetry maintained in app, not DB]` `[DEC-TBD: batch-version cannot itself be a base (no nesting)]`
 
-**Estimate:** 3–4 hr. **Depends on:** FEAT-19, 20, 21. **Enables:** FEAT-30, 31, 33, 36 (aggregation traversal), 40 (plant-points traversal).
+**Estimate:** 3–4 hr. **Depends on:** FEAT-19, 20, 21. **Enables:** FEAT-30, 31, 33, 36 (aggregation traversal), 41 (plant-points traversal).
 
 **Reuse note:** The "pickable recipes" filter helper from FEAT-19 gains an `isBase` parameter here. Keep one place that knows the rules of what's pickable; future picker contexts (recipe-bank, base picker, related picker) just pass different params.
 
@@ -1299,9 +1299,9 @@ Conventions:
 
 **Goal:** Surface `cooks_base_recipe_id` / `cooks_base_servings` in the slot editor and on the slot card; pre-suggest the meal's `base_recipe_id` when the meal is a batch-version; soft warning when a batch-version meal has no base supply earlier in the plan or in the same slot. `[DEC-TBD: cooked base decoupled from meal's referenced base, can be different]` `[DEC-TBD: soft warning only — doesn't block save]`
 
-**Estimate:** 3–4 hr. **Depends on:** FEAT-23, 30, 31. **Enables:** FEAT-36 (aggregation), FEAT-40 (plant-points).
+**Estimate:** 3–4 hr. **Depends on:** FEAT-23, 30, 31. **Enables:** FEAT-36 (aggregation), FEAT-41 (plant-points).
 
-**Reuse note:** The base-supply check logic ("does this batch meal have a base cooked earlier or here?") will be reused by aggregation (FEAT-36) and plant-points (FEAT-40) — though for different purposes. Factor it as a query over the plan's slots, then consume it in the planner UI here.
+**Reuse note:** The base-supply check logic ("does this batch meal have a base cooked earlier or here?") will be reused by aggregation (FEAT-36) and plant-points (FEAT-41) — though for different purposes. Factor it as a query over the plan's slots, then consume it in the planner UI here.
 
 **Files:**
 - `backend/src/trpc/routers/slots.ts` (extend `update` with base-cook fields + application-level `is_base = true` validation)
@@ -1535,7 +1535,7 @@ Conventions:
 
 **Goal:** `shopping.toggleChecked({ planId, ingredientId, isChecked })`. The first `getForPlan` call for a plan lazily creates `shopping_list_items` rows for that plan's current ingredient set; subsequent calls reuse them. On every aggregation, if a line's current total differs from the total recorded at last check, that line's `is_checked` resets to false. `[DEC-TBD: lazy-create shopping_list_items]` `[DEC-TBD: quantity-bound check-state reset]`
 
-**Estimate:** 3 hr. **Depends on:** FEAT-36. **Enables:** FEAT-39, FEAT-42.
+**Estimate:** 3 hr. **Depends on:** FEAT-36. **Enables:** FEAT-39, FEAT-43.
 
 **Files:**
 - `backend/src/trpc/routers/shopping.ts` (extend)
@@ -1571,9 +1571,9 @@ Conventions:
 
 ### FEAT-39 — Shopping List view UI
 
-**Goal:** A printable, mobile-friendly shopping list page: grouped by category, with check boxes, total quantities, contributing recipes (collapsed by default), and shelf-life warnings. PWA-cacheable shape established here (service worker arrives in FEAT-41).
+**Goal:** A printable, mobile-friendly shopping list page: grouped by category, with check boxes, total quantities, contributing recipes (collapsed by default), and shelf-life warnings. PWA-cacheable shape established here (service worker arrives in FEAT-42).
 
-**Estimate:** 3 hr. **Depends on:** FEAT-36, 37, 38. **Enables:** FEAT-41.
+**Estimate:** 3 hr. **Depends on:** FEAT-36, 37, 38. **Enables:** FEAT-42.
 
 **Files:**
 - `frontend/src/routes/_authed/plans/$planId.shopping.tsx`
@@ -1600,7 +1600,7 @@ Conventions:
 3. Long category sections scroll smoothly on mobile.
 
 **Common gotchas:**
-- Avoid putting the check state in `localStorage`; the server is the source of truth (FEAT-41/42 handle offline separately).
+- Avoid putting the check state in `localStorage`; the server is the source of truth (FEAT-42/42 handle offline separately).
 
 **Definition of done:**
 - Tests cover: category grouping render; line renders with shelf-life badge; check toggle optimistic update.
@@ -1609,7 +1609,72 @@ Conventions:
 
 ---
 
-### FEAT-40 — Plant points: day-level and plan-level (with batch traversal and base-cook union)
+### FEAT-40 — Responsive planner interactions: hide bank on phones, drag-and-drop on `lg+`
+
+**Goal:** Reshape the planner around three viewport tiers, sharing one viewport hook. **Below `md` (< 768 px)**: the Recipe Bank is not rendered and the `recipes.list` infinite query is not started; recipe assignment goes through the existing slot-editor sheet only (tap any slot → editor → flip `slot_type` to `recipe` → pick via the `SearchableCombobox`). **`md`–`lg − 1` (768–1023 px)**: bank renders above the grid as today; click-to-assign unchanged. **`≥ lg` (≥ 1024 px)**: bank renders alongside the grid; a `@dnd-kit/core` `DndContext` mounts with `PointerSensor` (5 px activation), `KeyboardSensor`, and `TouchSensor` (200 ms / 5 px activation). Bank rows drag onto empty slots (equivalent to click-to-assign). Populated slots drag onto other slots — drop on empty = move, drop on populated = swap (atomic, server-side). `[DEC-84: DnD on lg+ viewports as additive affordance]` `[DEC-85: hide Recipe Bank below md]`
+
+**Estimate:** 4 hr. **Depends on:** FEAT-31. **Enables:** none.
+
+**Reuse note:** Slot mutation goes through the existing `useOptimisticSlotUpdate` for bank → slot drops (same shape as click-to-assign). Slot ↔ slot relocate/swap uses a sibling hook `useOptimisticSlotRelocate` that mirrors the `onMutate` / `onError` / `onSettled` scaffold but patches two slots in cache. Don't fork the existing hook's internals — mirror them. The slot-editor sheet (FEAT-31) is reused unchanged on phone tier — including its recipe combobox path (`SearchableCombobox`). The slot card's named content regions (cross-cutting #14) gain an additive `draggableHandle` / `droppable` prop pair; do not rewrite.
+
+**Files:**
+- `frontend/src/components/planner/dnd-provider.tsx` (new — DndContext + sensors + DragOverlay + screen-reader announcements; mounted on desktop tier only)
+- `frontend/src/hooks/use-viewport-tier.ts` (new — `matchMedia('(min-width: 48rem)')` + `(min-width: 64rem)` via `useSyncExternalStore`; returns `'phone' | 'tablet' | 'desktop'`)
+- `frontend/src/hooks/use-optimistic-slot-relocate.ts` (new — two-slot LWW patch)
+- `frontend/src/routes/-components/planner-page.tsx` (extend — gate bank rendering and DnD mounting on the tier)
+- `frontend/src/components/planner/recipe-bank.tsx` (extend — bank rows become `useDraggable` on desktop tier)
+- `frontend/src/components/planner/planner-grid.tsx` (extend — passes droppable wiring per cell on desktop tier)
+- `frontend/src/components/planner/slot-cell.tsx` (extend — additive `dragHandle` / `droppableRef` props; existing click stays primary)
+- `backend/src/trpc/routers/slots.ts` (extend with `relocate` procedure adjacent to `update`)
+- `shared/src/schemas/slots.ts` (add `relocateSlotInputSchema = z.object({ sourceSlotId, destSlotId })`)
+
+**Acceptance criteria:**
+- [ ] `useViewportTier()` returns `'phone' | 'tablet' | 'desktop'` from two `matchMedia` queries; updates on viewport change without a remount loop
+- [ ] On phone tier: `<RecipeBank>` is not rendered; `recipes.list` is not called; the assignment-hint banner is not rendered; tapping any slot opens the editor sheet, which assigns via its existing combobox path
+- [ ] On tablet tier: bank renders above the grid as today; no `<DndContext>` in the tree; click-to-assign behaves unchanged
+- [ ] On desktop tier: bank renders alongside the grid; `<DndContext>` mounts with pointer, keyboard, and touch sensors
+- [ ] Bank → empty-slot drag fires the same mutation shape as click-to-assign (`slots.update`)
+- [ ] Slot → empty-slot drag fires `slots.relocate({ sourceSlotId, destSlotId })`; source slot becomes empty, dest receives source's full content (`recipe_id`, `number_of_servings`, `chef_user_id`, `comment`, `cooks_base_recipe_id`, `cooks_base_servings`)
+- [ ] Slot → populated-slot drag fires `slots.relocate`; contents swap fully
+- [ ] Drag from bank onto a *populated* slot is rejected client-side (no mutation fires); user must clear first
+- [ ] Cross-plan drops are impossible (single-plan only)
+- [ ] Keyboard a11y: bank rows and populated slots respond to `space` / `enter` to grab; arrow keys navigate slots; `space` drops; `escape` cancels; dnd-kit screen-reader announcements fire on start / over / end / cancel
+- [ ] Touch on desktop tier needs a 200 ms hold to lift a drag; a brief tap remains click-to-assign
+- [ ] Optimistic updates roll back on error (both bank→slot and slot↔slot paths)
+- [ ] Server `slots.relocate` is atomic under `withTransaction`; an error after the first write rolls back the second
+- [ ] Server `slots.relocate` rejects cross-household source / dest with `FORBIDDEN`
+
+**Implementation notes:**
+- One `DndContext` for the whole planner page; `onDragEnd` discriminates draggable id namespace (`recipe:<id>` vs `slot:<id>`) and dispatches the appropriate mutation.
+- `useOptimisticSlotRelocate` patches both slots in `setQueryData` on `onMutate`, captures the previous plan snapshot, and reconciles from the server response on `onSettled` (LWW per DEC-36). No invalidation — the server result is canonical.
+- Viewport tier transitions: do not reload; the tree re-mounts the bank / `DndContext` as the hook reports a new tier. Persist the `selectedRecipe` state only when bank is mounted.
+- `slots.relocate` runs the two writes inside `withTransaction` (cross-cutting #4). Read source + dest under the transaction, derive the move-vs-swap branch server-side, write both rows.
+- Schemas live in `/shared/src/schemas/` (cross-cutting #2).
+- dnd-kit is ESM (DEC-01); verified at install.
+
+**Manual verification:**
+1. Phone (`< md`) in DevTools: bank absent; tap a slot → editor opens → "Recipe" type → pick recipe → save. Assignment lands.
+2. Tablet (`md`–`lg − 1`): bank reappears above grid; click-to-assign unchanged from before this FEAT.
+3. Desktop (`≥ lg`): drag a recipe onto an empty slot; drag an assigned slot onto an empty slot (move); drag an assigned slot onto a populated slot (swap). Tab to a row, space to grab, arrow + space to drop. Touch (if on a touchscreen) — quick tap selects, 200 ms hold drags.
+4. Rotate / resize across all three tiers in one session without reloading; each tier behaves correctly.
+
+**Common gotchas:**
+- `useSyncExternalStore` is the safer hook for the tier — `useState` + effect risks a brief mismatch on first paint.
+- A `PointerSensor` without an activation distance eats every click; the 5 px constraint is load-bearing.
+- A `TouchSensor` without a delay turns every scroll attempt into a drag. The 200 ms delay is load-bearing — do not lower it.
+- Two-slot optimistic patches must capture the *previous plan snapshot* (not per-slot), so a rollback restores both slots atomically.
+- Cross-tier transitions must not orphan a `selectedRecipe`. Reset it when tier changes from `'tablet'` / `'desktop'` to `'phone'`.
+- Hidden via CSS (`hidden`) vs not mounted: render-gate the bank so its query doesn't fire on phones (otherwise the perf win is moot).
+
+**Definition of done:**
+- Backend tests cover: move (empty dest), swap (populated dest), cross-household reject, transaction rollback on forced post-source error.
+- Frontend tests cover: phone tier omits bank and triggers editor on tap; tablet tier renders bank and click-to-assigns; desktop tier mounts `DndContext`, fires `update` on bank→slot drop, fires `relocate` on slot→slot drop with swap branch; touch sensor delay does not swallow taps; tier transition recomputes shape.
+- Commit: `feat(planner): responsive interactions with desktop drag-and-drop and phone editor-only flow`
+- Gate check: across phone / tablet / desktop tiers, all three assignment paths behave as specified; axe-core spot-check passes (FEAT-54).
+
+---
+
+### FEAT-41 — Plant points: day-level and plan-level (with batch traversal and base-cook union)
 
 **Goal:** Procedures `plants.forDay(planId, date)` and `plants.forPlan(planId)`. Both compute distinct plant-ingredient counts. Day/plan logic traverses `recipe.base_recipe_id` for batch-version slots (so days running on leftovers don't appear plant-poor) and unions `slot.cooks_base_recipe_id` ingredients. Dedup handles the case where the meal's referenced base equals the cooked base. UI display on the planner. `[DEC-TBD: plant-points traversal rules for batch and base-cook slots]`
 
@@ -1649,11 +1714,11 @@ Conventions:
 
 ---
 
-### FEAT-41 — PWA infrastructure: service worker + manifest + network-first for shopping list
+### FEAT-42 — PWA infrastructure: service worker + manifest + network-first for shopping list
 
 **Goal:** Register a service worker via `vite-plugin-pwa`; ship a web manifest with icons and theme colours; the shopping-list GET uses a **network-first** strategy (always show server truth when reachable, fall back to cache on failure or timeout). `[DEC-TBD: PWA network-first for shopping list]`
 
-**Estimate:** 3 hr. **Depends on:** FEAT-04, 39. **Enables:** FEAT-42.
+**Estimate:** 3 hr. **Depends on:** FEAT-04, 39. **Enables:** FEAT-43.
 
 **Files:**
 - `frontend/vite.config.ts` (add `vite-plugin-pwa`)
@@ -1690,11 +1755,11 @@ Conventions:
 
 ---
 
-### FEAT-42 — Offline check-state queue + reconnect sync
+### FEAT-43 — Offline check-state queue + reconnect sync
 
 **Goal:** When offline, `toggleChecked` mutations queue locally; on reconnect, the queue drains in order against the server. UI reflects the optimistic queued state. `[DEC-TBD: offline mutation queue, LWW conflict resolution accepted]`
 
-**Estimate:** 3–4 hr. **Depends on:** FEAT-38, 41. **Enables:** none specifically; offline-shopping UX.
+**Estimate:** 3–4 hr. **Depends on:** FEAT-38, 42. **Enables:** none specifically; offline-shopping UX.
 
 **Files:**
 - `frontend/src/lib/offline-queue.ts` (IndexedDB-backed)
@@ -1732,13 +1797,13 @@ Conventions:
 
 ## Phase 6 — Observability & deploy hardening
 
-### FEAT-43 — Pino → Axiom transport with req.id propagation
+### FEAT-44 — Pino → Axiom transport with req.id propagation
 
 **Goal:** Ship Fastify's Pino logs to Axiom via a transport; the per-request `req.id` (established in FEAT-03) lands on every log entry in Axiom. `[DEC-TBD: Pino → Axiom for structured logs, 30-day free-tier retention]`
 
-**Estimate:** 1–2 hr. **Depends on:** FEAT-03, 06. **Enables:** FEAT-44.
+**Estimate:** 1–2 hr. **Depends on:** FEAT-03, 06. **Enables:** FEAT-45.
 
-**Reuse note:** This is the second consumer of `req.id` after FEAT-03; FEAT-44 is the third. Keep the field name (`reqId` vs `request_id` vs `req.id`) consistent across all three or cross-reference breaks.
+**Reuse note:** This is the second consumer of `req.id` after FEAT-03; FEAT-45 is the third. Keep the field name (`reqId` vs `request_id` vs `req.id`) consistent across all three or cross-reference breaks.
 
 **Files:**
 - `backend/src/plugins/logger.ts` (extend with Axiom transport)
@@ -1748,7 +1813,7 @@ Conventions:
 **Acceptance criteria:**
 - [ ] In production, Pino streams JSON entries to Axiom via the official transport (`@axiomhq/pino` or similar)
 - [ ] Local dev keeps pretty-printed stdout (no Axiom send)
-- [ ] Every entry includes `reqId` matching the value the same request shows in response headers (if exposed) and in Sentry tags (FEAT-44)
+- [ ] Every entry includes `reqId` matching the value the same request shows in response headers (if exposed) and in Sentry tags (FEAT-45)
 - [ ] Startup, shutdown, and error events all reach Axiom
 - [ ] No PII is in log entries that wasn't already in the request line (specifically — request bodies are not logged)
 
@@ -1771,11 +1836,11 @@ Conventions:
 
 ---
 
-### FEAT-44 — Sentry frontend + backend with PII scrubbing and req.id tag
+### FEAT-45 — Sentry frontend + backend with PII scrubbing and req.id tag
 
 **Goal:** Sentry React SDK + Sentry Node SDK initialised in both apps with `beforeSend` scrubbing (cookies, authorization headers, email addresses); session replay disabled; `req.id` attached as a tag on backend errors so they cross-reference Axiom entries; absolute-threshold alert configured in Sentry (>5 errors / 5 min). `[DEC-TBD: Sentry beforeSend PII scrubbing; replay disabled to skip cookie consent]` `[DEC-TBD: absolute-threshold alert; percentage-based unsuitable at low traffic]`
 
-**Estimate:** 2–3 hr. **Depends on:** FEAT-43. **Enables:** none specifically.
+**Estimate:** 2–3 hr. **Depends on:** FEAT-44. **Enables:** none specifically.
 
 **Files:**
 - `backend/src/plugins/sentry.ts`
@@ -1813,7 +1878,7 @@ Conventions:
 
 ---
 
-### FEAT-45 — Rate limiting via @fastify/rate-limit
+### FEAT-46 — Rate limiting via @fastify/rate-limit
 
 **Goal:** `@fastify/rate-limit` configured: 100 req/min per IP for unauthenticated routes, 300 req/min per session for authenticated, and a tighter 5 requests per email per hour on the magic-link request endpoint. `[DEC-TBD: rate limits per NFR; tighter per-email limit on magic-link]`
 
@@ -1849,11 +1914,11 @@ Conventions:
 
 ---
 
-### FEAT-46 — /api/health endpoint
+### FEAT-47 — /api/health endpoint
 
 **Goal:** A health endpoint that returns 200 + `{ ok: true }` when the server is up and the DB is reachable; 503 otherwise. Used by Fly's health checks (referenced from `fly.toml` since FEAT-05).
 
-**Estimate:** 1 hr. **Depends on:** FEAT-09. **Enables:** robust deploys via FEAT-48.
+**Estimate:** 1 hr. **Depends on:** FEAT-09. **Enables:** robust deploys via FEAT-49.
 
 **Files:**
 - `backend/src/routes/health.ts`
@@ -1887,11 +1952,11 @@ Conventions:
 
 ---
 
-### FEAT-47 — Explicit CSP policy
+### FEAT-48 — Explicit CSP policy
 
 **Goal:** Replace `@fastify/helmet`'s default CSP with an explicit policy: `img-src 'self' res.cloudinary.com data:`, `connect-src 'self' <sentry-ingest>`, minimal `script-src` and `style-src` allowlist. Everything else defaults to `'self'`.
 
-**Estimate:** 1–2 hr. **Depends on:** FEAT-03, 18, 44. **Enables:** none specifically.
+**Estimate:** 1–2 hr. **Depends on:** FEAT-03, 18, 45. **Enables:** none specifically.
 
 **Files:**
 - `backend/src/plugins/security.ts` (extend helmet config)
@@ -1924,11 +1989,11 @@ Conventions:
 
 ---
 
-### FEAT-48 — GitHub Actions deploy workflow
+### FEAT-49 — GitHub Actions deploy workflow
 
 **Goal:** On push to `main`, build the multi-stage image and run `flyctl deploy --release-command "pnpm drizzle-kit migrate"` so migrations execute before traffic shifts; secrets pre-configured via `flyctl secrets set`. `[DEC-TBD: migrations run via release_command on deploy]` `[DEC-TBD: no staging environment, mitigated by Testcontainers and restore drills]`
 
-**Estimate:** 2 hr. **Depends on:** FEAT-07, 06, 09. **Enables:** FEAT-49.
+**Estimate:** 2 hr. **Depends on:** FEAT-07, 06, 09. **Enables:** FEAT-50.
 
 **Files:**
 - `.github/workflows/deploy.yml`
@@ -1963,11 +2028,11 @@ Conventions:
 
 ---
 
-### FEAT-49 — Nightly pg_dump → R2 backup workflow
+### FEAT-50 — Nightly pg_dump → R2 backup workflow
 
 **Goal:** A scheduled GitHub Actions workflow runs `pg_dump` via `flyctl proxy` against the Fly Postgres cluster and uploads the dump to a Cloudflare R2 bucket. `[DEC-TBD: off-site backup to R2, ~$0.50/month, vendor-catastrophe insurance]`
 
-**Estimate:** 2–3 hr. **Depends on:** FEAT-48. **Enables:** FEAT-50.
+**Estimate:** 2–3 hr. **Depends on:** FEAT-49. **Enables:** FEAT-51.
 
 **Files:**
 - `.github/workflows/backup.yml` (cron)
@@ -2001,11 +2066,11 @@ Conventions:
 
 ---
 
-### FEAT-50 — OPERATIONS.md and rehearsed restore drills
+### FEAT-51 — OPERATIONS.md and rehearsed restore drills
 
 **Goal:** A single `OPERATIONS.md` documenting: Fly snapshot list + restore-to-new-cluster procedure, R2-dump-to-fresh-cluster procedure, app rollback via `flyctl releases rollback`, secrets management, alert response runbook. Both restore paths rehearsed at least once.
 
-**Estimate:** 3 hr (writing + actual restore drill). **Depends on:** FEAT-49. **Enables:** confidence to launch.
+**Estimate:** 3 hr (writing + actual restore drill). **Depends on:** FEAT-50. **Enables:** confidence to launch.
 
 **Files:**
 - `OPERATIONS.md`
@@ -2037,7 +2102,7 @@ Conventions:
 
 ---
 
-### FEAT-51 — Cold-start time measurement and auto-stop decision
+### FEAT-52 — Cold-start time measurement and auto-stop decision
 
 **Goal:** Measure cold-start time after the machine has been auto-stopped; if it exceeds a 3-second budget for the user's first request, reconsider auto-stop (always-on at ~$5/month is the alternative). `[DEC-TBD: 3-second cold-start budget; auto-stop unless exceeded]`
 
@@ -2072,7 +2137,7 @@ Conventions:
 
 ---
 
-### FEAT-52 — Playwright E2E for critical paths
+### FEAT-53 — Playwright E2E for critical paths
 
 **Goal:** Playwright covers the critical-path flows end-to-end against a real browser: sign in via magic link, create a recipe, plan a week including a batch-cook slot, generate the shopping list, check off items. Auth reuse via `storageState`. `[DEC-TBD: Playwright with storageState auth reuse]`
 
@@ -2112,11 +2177,11 @@ Conventions:
 
 ---
 
-### FEAT-53 — WCAG 2.1 AA spot-check via axe-core
+### FEAT-54 — WCAG 2.1 AA spot-check via axe-core
 
 **Goal:** Run axe-core inside Playwright against the main views (sign-in, recipe browse, recipe editor, planner, shopping list) in both light and dark themes; fail on violations.
 
-**Estimate:** 2 hr. **Depends on:** FEAT-52, 16. **Enables:** none specifically.
+**Estimate:** 2 hr. **Depends on:** FEAT-53, 16. **Enables:** none specifically.
 
 **Files:**
 - `e2e/specs/a11y.spec.ts`
@@ -2156,7 +2221,7 @@ The 53 features above are sequenced for incremental delivery, but several concer
 
 ### 1. `req.id` propagation chain
 
-**Threads through:** FEAT-03 (Pino HTTP req-id generation), FEAT-43 (Axiom transport carrying req.id), FEAT-44 (Sentry tag attaching req.id), FEAT-52 (e2e probably should expose req.id for debugging failed runs).
+**Threads through:** FEAT-03 (Pino HTTP req-id generation), FEAT-44 (Axiom transport carrying req.id), FEAT-45 (Sentry tag attaching req.id), FEAT-53 (e2e probably should expose req.id for debugging failed runs).
 
 The value of req.id is *cross-referenceability*: an alert in Sentry should link to the matching Axiom entry should link to the response a user reported. That only works if the field name is identical across all three sinks and the value is preserved without re-generation along the way. **Decide the field name (`reqId`) at FEAT-03 and don't drift later.** Add a small assertion in a test: pick a request, capture its `reqId`, find it in both Axiom and (if errored) Sentry.
 
@@ -2194,13 +2259,13 @@ Five consumers, one mental model: a debounced typeahead over a search query, par
 
 ### 7. Optimistic-update pattern
 
-**Threads through:** FEAT-31 (first usage), FEAT-32 (base cooking), FEAT-33 (pair switch), FEAT-39 (check toggles), FEAT-42 (offline queue).
+**Threads through:** FEAT-31 (first usage), FEAT-32 (base cooking), FEAT-33 (pair switch), FEAT-39 (check toggles), FEAT-43 (offline queue).
 
-TanStack Query's `onMutate`/`onError`/`onSettled` pattern is the right tool. Five features touching it means five chances to drift. **Encapsulate the pattern in a small hook (`useOptimisticSlotUpdate`, generalised) in FEAT-31** so the rollback logic lives in one place. The offline queue (FEAT-42) is a strict superset — it adds a persistence layer — so structuring FEAT-31's hook with an injectable mutation function makes FEAT-42 a small extension rather than a rewrite.
+TanStack Query's `onMutate`/`onError`/`onSettled` pattern is the right tool. Five features touching it means five chances to drift. **Encapsulate the pattern in a small hook (`useOptimisticSlotUpdate`, generalised) in FEAT-31** so the rollback logic lives in one place. The offline queue (FEAT-43) is a strict superset — it adds a persistence layer — so structuring FEAT-31's hook with an injectable mutation function makes FEAT-43 a small extension rather than a rewrite.
 
 ### 8. The `dateUtils` module
 
-**Threads through:** FEAT-27 (introduced for overlap + status filter), FEAT-37 (shelf-life), FEAT-34 (list view filter), FEAT-40 (per-day plant points).
+**Threads through:** FEAT-27 (introduced for overlap + status filter), FEAT-37 (shelf-life), FEAT-34 (list view filter), FEAT-41 (per-day plant points).
 
 The plan calls out "Europe/London time, centralised so multi-timezone is a localised change." Every "today"-relative computation must read from the module. **Forbid `new Date()` in domain code** (in review or via lint) and import from `dateUtils` instead.
 
@@ -2208,15 +2273,15 @@ The plan calls out "Europe/London time, centralised so multi-timezone is a local
 
 **Threads through (recipe):** FEAT-19 (defined), FEAT-21 (editor), FEAT-23 (batch fields), FEAT-31 (planner sidebar), FEAT-26 (related), FEAT-36 (aggregation traverses base).
 
-**Threads through (shopping):** FEAT-36 (defined), FEAT-37 (shelf-life adds to it), FEAT-39 (UI consumes), FEAT-42 (offline cache shape mirrors it).
+**Threads through (shopping):** FEAT-36 (defined), FEAT-37 (shelf-life adds to it), FEAT-39 (UI consumes), FEAT-43 (offline cache shape mirrors it).
 
 Both DTOs are consumed by many features and changed by few. **Define them with explicit Zod schemas in `/shared` in FEAT-19 and FEAT-36 respectively** — adding fields is a small migration; renaming or restructuring is invasive. The `contributingSlots` shape inside the shopping DTO is particularly worth getting right because both the UI and the shelf-life logic depend on its details.
 
 ### 10. Plant-points calculation as a building block
 
-**Threads through:** FEAT-19 (recipe-level), FEAT-40 (day + plan level with traversal).
+**Threads through:** FEAT-19 (recipe-level), FEAT-41 (day + plan level with traversal).
 
-The recipe-level computation in FEAT-19 is reused by FEAT-40, but the traversal logic (batch-version meals + base-cook union + dedup) is *new* in FEAT-40. **Keep the recipe-level helper pure and small** so the day/plan logic composes it without surprises. Resist optimising prematurely; the SQL approach (UNION + DISTINCT) is cleaner than client-side joining.
+The recipe-level computation in FEAT-19 is reused by FEAT-41, but the traversal logic (batch-version meals + base-cook union + dedup) is *new* in FEAT-41. **Keep the recipe-level helper pure and small** so the day/plan logic composes it without surprises. Resist optimising prematurely; the SQL approach (UNION + DISTINCT) is cleaner than client-side joining.
 
 ### 11. Domain error codes via `TRPCError.cause`
 
@@ -2250,9 +2315,9 @@ The seven-step tombstoning sequence references every user-FK'd table. **FEAT-35 
 
 ### 16. PWA scope vs. tRPC URL shape
 
-**Threads through:** FEAT-04 (tRPC URLs settled), FEAT-41 (network-first match patterns), FEAT-42 (offline queue match patterns).
+**Threads through:** FEAT-04 (tRPC URLs settled), FEAT-42 (network-first match patterns), FEAT-43 (offline queue match patterns).
 
-`@trpc/react-query` produces URLs like `/api/trpc/<procedure>?batch=1&input=...`. The Workbox runtime caching pattern (FEAT-41) must match on the procedure name segment, not the query string. **Avoid changing the tRPC URL shape later** (e.g. by reconfiguring `httpBatchLink` to `httpLink`) without revisiting the cache rules.
+`@trpc/react-query` produces URLs like `/api/trpc/<procedure>?batch=1&input=...`. The Workbox runtime caching pattern (FEAT-42) must match on the procedure name segment, not the query string. **Avoid changing the tRPC URL shape later** (e.g. by reconfiguring `httpBatchLink` to `httpLink`) without revisiting the cache rules.
 
 ### 17. Better Auth migration path
 
@@ -2262,9 +2327,9 @@ The plan acknowledges Better Auth's risk as a young library with a migration pla
 
 ### 18. Cold-start ↔ pg-pool ↔ machine size
 
-**Threads through:** FEAT-08, FEAT-09, FEAT-51.
+**Threads through:** FEAT-08, FEAT-09, FEAT-52.
 
-Three measurement decisions that interact: machine size determines memory headroom, which constrains pool size, which contributes to cold-start time (more connections = longer first-request latency). **Re-measure cold-start (FEAT-51) after the pool is in use** (post-FEAT-09), not just after FEAT-05's empty deploy. The 3-second budget may bind at one of these surfaces unexpectedly.
+Three measurement decisions that interact: machine size determines memory headroom, which constrains pool size, which contributes to cold-start time (more connections = longer first-request latency). **Re-measure cold-start (FEAT-52) after the pool is in use** (post-FEAT-09), not just after FEAT-05's empty deploy. The 3-second budget may bind at one of these surfaces unexpectedly.
 
 ### 19. The "soft-delete visible in history, hidden from new selection" rule
 

@@ -9,7 +9,7 @@ import { recipeIngredients } from '../db/schema/recipes.ts';
 // covers the "same plant entered twice with different prep types" case (e.g.
 // 1 onion sliced + 1 onion diced count as one point).
 //
-// FEAT-40 reuses this primitive at day/plan level, composing with the
+// FEAT-41 reuses this primitive at day/plan level, composing with the
 // batch-traversal logic there — keep this helper pure and small so the
 // downstream composition stays straightforward.
 

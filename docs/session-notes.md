@@ -159,9 +159,9 @@ Better Auth's session atom auto-refreshes only when its own endpoints fire (the 
 
 - **Manual gate** per the FEAT-39 verification steps: start backend + frontend; navigate to `/plans/<id>/shopping`; check a line — UI flips immediately; reload — server state matches; bump a slot's `numberOfServings` so a checked line's total drifts → reload → that line returns unchecked; print preview → single column, no nav, no contributing-recipes, shelf-life badges visible, category groupings preserved; phone-width viewport → no horizontal scroll, tap targets ≥ 44 px.
 - **`recipe-comments.test.tsx` flake.** Pre-existing parallel-run timing issue with `userEvent.type` — `'after'` came out as `'aaaaaaafataearaaaa'`. Reproducible only under the full parallel test run; passes alone and on rerun. Not caused by FEAT-39, but worth a separate investigation if it surfaces again. Likely fix is `userEvent.setup({ delay: null })` or a `pointerEventsCheck: 0` option, but the root cause should be confirmed before applying a workaround.
-- **FEAT-41 (PWA infra).** The shopping route is now the first `tRPC` URL that needs network-first runtime caching. `vite-plugin-pwa` registration plus the Workbox runtime-cache rule should match on the `/api/trpc/shopping.getForPlan?…` path prefix (cross-cutting #16 — `httpBatchLink` URL shape stays). No DTO change needed.
-- **FEAT-42 (offline mutation queue).** `useOptimisticCheckToggle` is the natural extension point — wrap `mutation.mutate` in a queue that serialises `{ planId, ingredientId, isChecked, requestedAt }` to IndexedDB and drains on reconnect. The hook's `onMutate` already does the optimistic patch, so the queue layer is the durability story plus the drain reconciliation, not a rewrite.
-- **Stale memory:** the cross-cutting helper register in AGENTS.md mentions only the slot card and the optimistic slot-update hook as canonical scaffolds. After FEAT-42 makes the shopping-side hook authoritative for offline-aware mutations, the cross-cutting section should call it out by name (currently it's a sibling, not a peer).
+- **FEAT-42 (PWA infra).** The shopping route is now the first `tRPC` URL that needs network-first runtime caching. `vite-plugin-pwa` registration plus the Workbox runtime-cache rule should match on the `/api/trpc/shopping.getForPlan?…` path prefix (cross-cutting #16 — `httpBatchLink` URL shape stays). No DTO change needed.
+- **FEAT-43 (offline mutation queue).** `useOptimisticCheckToggle` is the natural extension point — wrap `mutation.mutate` in a queue that serialises `{ planId, ingredientId, isChecked, requestedAt }` to IndexedDB and drains on reconnect. The hook's `onMutate` already does the optimistic patch, so the queue layer is the durability story plus the drain reconciliation, not a rewrite.
+- **Stale memory:** the cross-cutting helper register in AGENTS.md mentions only the slot card and the optimistic slot-update hook as canonical scaffolds. After FEAT-43 makes the shopping-side hook authoritative for offline-aware mutations, the cross-cutting section should call it out by name (currently it's a sibling, not a peer).
 
 ---
 
@@ -199,7 +199,7 @@ Better Auth's session atom auto-refreshes only when its own endpoints fire (the 
 
 - **Manual gate** per the FEAT-38 verification steps: build a plan with 3 ingredients; call `shopping.getForPlan` and confirm three rows exist in `shopping_list_items` with `is_checked = false`; `toggleChecked` two lines → reload → two return `isChecked: true`; bump a slot's `numberOfServings` so a checked line's total shifts → reload → that line is unchecked again and the persisted row reflects it; revert the serving count → the line stays unchecked (one-way reset per DEC-31).
 - **FEAT-39 (UI surface).** The line shape's `isChecked` field is what the checkbox binds to; the optimistic-update hook from FEAT-31 is the recommended scaffold for the `toggleChecked` call (cross-cutting #7). The contract intentionally keeps the response minimal — no full-line round-trip — to keep the optimistic update path narrow.
-- **FEAT-42 (offline queue + reconnect sync).** When LWW reorders a queued toggle behind a fresh aggregation, the reset can flip a line the user thought they'd just checked. DEC-36 / DEC-31 explicitly accept this; named in DEC-36's revisit-when. The IndexedDB queue should serialise `(planId, ingredientId, isChecked, requestedAt)` — server doesn't need `requestedAt`, but the client uses it to drop duplicate toggles at queue-drain time.
+- **FEAT-43 (offline queue + reconnect sync).** When LWW reorders a queued toggle behind a fresh aggregation, the reset can flip a line the user thought they'd just checked. DEC-36 / DEC-31 explicitly accept this; named in DEC-36's revisit-when. The IndexedDB queue should serialise `(planId, ingredientId, isChecked, requestedAt)` — server doesn't need `requestedAt`, but the client uses it to drop duplicate toggles at queue-drain time.
 - **`PLAN_NOT_FOUND` domain code** remains uncreated (carried over from FEAT-36). `toggleChecked` throws plain `NOT_FOUND` for cross-household plans following the same `loadHouseholdPlan` precedent; the UI doesn't disambiguate yet.
 - **Concurrent first-read race not exercised behaviourally.** The architectural `withTransaction` wrap is the protection — two simultaneous first-reads would both run `INSERT … ON CONFLICT DO NOTHING`, and Postgres serialises the inserts. Deterministically reproducing this in Testcontainers needs a coordinator helper (two awaiting promises, one shared barrier). Skipped this session because the cost outweighs the marginal certainty; the unique-PK fallback is the load-bearing guarantee, not the transaction isolation.
 
@@ -415,7 +415,7 @@ None of consequence. Two minor deviations worth noting:
 
 - **Suggestion UX is an explicit hint button, not a pre-fill.** The FEAT-32 spec's "must not auto-set; it's a hint" wording is most faithfully expressed as a `Suggested: <name> — use this?` button beside an empty picker. Click → fetches the base recipe via `recipes.get` and populates both the picker and the base-servings input (defaulted from `recipe.baseServings`). Opt-in, not opt-out.
 - **Base-cook fields restricted to `slot_type='recipe'`** at both the input schema refine and the procedure layer. The DB joint-set CHECK is unconditional, but cooking a base on an `eat_out` slot is nonsensical for the v1 mental model. Defence in depth: the input schema rejects with a clear refine message before the procedure even loads the slot.
-- **Warning lives backend + frontend, with `OCCASION_ORDER` as the shared source of truth.** Backend `hasBaseSupply` SQL helper is the reusable predicate for FEAT-36 (aggregation) and FEAT-40 (plant-points). For the planner UI's per-slot warning the frontend computes it client-side from the already-loaded `plans.get` data — no extra round-trip, no extra cache entry. Both consume `shared/src/lib/occasion-order.ts`'s `OCCASION_ORDER = { Lunch: 0, Dinner: 1 }` so a third occasion drops in once in one file.
+- **Warning lives backend + frontend, with `OCCASION_ORDER` as the shared source of truth.** Backend `hasBaseSupply` SQL helper is the reusable predicate for FEAT-36 (aggregation) and FEAT-41 (plant-points). For the planner UI's per-slot warning the frontend computes it client-side from the already-loaded `plans.get` data — no extra round-trip, no extra cache entry. Both consume `shared/src/lib/occasion-order.ts`'s `OCCASION_ORDER = { Lunch: 0, Dinner: 1 }` so a third occasion drops in once in one file.
 - **Occasion ordering hardcoded as a constant**, not a DB column. Spec's common-gotcha note already flags this: "if a future occasion (breakfast?) is added, the ordering needs an explicit column." A `display_order` column on `meal_occasions` is the upgrade path; for two occasions the constant is cheaper and equally correct.
 - **`SLOT_BASE_*` domain error codes (three new)** ride the existing `domainErrorCauseSchema`: `SLOT_BASE_CROSS_HOUSEHOLD`, `SLOT_BASE_NOT_PICKABLE`, `SLOT_BASE_NOT_BASE`. Same shape as the existing `SLOT_RECIPE_*` codes from FEAT-30.
 
@@ -441,7 +441,7 @@ None of consequence. Two minor deviations worth noting:
 
 - **FEAT-33 (pair switch) lands `<PairSwitchButton />` on the editor sheet** and `chefChip` on the slot card via the same content-slot pattern. After a pair switch the batch-supply warning may suddenly appear or disappear (spec's "correct behaviour, not a bug" note) — that's already handled by the per-render derivation; nothing extra needed in FEAT-33.
 - **FEAT-36 (aggregation) consumes `hasBaseSupply` differently** — it'll likely walk all slots and sum cook-base servings against the consumers of each base. Today's helper is single-slot-anchored; aggregation may want a "list all base-cook supplies in a plan" variant. Don't extend the helper signature pre-emptively; let FEAT-36 spec it.
-- **FEAT-40 (plant-points)** wants the same "earlier-or-same" predicate to attribute the plant-points of a cooked base to its consuming meals across the same date or earlier. Same helper, different aggregation. The shared `OCCASION_ORDER` is the contract.
+- **FEAT-41 (plant-points)** wants the same "earlier-or-same" predicate to attribute the plant-points of a cooked base to its consuming meals across the same date or earlier. Same helper, different aggregation. The shared `OCCASION_ORDER` is the contract.
 - **If a third meal occasion lands (Breakfast),** update `MEAL_OCCASIONS` in `backend/src/db/seeds/reference.ts`, `OCCASION_ORDER` in `shared/src/lib/occasion-order.ts`, and the SQL `CASE` in `backend/src/lib/batch-supply.ts`. Three files in lockstep. Alternative: promote to a `display_order` column on `meal_occasions` and read it everywhere — worth the migration when occasions become non-linear or user-editable.
 - **Backend Testcontainers needed the now-familiar Colima workaround** to run in this dev environment. Carry the env vars when running future backend integration tests locally.
 
@@ -460,7 +460,7 @@ None of consequence. Two minor deviations worth noting:
 
 - **Pair switch UI** — FEAT-33.
 - **Aggregated shopping list view** — FEAT-36.
-- **Plant-points display on the planner** — FEAT-40.
+- **Plant-points display on the planner** — FEAT-41.
 - **Multi-occasion ordering** — Lunch < Dinner hardcoded; a third occasion needs the three-file update above or a `display_order` column.
 
 ---
@@ -516,7 +516,7 @@ None of consequence. Two minor deviations worth noting:
 ### Known limitations / not in scope
 
 - **Base-cook fields** (`cooks_base_recipe_id`, `cooks_base_servings`) — surfaced in FEAT-32. The slot editor doesn't expose them yet.
-- **Plant-points display on the planner** — FEAT-40.
+- **Plant-points display on the planner** — FEAT-41.
 - **Aggregated shopping list view** — FEAT-36 onwards.
 - **Drag-and-drop slot assignment** — explicitly excluded (DEC-52); click-to-assign only.
 
@@ -589,7 +589,7 @@ None of consequence. Two minor deviations worth noting:
 
 - **FEAT-30 (Slot procedures)** adds `comment` to `meal_plan_slots`; when it lands, add `comment: slot.comment` to the `slotValues` map in `plans.duplicate` and a corresponding case to the assignment-fidelity test. Single-line change in each place.
 - **FEAT-31 (Planner UI)** will surface duplicate as a button on a past or current plan. Input is just `{ planId, newStartDate }`; on success, the UI navigates to `/plans/$newPlanId` using the returned `plan.id`. `slotCount` is informational (toast: "Duplicated 14 slots").
-- **`addDays` is a public dateUtils export** and a candidate for the shopping-list date-range walks and the per-day plant-points aggregation (FEAT-40); reuse instead of reaching for raw arithmetic.
+- **`addDays` is a public dateUtils export** and a candidate for the shopping-list date-range walks and the per-day plant-points aggregation (FEAT-41); reuse instead of reaching for raw arithmetic.
 
 ### What did NOT change (carry from earlier notes)
 
@@ -636,7 +636,7 @@ None of consequence. Two minor deviations worth noting:
 
 - **FEAT-29 (Plan duplication)** can reuse `loadHouseholdPlan` and `loadOccasionIds` (lifted from `plans.create`/`get`/`updateRange`). Duplication is conceptually "compute an offset, copy slots inside a transaction" — the helper surface is now there.
 - **FEAT-31 (Planner UI)** gets two new touchpoints: the `updateRange` mutation and the `PLAN_DESTRUCTIVE_RANGE_CHANGE` confirm-dialog flow. Recommendation: render the dialog from the cause payload directly (lossy slots are described by `date` + `occasionId` + `slotType` + optional `recipeId`; resolve the recipe name via the existing recipe query cache rather than fetching). The shared `useOptimisticSlotUpdate` hook (FEAT-31) won't apply to `updateRange` — it's a plan-level mutation, not a slot-level one. A separate `useUpdatePlanRange` is appropriate.
-- **FEAT-50 (`OPERATIONS.md`)** should note migration `0005` drops `meal_plans.name`. Deployment ordering is automatic via Fly `release_command` (DEC-40); no manual step.
+- **FEAT-51 (`OPERATIONS.md`)** should note migration `0005` drops `meal_plans.name`. Deployment ordering is automatic via Fly `release_command` (DEC-40); no manual step.
 
 ### What did NOT change (carry from earlier notes)
 
@@ -686,7 +686,7 @@ None of consequence. Two minor deviations worth noting:
 - **FEAT-30 (Slot procedures)** queries against the slots produced here. The `slot_type` enum is in `meal-plans.ts`'s pgEnum; FEAT-30's `update` procedure should switch on it and never write a slot without going through the joint-set CHECK on `(recipe_id, slot_type, number_of_servings)` — already enforced at the DB level by FEAT-12's constraints.
 - **FEAT-31 (Planner UI)** gets the slot DTO shape it needs (`PlanSlot` carries `recipe: PlanSlotRecipe | null`). The `Plan` DTO has `createdByUserId` so the UI can render attribution. The `PlanStatus` enum (`active | past | future | all`) is the URL search-param contract per DEC-10.
 - **FEAT-37 (Shelf-life warnings)** is the second `dateUtils` consumer — explicitly anticipated by the helper's docstring.
-- **FEAT-50 (`OPERATIONS.md`)** should document that `meal_occasions` is seeded with two rows (`Lunch`, `Dinner`) on first migration; `plans.create` returns `INTERNAL_SERVER_ERROR` if the table is empty, indicating a deployment misconfiguration.
+- **FEAT-51 (`OPERATIONS.md`)** should document that `meal_occasions` is seeded with two rows (`Lunch`, `Dinner`) on first migration; `plans.create` returns `INTERNAL_SERVER_ERROR` if the table is empty, indicating a deployment misconfiguration.
 
 ### What did NOT change (carry from earlier notes)
 
@@ -1048,7 +1048,7 @@ Per the FEAT-18 entry's "Open hole: `recipe_sources` cross-household" — `updat
 - **`includePickerHidden` accepted on the input schema today as a no-op.** The batch-version-of-soft-deleted-base rule lives in FEAT-23. Defining the flag now means FEAT-23 fills in the rule without reshaping `listRecipesInputSchema` (which is type-exported and consumed across the workspace boundary via `AppRouter`). The helper `pickableRecipesWhere` accepts the option and currently ignores it — `void options.includePickerHidden` documents the intentional skip and prevents an unused-import lint flake.
 - **`pickable-recipes` helper exposes a Drizzle WHERE fragment, not a full subquery.** `pickableRecipesWhere(options): SQL` returns an `and(...)` that callers AND into their own WHERE — keeps the helper composable with cursor pagination, search, and any future per-call predicate. Caller still owns `from(recipes)` and the ORDER BY. Worth carrying: when FEAT-23 adds `isBase` and the picker-hidden rule, neither needs the caller's query shape to change.
 - **Keyset pagination over `(lower(name), id)`, not offset.** Same ordering as the ORDER BY, so cursor comparison is exact. Cursor shape is `{ lowerName: string; id: number }` — fetch `limit + 1` to learn whether `nextCursor` should be non-null without a second `count(*)` round-trip. UI doesn't surface a page control yet; the wire shape is there so the recipe-bank (FEAT-31) and the slot-editor picker (FEAT-31/32) can grow into it without a procedure version bump. Confirmed at kick-off Q4.
-- **Plant-points helper lives in `backend/src/lib/plant-points.ts` and exposes both a correlated SQL fragment and a standalone evaluator.** `recipePlantPointsExpr(outerRecipeIdSql)` for inline use in the list / get SELECT; `selectRecipePlantPoints(db, recipeId)` for tests + one-off reads (and the day/plan composition in FEAT-40 will compose the fragment, not the helper). FEAT-40's traversal layer (batch-version meals + base-cook union + dedup) is *new*; this helper is the building block, kept pure and small per cross-cutting concern #10.
+- **Plant-points helper lives in `backend/src/lib/plant-points.ts` and exposes both a correlated SQL fragment and a standalone evaluator.** `recipePlantPointsExpr(outerRecipeIdSql)` for inline use in the list / get SELECT; `selectRecipePlantPoints(db, recipeId)` for tests + one-off reads (and the day/plan composition in FEAT-41 will compose the fragment, not the helper). FEAT-41's traversal layer (batch-version meals + base-cook union + dedup) is *new*; this helper is the building block, kept pure and small per cross-cutting concern #10.
 - **Recipe DTO split into `recipeListItemSchema` and `recipeSchema`** in `shared/src/schemas/recipes.ts`. The list shape is what every picker / browse / recipe-bank consumer reads; the detail shape extends it with macros, source name, joined ingredients + method, and rating aggregates. Adding fields is cheap, restructuring is invasive — calling out the boundary now (cross-cutting concern #9) saves the editor (FEAT-21), the planner sidebar (FEAT-31), the related-recipes UI (FEAT-26), the base picker (FEAT-32), and the shopping-list aggregation (FEAT-36) from each redefining their own DTO. `plantPointsCount` lives on the list DTO because it's cheap server-side and useful on cards; ratings stay on `get` only (Q4 of kick-off).
 - **Detail read view shipped (`/_authed/recipes/$recipeId`), not stubbed.** Spec said "no editor yet — show a read view or stub". A real read view exercises `recipes.get` end-to-end before FEAT-21 lands; it also surfaces the NOT_FOUND flow against the route. Plain-text everywhere (DEC-49). No rating UI, no edit affordances — FEAT-21/27/29 fill those.
 - **Dev fixtures split into `runDevSeeds` so tests keep using `runSeeds` unchanged.** `runSeeds` (household + reference) is what tests share; `runDevSeeds` (sample ingredients + 2 recipes) is invoked only from `scripts/seed.ts`. Tests would have collided on the seeded `Onion` ingredient otherwise (`recipes-schema.test.ts` builds its own `Onion`). Cleaner than gating on `NODE_ENV` inside the seed body.
@@ -1056,7 +1056,7 @@ Per the FEAT-18 entry's "Open hole: `recipe_sources` cross-household" — `updat
 
 ### Drift from kick-off plan
 
-1. **Dropped `dateAdded` / `dateLastUpdated` from the DTOs after a typecheck failure.** I drafted both schemas with `z.coerce.date()`, expecting tRPC's default (transformer-free) serializer to round-trip the JS `Date` from Drizzle's `date(mode: 'date')` column. It doesn't — the wire payload is a string, but the Zod output type is `Date`, and the frontend type from `AppRouter` got `Date` while the runtime value was a string. Two fixes were on the table: (a) add a superjson transformer to tRPC (substantive, threads through every procedure + every cache rule) or (b) drop the date fields, since nothing in FEAT-19's surfaces actually uses them. Took (b). If a downstream FEAT needs created/updated timestamps (e.g. the recipe-bank's "recently added" sort) we'll either add a transformer then or type the fields as ISO strings end-to-end (cheaper, narrower change). Avoiding the transformer also keeps the PWA cache (FEAT-41) honest — its rules match on JSON, not superjson envelopes.
+1. **Dropped `dateAdded` / `dateLastUpdated` from the DTOs after a typecheck failure.** I drafted both schemas with `z.coerce.date()`, expecting tRPC's default (transformer-free) serializer to round-trip the JS `Date` from Drizzle's `date(mode: 'date')` column. It doesn't — the wire payload is a string, but the Zod output type is `Date`, and the frontend type from `AppRouter` got `Date` while the runtime value was a string. Two fixes were on the table: (a) add a superjson transformer to tRPC (substantive, threads through every procedure + every cache rule) or (b) drop the date fields, since nothing in FEAT-19's surfaces actually uses them. Took (b). If a downstream FEAT needs created/updated timestamps (e.g. the recipe-bank's "recently added" sort) we'll either add a transformer then or type the fields as ISO strings end-to-end (cheaper, narrower change). Avoiding the transformer also keeps the PWA cache (FEAT-42) honest — its rules match on JSON, not superjson envelopes.
 2. **Plant-points subquery hit "column reference \"id\" is ambiguous" first.** Inside a `sql` template literal, Drizzle renders column references *bare* (no `table.` prefix), so the join condition `${ingredients.id} = ${recipeIngredients.ingredientId}` became `"id" = "ingredient_id"` — three `id` columns in scope (outer `recipes`, inner `recipe_ingredients`, inner `ingredients`). Fix: spell out `<table>.<column>` literally inside the template, and require the outer-recipe id reference to be a qualified SQL fragment (callers now pass `sql\`recipes.id\``, not `recipes.id`). Captured in a comment on `recipePlantPointsExpr`. Worth carrying: **inside `sql\`...\`` templates, treat Drizzle column references as bare identifiers and qualify them yourself.** This will bite anyone writing correlated subqueries; the safe rule is "if your subquery joins more than one table, every column in the template is a string-literal."
 3. **`recipes.list` returns a paginated *result envelope* (`{ items, nextCursor }`) rather than a bare array.** `recipes.list.useQuery` consumers must read `data?.items ?? []`. `ingredients.list` returns a bare array; that asymmetry is intentional (ingredients is small enough not to need cursors and the helper signature would have been overkill) but worth flagging because mental-model spillover is easy.
 4. **Nav placement: "Recipes" sits between "Home" and "Ingredients" in `authed-layout.tsx`.** Plan said "between Home and Ingredients"; landed there. No tests on the nav directly — the existing `authed-layout.test.tsx` doesn't exhaustively enumerate links. If we want a regression guard against accidental nav removal, that test is the place — defer until we add a fourth link.
@@ -1093,7 +1093,7 @@ Per the FEAT-18 entry's "Open hole: `recipe_sources` cross-household" — `updat
   3. Possibly add `baseRecipeId` / `pairedRecipeId` aggregates on the list DTO if pickers need them. Today both fields are returned plainly.
 - **FEAT-26 (related recipes)** reuses the same picker helper for the "what can I link to?" query — no new helper needed.
 - **FEAT-31 (planner sidebar / recipe bank)** consumes `recipes.list` directly. The keyset cursor shape is the contract; if the recipe bank needs a virtualised infinite list, `useInfiniteQuery` over `{ cursor, limit }` is the path. No procedure change expected.
-- **FEAT-40 (day + plan plant points)** composes `recipePlantPointsExpr` at the day/plan level with the batch-traversal rules (FEAT-23). Keep this helper pure (no household scoping, no date logic) — that's the contract the day/plan computation relies on.
+- **FEAT-41 (day + plan plant points)** composes `recipePlantPointsExpr` at the day/plan level with the batch-traversal rules (FEAT-23). Keep this helper pure (no household scoping, no date logic) — that's the contract the day/plan computation relies on.
 - **Superjson / date-on-the-wire decision is deferred.** If two downstream FEATs need real `Date` types over the wire (recipe-bank "recently added" sort + planner created-at filter, say), the cheapest change is to type those fields as ISO strings in the DTO and add a single `parseISO()` at the consumer. Adding a transformer to tRPC is a substantive change (every cache rule, every test fixture) and we should defer it until the cost of NOT having it is concrete. Open question; capture before FEAT-31 or FEAT-34.
 - **`pickable-recipes` helper has no test file of its own** — its behaviour is exercised through `recipes.list` (includes-deleted and excludes-deleted assertions). If FEAT-23's extensions get gnarly enough, peel out `pickable-recipes.test.ts` and exercise the WHERE in isolation; the helper is small enough today that a procedure-level test is the right tool.
 
@@ -1139,10 +1139,10 @@ Per the FEAT-18 entry's "Open hole: `recipe_sources` cross-household" — `updat
 
 ### Open items for downstream FEATs
 
-- **FEAT-20 will persist `image_url` on the recipe row via `recipes.update`.** Cloudinary's upload response returns `secure_url` (HTTPS-only) — that's the field to store, not `url`. The PWA cache rules (FEAT-41) match `res.cloudinary.com` for `img-src` (DEC-46 CSP already includes it), so served images won't need any further wiring.
+- **FEAT-20 will persist `image_url` on the recipe row via `recipes.update`.** Cloudinary's upload response returns `secure_url` (HTTPS-only) — that's the field to store, not `url`. The PWA cache rules (FEAT-42) match `res.cloudinary.com` for `img-src` (DEC-46 CSP already includes it), so served images won't need any further wiring.
 - **FEAT-21 (Recipe Editor) consumes `uploads.getRecipeImageCredentials`.** The flow: call the query → POST `multipart/form-data` to `https://api.cloudinary.com/v1_1/<cloudName>/image/upload` with fields `{ file, api_key, timestamp, signature, folder, allowed_formats, max_file_size, eager }` — **snake_case keys** (see implementation note). Cloudinary's response is JSON with `secure_url`; pass that to `recipes.update`. No proxying through the backend (DEC-50). Direct browser → Cloudinary keeps the Fly machine's request-body budget intact.
 - **Orphan cleanup is a non-goal in v1** (DEC-50). If a user gets credentials, uploads, then abandons the recipe edit, the asset sits in Cloudinary forever. Free-tier storage covers household-scale; revisit only if Cloudinary's billing or asset-clutter gets visible. If we ever build the cleanup job, it'd be a nightly worker that diffs Cloudinary's asset list against `recipes.image_url` — but it's a non-goal so don't.
-- **Better Auth `protectedProcedure` is the only auth surface here.** No rate-limit on credential minting yet. FEAT-45's `@fastify/rate-limit` should cover `uploads.*` alongside the magic-link endpoint — a credential mint isn't expensive, but it costs Cloudinary if a misbehaving client floods uploads, so a modest per-user limit (10/min?) is a defensive default. Not enabled now.
+- **Better Auth `protectedProcedure` is the only auth surface here.** No rate-limit on credential minting yet. FEAT-46's `@fastify/rate-limit` should cover `uploads.*` alongside the magic-link endpoint — a credential mint isn't expensive, but it costs Cloudinary if a misbehaving client floods uploads, so a modest per-user limit (10/min?) is a defensive default. Not enabled now.
 - **`AppContext.cloudinary` is the second consumer of the decorate-and-augment pattern.** If a third arrives (e.g. a feature-flag client, a Sentry-tagged logger, a per-request `dateUtils.now()` injection), consider whether to keep adding to `AppContext` directly or introduce a `services` namespace (`ctx.services.cloudinary`, `ctx.services.flags`, …). At two consumers it's fine flat; at four it'd benefit from grouping. Just don't reach for the namespace until the third consumer makes the case.
 - **Operator action before next prod deploy.** Three new env vars are required (no defaults); the next deploy after this PR merges will crashloop without them. Set in Fly:
 
@@ -1279,7 +1279,7 @@ Per the FEAT-18 entry's "Open hole: `recipe_sources` cross-household" — `updat
 - **Move `routes/index.tsx` → `routes/_authed/index.tsx`.** `/` becomes the first authenticated route. Cleanest implementation of "logged-in user visiting `/sign-in` is redirected to `/`" — and matches the long-term shape, since every later FEAT (settings, recipes, planner, shopping list) will live under `_authed/`. The alternative of leaving `/` public and adding a placeholder `_authed/home.tsx` was rejected as junk that would get renamed in FEAT-16.
 - **Native `<label htmlFor>`, no `@radix-ui/react-label`.** Radix's label adds zero behavioural value for a single email input (the native `<label htmlFor>` already gives click-to-focus). Saved one dependency. shadcn/ui is still the styling system per DEC-51; this is purely "don't add a dep you don't need."
 - **CSRF transport: Better Auth's double-submit cookie, sent via `credentials: 'include'`.** Better Auth's default CSRF model uses a cookie the browser sends automatically. No header injection in the tRPC client. Confirmed at implementation time against the installed `better-auth@1.6.11`. The tRPC `httpBatchLink` was extended with a `fetch` override (`(input, init) => fetch(input, { ...init, credentials: 'include' })`) — minimum-viable wiring.
-- **tRPC URL shape preserved (cross-cutting #16).** `httpBatchLink({ url: '/api/trpc' })` stays — the PWA cache rules (FEAT-41 onward) match on the procedure segment.
+- **tRPC URL shape preserved (cross-cutting #16).** `httpBatchLink({ url: '/api/trpc' })` stays — the PWA cache rules (FEAT-42 onward) match on the procedure segment.
 - **Custom `unauthorizedRedirectLink` over per-call `onError`.** A `TRPCLink<AppRouter>` (using `observable` from `@trpc/server/observable`) intercepts errors with `err.data?.code === 'UNAUTHORIZED'` and calls an injected `onUnauthorized` callback. `app.tsx` wires that callback to `router.navigate({ to: '/sign-in' })`. The injection pattern keeps `lib/trpc.ts` independent of the router and dodges the otherwise-cyclic import.
 - **Route file structure: named exports for `beforeLoad` + components.** Each route file exports its `beforeLoad` and its component as named exports (`signInBeforeLoad`, `SignInPage`, `verifyBeforeLoad`, `VerifyPage`, `copyForError`, `authedBeforeLoad`) which the `Route` definition then references. Tests call the named exports directly without standing up a memory router; the `Route` object's option shape doesn't expose a plain function for testing.
 
@@ -1364,7 +1364,7 @@ End-to-end flow now confirmed: form → email → click → redirect to `http://
 - **Better Auth handler bridged via the Web `Request`/`Response` path, not `toNodeHandler`.** The Node-handler path requires disabling Fastify's body parsing on the auth route, which leaks across the rest of the app unless carefully scoped. Bridging via `auth.handler(new Request(url, init))` lets Fastify's built-in JSON parser run on the request body and we just `JSON.stringify` it back into the `RequestInit.body` — no body-parser fight, no encapsulation gymnastics. Matches the pattern in Better Auth's Fastify integration docs.
 - **`account.fields.password = false` not configured.** Kick-off plan flagged it; on closer reading, unnecessary. The password column only sees writes when the email-and-password provider is enabled, which it isn't (DEC-41). FEAT-10's session note already covers this — NULL costs zero bytes. Saved one config line plus a downstream migration risk.
 - **Cookie prefix: `lofty-larder`, not `__Host-`.** `__Host-` forbids subdomains and invalidates every existing session on the deploy that flips it, for no v1 benefit (single-origin in prod per DEC-44). Better Auth defaults already satisfy DEC-43 (`HttpOnly`, `Secure` in prod, `SameSite=Lax`, CSRF).
-- **`health.ping` exemption is dev-only.** Spec verbatim. The pre-handler's `isExempt(url, config)` returns true for `/api/trpc/health.ping` only when `NODE_ENV !== 'production'`. Prod healthcheck endpoint lands separately in FEAT-46 as a plain Fastify route under `/api/health`.
+- **`health.ping` exemption is dev-only.** Spec verbatim. The pre-handler's `isExempt(url, config)` returns true for `/api/trpc/health.ping` only when `NODE_ENV !== 'production'`. Prod healthcheck endpoint lands separately in FEAT-47 as a plain Fastify route under `/api/health`.
 - **No user→household join row.** Per DEC-17, `CURRENT_HOUSEHOLD_ID` IS the link in v1. Better Auth's user-create path runs unmodified; multi-user-household work is a non-goal.
 - **`buildApp(config, { db?, sendMagicLink? })` — both injectable.** The signature change is the test ergonomics that pays for itself across every later FEAT's tests. Production calls `buildApp(config)` and gets the singletons; tests pass their own Drizzle handle (Testcontainers in `auth.test.ts`, a no-op pool in `server.test.ts`) plus a spy sender.
 - **Module augmentation for `FastifyRequest.session`/`user` lives in `trpc/context.ts`, not the auth plugin.** First pass put it in `plugins/auth.ts` — typechecked fine in the backend but broke `/shared` because `router-type.ts` only pulls the tRPC chain (router → init → context), not the plugins. Moving the augmentation onto the `trpc/context.ts` compilation path makes it visible to every consumer of the AppRouter type.
@@ -1404,9 +1404,9 @@ End-to-end flow now confirmed: form → email → click → redirect to `http://
 - **FEAT-16 (profile + theme)** — `user.getMe` / `user.updateProfile` procedures should be `protectedProcedure` (not `publicProcedure`); the `ctx.user` narrowing means resolvers can read `ctx.user.id` and `ctx.user.themePreference` directly without a null check.
 - **FEAT-17 onward — every domain procedure file** uses `protectedProcedure` (from `backend/src/trpc/init.ts`) as the default. `publicProcedure` is reserved for `health.ping` and any future genuinely-anonymous endpoints. Domain procedures scope every query by `CURRENT_HOUSEHOLD_ID` (DEC-17, cross-cutting #3) — `ctx.user.id` is informational only, never authorisation.
 - **FEAT-35 (account deletion)** — the seven-step tombstoning sequence (DEC-29) will delete from `sessions` and `accounts` before the `users` row. Better Auth's cascade rule on `sessions.userId` / `accounts.userId` is `ON DELETE CASCADE` (FEAT-10 schema), so deleting the user row would clean those up automatically — but the explicit step is still in the sequence for audit-trace clarity. `verifications` are identified by email string, not `userId`, so they don't cascade; the tombstoning procedure should `DELETE FROM verifications WHERE identifier = :email` as part of the same transaction.
-- **FEAT-45 (rate limiting, DEC-45)** — the magic-link request endpoint needs the per-email 5/hour limit (DEC-45). Better Auth's built-in `rateLimit: { window: 60, max: 5 }` on the `magicLink` plugin would cover *per-IP* but not *per-email*; FEAT-45 will need a custom limiter or to extend Better Auth's. Not enabled now — wait for FEAT-45 to land the unified `@fastify/rate-limit` config.
-- **FEAT-46 (`/api/health` route)** — when this lands, the auth pre-handler exemption `/api/health` already accepts it (the `isExempt` helper matches the `/api/health` prefix). Just register the plain Fastify route.
-- **FEAT-50 (`OPERATIONS.md` + restore drills)** — the prod env-var checklist below should lift into the ops doc.
+- **FEAT-46 (rate limiting, DEC-45)** — the magic-link request endpoint needs the per-email 5/hour limit (DEC-45). Better Auth's built-in `rateLimit: { window: 60, max: 5 }` on the `magicLink` plugin would cover *per-IP* but not *per-email*; FEAT-46 will need a custom limiter or to extend Better Auth's. Not enabled now — wait for FEAT-46 to land the unified `@fastify/rate-limit` config.
+- **FEAT-47 (`/api/health` route)** — when this lands, the auth pre-handler exemption `/api/health` already accepts it (the `isExempt` helper matches the `/api/health` prefix). Just register the plain Fastify route.
+- **FEAT-51 (`OPERATIONS.md` + restore drills)** — the prod env-var checklist below should lift into the ops doc.
 
 ### Operator action before next prod deploy
 
@@ -1438,11 +1438,11 @@ export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 - Frontend sign-in UI, verification route, protected layout — **FEAT-15**.
 - `user.getMe` / `user.updateProfile` procedures — **FEAT-16**.
 - Tombstoning sequence (delete sessions/accounts/verifications/recipes/etc. before user row) — **FEAT-35**.
-- Per-email rate-limit on magic-link request — **FEAT-45**.
-- Unauth `/api/health` Fastify route (already exempt in the pre-handler) — **FEAT-46**.
-- `OPERATIONS.md` lift of the env-var checklist above — **FEAT-50**.
+- Per-email rate-limit on magic-link request — **FEAT-46**.
+- Unauth `/api/health` Fastify route (already exempt in the pre-handler) — **FEAT-47**.
+- `OPERATIONS.md` lift of the env-var checklist above — **FEAT-51**.
 - Cloudflare cache-bypass tightening for `/api/auth/*` — already covered by the broad `/api/*` bypass rule landed at FEAT-06; revisit only if Cloudflare's edge starts misclassifying.
-- Sentry `beforeSend` PII scrub for auth headers — **FEAT-43** (when Sentry first lands).
+- Sentry `beforeSend` PII scrub for auth headers — **FEAT-44** (when Sentry first lands).
 
 ---
 
@@ -1550,7 +1550,7 @@ If any of the three reads `fail` or `neutral`, do **not** declare done — the c
 ### Open items for downstream FEATs
 
 - **FEAT-14 (Better Auth server)** — consumes the verified domain. Sender constant should be `magic@loftys-larder.co.uk`; `RESEND_API_KEY` lands then via `flyctl secrets set` (do **not** set it now — no consumer yet, and an unused secret in Fly drift-checks adds noise).
-- **FEAT-50 (`OPERATIONS.md` + restore drills)** — lifts this runbook into the operations doc. The live record values stay in Cloudflare DNS / Resend dashboard; don't duplicate them into the doc.
+- **FEAT-51 (`OPERATIONS.md` + restore drills)** — lifts this runbook into the operations doc. The live record values stay in Cloudflare DNS / Resend dashboard; don't duplicate them into the doc.
 - **DMARC tightening watch.** Once FEAT-14 is live and we have a few weeks of real magic-link sends with no SPF/DKIM failures, revisit DMARC `p=none` → `quarantine`. Not now.
 - **`rua` watch.** If we ever suspect domain spoofing or want visibility into receiver behaviour, add `rua=mailto:conorwarne92@gmail.com` to the `_dmarc` TXT. Single-record edit, no other change.
 
@@ -1638,7 +1638,7 @@ CI (`ubuntu-latest`) doesn't need either.
 - Shopping-list aggregation + lazy create — **FEAT-38**.
 - `pickable-recipes` helper (cross-cutting #5) — **FEAT-19**.
 - `dateUtils` module (cross-cutting #8) — **FEAT-27** (first consumer is the plan-overlap check).
-- Plant-points helper — **FEAT-40**.
+- Plant-points helper — **FEAT-41**.
 - Zod schemas in `/shared/src/schemas/*` — land alongside the procedures that consume them.
 
 ---
@@ -1807,7 +1807,7 @@ If a future change adds a fourth workspace, copy the relevant subset into a new 
 ### Decisions taken at kick-off (the *why*, not just the *what*)
 
 - **`CURRENT_HOUSEHOLD_ID` is a hardcoded UUID constant** in `backend/src/config.ts` (`00000000-0000-4000-8000-000000000001`), re-exported from `backend/src/db/index.ts`. *Why hardcoded, not env-var:* single-household MVP (DEC-17) only needs *one* value across all environments; an env var would invite drift between dev/test/prod. FEAT-10's seed must import this constant — do not regenerate.
-- **`DATABASE_URL` is required in every environment** (Zod-validated as `postgres://` or `postgresql://`). *Why required, not optional-with-lazy-pool:* plumbing only earns its keep if it's hot at startup, and `health.ping` will start touching the DB at FEAT-46. Boot-time failure is the right time to surface a missing secret, not first-DB-query time.
+- **`DATABASE_URL` is required in every environment** (Zod-validated as `postgres://` or `postgresql://`). *Why required, not optional-with-lazy-pool:* plumbing only earns its keep if it's hot at startup, and `health.ping` will start touching the DB at FEAT-47. Boot-time failure is the right time to surface a missing secret, not first-DB-query time.
 - **Pool max hardcoded at 10**, `min` at pg-pool default 0. *Why not env-var-overridable:* DEC-71 picked a static number once for the household workload ceiling. The Testcontainers smoke builds its own `pg.Pool({ max: 1 })`, so test concurrency is decoupled.
 - **DEC-80 not triggered by FEAT-09.** No `/shared` runtime imports added; the call is deferred to FEAT-10/11 when Better Auth Drizzle table shapes and/or Zod schemas first cross the workspace boundary at runtime.
 
@@ -1841,14 +1841,14 @@ export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 - `DOCKER_HOST` — Colima's socket isn't at the default `/var/run/docker.sock`; Testcontainers' runtime detection has to be pointed at it.
 - `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` — Ryuk (Testcontainers' reaper) bind-mounts the docker socket back into its own container. Colima's Lima VM can't bind-mount a `~/.colima/...` path through 9p in a way Ryuk expects; pointing the override at `/var/run/docker.sock` is the documented Colima workaround.
 
-GitHub Actions runners use the default socket path and don't need either override. Worth a `docs/OPERATIONS.md` line at FEAT-50 lift; not blocking.
+GitHub Actions runners use the default socket path and don't need either override. Worth a `docs/OPERATIONS.md` line at FEAT-51 lift; not blocking.
 
 ### Deferred (do NOT do as part of FEAT-09)
 
 - Wire `db` into the tRPC context — downstream FEAT (FEAT-10 first procedure).
 - `flyctl postgres create` / `flyctl postgres attach` and `DATABASE_URL` in Fly secrets — operational follow-up; required before the next prod deploy.
 - Any table/schema — FEAT-10/11/12.
-- `release_command "pnpm drizzle-kit migrate"` in CI — FEAT-48.
+- `release_command "pnpm drizzle-kit migrate"` in CI — FEAT-49.
 - `/shared` runtime build wiring (DEC-80 revisit) — deferred until the FEAT that first lands a runtime shared import.
 
 ---
@@ -1872,7 +1872,7 @@ GitHub Actions runners use the default socket path and don't need either overrid
 - **`flyctl deploy --remote-only` for the first deploy** because local Docker has no `buildx` (see FEAT-05 entry below). Once `docker-buildx` is installed, the flag can be dropped.
 - **Fly issues only the LE cert** in `flyctl certs show`. The FEAT-06 gotcha's mention of "two certs (LE + Cloudflare-origin)" refers to Fly's LE cert plus Cloudflare's edge SSL cert — the latter is implicit and verified by Full (strict) SSL mode being on without TLS errors on the live URL.
 - **Cloudflare SSL/TLS mode: Full (strict).** "Always Use HTTPS" left **off** — Fly's `force_https = true` (in `fly.toml`) is the single redirect authority. No loops.
-- **`fly-request-id` flows through Cloudflare untouched.** Confirmed in probes. This is the foundation for FEAT-43's `reqId` propagation (DEC-77 / cross-cutting #1).
+- **`fly-request-id` flows through Cloudflare untouched.** Confirmed in probes. This is the foundation for FEAT-44's `reqId` propagation (DEC-77 / cross-cutting #1).
 - **All helmet security headers survive the Cloudflare hop.** CSP, HSTS, X-Frame-Options, etc. all present on responses fetched through the proxied URL.
 
 ### Decisions taken at kick-off
@@ -1885,7 +1885,7 @@ GitHub Actions runners use the default socket path and don't need either overrid
 
 ### Runbook — first-time prod deploy
 
-Substitute `<DOMAIN>` throughout once chosen. Capture every command's exit status / output worth keeping; FEAT-50 lifts this into `OPERATIONS.md`.
+Substitute `<DOMAIN>` throughout once chosen. Capture every command's exit status / output worth keeping; FEAT-51 lifts this into `OPERATIONS.md`.
 
 #### Step 0 — Domain (manual, Cloudflare Registrar)
 
@@ -2063,12 +2063,12 @@ When all six pass: report back. **Do not** tick the FEAT-06 boxes in `feature-sp
 - `flyctl postgres create` / `flyctl postgres attach` — **FEAT-09**.
 - `flyctl secrets set DATABASE_URL=…` — **FEAT-09** (or implicit via `postgres attach`).
 - SPF / DKIM / DMARC DNS records for Resend — **FEAT-13**.
-- Swap TCP `[checks.tcp_alive]` for HTTP `/api/health` check — **FEAT-46**.
-- Wire `release_command "pnpm drizzle-kit migrate"` into CI on push to `main` — **FEAT-48**.
-- Cold-start measurement against 3-second budget (DEC-64) — **FEAT-51**.
-- Nightly `pg_dump → R2` (DEC-73) — **FEAT-49 / 50**.
+- Swap TCP `[checks.tcp_alive]` for HTTP `/api/health` check — **FEAT-47**.
+- Wire `release_command "pnpm drizzle-kit migrate"` into CI on push to `main` — **FEAT-49**.
+- Cold-start measurement against 3-second budget (DEC-64) — **FEAT-52**.
+- Nightly `pg_dump → R2` (DEC-73) — **FEAT-50 / 50**.
 
-### Captured values (live record — for FEAT-50's `OPERATIONS.md` lift)
+### Captured values (live record — for FEAT-51's `OPERATIONS.md` lift)
 
 Fly app: `loftys-larder-prod`, region `lhr`, org TBD.
 
@@ -2104,7 +2104,7 @@ Cache rule `bypass-api` configured at Cloudflare → Caching → Cache Rules. In
 
 1. **Base image is `node:24-alpine`, not `node:24-slim`.** Plan recommended slim; first build came in at 346 MB (slim itself is ~345 MB on Apple-silicon Docker), failing the < ~300 MB acceptance criterion. No native-binding deps in the runtime image — esbuild's native bits live only in the build stage — so musl-libc risk is nil at this stage. Final image is **229 MB**. Revisit if `pg` (FEAT-09) or another native dep needs glibc; the swap is one-token (`alpine` → `slim`).
 
-2. **Health check in `fly.toml` is a machine-level TCP check, not the HTTP `/api/health` path specified in FEAT-05.** `/api/health` ships in FEAT-46; declaring an HTTP check that resolves to a non-existent route would have marked every machine unhealthy from FEAT-06's first deploy. Inline comment in `fly.toml` flags the swap point. **FEAT-46 must replace `[checks.tcp_alive]` with an HTTP check (or add one and keep TCP).**
+2. **Health check in `fly.toml` is a machine-level TCP check, not the HTTP `/api/health` path specified in FEAT-05.** `/api/health` ships in FEAT-47; declaring an HTTP check that resolves to a non-existent route would have marked every machine unhealthy from FEAT-06's first deploy. Inline comment in `fly.toml` flags the swap point. **FEAT-47 must replace `[checks.tcp_alive]` with an HTTP check (or add one and keep TCP).**
 
 3. **`frontend/tsconfig.json` was modified** — not on the kick-off file list. Docker exposed that `shared/dist/` is a one-off local artefact, not reproducibly built (`shared`'s `build` script is `tsc --noEmit`). Restored a reproducible frontend build with:
    - `paths: { "@loftys-larder/shared": ["../shared/src/index.ts"] }` — resolves the type-only import to source.
@@ -2143,7 +2143,7 @@ Cache rule `bypass-api` configured at Cloudflare → Caching → Cache Rules. In
 
 1. **Dropped TS `composite: true` from `/shared` and project references from `/backend` + `/frontend`.** The type-only cross-workspace import in `shared/src/router-type.ts` was incompatible with `composite + rootDir` (TS refuses to read files outside the project boundary, even for type-only imports). `/shared/tsconfig.json` now runs `noEmit: true` with `rootDir: ".."`. Captured as **DEC-80** with the revisit trigger ("first runtime import from `/shared`", likely FEAT-08). AGENTS.md leaf-rule bullet updated to note the type-only exception.
 
-2. **Added `LOG_LEVEL` env var** to `backend/src/config.ts` and `.env.example`. Not in FEAT-03's plan; added so the Vitest suite can run Pino at `silent` without polluting test output. Defaults to `info` in dev/prod. Worth knowing this exists when wiring Axiom in FEAT-43 (don't accidentally set it to `silent` in production env).
+2. **Added `LOG_LEVEL` env var** to `backend/src/config.ts` and `.env.example`. Not in FEAT-03's plan; added so the Vitest suite can run Pino at `silent` without polluting test output. Defaults to `info` in dev/prod. Worth knowing this exists when wiring Axiom in FEAT-44 (don't accidentally set it to `silent` in production env).
 
 3. **Added two extra tests** beyond the planned set:
    - `security headers > sets helmet default headers` — guards against accidental helmet misconfiguration.

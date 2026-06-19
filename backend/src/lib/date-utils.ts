@@ -1,7 +1,7 @@
 // Centralised "today"-relative semantics for the planner (DEC-33, cross-cutting
 // #8). The single hardcoded timezone is Europe/London; every consumer of "today"
 // — plan overlap, plan-status filter (FEAT-27), shelf-life (FEAT-37), per-day
-// plant points (FEAT-40) — flows through here. Domain code must never reach for
+// plant points (FEAT-41) — flows through here. Domain code must never reach for
 // `new Date()` directly; if a new caller needs a fresh Date for any reason it
 // should request it via a helper added here.
 //

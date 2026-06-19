@@ -13,7 +13,7 @@ type DbHandle = NodePgDatabase<Schema> | Tx;
 // Reusable predicate: "does this plan have a slot cooking `baseRecipeId` that
 // is at-or-before the slot identified by `slotId`?" Used by the planner UI's
 // soft warning (FEAT-32), and consumed by aggregation (FEAT-36) and
-// plant-points (FEAT-40) for the same earlier-or-same-occasion semantics.
+// plant-points (FEAT-41) for the same earlier-or-same-occasion semantics.
 //
 // "Earlier-or-same" means: an earlier calendar date, or the same date with an
 // equal-or-earlier occasion ordinal (OCCASION_ORDER, e.g. Lunch < Dinner), or

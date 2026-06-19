@@ -4,6 +4,30 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-19 — Planner date label formatting
+
+**Status:** implementation complete; not yet committed at write time. Touched `frontend/src/lib/date-utils.ts` plus three surfaces (planner header, plans list card, slot editor modal title) and three test files. Frontend Vitest run scoped to affected files: 45/45 across `date-utils.test.ts`, `plan-list-card.test.tsx`, `plans-page.test.tsx`, `planner-page.test.tsx`, `slot-editor-sheet.test.tsx`. `pnpm -r typecheck` clean. UI-only cosmetic change — no schema, no DTO, no domain code; nothing to verify via Testcontainers.
+
+### What changed
+
+- New `formatLongDayLabel(iso)` — "Fri 19th Jun 2026". Uppercased weekday rejected mid-iteration in favour of sentence-case for the modal/header context (was MON … →  Mon …).
+- New `formatDayRangeLabel(start, end)` — collapses repeated month/year segments. Same month + year: `Mon 15th – Sun 21st Jun 2026`. Same year only: `Mon 30th Jun – Sun 6th Jul 2026`. Different years: full label on both sides. The collapse parses both ISO strings once and branches on `s.year === e.year && s.month === e.month`.
+- Three call sites updated: `routes/-components/planner-page.tsx` header, `components/planner/plan-list-card.tsx` list row, `components/planner/slot-editor-sheet.tsx` `DialogTitle`. Slot-cell aria-labels (`{occasionName} on {date}`) intentionally left alone — accessibility text, not a user-visible date.
+
+### Decisions taken inline
+
+- **Helpers live in `frontend/src/lib/date-utils.ts`,** not `/shared`. Format is a frontend presentation concern; the backend has its own civil-day helpers (`backend/src/lib/date-utils.ts`) and there's no current DTO that needs the rendered string. DEC-80 keeps `/shared` runtime-leaf — adding a presentation helper there would have been wrong altitude.
+- **Ordinal suffix is a 4-line switch.** No `Intl` API for ordinals at the `en-GB` locale we care about (`Intl.PluralRules` gets the plural category but not the suffix string). Hand-rolled `ordinalSuffix(day)` covers 11th/12th/13th and the `1/2/3/n` tail. Self-contained, no deps.
+- **Collapse logic is in the range formatter, not the day formatter.** Keeping `formatLongDayLabel(iso)` total — "always renders weekday/day/month/year" — means it's safe to call standalone (slot modal does). The collapse decision is a property of the *pair*, so it lives where the pair is.
+- **Test fixture date `2026-06-15 – 2026-06-21` falls in the same month**, so the existing fixture exercises the same-month branch. No fixture changes needed; the cross-month and cross-year branches are covered by intent only — could add `date-utils.test.ts` cases if it ever regresses, but the call-site tests pin the most-used branch.
+
+### Carry-forward gotchas
+
+- **`Intl.DateTimeFormat` rendered short month is `Jun.` in some locales but `Jun` in `en-GB`.** The pinned locale (`'en-GB'`) gives the trailing-dot-free form across Node/Chromium. A future swap to `'en'` would re-introduce the dot; the call-site tests would catch it.
+- **Same-month range with reversed weekday (`Sun 21st – Mon 15th`) is grammatically odd**, but the formatter trusts that callers pass `start ≤ end`. Upstream uses `clampRange` + `plan.startDate <= plan.endDate` invariants, so this stays implicit.
+
+---
+
 ## 2026-06-19 — FEAT-39 (Shopping list view UI)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across the three workspaces. Frontend Vitest run: 247/247 tests across 36 files (212 pre-existing + 35 net new across `use-optimistic-check-toggle.test.ts` (5), `shopping-list-page.test.tsx` (7), `list-line.test.tsx` (6), and one additional case across the existing planner-page test where I extended the `@tanstack/react-router` mock). One pre-existing flake in `recipe-comments.test.tsx` ("Post button is disabled when text exceeds the max length" — `userEvent.type` produced garbled input under parallel load, then passed in isolation and on rerun). DoD boxes in `docs/feature-specs.md §FEAT-39` left unticked — human action. Manual gate (open list, check items, edit servings to trigger DEC-31 reset, print preview, phone viewport) owed by the human.

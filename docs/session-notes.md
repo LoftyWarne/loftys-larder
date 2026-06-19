@@ -4,6 +4,28 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-19 — Shopping list nav entry
+
+**Status:** implementation complete; not yet committed at write time. `pnpm --filter frontend typecheck` and `pnpm --filter frontend lint` both clean. No new tests — UI nav wiring only. Manual probe (sign in → click "Shopping list" → confirm forward to active plan or empty state) owed by the human.
+
+### What changed
+
+- New `/_authed/shopping` route: thin shell in `frontend/src/routes/_authed/shopping.tsx`, page body in `routes/-components/shopping-index-page.tsx`. Queries `plans.list({ status: 'active' })`, picks the first item, and forwards to `/plans/$planId/shopping` with `replace: true`. No active plan → empty state with a CTA to `/plans`. Loading/error mirror the per-plan `ShoppingListPage` shape.
+- `routes/-components/authed-layout.tsx` now has a `Shopping list` link between `Plans` and `Ingredients`.
+
+### Decisions taken inline
+
+- **Forward, don't duplicate.** The shopping list URL stays `/plans/$planId/shopping` — that's the canonical, per-plan URL the planner header already links to and the PWA cache rules already match. The new `/shopping` is a convenience entry that resolves "which plan?" client-side, not a second source of truth.
+- **`replace: true` on the redirect** so back-button doesn't bounce the user between `/shopping` and `/plans/$planId/shopping`.
+- **"Active" = first item of `plans.list({ status: 'active' })`.** The list query orders by `startDate desc, id desc`; given the backend's overlap constraint (DEC-17 territory) you can only have one active plan at a time in v1, so "first" and "the one" coincide. If multi-active ever becomes a thing, this picks the most recently started — fine as a default.
+- **No `beforeLoad` redirect.** Doing it in the component with `useEffect` keeps the route file a thin shell (AGENTS.md route-shell rule) and reuses the existing tRPC react-query plumbing rather than wiring a server-side prefetch just for this.
+
+### Carry-forward gotchas
+
+- The new route doesn't have a Vitest. The nav-link presence and the redirect behaviour are both observable, but with the existing per-plan `shopping-list-page.test.tsx` covering the destination it didn't earn one. If the redirect ever flakes, the cheapest probe is a single render-and-assert-`navigate` test mirroring `plans-page.test.tsx`'s `useNavigate` mock pattern.
+
+---
+
 ## 2026-06-19 — Planner date label formatting
 
 **Status:** implementation complete; not yet committed at write time. Touched `frontend/src/lib/date-utils.ts` plus three surfaces (planner header, plans list card, slot editor modal title) and three test files. Frontend Vitest run scoped to affected files: 45/45 across `date-utils.test.ts`, `plan-list-card.test.tsx`, `plans-page.test.tsx`, `planner-page.test.tsx`, `slot-editor-sheet.test.tsx`. `pnpm -r typecheck` clean. UI-only cosmetic change — no schema, no DTO, no domain code; nothing to verify via Testcontainers.

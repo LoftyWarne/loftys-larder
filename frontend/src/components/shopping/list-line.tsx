@@ -68,12 +68,18 @@ export function ListLine({
         </summary>
         <ul className="mt-1 space-y-0.5">
           {line.contributingSlots.map((slot) => (
-            <li key={slot.slotId} className="flex flex-wrap gap-x-2">
+            <li
+              key={slot.slotId}
+              className="flex flex-wrap items-baseline justify-between gap-x-3"
+            >
               <span>{slot.recipeName}</span>
-              <span className="text-xs">{formatDayLabel(slot.date)}</span>
-              <span className="text-xs tabular-nums">
-                {formatQuantity(slot.scaledQuantity, line.unit.name)}{' '}
-                {line.unit.name}
+              <span className="flex items-baseline gap-2 text-muted-foreground/80">
+                <span>{formatDayLabel(slot.date)}</span>
+                <span aria-hidden="true">·</span>
+                <span className="tabular-nums">
+                  {formatQuantity(slot.scaledQuantity, line.unit.name)}{' '}
+                  {line.unit.name}
+                </span>
               </span>
             </li>
           ))}

@@ -9,6 +9,7 @@ const {
   deleteAccountMock,
   useUtilsMock,
   signOutMock,
+  refreshSessionMock,
   navigateMock,
 } = vi.hoisted(() => ({
   getMeMock: vi.fn(),
@@ -17,6 +18,7 @@ const {
   deleteAccountMock: vi.fn(),
   useUtilsMock: vi.fn(),
   signOutMock: vi.fn(),
+  refreshSessionMock: vi.fn(),
   navigateMock: vi.fn(),
 }));
 
@@ -36,6 +38,7 @@ vi.mock('@/lib/auth-client.ts', () => ({
   authClient: {
     signOut: signOutMock,
   },
+  refreshSession: refreshSessionMock,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -79,8 +82,20 @@ function setup(options: SetupOptions = {}): {
   useUtilsMock.mockReturnValue({
     user: { getMe: { invalidate } },
   });
-  const mutateAsync = options.mutateAsync ?? vi.fn().mockResolvedValue(ME);
-  updateProfileMock.mockReturnValue({ mutateAsync });
+  const rawMutateAsync = options.mutateAsync ?? vi.fn().mockResolvedValue(ME);
+  // Mirror useMutation's real behaviour: run onSuccess after a successful
+  // mutateAsync so the test exercises the cache-invalidate + session-refresh
+  // path.
+  updateProfileMock.mockImplementation(
+    (opts?: { onSuccess?: () => unknown }) => {
+      const mutateAsync = vi.fn().mockImplementation(async (input: unknown) => {
+        const result: unknown = await rawMutateAsync(input);
+        await opts?.onSuccess?.();
+        return result;
+      });
+      return { mutateAsync };
+    },
+  );
   const deleteMutateAsync =
     options.deleteMutateAsync ?? vi.fn().mockResolvedValue({ deleted: true });
   deleteAccountMock.mockReturnValue({
@@ -89,7 +104,7 @@ function setup(options: SetupOptions = {}): {
   });
   signOutMock.mockResolvedValue(undefined);
   navigateMock.mockResolvedValue(undefined);
-  return { mutateAsync, deleteMutateAsync };
+  return { mutateAsync: rawMutateAsync, deleteMutateAsync };
 }
 
 beforeEach(() => {
@@ -99,6 +114,7 @@ beforeEach(() => {
   deleteAccountMock.mockReset();
   useUtilsMock.mockReset();
   signOutMock.mockReset();
+  refreshSessionMock.mockReset();
   navigateMock.mockReset();
 });
 
@@ -197,6 +213,39 @@ describe('SettingsPage', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Boom');
     });
     expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled();
+  });
+
+  it('refreshes the Better Auth session after a successful save so ThemeProvider sees the new preference without a reload', async () => {
+    setup();
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Name')).toHaveValue('Test User');
+    });
+    await user.click(screen.getByRole('radio', { name: /dark/i }));
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => {
+      expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('does not refresh the session when the save fails', async () => {
+    setup({ mutateAsync: vi.fn().mockRejectedValue(new Error('Boom')) });
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Name')).toHaveValue('Test User');
+    });
+    await user.click(screen.getByRole('radio', { name: /dark/i }));
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Boom');
+    });
+    expect(refreshSessionMock).not.toHaveBeenCalled();
   });
 
   it('shows a confirmation after a successful save', async () => {

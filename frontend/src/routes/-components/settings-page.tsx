@@ -11,7 +11,7 @@ import { useForm } from 'react-hook-form';
 import { DangerConfirmDialog } from '@/components/danger-confirm-dialog.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
-import { authClient } from '@/lib/auth-client.ts';
+import { authClient, refreshSession } from '@/lib/auth-client.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 type SaveState =
@@ -38,6 +38,7 @@ export function SettingsPage(): React.ReactElement {
   const updateProfile = trpc.user.updateProfile.useMutation({
     onSuccess: async () => {
       await utils.user.getMe.invalidate();
+      refreshSession();
     },
   });
   const deleteAccount = trpc.user.deleteAccount.useMutation();

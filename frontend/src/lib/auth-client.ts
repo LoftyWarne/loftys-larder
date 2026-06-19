@@ -23,3 +23,12 @@ export const authClient = createAuthClient({
 });
 
 export const { useSession, signIn, signOut, getSession } = authClient;
+
+// The session atom is auto-refreshed only when Better Auth's own endpoints
+// (e.g. /update-user) are called. We mutate the user via tRPC, so anything
+// the session carries — currently `themePreference` — must trigger a manual
+// refresh, otherwise `useSession` consumers (notably ThemeProvider) stay stale
+// until a hard reload.
+export function refreshSession(): void {
+  authClient.$store.notify('$sessionSignal');
+}

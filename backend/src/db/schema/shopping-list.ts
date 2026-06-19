@@ -34,7 +34,7 @@ export const shoppingListItems = pgTable(
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [primaryKey({ columns: [table.planId, table.ingredientId] })],
 );

@@ -37,7 +37,7 @@ export const users = pgTable(
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [uniqueIndex('users_email_unique').on(table.email)],
 );
@@ -59,7 +59,7 @@ export const sessions = pgTable(
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [
     uniqueIndex('sessions_token_unique').on(table.token),
@@ -89,7 +89,7 @@ export const accounts = pgTable(
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [index('accounts_user_id_idx').on(table.userId)],
 );
@@ -107,7 +107,7 @@ export const verifications = pgTable(
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [index('verifications_identifier_idx').on(table.identifier)],
 );

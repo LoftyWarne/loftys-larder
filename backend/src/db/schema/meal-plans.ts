@@ -50,7 +50,7 @@ export const mealPlans = pgTable(
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [
     check(
@@ -100,7 +100,7 @@ export const mealPlanSlots = pgTable(
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [
     uniqueIndex('meal_plan_slots_plan_date_occasion_unique').on(

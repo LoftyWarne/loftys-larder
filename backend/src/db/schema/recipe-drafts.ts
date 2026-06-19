@@ -33,7 +33,7 @@ export const recipeDrafts = pgTable(
     lastUpdatedAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`)
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (table) => [
     uniqueIndex('recipe_drafts_user_recipe_unique').on(

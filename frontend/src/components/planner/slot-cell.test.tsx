@@ -91,6 +91,32 @@ describe('SlotCell', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
+  it('renders a clear affordance for non-empty slots and fires onClear', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    const onClear = vi.fn();
+    render(
+      <SlotCell
+        slot={{ ...BASE_SLOT, slotType: 'eat_out' }}
+        onClick={onClick}
+        onClear={onClear}
+      />,
+    );
+    const clearButton = screen.getByRole('button', { name: /^clear/i });
+    await user.click(clearButton);
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('omits the clear affordance for empty slots', () => {
+    render(
+      <SlotCell slot={BASE_SLOT} onClick={() => undefined} onClear={vi.fn()} />,
+    );
+    expect(
+      screen.queryByRole('button', { name: /^clear/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders the baseCookLine prop when the parent provides one', () => {
     render(
       <SlotCell

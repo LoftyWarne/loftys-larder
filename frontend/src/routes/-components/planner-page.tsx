@@ -120,6 +120,22 @@ export function PlannerPage(): React.ReactElement {
     setEditingSlotId(slot.id);
   }
 
+  function handleSlotClear(slot: PlanSlot): void {
+    setMutationError(null);
+    update({
+      input: {
+        slotId: slot.id,
+        slotType: 'empty',
+        recipeId: null,
+        numberOfServings: null,
+        chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
+        comment: null,
+      },
+    });
+  }
+
   function handleSave(
     input: UpdateSlotInput,
     options?: {
@@ -188,6 +204,7 @@ export function PlannerPage(): React.ReactElement {
             rangeEnd={visible.end}
             warningSlotIds={batchWarningSlots}
             onSlotClick={handleSlotClick}
+            onSlotClear={handleSlotClear}
           />
         ) : (
           <p className="text-sm text-muted-foreground" role="status">

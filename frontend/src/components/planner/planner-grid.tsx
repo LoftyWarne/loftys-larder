@@ -11,6 +11,7 @@ export interface PlannerGridProps {
   rangeEnd: string;
   warningSlotIds?: ReadonlySet<number>;
   onSlotClick: (slot: PlanSlot) => void;
+  onSlotClear?: (slot: PlanSlot) => void;
 }
 
 interface OccasionColumn {
@@ -24,6 +25,7 @@ export function PlannerGrid({
   rangeEnd,
   warningSlotIds,
   onSlotClick,
+  onSlotClear,
 }: PlannerGridProps): React.ReactElement {
   const visibleDates = useMemo(
     () => eachDateInRange(rangeStart, rangeEnd),
@@ -103,6 +105,13 @@ export function PlannerGrid({
                       onClick={() => {
                         onSlotClick(slot);
                       }}
+                      onClear={
+                        onSlotClear
+                          ? () => {
+                              onSlotClear(slot);
+                            }
+                          : undefined
+                      }
                     />
                   ) : (
                     <div className="h-full min-h-20 rounded-md border border-dashed border-input bg-muted/30" />

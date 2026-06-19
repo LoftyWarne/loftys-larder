@@ -200,7 +200,9 @@ describe('PlannerPage', () => {
 
     await user.click(screen.getByRole('option', { name: /tomato pasta/i }));
     await user.click(
-      screen.getByRole('button', { name: /Lunch on 2026-06-15: empty slot/i }),
+      screen.getByRole('button', {
+        name: /^Lunch on 2026-06-15: empty slot$/i,
+      }),
     );
 
     expect(updateMutateMock).toHaveBeenCalledTimes(1);
@@ -224,7 +226,7 @@ describe('PlannerPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: /Dinner on 2026-06-15: tomato pasta/i,
+        name: /^Dinner on 2026-06-15: tomato pasta$/i,
       }),
     );
 
@@ -240,11 +242,39 @@ describe('PlannerPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: /Dinner on 2026-06-15: tomato pasta/i,
+        name: /^Dinner on 2026-06-15: tomato pasta$/i,
       }),
     );
     await user.click(screen.getByRole('button', { name: /^clear$/i }));
 
+    expect(updateMutateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMutateMock.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(payload).toEqual({
+      slotId: 101,
+      slotType: 'empty',
+      recipeId: null,
+      numberOfServings: null,
+      chefUserId: null,
+      cooksBaseRecipeId: null,
+      cooksBaseServings: null,
+      comment: null,
+    });
+  });
+
+  it('clearing from the slot card sends slotType=empty without opening the editor', async () => {
+    const user = userEvent.setup();
+    setup();
+    render(<PlannerPage />);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: /^Clear Dinner on 2026-06-15: tomato pasta$/i,
+      }),
+    );
+
+    expect(
+      screen.queryByRole('heading', { name: /dinner.*Mon 15th Jun 2026/i }),
+    ).not.toBeInTheDocument();
     expect(updateMutateMock).toHaveBeenCalledTimes(1);
     const payload = updateMutateMock.mock.calls[0]?.[0] as UpdateSlotInput;
     expect(payload).toEqual({
@@ -266,7 +296,7 @@ describe('PlannerPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: /Dinner on 2026-06-15: tomato pasta/i,
+        name: /^Dinner on 2026-06-15: tomato pasta$/i,
       }),
     );
     await user.click(screen.getByRole('radio', { name: /eat out/i }));

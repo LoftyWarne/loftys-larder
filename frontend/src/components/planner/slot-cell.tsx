@@ -1,4 +1,5 @@
 import type { PlanSlot } from '@loftys-larder/shared';
+import { Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils.ts';
@@ -10,6 +11,7 @@ import { cn } from '@/lib/utils.ts';
 export interface SlotCellProps {
   slot: PlanSlot;
   onClick: () => void;
+  onClear?: () => void;
   isSelected?: boolean;
   // Future content regions — leave open for downstream FEATs.
   baseCookLine?: ReactNode;
@@ -27,30 +29,45 @@ const STATE_LABEL: Record<Exclude<PlanSlot['slotType'], 'recipe'>, string> = {
 export function SlotCell({
   slot,
   onClick,
+  onClear,
   isSelected = false,
   baseCookLine,
   chefChip,
   commentLine,
 }: SlotCellProps): React.ReactElement {
+  const showClear = onClear !== undefined && slot.slotType !== 'empty';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={describeSlotForA11y(slot)}
-      data-slot-id={slot.id}
-      data-slot-type={slot.slotType}
-      className={cn(
-        'flex h-full min-h-20 w-full flex-col items-stretch gap-1 rounded-md border border-input bg-card p-2 text-left text-sm transition hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring',
-        slot.slotType === 'empty' &&
-          'border-dashed text-muted-foreground italic',
-        isSelected && 'border-primary ring-2 ring-ring',
+    <div className="relative h-full">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={describeSlotForA11y(slot)}
+        data-slot-id={slot.id}
+        data-slot-type={slot.slotType}
+        className={cn(
+          'flex h-full min-h-20 w-full flex-col items-stretch gap-1 rounded-md border border-input bg-card p-2 text-left text-sm transition hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring',
+          showClear && 'pr-8',
+          slot.slotType === 'empty' &&
+            'border-dashed text-muted-foreground italic',
+          isSelected && 'border-primary ring-2 ring-ring',
+        )}
+      >
+        <SlotBody slot={slot} />
+        {baseCookLine}
+        {chefChip}
+        {commentLine}
+      </button>
+      {showClear && (
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label={`Clear ${describeSlotForA11y(slot)}`}
+          className="absolute top-1 right-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
       )}
-    >
-      <SlotBody slot={slot} />
-      {baseCookLine}
-      {chefChip}
-      {commentLine}
-    </button>
+    </div>
   );
 }
 

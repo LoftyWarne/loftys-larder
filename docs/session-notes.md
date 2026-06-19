@@ -4,6 +4,31 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-19 — Slot card clear affordance
+
+**Status:** implementation complete; not yet committed at write time. `pnpm --filter frontend typecheck`, `pnpm --filter frontend lint`, and the full Vitest suite (250 tests) all pass. No human probe owed beyond a tap to confirm the icon hit-target feels right.
+
+### What changed
+
+- `SlotCell` gained an optional `onClear` prop and renders a `Trash2` icon button (top-right, absolutely positioned within a wrapper `<div>`) whenever `onClear` is supplied and the slot is not already empty. Main button gets `pr-8` padding when the affordance is visible so the icon doesn't overlap the content.
+- `PlannerGrid` accepts `onSlotClear` and threads it per slot.
+- `PlannerPage` adds `handleSlotClear`, which dispatches an `empty` payload through the existing `useOptimisticSlotUpdate` hook — no editor-sheet detour.
+- Tests: two new `SlotCell` cases (clear fires `onClear`, hidden for empty slots), one new `PlannerPage` case (card-level clear bypasses the editor). Two pre-existing planner-page selectors anchored with `^…$` because the new `Clear …` aria-label otherwise matched the same `getByRole` regex as the main button.
+
+### Decisions taken inline
+
+- **Nested-button avoidance via a wrapper div.** A single `<button>` can't contain another interactive button (invalid HTML, blocks the inner click in some browsers). The card is now `<div className="relative"><button …/>{maybe <button …/>}</div>` — both buttons are siblings and the trash button is absolutely positioned. Matches the standard shadcn pattern for "card with secondary action".
+- **No confirmation dialog on clear.** The editor sheet's existing `handleClear` button doesn't confirm either — staying consistent. LWW (DEC-36) means an accidental clear is recoverable by re-picking the recipe; the editor sheet still opens on tap of the main button when the user wants to inspect first.
+- **Hidden for empty slots.** Clearing an empty slot is a no-op. Keeps the visual noise down on a fresh week where every slot starts empty.
+- **Reused the optimistic hook (cross-cutting #7).** Did not introduce a new mutation path. The new handler is one `update({ input })` call with the canonical empty payload — identical shape to the editor's clear button so the optimistic + settle logic doesn't fork.
+
+### Carry-forward gotchas
+
+- **`SlotCell` is now a `<div>` at the root, not a `<button>`.** Tests that did `getByRole('button')` on a `SlotCell` mount will fail if a clear handler is supplied (two buttons match). The existing `slot-cell.test.tsx` happens to render without `onClear` so its bare `getByRole('button')` still resolves uniquely — but anything new should use the aria-label.
+- **The clear button's `aria-label` is `Clear ${describeSlotForA11y(slot)}`.** That string is a strict superset of the main button's label, so any regex that matches the main button without anchors will also match the clear button. Always anchor (`^…$`) or use `exact: true`.
+
+---
+
 ## 2026-06-19 — Shopping list nav entry
 
 **Status:** implementation complete; not yet committed at write time. `pnpm --filter frontend typecheck` and `pnpm --filter frontend lint` both clean. No new tests — UI nav wiring only. Manual probe (sign in → click "Shopping list" → confirm forward to active plan or empty state) owed by the human.

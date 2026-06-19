@@ -7,7 +7,7 @@ import { useOptimisticCheckToggle } from '@/hooks/use-optimistic-check-toggle.ts
 import { trpc } from '@/lib/trpc.ts';
 
 export function ShoppingListPage(): React.ReactElement {
-  const params = useParams({ from: '/_authed/plans/$planId/shopping' });
+  const params = useParams({ from: '/_authed/plans/$planId_/shopping' });
   const planId = Number.parseInt(params.planId, 10);
   const idIsValid = Number.isInteger(planId) && planId > 0;
 

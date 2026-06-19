@@ -4,6 +4,34 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-19 — Theme preference doesn't apply without hard refresh
+
+**Status:** fix complete; not yet committed at write time. `settings-page.test.tsx` 14/14 pass; `pnpm -r typecheck` and `pnpm -r lint` clean. Pre-existing flake in `recipe-comments.test.tsx` unrelated.
+
+### The bug
+
+Switching theme in Settings and clicking *Save* persisted to the DB but the UI stayed on the old theme until a hard refresh. `ThemeProvider` (`frontend/src/lib/theme-provider.tsx`) reads `themePreference` from Better Auth's `useSession` cache, not from tRPC's `getMe`. The settings mutation only `invalidate`s `trpc.user.getMe`, so the Better Auth session atom keeps serving the stale value.
+
+Better Auth's session atom auto-refreshes only when its own endpoints fire (the client wires a `$sessionSignal` listener to `/update-user`, `/sign-out`, etc. — see `node_modules/.../better-auth/dist/client/config.mjs:67`). Our profile update goes through tRPC, so that listener never sees it.
+
+### What changed
+
+- `frontend/src/lib/auth-client.ts`: exported `refreshSession()` which calls `authClient.$store.notify('$sessionSignal')`. That's the documented hook for nudging the session atom from outside Better Auth's endpoint surface.
+- `frontend/src/routes/-components/settings-page.tsx`: `updateProfile.useMutation`'s `onSuccess` now calls `refreshSession()` after `utils.user.getMe.invalidate()`, so `ThemeProvider` re-reads on the next render.
+- `settings-page.test.tsx`: the `updateProfileMock` now wraps `mutateAsync` so `useMutation`'s `onSuccess` actually runs in tests (previously the mock just returned `{ mutateAsync }` and onSuccess was never invoked). Added two new tests: success path refreshes the session; error path does not.
+
+### Decisions taken inline
+
+- **Did not move the theme source-of-truth to tRPC's `getMe`.** `ThemeProvider` sits at the app root and renders for unauthenticated users (sign-in page); reading from `getMe` would either fail or need a conditional that knew whether the user is signed in. Keeping the session as the read path and just nudging the atom is two lines and preserves the existing shape.
+- **`$store.notify` over `getSession({ disableCookieCache: true })`.** Both refetch, but `notify` triggers the same code path Better Auth's own auto-refresh uses (`useAuthQuery` re-runs when `$sessionSignal` flips), so the React subscriber sees a fresh value via the existing nanostore subscription. Calling `getSession` directly bypasses the atom and the `useSession` consumers wouldn't necessarily re-render.
+
+### Carry-forward gotchas
+
+- **Any future field added to `inferAdditionalFields` (the auth client extension at `auth-client.ts:17`) needs the same treatment** if it's mutated via tRPC rather than Better Auth. Today that's just `themePreference`; if `householdName` or similar lands on the session later, the settings mutation should keep calling `refreshSession()` — already covered by the existing call site.
+- **The test mock change is non-trivial:** `updateProfileMock.mockImplementation(opts => { ... opts.onSuccess?.() ... })` mirrors `useMutation`'s real behaviour. If anyone adds another `useMutation` with side-effecting callbacks to this page, they can rely on `onSuccess` actually firing in tests.
+
+---
+
 ## 2026-06-19 — Shopping list contributor row layout
 
 **Status:** implementation complete; not yet committed at write time. `list-line.test.tsx` 6/6 pass. Unrelated pre-existing flake in `recipe-comments.test.tsx` ("edit flow swaps in a textarea" — `userEvent.type` produced garbled input again under parallel load; same shape as the FEAT-39 note's flake). UI-only cosmetic change — no schema, no DTO, no helper.

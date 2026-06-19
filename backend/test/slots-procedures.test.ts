@@ -47,6 +47,7 @@ describe('slots procedures', () => {
   let pool: pg.Pool | undefined;
   let db!: NodePgDatabase<Schema>;
   let occasionId!: number;
+  let secondOccasionId!: number;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17.2-alpine').start();
@@ -100,8 +101,10 @@ describe('slots procedures', () => {
       .values([{ name: 'Lunch' }, { name: 'Dinner' }])
       .returning({ id: mealOccasions.id });
     const first = occasions[0];
-    if (!first) throw new Error('expected occasion');
+    const second = occasions[1];
+    if (!first || !second) throw new Error('expected two occasions');
     occasionId = first.id;
+    secondOccasionId = second.id;
   });
 
   function makeContext(
@@ -898,6 +901,140 @@ describe('slots procedures', () => {
           comment: null,
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+  });
+
+  describe('relocate', () => {
+    it('moves a populated source onto an empty dest (source becomes empty)', async () => {
+      const planId = await insertPlan();
+      const recipeId = await insertRecipe('Lentil Curry');
+      const sourceId = await insertSlot(planId, {
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: 4,
+        chefUserId: USER_ID,
+        comment: 'source comment',
+      });
+      const destId = await insertSlot(planId, { occasionId: secondOccasionId });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.slots.relocate({
+        sourceSlotId: sourceId,
+        destSlotId: destId,
+      });
+
+      expect(result.sourceSlot.slotType).toBe('empty');
+      expect(result.sourceSlot.recipeId).toBeNull();
+      expect(result.sourceSlot.numberOfServings).toBeNull();
+      expect(result.sourceSlot.chefUserId).toBeNull();
+      expect(result.sourceSlot.comment).toBeNull();
+      expect(result.destSlot.slotType).toBe('recipe');
+      expect(result.destSlot.recipeId).toBe(recipeId);
+      expect(result.destSlot.numberOfServings).toBe(4);
+      expect(result.destSlot.chefUserId).toBe(USER_ID);
+      expect(result.destSlot.comment).toBe('source comment');
+
+      const sourceRow = await readSlot(sourceId);
+      const destRow = await readSlot(destId);
+      expect(sourceRow.slotType).toBe('empty');
+      expect(destRow.slotType).toBe('recipe');
+      expect(destRow.recipeId).toBe(recipeId);
+    });
+
+    it('swaps two populated slots, exchanging recipe / servings / chef / comment / cooksBase*', async () => {
+      const planId = await insertPlan();
+      const sourceRecipe = await insertRecipe('Source Recipe');
+      const destRecipe = await insertRecipe('Dest Recipe');
+      const sourceId = await insertSlot(planId, {
+        slotType: 'recipe',
+        recipeId: sourceRecipe,
+        numberOfServings: 2,
+        chefUserId: USER_ID,
+        comment: 'src',
+      });
+      const destId = await insertSlot(planId, {
+        occasionId: secondOccasionId,
+        slotType: 'recipe',
+        recipeId: destRecipe,
+        numberOfServings: 5,
+        chefUserId: null,
+        comment: 'dst',
+      });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.slots.relocate({
+        sourceSlotId: sourceId,
+        destSlotId: destId,
+      });
+
+      expect(result.sourceSlot.recipeId).toBe(destRecipe);
+      expect(result.sourceSlot.numberOfServings).toBe(5);
+      expect(result.sourceSlot.chefUserId).toBeNull();
+      expect(result.sourceSlot.comment).toBe('dst');
+      expect(result.destSlot.recipeId).toBe(sourceRecipe);
+      expect(result.destSlot.numberOfServings).toBe(2);
+      expect(result.destSlot.chefUserId).toBe(USER_ID);
+      expect(result.destSlot.comment).toBe('src');
+    });
+
+    it('rejects a relocate across different plans with FORBIDDEN', async () => {
+      const planA = await insertPlan();
+      const planB = await insertPlan();
+      const recipeId = await insertRecipe('A Recipe');
+      const sourceId = await insertSlot(planA, {
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: 2,
+      });
+      const destId = await insertSlot(planB);
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.relocate({ sourceSlotId: sourceId, destSlotId: destId }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+      const sourceRow = await readSlot(sourceId);
+      expect(sourceRow.slotType).toBe('recipe');
+      expect(sourceRow.recipeId).toBe(recipeId);
+    });
+
+    it("rejects a relocate where one slot is in another household's plan", async () => {
+      const planId = await insertPlan();
+      const otherPlanId = await insertPlan({ householdId: OTHER_HOUSEHOLD_ID });
+      const recipeId = await insertRecipe('Foreign Plan');
+      const sourceId = await insertSlot(planId, {
+        slotType: 'recipe',
+        recipeId,
+        numberOfServings: 2,
+      });
+      const destId = await insertSlot(otherPlanId);
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.relocate({ sourceSlotId: sourceId, destSlotId: destId }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+      const sourceRow = await readSlot(sourceId);
+      expect(sourceRow.slotType).toBe('recipe');
+    });
+
+    it('rejects sourceSlotId === destSlotId at the schema layer', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.relocate({ sourceSlotId: slotId, destSlotId: slotId }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects unauthenticated callers', async () => {
+      const planId = await insertPlan();
+      const sourceId = await insertSlot(planId);
+      const destId = await insertSlot(planId, { occasionId: secondOccasionId });
+      const caller = createCaller(makeContext({ authenticated: false }));
+      await expect(
+        caller.slots.relocate({ sourceSlotId: sourceId, destSlotId: destId }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });
 });

@@ -10,6 +10,7 @@ export interface PlannerGridProps {
   rangeStart: string;
   rangeEnd: string;
   warningSlotIds?: ReadonlySet<number>;
+  dndEnabled?: boolean;
   onSlotClick: (slot: PlanSlot) => void;
   onSlotClear?: (slot: PlanSlot) => void;
 }
@@ -24,6 +25,7 @@ export function PlannerGrid({
   rangeStart,
   rangeEnd,
   warningSlotIds,
+  dndEnabled = false,
   onSlotClick,
   onSlotClear,
 }: PlannerGridProps): React.ReactElement {
@@ -98,6 +100,7 @@ export function PlannerGrid({
                   {slot ? (
                     <SlotCell
                       slot={slot}
+                      dndEnabled={dndEnabled}
                       baseCookLine={renderBaseCookLine(
                         slot,
                         warningSlotIds?.has(slot.id) ?? false,

@@ -1,3 +1,4 @@
+import { useDraggable } from '@dnd-kit/core';
 import type { ListRecipesCursor, RecipeListItem } from '@loftys-larder/shared';
 import { useEffect, useState } from 'react';
 
@@ -12,11 +13,16 @@ const PAGE_SIZE = 30;
 export interface RecipeBankProps {
   selectedRecipeId: number | null;
   onSelect: (recipe: RecipeListItem | null) => void;
+  // When true, each row registers as a dnd-kit draggable so it can be dragged
+  // onto an empty slot. Click-to-select keeps working alongside the drag —
+  // the pointer sensor's 5 px activation constraint keeps taps as taps.
+  dndEnabled?: boolean;
 }
 
 export function RecipeBank({
   selectedRecipeId,
   onSelect,
+  dndEnabled = false,
 }: RecipeBankProps): React.ReactElement {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -88,41 +94,15 @@ export function RecipeBank({
         }
         className="flex flex-1 flex-col gap-2 overflow-y-auto"
       >
-        {recipes.map((recipe) => {
-          const isSelected = recipe.id === selectedRecipeId;
-          return (
-            <li key={recipe.id}>
-              <button
-                type="button"
-                id={`recipe-bank-${String(recipe.id)}`}
-                role="option"
-                aria-selected={isSelected}
-                onClick={() => {
-                  onSelect(isSelected ? null : recipe);
-                }}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-md border border-input bg-background p-2 text-left transition hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring',
-                  isSelected && 'border-primary ring-2 ring-ring',
-                )}
-              >
-                {recipe.imageUrl !== null && (
-                  <img
-                    src={recipe.imageUrl}
-                    alt=""
-                    className="h-12 w-12 shrink-0 rounded object-cover"
-                  />
-                )}
-                <span className="flex flex-col">
-                  <span className="font-medium">{recipe.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {String(recipe.baseServings)} servings
-                    {recipe.isBase && ' · base'}
-                  </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
+        {recipes.map((recipe) => (
+          <RecipeBankRow
+            key={recipe.id}
+            recipe={recipe}
+            isSelected={recipe.id === selectedRecipeId}
+            onSelect={onSelect}
+            dndEnabled={dndEnabled}
+          />
+        ))}
       </ul>
 
       {listQuery.hasNextPage && (
@@ -138,5 +118,65 @@ export function RecipeBank({
         </Button>
       )}
     </aside>
+  );
+}
+
+interface RecipeBankRowProps {
+  recipe: RecipeListItem;
+  isSelected: boolean;
+  onSelect: (recipe: RecipeListItem | null) => void;
+  dndEnabled: boolean;
+}
+
+function RecipeBankRow({
+  recipe,
+  isSelected,
+  onSelect,
+  dndEnabled,
+}: RecipeBankRowProps): React.ReactElement {
+  // Hook always called; `disabled` short-circuits the drag when we're not in
+  // desktop tier. Keeping the hook unconditional satisfies the rules-of-hooks
+  // when `dndEnabled` flips on a viewport resize.
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `recipe:${String(recipe.id)}`,
+    data: { kind: 'recipe', recipe },
+    disabled: !dndEnabled,
+  });
+  return (
+    <li>
+      <button
+        type="button"
+        id={`recipe-bank-${String(recipe.id)}`}
+        ref={setNodeRef}
+        onClick={() => {
+          onSelect(isSelected ? null : recipe);
+        }}
+        {...attributes}
+        {...listeners}
+        role="option"
+        aria-selected={isSelected}
+        className={cn(
+          'flex w-full items-center gap-3 rounded-md border border-input bg-background p-2 text-left transition hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring',
+          isSelected && 'border-primary ring-2 ring-ring',
+          dndEnabled && 'cursor-grab',
+          isDragging && 'opacity-40',
+        )}
+      >
+        {recipe.imageUrl !== null && (
+          <img
+            src={recipe.imageUrl}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded object-cover"
+          />
+        )}
+        <span className="flex flex-col">
+          <span className="font-medium">{recipe.name}</span>
+          <span className="text-xs text-muted-foreground">
+            {String(recipe.baseServings)} servings
+            {recipe.isBase && ' · base'}
+          </span>
+        </span>
+      </button>
+    </li>
   );
 }

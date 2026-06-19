@@ -5,13 +5,16 @@ import type {
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { Link, useParams, useSearch } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
+import { DndProvider } from '@/components/planner/dnd-provider.tsx';
 import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useOptimisticSlotRelocate } from '@/hooks/use-optimistic-slot-relocate.ts';
 import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
+import { useViewportTier } from '@/hooks/use-viewport-tier.ts';
 import { deriveBatchSupplyWarnings } from '@/lib/batch-supply.ts';
 import { clampRange, formatDayRangeLabel } from '@/lib/date-utils.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -21,6 +24,10 @@ export function PlannerPage(): React.ReactElement {
   const search = useSearch({ from: '/_authed/plans/$planId' });
   const planId = Number.parseInt(params.planId, 10);
   const idIsValid = Number.isInteger(planId) && planId > 0;
+
+  const tier = useViewportTier();
+  const bankVisible = tier !== 'phone';
+  const dndEnabled = tier === 'desktop';
 
   const planQuery = trpc.plans.get.useQuery(
     { id: planId },
@@ -34,11 +41,29 @@ export function PlannerPage(): React.ReactElement {
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
+  // When the viewport shrinks to phone, the bank disappears — drop any
+  // recipe that was selected for click-to-assign so the assignment-hint
+  // banner doesn't outlive the bank that produced it.
+  useEffect(() => {
+    if (!bankVisible && selectedRecipe !== null) {
+      setSelectedRecipe(null);
+    }
+  }, [bankVisible, selectedRecipe]);
+
   const { update, isPending } = useOptimisticSlotUpdate({
     planId,
     onError: (err) => {
       setMutationError(
         err instanceof Error ? err.message : 'Slot update failed',
+      );
+    },
+  });
+
+  const { relocate } = useOptimisticSlotRelocate({
+    planId,
+    onError: (err) => {
+      setMutationError(
+        err instanceof Error ? err.message : 'Slot relocation failed',
       );
     },
   });
@@ -163,14 +188,65 @@ export function PlannerPage(): React.ReactElement {
     setEditingSlotId(null);
   }
 
-  return (
-    <section className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[16rem_1fr]">
-      <div className="lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden">
-        <RecipeBank
-          selectedRecipeId={selectedRecipe?.id ?? null}
-          onSelect={setSelectedRecipe}
-        />
-      </div>
+  function handleDragAssign({
+    recipe,
+    slot,
+  }: {
+    recipe: RecipeListItem;
+    slot: PlanSlot;
+  }): void {
+    setMutationError(null);
+    update({
+      input: {
+        slotId: slot.id,
+        slotType: 'recipe',
+        recipeId: recipe.id,
+        numberOfServings: recipe.baseServings,
+        chefUserId: null,
+        cooksBaseRecipeId: null,
+        cooksBaseServings: null,
+        comment: null,
+      },
+      optimisticRecipe: {
+        id: recipe.id,
+        name: recipe.name,
+        imageUrl: recipe.imageUrl,
+        isBase: recipe.isBase,
+        baseRecipeId: recipe.baseRecipeId,
+        pairedRecipeId: recipe.pairedRecipeId,
+        isDeleted: recipe.isDeleted,
+      },
+    });
+  }
+
+  function handleDragRelocate({
+    sourceSlot,
+    destSlot,
+  }: {
+    sourceSlot: PlanSlot;
+    destSlot: PlanSlot;
+  }): void {
+    setMutationError(null);
+    relocate({ sourceSlotId: sourceSlot.id, destSlotId: destSlot.id });
+  }
+
+  const plannerSection = (
+    <section
+      className={
+        bankVisible
+          ? 'mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[16rem_1fr]'
+          : 'mx-auto flex w-full max-w-6xl flex-col gap-4'
+      }
+    >
+      {bankVisible && (
+        <div className="lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden">
+          <RecipeBank
+            selectedRecipeId={selectedRecipe?.id ?? null}
+            onSelect={setSelectedRecipe}
+            dndEnabled={dndEnabled}
+          />
+        </div>
+      )}
       <div className="space-y-4">
         <header className="flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-2xl font-semibold">
@@ -203,6 +279,7 @@ export function PlannerPage(): React.ReactElement {
             rangeStart={visible.start}
             rangeEnd={visible.end}
             warningSlotIds={batchWarningSlots}
+            dndEnabled={dndEnabled}
             onSlotClick={handleSlotClick}
             onSlotClear={handleSlotClear}
           />
@@ -227,4 +304,16 @@ export function PlannerPage(): React.ReactElement {
       />
     </section>
   );
+
+  if (dndEnabled) {
+    return (
+      <DndProvider
+        onAssignRecipeToSlot={handleDragAssign}
+        onRelocateSlot={handleDragRelocate}
+      >
+        {plannerSection}
+      </DndProvider>
+    );
+  }
+  return plannerSection;
 }

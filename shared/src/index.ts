@@ -201,6 +201,10 @@ export {
   type UpdateSlotInput,
   updateSlotResultSchema,
   type UpdateSlotResult,
+  relocateSlotInputSchema,
+  type RelocateSlotInput,
+  relocateSlotResultSchema,
+  type RelocateSlotResult,
 } from './schemas/slots.ts';
 export {
   plannerSearchSchema,

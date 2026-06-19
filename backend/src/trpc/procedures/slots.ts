@@ -4,9 +4,12 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
+  relocateSlotInputSchema,
+  relocateSlotResultSchema,
   updateSlotInputSchema,
   updateSlotResultSchema,
   type PlanSlot,
+  type RelocateSlotResult,
   type UpdateSlotResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
@@ -15,7 +18,7 @@ import * as schema from '../../db/schema/index.ts';
 import { mealPlans, mealPlanSlots } from '../../db/schema/meal-plans.ts';
 import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
-import type { Tx } from '../../db/withTransaction.ts';
+import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import { formatCivilDate } from '../../lib/date-utils.ts';
 import { protectedProcedure, router } from '../init.ts';
 
@@ -84,12 +87,143 @@ export const slotsRouter = router({
       const slot = await selectSlotById(ctx.db, existing.id);
       return { slot };
     }),
+
+  // FEAT-40 — drag a slot onto another slot. Empty dest = move (source goes
+  // empty). Populated dest = swap (contents exchange). Both writes happen
+  // inside one transaction (cross-cutting #4) so the two slots are never
+  // observed mid-exchange. Same scope discipline as `update` — load both
+  // slots via the plan join so household_id stays load-bearing (DEC-17).
+  // Both slots must belong to the same plan; cross-plan drops fail with
+  // FORBIDDEN.
+  relocate: protectedProcedure
+    .input(relocateSlotInputSchema)
+    .output(relocateSlotResultSchema)
+    .mutation(async ({ ctx, input }): Promise<RelocateSlotResult> => {
+      const withTransaction = makeWithTransaction(ctx.db);
+      const { sourceSlotId, destSlotId } = await withTransaction(async (tx) => {
+        const [source, dest] = await Promise.all([
+          loadHouseholdSlotContent(tx, input.sourceSlotId),
+          loadHouseholdSlotContent(tx, input.destSlotId),
+        ]);
+        if (source.planId !== dest.planId) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Cannot relocate a slot across plans',
+            cause: { code: 'SLOT_RELOCATE_CROSS_PLAN' },
+          });
+        }
+        // Destination receives source's content unconditionally; source
+        // either receives dest's content (swap) or is emptied (move).
+        const sourcePatch =
+          dest.slotType === 'empty' ? emptySlotPatch() : asSlotPatch(dest);
+        const destPatch = asSlotPatch(source);
+        await tx
+          .update(mealPlanSlots)
+          .set(destPatch)
+          .where(eq(mealPlanSlots.id, dest.id));
+        await tx
+          .update(mealPlanSlots)
+          .set(sourcePatch)
+          .where(eq(mealPlanSlots.id, source.id));
+        return { sourceSlotId: source.id, destSlotId: dest.id };
+      });
+      const [sourceSlot, destSlot] = await Promise.all([
+        selectSlotById(ctx.db, sourceSlotId),
+        selectSlotById(ctx.db, destSlotId),
+      ]);
+      return { sourceSlot, destSlot };
+    }),
 });
 
 interface ExistingSlot {
   id: number;
   recipeId: number | null;
   cooksBaseRecipeId: number | null;
+}
+
+// Full content of a slot, read inside a relocate transaction so the source ↔
+// dest swap derives from the same snapshot the transaction commits.
+interface SlotContent {
+  id: number;
+  planId: number;
+  slotType: typeof mealPlanSlots.$inferSelect.slotType;
+  recipeId: number | null;
+  numberOfServings: number | null;
+  chefUserId: string | null;
+  cooksBaseRecipeId: number | null;
+  cooksBaseServings: number | null;
+  comment: string | null;
+}
+
+type SlotPatch = Pick<
+  SlotContent,
+  | 'slotType'
+  | 'recipeId'
+  | 'numberOfServings'
+  | 'chefUserId'
+  | 'cooksBaseRecipeId'
+  | 'cooksBaseServings'
+  | 'comment'
+>;
+
+function asSlotPatch(slot: SlotContent): SlotPatch {
+  return {
+    slotType: slot.slotType,
+    recipeId: slot.recipeId,
+    numberOfServings: slot.numberOfServings,
+    chefUserId: slot.chefUserId,
+    cooksBaseRecipeId: slot.cooksBaseRecipeId,
+    cooksBaseServings: slot.cooksBaseServings,
+    comment: slot.comment,
+  };
+}
+
+function emptySlotPatch(): SlotPatch {
+  return {
+    slotType: 'empty',
+    recipeId: null,
+    numberOfServings: null,
+    chefUserId: null,
+    cooksBaseRecipeId: null,
+    cooksBaseServings: null,
+    comment: null,
+  };
+}
+
+async function loadHouseholdSlotContent(
+  db: DbHandle,
+  slotId: number,
+): Promise<SlotContent> {
+  const rows = await db
+    .select({
+      id: mealPlanSlots.id,
+      planId: mealPlanSlots.planId,
+      slotType: mealPlanSlots.slotType,
+      recipeId: mealPlanSlots.recipeId,
+      numberOfServings: mealPlanSlots.numberOfServings,
+      chefUserId: mealPlanSlots.chefUserId,
+      cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
+      cooksBaseServings: mealPlanSlots.cooksBaseServings,
+      comment: mealPlanSlots.comment,
+    })
+    .from(mealPlanSlots)
+    .innerJoin(mealPlans, eq(mealPlanSlots.planId, mealPlans.id))
+    .where(
+      and(
+        eq(mealPlanSlots.id, slotId),
+        eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Slot not found',
+      cause: { code: 'SLOT_NOT_FOUND' },
+    });
+  }
+  return row;
 }
 
 async function loadHouseholdSlot(

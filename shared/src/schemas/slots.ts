@@ -78,3 +78,25 @@ export const updateSlotResultSchema = z.object({
   slot: planSlotSchema,
 });
 export type UpdateSlotResult = z.infer<typeof updateSlotResultSchema>;
+
+// FEAT-40 desktop / large-tablet drag affordance: source content moves to
+// dest. When dest is populated the procedure swaps; when dest is empty the
+// source is emptied. Both writes happen inside one `withTransaction` so the
+// shared resource sees an atomic state — last-write-wins still applies per
+// DEC-36 if two clients race.
+export const relocateSlotInputSchema = z
+  .object({
+    sourceSlotId: slotIdSchema,
+    destSlotId: slotIdSchema,
+  })
+  .refine((value) => value.sourceSlotId !== value.destSlotId, {
+    path: ['destSlotId'],
+    message: 'sourceSlotId and destSlotId must differ',
+  });
+export type RelocateSlotInput = z.infer<typeof relocateSlotInputSchema>;
+
+export const relocateSlotResultSchema = z.object({
+  sourceSlot: planSlotSchema,
+  destSlot: planSlotSchema,
+});
+export type RelocateSlotResult = z.infer<typeof relocateSlotResultSchema>;

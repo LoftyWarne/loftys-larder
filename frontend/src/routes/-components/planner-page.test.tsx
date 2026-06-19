@@ -15,6 +15,7 @@ const {
   recipesUseInfiniteQueryMock,
   membersUseQueryMock,
   updateMutateMock,
+  relocateMutateMock,
   setDataMock,
   getDataMock,
   cancelMock,
@@ -25,6 +26,7 @@ const {
   recipesUseInfiniteQueryMock: vi.fn(),
   membersUseQueryMock: vi.fn(),
   updateMutateMock: vi.fn(),
+  relocateMutateMock: vi.fn(),
   setDataMock: vi.fn(),
   getDataMock: vi.fn(),
   cancelMock: vi.fn().mockResolvedValue(undefined),
@@ -75,6 +77,12 @@ vi.mock('@/lib/trpc.ts', () => ({
           mutationOptions = opts;
           return { mutate: updateMutateMock, isPending: false };
         },
+      },
+      relocate: {
+        useMutation: () => ({
+          mutate: relocateMutateMock,
+          isPending: false,
+        }),
       },
     },
   },
@@ -180,16 +188,45 @@ function setup(options: SetupOptions = {}): void {
   });
 }
 
+const noop = (): void => undefined;
+function mockViewportTier(tier: 'phone' | 'tablet' | 'desktop'): void {
+  const md = tier !== 'phone';
+  const lg = tier === 'desktop';
+  window.matchMedia = (query: string): MediaQueryList => {
+    const mql: Partial<MediaQueryList> = {
+      matches:
+        query === '(min-width: 48rem)'
+          ? md
+          : query === '(min-width: 64rem)'
+            ? lg
+            : false,
+      media: query,
+      onchange: null,
+      addEventListener: noop,
+      removeEventListener: noop,
+      addListener: noop,
+      removeListener: noop,
+      dispatchEvent: () => false,
+    };
+    return mql as MediaQueryList;
+  };
+}
+
 beforeEach(() => {
   planUseQueryMock.mockReset();
   recipesUseInfiniteQueryMock.mockReset();
   membersUseQueryMock.mockReset();
   updateMutateMock.mockReset();
+  relocateMutateMock.mockReset();
   setDataMock.mockReset();
   getDataMock.mockReset();
   paramsMock.mockReset();
   searchMock.mockReset();
   mutationOptions = {};
+  // Default to tablet so the bank is visible and click-to-assign tests work
+  // exactly as before FEAT-40 introduced viewport gating. Tests that need
+  // phone or desktop tier reassign matchMedia themselves.
+  mockViewportTier('tablet');
 });
 
 describe('PlannerPage', () => {
@@ -349,5 +386,71 @@ describe('PlannerPage', () => {
     // Visible range collapsed to the first day — second slot's date label
     // (Jun 20) should be absent.
     expect(screen.queryByText(/20 Jun/)).not.toBeInTheDocument();
+  });
+
+  // FEAT-40 — three viewport tiers gate the planner's interaction surface.
+  describe('responsive interaction tiers', () => {
+    it('hides the Recipe Bank on phone-sized viewports', () => {
+      mockViewportTier('phone');
+      setup();
+      render(<PlannerPage />);
+
+      expect(
+        screen.queryByRole('listbox', { name: /pickable recipes/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('option', { name: /tomato pasta/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('opens the editor when an empty slot is tapped on phone tier', async () => {
+      mockViewportTier('phone');
+      const user = userEvent.setup();
+      setup();
+      render(<PlannerPage />);
+
+      await user.click(
+        screen.getByRole('button', {
+          name: /^Lunch on 2026-06-15: empty slot$/i,
+        }),
+      );
+
+      expect(
+        screen.getByRole('heading', { name: /lunch.*Mon 15th Jun 2026/i }),
+      ).toBeInTheDocument();
+      expect(updateMutateMock).not.toHaveBeenCalled();
+    });
+
+    it('renders the Recipe Bank on tablet tier (DnD not active outside DndProvider)', () => {
+      mockViewportTier('tablet');
+      setup();
+      render(<PlannerPage />);
+
+      // Bank is visible; click-to-assign tests above cover the actual
+      // interaction. No `<DndContext>` wraps the planner on this tier — the
+      // disabled draggable hook is a no-op without the provider.
+      expect(
+        screen.getByRole('listbox', { name: /pickable recipes/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('option', { name: /tomato pasta/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('mounts DnD wiring on desktop tier (cursor-grab on bank rows)', () => {
+      mockViewportTier('desktop');
+      setup();
+      render(<PlannerPage />);
+
+      const row = screen.getByRole('option', { name: /tomato pasta/i });
+      expect(row).toBeInTheDocument();
+      // The bank row carries the grab cursor class only when the DnD path
+      // is mounted; the slot card adds the same class when populated.
+      expect(row.className).toContain('cursor-grab');
+      const slotButton = screen.getByRole('button', {
+        name: /^Dinner on 2026-06-15: tomato pasta$/i,
+      });
+      expect(slotButton.className).toContain('cursor-grab');
+    });
   });
 });

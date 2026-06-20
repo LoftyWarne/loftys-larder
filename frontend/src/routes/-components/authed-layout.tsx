@@ -11,46 +11,46 @@ export async function authedBeforeLoad(): Promise<void> {
 export function AuthedLayout(): React.ReactElement {
   return (
     <div className="space-y-6">
-      <nav className="flex items-center gap-4 border-b pb-3 text-sm font-medium">
+      <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b pb-3 text-sm font-medium">
         <Link
           to="/"
           activeProps={{ className: 'text-primary' }}
-          className="hover:underline"
+          className="whitespace-nowrap hover:underline"
         >
           Home
         </Link>
         <Link
           to="/recipes"
           activeProps={{ className: 'text-primary' }}
-          className="hover:underline"
+          className="whitespace-nowrap hover:underline"
         >
           Recipes
         </Link>
         <Link
           to="/plans"
           activeProps={{ className: 'text-primary' }}
-          className="hover:underline"
+          className="whitespace-nowrap hover:underline"
         >
           Plans
         </Link>
         <Link
           to="/shopping"
           activeProps={{ className: 'text-primary' }}
-          className="hover:underline"
+          className="whitespace-nowrap hover:underline"
         >
           Shopping list
         </Link>
         <Link
           to="/ingredients"
           activeProps={{ className: 'text-primary' }}
-          className="hover:underline"
+          className="whitespace-nowrap hover:underline"
         >
           Ingredients
         </Link>
         <Link
           to="/settings"
           activeProps={{ className: 'text-primary' }}
-          className="hover:underline"
+          className="whitespace-nowrap hover:underline"
         >
           Settings
         </Link>

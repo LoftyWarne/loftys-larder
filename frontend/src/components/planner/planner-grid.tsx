@@ -68,9 +68,12 @@ export function PlannerGrid({
         role="rowgroup"
         className="grid gap-2"
         style={{
-          gridTemplateColumns: `minmax(6rem, max-content) repeat(${String(
+          // Column minima are mobile-first: a phone at 360 px can fit a
+          // 4rem date label + two 7rem occasion columns (18rem total) with
+          // breathing room. Larger viewports expand via the 1fr terms.
+          gridTemplateColumns: `minmax(4rem, max-content) repeat(${String(
             occasions.length,
-          )}, minmax(10rem, 1fr))`,
+          )}, minmax(7rem, 1fr))`,
         }}
       >
         <div role="row" className="contents">

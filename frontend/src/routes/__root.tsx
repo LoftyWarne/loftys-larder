@@ -7,7 +7,7 @@ export const Route = createRootRoute({
 function RootLayout(): React.ReactElement {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <main className="container mx-auto p-6">
+      <main className="container mx-auto p-3 sm:p-6">
         <Outlet />
       </main>
     </div>

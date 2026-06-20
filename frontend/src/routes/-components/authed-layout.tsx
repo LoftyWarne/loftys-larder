@@ -10,7 +10,7 @@ export async function authedBeforeLoad(): Promise<void> {
 
 export function AuthedLayout(): React.ReactElement {
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <nav className="flex items-center gap-4 border-b pb-3 text-sm font-medium">
         <Link
           to="/"

@@ -382,8 +382,9 @@ describe('PlannerPage', () => {
   });
 
   // FEAT-40 — two interaction shapes gated on `lg`. Below `lg`: no Recipe
-  // Bank, slot taps open the editor only. At `lg+`: bank visible alongside
-  // the grid, DnD active, click-to-assign still works.
+  // Bank, slot taps open the editor — but slot ↔ slot drag still works.
+  // At `lg+`: bank visible alongside the grid, full DnD active, click-to-
+  // assign still works.
   describe('responsive interaction shape', () => {
     it('hides the Recipe Bank below the `lg` breakpoint', () => {
       mockIsLargeViewport(false);
@@ -416,7 +417,20 @@ describe('PlannerPage', () => {
       expect(updateMutateMock).not.toHaveBeenCalled();
     });
 
-    it('mounts the bank and DnD wiring at `lg+`', () => {
+    it('keeps slot ↔ slot DnD wired below `lg` (cursor-grab on populated slots)', () => {
+      mockIsLargeViewport(false);
+      setup();
+      render(<PlannerPage />);
+
+      // No bank, but populated slot cards are still draggable + droppable
+      // so users can move / swap meals on a phone or portrait tablet.
+      const slotButton = screen.getByRole('button', {
+        name: /^Dinner on 2026-06-15: tomato pasta$/i,
+      });
+      expect(slotButton.className).toContain('cursor-grab');
+    });
+
+    it('mounts the bank and full DnD wiring at `lg+`', () => {
       mockIsLargeViewport(true);
       setup();
       render(<PlannerPage />);

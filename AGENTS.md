@@ -207,8 +207,8 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 | Add a `getCurrentScope()` resolver or thread `scope` through repositories | `CURRENT_HOUSEHOLD_ID` constant is the discipline. (DEC-17) |
 | Enable Sentry session replay | PII / cookie-consent cost not worth it at this scale. (DEC-76) |
 | Add a coverage threshold | Coverage is not a target; behaviour is. (DEC-59) |
-| Introduce drag-and-drop slot assignment below the `lg` breakpoint | DnD is `lg+` only per DEC-52 / DEC-84 / FEAT-40. Phones and small portrait tablets stay click-only (or, on `<md`, editor-only). |
-| Render the Recipe Bank below `lg` | Hidden below the `lg` cutoff per DEC-85 / FEAT-40 — bank and DnD share the same gate. Recipe assignment routes through the slot-editor sheet there. |
+| Introduce a recipe-bank → slot drag below the `lg` breakpoint | Bank → slot DnD is `lg+` only per DEC-84 / FEAT-40, because the bank itself is hidden below `lg` (DEC-85). Slot ↔ slot drag *is* enabled at every viewport — touch-and-hold (200 ms) lifts a populated slot, the same `slots.relocate` mutation handles move / swap. |
+| Render the Recipe Bank below `lg` | Hidden below the `lg` cutoff per DEC-85 / FEAT-40. Recipe assignment routes through the slot-editor sheet there. (Slot ↔ slot drag still works without the bank.) |
 | Create a staging Fly app | Testcontainers + restore drills are the chosen mitigation. (DEC-65) |
 | Use `tsx` in production | `esbuild` single bundle. (DEC-61) |
 | Add a build orchestrator (Turborepo, Nx) | Three workspaces is below the threshold. (DEC-03) |

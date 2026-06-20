@@ -280,7 +280,11 @@ export function PlannerPage(): React.ReactElement {
             rangeStart={visible.start}
             rangeEnd={visible.end}
             warningSlotIds={batchWarningSlots}
-            dndEnabled={isLargeViewport}
+            // Slot ↔ slot drag works at every viewport — touch-and-hold
+            // (200 ms) lifts a populated slot, drops on another slot to
+            // move or swap. Bank → slot still only at `lg+`, since the
+            // bank itself is only mounted there.
+            dndEnabled
             onSlotClick={handleSlotClick}
             onSlotClear={handleSlotClear}
           />
@@ -306,15 +310,16 @@ export function PlannerPage(): React.ReactElement {
     </section>
   );
 
-  if (isLargeViewport) {
-    return (
-      <DndProvider
-        onAssignRecipeToSlot={handleDragAssign}
-        onRelocateSlot={handleDragRelocate}
-      >
-        {plannerSection}
-      </DndProvider>
-    );
-  }
-  return plannerSection;
+  // DndProvider wraps the planner at every viewport so slot ↔ slot drag
+  // works on phones and tablets too. The bank → slot path only triggers
+  // when the bank is mounted (lg+), so on smaller viewports the only
+  // active DnD interaction is slot relocate/swap.
+  return (
+    <DndProvider
+      onAssignRecipeToSlot={handleDragAssign}
+      onRelocateSlot={handleDragRelocate}
+    >
+      {plannerSection}
+    </DndProvider>
+  );
 }

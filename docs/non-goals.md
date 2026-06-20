@@ -8,11 +8,11 @@ Entries flagged `[→ decision log]` correspond to a deferred or contested decis
 
 ## 1. Features Considered and Explicitly Not Built
 
-### Drag-and-drop slot assignment on viewports below `lg` (phones and small portrait tablets)
-What it is: dragging recipe cards from the sidebar onto planner slots, or assigned slots onto other slots, on phone-sized and small-tablet screens.
-Why not: the primary use is one-handed on a phone in a kitchen. Below `lg` the slot-editor sheet (see DEC-85) is the sole assignment path — works identically with touch / mouse / keyboard, satisfies WCAG 2.1 AA without dedicated DnD a11y machinery on the tightest screens. The plan treats touch-first as a load-bearing constraint on those viewports, not a nice-to-have.
-Scope: DnD *is* enabled on `lg+` viewports (desktops, touchscreen laptops, tablets in landscape, iPad Pro in portrait) per **DEC-84** and **FEAT-40**, alongside click-to-assign. This non-goal binds only below `lg`.
-Revisit: only if usability testing shows click-to-assign / editor-flow confuses or slows users on phones in practice. Desktop-power-user feedback alone is not a sufficient trigger.
+### Drag-and-drop *recipe-bank* assignment on viewports below `lg` (phones and small portrait tablets)
+What it is: dragging recipe cards from a sidebar onto planner slots on phone-sized and small-tablet screens. (Slot ↔ slot drag is *not* on this non-goals list — see Scope below.)
+Why not: the primary use is one-handed on a phone in a kitchen. Below `lg` the Recipe Bank is hidden entirely (DEC-85), so there is no sidebar to drag *from* — recipe assignment routes through the slot-editor sheet. The plan treats touch-first as a load-bearing constraint on the tightest screens; introducing a bank-on-phone purely to enable drag-to-assign would unwind DEC-85.
+Scope: Bank → slot drag is enabled on `lg+` viewports per **DEC-84** and **FEAT-40**. Slot ↔ slot drag (move / swap) is enabled at *every* viewport — touch-and-hold (200 ms) lifts a populated slot on any device; the gesture is a legitimate touch idiom and is well-precedented in mobile list-reordering UIs.
+Revisit: only if usability testing shows the editor-flow assignment on phones confuses or slows users in practice. Desktop-power-user feedback alone is not a sufficient trigger.
 `[→ decision log]`
 
 ### Recipe snapshotting at slot assignment

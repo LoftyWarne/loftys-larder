@@ -1609,16 +1609,16 @@ Conventions:
 
 ---
 
-### FEAT-40 — Responsive planner interactions: hide bank below `lg`, drag-and-drop at `lg+`
+### FEAT-40 — Responsive planner interactions: hide bank below `lg`, slot ↔ slot drag everywhere, bank → slot drag at `lg+`
 
-**Goal:** Reshape the planner around a single breakpoint, `lg` (1024 px). **Below `lg`**: the Recipe Bank is not rendered and the `recipes.list` infinite query is not started; recipe assignment routes exclusively through the existing slot-editor sheet (tap any slot → editor → flip `slot_type` to `recipe` → pick via the `SearchableCombobox`). No drag affordances. **At `lg+`**: the bank renders alongside the grid, click-to-assign keeps working, and a `@dnd-kit/core` `DndContext` mounts with `PointerSensor` (5 px activation), `KeyboardSensor`, and `TouchSensor` (200 ms / 5 px activation). Bank rows drag onto empty slots (equivalent to click-to-assign). Populated slots drag onto other slots — drop on empty = move, drop on populated = swap (atomic, server-side). `[DEC-84: DnD on lg+ viewports as additive affordance]` `[DEC-85: hide Recipe Bank below lg]`
+**Goal:** Reshape the planner around a single breakpoint, `lg` (1024 px). **Below `lg`**: the Recipe Bank is not rendered and the `recipes.list` infinite query is not started; recipe assignment routes through the existing slot-editor sheet (tap any slot → editor → flip `slot_type` to `recipe` → pick via the `SearchableCombobox`). **At `lg+`**: the bank renders alongside the grid and click-to-assign also works. **A `@dnd-kit/core` `DndContext` mounts at every viewport** with `PointerSensor` (5 px activation), `KeyboardSensor`, and `TouchSensor` (200 ms / 5 px activation) — populated slot cells are draggables and every slot cell is a droppable, so users can move / swap meals on phones, tablets, and desktops alike. The bank → slot drag path only triggers at `lg+`, since the bank itself is only mounted there. Drop on empty = move, drop on populated = swap (atomic, server-side). `[DEC-84: bank → slot DnD lg+ only; slot ↔ slot DnD at every viewport]` `[DEC-85: hide Recipe Bank below lg]`
 
 **Estimate:** 4 hr. **Depends on:** FEAT-31. **Enables:** none.
 
 **Reuse note:** Slot mutation goes through the existing `useOptimisticSlotUpdate` for bank → slot drops (same shape as click-to-assign). Slot ↔ slot relocate/swap uses a sibling hook `useOptimisticSlotRelocate` that mirrors the `onMutate` / `onError` / `onSettled` scaffold but patches two slots in cache. Don't fork the existing hook's internals — mirror them. The slot-editor sheet (FEAT-31) is reused unchanged below `lg` — including its recipe combobox path (`SearchableCombobox`). The slot card's named content regions (cross-cutting #14) gain an additive `dragHandle` / `droppable` prop pair; do not rewrite.
 
 **Files:**
-- `frontend/src/components/planner/dnd-provider.tsx` (new — DndContext + sensors + DragOverlay + screen-reader announcements; mounted only at `lg+`)
+- `frontend/src/components/planner/dnd-provider.tsx` (new — DndContext + sensors + DragOverlay + screen-reader announcements; mounted at every viewport so slot ↔ slot drag works on phones too)
 - `frontend/src/hooks/use-is-large-viewport.ts` (new — `matchMedia('(min-width: 64rem)')` via `useSyncExternalStore`; returns a boolean)
 - `frontend/src/hooks/use-optimistic-slot-relocate.ts` (new — two-slot LWW patch)
 - `frontend/src/routes/-components/planner-page.tsx` (extend — single boolean gates bank rendering, DnD mounting, and the layout)
@@ -1630,8 +1630,9 @@ Conventions:
 
 **Acceptance criteria:**
 - [ ] `useIsLargeViewport()` returns true when `matchMedia('(min-width: 64rem)')` matches, updates on viewport change without a remount loop, and defaults to false during SSR / initial render
-- [ ] Below `lg`: `<RecipeBank>` is not rendered; `recipes.list` is not called; the assignment-hint banner is not rendered; tapping any slot opens the editor sheet, which assigns via its existing combobox path; no `<DndContext>` in the tree
-- [ ] At `lg+`: bank renders alongside the grid; `<DndContext>` mounts with pointer, keyboard, and touch sensors; click-to-assign continues to work
+- [ ] `<DndContext>` mounts at every viewport with pointer, keyboard, and touch sensors; populated slot cells are draggable and every slot cell is droppable on phones, tablets, and desktops
+- [ ] Below `lg`: `<RecipeBank>` is not rendered; `recipes.list` is not called; the assignment-hint banner is not rendered; tapping any slot opens the editor sheet, which assigns via its existing combobox path
+- [ ] At `lg+`: bank renders alongside the grid; click-to-assign continues to work; bank → slot drag is enabled in addition to slot ↔ slot drag
 - [ ] Bank → empty-slot drag fires the same mutation shape as click-to-assign (`slots.update`)
 - [ ] Slot → empty-slot drag fires `slots.relocate({ sourceSlotId, destSlotId })`; source slot becomes empty, dest receives source's full content (`recipe_id`, `number_of_servings`, `chef_user_id`, `comment`, `cooks_base_recipe_id`, `cooks_base_servings`)
 - [ ] Slot → populated-slot drag fires `slots.relocate`; contents swap fully
@@ -1646,13 +1647,13 @@ Conventions:
 **Implementation notes:**
 - One `DndContext` for the whole planner page; `onDragEnd` discriminates draggable id namespace (`recipe:<id>` vs `slot:<id>`) and dispatches the appropriate mutation.
 - `useOptimisticSlotRelocate` patches both slots in `setQueryData` on `onMutate`, captures the previous plan snapshot, and reconciles from the server response on `onSettled` (LWW per DEC-36). No invalidation — the server result is canonical.
-- Cross-breakpoint transitions: do not reload; the tree re-mounts the bank / `DndContext` as the hook flips. Persist the `selectedRecipe` state only when bank is mounted.
+- Cross-breakpoint transitions: do not reload; the tree re-mounts the bank as the hook flips. The `DndContext` itself stays mounted across breakpoints. Persist the `selectedRecipe` state only when bank is mounted.
 - `slots.relocate` runs the two writes inside `withTransaction` (cross-cutting #4). Read source + dest under the transaction, derive the move-vs-swap branch server-side, write both rows.
 - Schemas live in `/shared/src/schemas/` (cross-cutting #2).
 - dnd-kit is ESM (DEC-01); verified at install.
 
 **Manual verification:**
-1. Below `lg` in DevTools: bank absent; tap a slot → editor opens → "Recipe" type → pick recipe → save. Assignment lands. No drag affordances anywhere.
+1. Below `lg` in DevTools: bank absent; tap a slot → editor opens → "Recipe" type → pick recipe → save. Assignment lands. Touch-and-hold (200 ms) on a populated slot and drag onto another slot: move / swap fires the relocate mutation.
 2. At `lg+`: drag a recipe onto an empty slot; drag an assigned slot onto an empty slot (move); drag an assigned slot onto a populated slot (swap). Tab to a row, space to grab, arrow + space to drop. Touch (if on a touchscreen) — quick tap selects, 200 ms hold drags.
 3. Resize across the `lg` cutoff in one session without reloading; both shapes behave correctly and `selectedRecipe` resets when the bank disappears.
 
@@ -1666,7 +1667,7 @@ Conventions:
 
 **Definition of done:**
 - Backend tests cover: move (empty dest), swap (populated dest), cross-household reject, transaction rollback on forced post-source error.
-- Frontend tests cover: below `lg` omits bank and triggers editor on tap; at `lg+` mounts `DndContext`, fires `update` on bank→slot drop, fires `relocate` on slot→slot drop with swap branch; touch sensor delay does not swallow taps; breakpoint transition recomputes shape.
+- Frontend tests cover: below `lg` omits bank and triggers editor on tap, but slot ↔ slot DnD wiring is still present (cursor-grab on populated slots); at `lg+` mounts the bank and full DnD, fires `update` on bank→slot drop, fires `relocate` on slot→slot drop with swap branch; touch sensor delay does not swallow taps.
 - Commit: `feat(planner): responsive interactions with desktop drag-and-drop and phone editor-only flow`
 - Gate check: below `lg` and at `lg+`, both assignment paths behave as specified; axe-core spot-check passes (FEAT-54).
 

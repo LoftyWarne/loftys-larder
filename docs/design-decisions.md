@@ -548,7 +548,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Desktop power users may prefer DnD on first encounter. The two-step interaction (select, then place) is slightly less direct than dragging.
 - **Revisit when:** Usability testing shows the interaction confuses or slows users in practice. Desktop-power-user feedback alone is not a sufficient trigger.
 - **Cross-refs:** FEAT-31; non-goal: "Drag-and-drop slot assignment".
-- **Scope narrowed by DEC-84** — DnD added on `lg+` viewports as an additive affordance alongside click-to-assign (FEAT-40). Click-to-assign remains the only path below `lg` and remains intact on every viewport above it; the phone rationale ("one-handed in a kitchen") still binds. DEC-84 documents the user-level override and the per-tier behaviour.
+- **Scope narrowed by DEC-84** — DnD added as an additive affordance alongside click-to-assign (FEAT-40). Bank → slot drag is `lg+` only (the bank itself is hidden below `lg` per DEC-85). Slot ↔ slot drag (move / swap) is enabled at every viewport via a 200 ms touch-sensor delay so a tap still opens the editor. Click-to-assign remains intact wherever the bank is mounted; the phone "one-handed in a kitchen" rationale is preserved because reordering meals is a touch-and-hold gesture, not a freeform drag-while-stirring. DEC-84 documents the user-level override and the per-surface behaviour.
 
 ### DEC-53 — Phone-first responsive design
 
@@ -888,6 +888,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Two interaction models on `lg+` (drag *and* click-to-assign) to keep coherent. New runtime dependency (`@dnd-kit/core`). Bigger frontend test surface — three viewport tiers and a swap-vs-move branch on the drop handler. Rotation can change behaviour mid-session (tablet portrait ↔ landscape).
 - **Revisit when:** dnd-kit becomes unmaintained or is forced into a major migration; telemetry shows DnD essentially never used; the `lg` breakpoint proves wrong (e.g. tablets in portrait emerge as the dominant DnD context, suggesting `md` would be the better gate).
 - **Cross-refs:** FEAT-40 (the implementation), DEC-52 (scope narrowed by this DEC), DEC-53 (phone-first responsive, still binding below `lg`), DEC-55 (WCAG 2.1 AA — sensor a11y is in scope), DEC-36 (LWW reconciliation for the swap mutation), DEC-01 (dnd-kit must be ESM-compatible).
+- **Amended — slot ↔ slot DnD now mounts at every viewport.** The `DndContext` and slot draggable/droppable wiring are no longer gated on `lg`; touch-and-hold (200 ms) lifts a populated slot on any device, and dropping on another slot moves (empty dest) or swaps (populated dest) via the same `slots.relocate` mutation. Only the **bank → slot** path stays `lg+` only, because the Recipe Bank itself stays hidden below `lg` (DEC-85). User-driven widening: slot reordering is a legitimate touch gesture on phones (well-trodden in mobile list / homescreen UIs), and the 200 ms touch-sensor delay keeps it from interfering with the slot-tap-opens-editor flow.
 
 ### DEC-85 — Hide Recipe Bank below `lg`; rely on the slot-editor sheet for recipe assignment
 

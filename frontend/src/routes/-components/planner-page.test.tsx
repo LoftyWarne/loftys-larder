@@ -189,17 +189,10 @@ function setup(options: SetupOptions = {}): void {
 }
 
 const noop = (): void => undefined;
-function mockViewportTier(tier: 'phone' | 'tablet' | 'desktop'): void {
-  const md = tier !== 'phone';
-  const lg = tier === 'desktop';
+function mockIsLargeViewport(isLarge: boolean): void {
   window.matchMedia = (query: string): MediaQueryList => {
     const mql: Partial<MediaQueryList> = {
-      matches:
-        query === '(min-width: 48rem)'
-          ? md
-          : query === '(min-width: 64rem)'
-            ? lg
-            : false,
+      matches: query === '(min-width: 64rem)' ? isLarge : false,
       media: query,
       onchange: null,
       addEventListener: noop,
@@ -223,10 +216,10 @@ beforeEach(() => {
   paramsMock.mockReset();
   searchMock.mockReset();
   mutationOptions = {};
-  // Default to tablet so the bank is visible and click-to-assign tests work
-  // exactly as before FEAT-40 introduced viewport gating. Tests that need
-  // phone or desktop tier reassign matchMedia themselves.
-  mockViewportTier('tablet');
+  // Default to the large-viewport branch so the bank is visible and the
+  // pre-FEAT-40 click-to-assign tests keep their assertions. Tests that need
+  // the compact branch (below `lg`) reassign matchMedia themselves.
+  mockIsLargeViewport(true);
 });
 
 describe('PlannerPage', () => {
@@ -388,10 +381,12 @@ describe('PlannerPage', () => {
     expect(screen.queryByText(/20 Jun/)).not.toBeInTheDocument();
   });
 
-  // FEAT-40 — three viewport tiers gate the planner's interaction surface.
-  describe('responsive interaction tiers', () => {
-    it('hides the Recipe Bank on phone-sized viewports', () => {
-      mockViewportTier('phone');
+  // FEAT-40 — two interaction shapes gated on `lg`. Below `lg`: no Recipe
+  // Bank, slot taps open the editor only. At `lg+`: bank visible alongside
+  // the grid, DnD active, click-to-assign still works.
+  describe('responsive interaction shape', () => {
+    it('hides the Recipe Bank below the `lg` breakpoint', () => {
+      mockIsLargeViewport(false);
       setup();
       render(<PlannerPage />);
 
@@ -403,8 +398,8 @@ describe('PlannerPage', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('opens the editor when an empty slot is tapped on phone tier', async () => {
-      mockViewportTier('phone');
+    it('opens the editor when an empty slot is tapped below `lg`', async () => {
+      mockIsLargeViewport(false);
       const user = userEvent.setup();
       setup();
       render(<PlannerPage />);
@@ -421,31 +416,15 @@ describe('PlannerPage', () => {
       expect(updateMutateMock).not.toHaveBeenCalled();
     });
 
-    it('renders the Recipe Bank on tablet tier (DnD not active outside DndProvider)', () => {
-      mockViewportTier('tablet');
-      setup();
-      render(<PlannerPage />);
-
-      // Bank is visible; click-to-assign tests above cover the actual
-      // interaction. No `<DndContext>` wraps the planner on this tier — the
-      // disabled draggable hook is a no-op without the provider.
-      expect(
-        screen.getByRole('listbox', { name: /pickable recipes/i }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole('option', { name: /tomato pasta/i }),
-      ).toBeInTheDocument();
-    });
-
-    it('mounts DnD wiring on desktop tier (cursor-grab on bank rows)', () => {
-      mockViewportTier('desktop');
+    it('mounts the bank and DnD wiring at `lg+`', () => {
+      mockIsLargeViewport(true);
       setup();
       render(<PlannerPage />);
 
       const row = screen.getByRole('option', { name: /tomato pasta/i });
       expect(row).toBeInTheDocument();
-      // The bank row carries the grab cursor class only when the DnD path
-      // is mounted; the slot card adds the same class when populated.
+      // The grab cursor on a bank row and a populated slot card is the
+      // visible signal that the DnD path is mounted.
       expect(row.className).toContain('cursor-grab');
       const slotButton = screen.getByRole('button', {
         name: /^Dinner on 2026-06-15: tomato pasta$/i,

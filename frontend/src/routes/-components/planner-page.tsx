@@ -12,9 +12,9 @@ import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { useOptimisticSlotRelocate } from '@/hooks/use-optimistic-slot-relocate.ts';
 import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
-import { useViewportTier } from '@/hooks/use-viewport-tier.ts';
 import { deriveBatchSupplyWarnings } from '@/lib/batch-supply.ts';
 import { clampRange, formatDayRangeLabel } from '@/lib/date-utils.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -25,9 +25,10 @@ export function PlannerPage(): React.ReactElement {
   const planId = Number.parseInt(params.planId, 10);
   const idIsValid = Number.isInteger(planId) && planId > 0;
 
-  const tier = useViewportTier();
-  const bankVisible = tier !== 'phone';
-  const dndEnabled = tier === 'desktop';
+  // FEAT-40 — the bank and DnD travel together. At `lg+` the bank renders
+  // alongside the grid and dnd-kit mounts; below `lg` the bank is hidden and
+  // slot assignment routes through the editor sheet only.
+  const isLargeViewport = useIsLargeViewport();
 
   const planQuery = trpc.plans.get.useQuery(
     { id: planId },
@@ -41,14 +42,14 @@ export function PlannerPage(): React.ReactElement {
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  // When the viewport shrinks to phone, the bank disappears — drop any
+  // When the viewport shrinks below `lg`, the bank disappears — drop any
   // recipe that was selected for click-to-assign so the assignment-hint
   // banner doesn't outlive the bank that produced it.
   useEffect(() => {
-    if (!bankVisible && selectedRecipe !== null) {
+    if (!isLargeViewport && selectedRecipe !== null) {
       setSelectedRecipe(null);
     }
-  }, [bankVisible, selectedRecipe]);
+  }, [isLargeViewport, selectedRecipe]);
 
   const { update, isPending } = useOptimisticSlotUpdate({
     planId,
@@ -233,17 +234,17 @@ export function PlannerPage(): React.ReactElement {
   const plannerSection = (
     <section
       className={
-        bankVisible
+        isLargeViewport
           ? 'mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[16rem_1fr]'
           : 'mx-auto flex w-full max-w-6xl flex-col gap-4'
       }
     >
-      {bankVisible && (
+      {isLargeViewport && (
         <div className="lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden">
           <RecipeBank
             selectedRecipeId={selectedRecipe?.id ?? null}
             onSelect={setSelectedRecipe}
-            dndEnabled={dndEnabled}
+            dndEnabled
           />
         </div>
       )}
@@ -279,7 +280,7 @@ export function PlannerPage(): React.ReactElement {
             rangeStart={visible.start}
             rangeEnd={visible.end}
             warningSlotIds={batchWarningSlots}
-            dndEnabled={dndEnabled}
+            dndEnabled={isLargeViewport}
             onSlotClick={handleSlotClick}
             onSlotClear={handleSlotClear}
           />
@@ -305,7 +306,7 @@ export function PlannerPage(): React.ReactElement {
     </section>
   );
 
-  if (dndEnabled) {
+  if (isLargeViewport) {
     return (
       <DndProvider
         onAssignRecipeToSlot={handleDragAssign}

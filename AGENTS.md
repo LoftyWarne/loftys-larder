@@ -208,7 +208,7 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 | Enable Sentry session replay | PII / cookie-consent cost not worth it at this scale. (DEC-76) |
 | Add a coverage threshold | Coverage is not a target; behaviour is. (DEC-59) |
 | Introduce drag-and-drop slot assignment below the `lg` breakpoint | DnD is `lg+` only per DEC-52 / DEC-84 / FEAT-40. Phones and small portrait tablets stay click-only (or, on `<md`, editor-only). |
-| Render the Recipe Bank below `md` | Hidden on phones per DEC-85 / FEAT-40; recipe assignment on phones goes through the slot-editor sheet only. |
+| Render the Recipe Bank below `lg` | Hidden below the `lg` cutoff per DEC-85 / FEAT-40 — bank and DnD share the same gate. Recipe assignment routes through the slot-editor sheet there. |
 | Create a staging Fly app | Testcontainers + restore drills are the chosen mitigation. (DEC-65) |
 | Use `tsx` in production | `esbuild` single bundle. (DEC-61) |
 | Add a build orchestrator (Turborepo, Nx) | Three workspaces is below the threshold. (DEC-03) |

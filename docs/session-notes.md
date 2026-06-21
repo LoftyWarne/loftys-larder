@@ -4,6 +4,44 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-21 — FEAT-42 (PWA infrastructure: service worker + manifest + network-first for shopping list)
+
+**Status:** implementation complete. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm format:check` all clean. Frontend tests **280/280** passing (12 new across two files). `pnpm --filter frontend build` succeeds; `dist/sw.js` contains the `shopping\.getForPlan` regex + `NetworkFirst` handler + `shopping-list-network-first` cache bucket; `dist/manifest.webmanifest` carries the expected name, `start_url`, scope, and icon set. DoD boxes in `docs/feature-specs.md §FEAT-42` left unticked — human action. **DEC-86** authored at the same time (the spec's `[DEC-TBD: PWA network-first for shopping list]`).
+
+### Decisions taken at kick-off
+
+- **One named cache bucket, one URL pattern.** `NetworkFirst` against `/\/api\/trpc\/shopping\.getForPlan/`, `cacheName: 'shopping-list-network-first'`, `networkTimeoutSeconds: 3` (aligned with the Fly cold-start budget — DEC-63 / DEC-64), 32 entries / 7-day max-age. Limiting the rule to `getForPlan` keeps mutations and unrelated reads off the cache surface and honours cross-cutting #16 (match the procedure segment, not the `batch=1&input=...` query string).
+- **`registerType: 'autoUpdate'`, no update toast.** v1 accepts a silent SW update on next full reload; a "new version available" banner is more UX surface than the project warrants today.
+- **Dev SW disabled.** `devOptions.enabled: false`. The "stale SW + Vite HMR" footgun (FEAT-42 common-gotcha) is real; the cost is one less surface to debug in dev.
+- **`injectRegister: null`; we call `registerSW` ourselves** from a tiny gated module. Gives us a single chokepoint for the dev/prod check and the `'serviceWorker' in navigator` guard.
+- **Direct browser → Cloudinary stays untouched (DEC-50).** SW does not intercept that origin; runtime caching only matches `/api/trpc/shopping.getForPlan`.
+
+### Drift from kick-off plan
+
+1. **Extracted PWA config into `frontend/src/lib/pwa-config.ts`.** Original plan kept the `VitePWA(...)` invocation inline in `vite.config.ts`. Spec's DoD calls for "manifest fields present (probe via fetch in a test)" — a full `vite build` inside Vitest is heavyweight. Hoisting `pwaManifest`, `pwaRuntimeCaching`, and `SHOPPING_LIST_NETWORK_FIRST_PATTERN` into a separate module makes them directly importable from a unit test (`src/test/pwa-config.test.ts`, 9 cases). `vite.config.ts` imports the same objects, so build-output and tests probe the same source of truth.
+2. **Local structural type for `RuntimeCachingRule`.** `vite-plugin-pwa` does not re-export `RuntimeCaching` (the type lives in `workbox-build`, which is hoisted transitively but not a direct dep). Defined a minimal local interface covering the subset Workbox reads. If we ever take a direct dep on `workbox-build` for other reasons, swap to the upstream type.
+3. **`virtual:pwa-register` aliased to a test stub in `vitest.config.ts`.** Vitest does not run the `vite-plugin-pwa` plugin, so the virtual id is unresolvable at test time. Added `src/test/stubs/pwa-register.ts` and an `resolve.alias` entry in `vitest.config.ts` so `sw-register.test.ts` can further `vi.mock` the id and assert calls. Tests themselves use `vi.waitFor(...)` to settle the dynamic import (microtask flushing was flaky).
+4. **Added `vite-plugin-pwa/client` to `frontend/tsconfig.json#compilerOptions.types`.** Needed so `virtual:pwa-register` types are visible inside `sw-register.ts` without a triple-slash reference.
+5. **Placeholder icons generated via a tiny no-deps Node script** (`$CLAUDE_JOB_DIR/tmp/gen-icons.mjs`) — solid sage-green PNGs at 192 / 512 / maskable-512 / 180 (Apple). Hand-packed PNG with a single IDAT zlib stream; no native bindings or image libs pulled in. Final brand art is tracked as a follow-up.
+
+### Implementation details worth carrying
+
+- **`registerServiceWorker()` gates on three checks**, in order: `import.meta.env.PROD`, `typeof navigator !== 'undefined'`, `'serviceWorker' in navigator`. The last one matters on older WebViews (some embedded Android / older iOS contexts) where `navigator` exists but the SW API is absent. `void import('virtual:pwa-register').then(...)` keeps the virtual id out of dev/test bundles entirely.
+- **Workbox config has `navigateFallback: '/index.html'` with `/api/*` on the denylist.** Without the denylist, a tRPC `fetch` against a precached app-shell route returns the SPA HTML on offline navigation — silently masking the real network failure. The denylist keeps API calls failing loud.
+- **The cache rule's regex is non-anchored.** Tests assert it matches both `/api/trpc/shopping.getForPlan` and `/api/trpc/shopping.getForPlan?batch=1&input=%7B%7D`, *and* doesn't over-match `shopping.toggleChecked`, `recipes.list`, or `/api/auth/*`. The "over-match guard" tests are the cheap canary for "did someone widen the regex without thinking."
+- **Icons live at the standard `frontend/public/icons/` path.** `apple-touch-icon.png` is linked directly from `index.html` (Apple ignores manifests for that link); the other three are referenced from `manifest.webmanifest`. `vite-plugin-pwa`'s `includeAssets: ['icons/apple-touch-icon.png']` ensures the precache pulls it in too.
+- **`workbox-window` dev-dep is needed even though we don't import it directly.** `vite-plugin-pwa` emits a `workbox-window.prod.es5-*.js` chunk; the dep must be installed for the chunk to resolve. Visible in the build output.
+- **`index.html` gained `theme-color`, `apple-mobile-web-app-*`, and an `apple-touch-icon` link.** The `<link rel="manifest">` is auto-injected by `vite-plugin-pwa` at build time — do not also hand-write one in `index.html` or you'll ship two competing references.
+
+### Open follow-ups
+
+- **Brand-art icons.** Placeholder solid-colour PNGs are in place; swap for final assets before any external install is encouraged.
+- **Manifest auto-injection of `lang: 'en'`.** `vite-plugin-pwa` adds `lang: 'en'` to the built manifest even though our `pwaManifest` object does not declare it. Harmless today; flagged here so the asymmetry between the source object and the emitted artifact isn't a surprise during a future audit.
+- **Procedure rename hazard.** The cache rule is hand-written, not derived from the tRPC client. If `shopping.getForPlan` is ever renamed, the cache silently misses until the regex is updated. The pwa-config tests catch over-match but not rename — worth a note in any future router-renaming session.
+- **FEAT-43 enablement.** The SW now ships in production builds; FEAT-43 (offline mutation queue) can land without re-treading PWA setup. The named cache bucket (`shopping-list-network-first`) is the right place to evict on reconnect-drain if we want a stricter freshness story than the default `maxAgeSeconds`.
+
+---
+
 ## 2026-06-21 — FEAT-41 (Plant points: day + plan with batch traversal and base-cook union)
 
 **Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across all three workspaces. Backend: 479/479 passing via Testcontainers (Colima socket workaround: `DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). Frontend: 268/268 passing — the pre-existing `recipe-comments.test.tsx` flake (two cases under React 19 + `user.type` on a controlled `<textarea>`) was rewritten to use `fireEvent.change`, so the full suite is now reliably green. DoD boxes in `docs/feature-specs.md §FEAT-41` left unticked — human action.

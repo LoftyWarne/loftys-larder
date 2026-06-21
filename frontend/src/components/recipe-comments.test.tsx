@@ -1,5 +1,5 @@
 import type { RecipeComment } from '@loftys-larder/shared';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -192,10 +192,16 @@ describe('RecipeComments', () => {
     expect(post).toBeDisabled();
   });
 
-  it('Post button is disabled when text exceeds the max length', async () => {
-    const user = userEvent.setup();
+  it('Post button is disabled when text exceeds the max length', () => {
     render(<RecipeComments recipeId={7} />);
-    await user.type(screen.getByLabelText(/add a comment/i), 'a'.repeat(2001));
+    // `user.type` of a 2001-char string into a controlled <textarea> races
+    // React 19's render batching and produces interleaved characters. The
+    // observable behaviour we care about — value over the limit disables the
+    // button — is unaffected by *how* the value lands in the field, so set
+    // it atomically via `fireEvent.change` to avoid the typing race.
+    fireEvent.change(screen.getByLabelText(/add a comment/i), {
+      target: { value: 'a'.repeat(2001) },
+    });
     expect(screen.getByRole('button', { name: /post/i })).toBeDisabled();
   });
 
@@ -235,9 +241,13 @@ describe('RecipeComments', () => {
     };
     render(<RecipeComments recipeId={7} />);
     await user.click(screen.getByRole('button', { name: /edit/i }));
-    const editArea = screen.getByLabelText(/edit comment/i);
-    await user.clear(editArea);
-    await user.type(editArea, 'after');
+    // Replace the textarea contents atomically: `user.clear` + `user.type`
+    // into a React 19 controlled <textarea> can interleave the prior value
+    // with the typed characters. `fireEvent.change` sets the new value in
+    // one event, which is what we actually want to assert against.
+    fireEvent.change(screen.getByLabelText(/edit comment/i), {
+      target: { value: 'after' },
+    });
     await user.click(screen.getByRole('button', { name: /save/i }));
     expect(editMutateMock).toHaveBeenCalledWith({ id: 9, comment: 'after' });
   });

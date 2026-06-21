@@ -83,6 +83,17 @@ Smoke test the magic-link flow: open `http://localhost:5173/sign-in`, enter
 an email on `MAGIC_LINK_ALLOWED_EMAILS`, and check that inbox. Hitting `/`
 without a session redirects to `/sign-in`.
 
+### PWA install + offline shopping list
+
+Production builds register a service worker via `vite-plugin-pwa`
+(`registerType: 'autoUpdate'`). The shopping-list tRPC read
+(`shopping.getForPlan`) uses a `NetworkFirst` runtime cache with a 3-second
+timeout, so killing connectivity and reloading still renders the last
+fetched list. Dev builds skip SW registration to keep Vite HMR clean. The
+manifest + icons live under `frontend/public/icons/` (placeholder art; the
+swap for final brand assets is tracked separately). See DEC-86 for the
+cache shape and trade-offs.
+
 ## Quality gates
 
 ESLint (typed, `@typescript-eslint` strict-type-checked) and Prettier own

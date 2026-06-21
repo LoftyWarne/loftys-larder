@@ -59,6 +59,8 @@
     "tw-animate-css": "^1.0.5",
     "typescript": "*",
     "vite": "^7.3.3",
-    "vitest": "^3.0.4"
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^3.0.4",
+    "workbox-window": "^7.4.1"
   }
 }

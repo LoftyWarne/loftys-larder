@@ -1,8 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
-import { buildApp, type BuildAppOptions } from '../src/server.ts';
+import { PassThrough } from 'node:stream';
+import {
+  buildApp,
+  buildAppWithLogger,
+  type BuildAppOptions,
+} from '../src/server.ts';
 import type { Config } from '../src/config.ts';
 import * as schema from '../src/db/schema/index.ts';
 
@@ -39,6 +44,7 @@ const devConfig: Config = {
   LOG_LEVEL: 'silent',
   ALLOWED_ORIGIN: 'http://localhost:5173',
   DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
+  AXIOM_ENDPOINT: 'https://api.axiom.co',
   ...authEnv,
 };
 
@@ -49,6 +55,9 @@ const prodConfig: Config = {
   LOG_LEVEL: 'silent',
   ALLOWED_ORIGIN: undefined,
   DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
+  AXIOM_TOKEN: 'test-axiom-token',
+  AXIOM_DATASET: 'test-dataset',
+  AXIOM_ENDPOINT: 'https://api.axiom.co',
   ...authEnv,
 };
 
@@ -218,6 +227,58 @@ describe('auth pre-handler', () => {
       url: `/api/trpc/health.ping?input=${encodeTrpcInput({})}`,
     });
     expect(response.statusCode).toBe(401);
+  });
+});
+
+describe('Axiom log propagation', () => {
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('emits a log entry to Axiom carrying the request reqId (DEC-77)', async () => {
+    const fetchSpy = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response(null, { status: 200 })),
+    );
+    // Capture (and discard) the stdout mirror so the production-mode logs
+    // don't leak JSON into the test output.
+    const silentStdout = new PassThrough();
+    silentStdout.resume();
+    const built = await buildAppWithLogger(
+      { ...prodConfig, LOG_LEVEL: 'info' },
+      { ...buildOptions, fetchImpl: fetchSpy, stdout: silentStdout },
+    );
+    app = built.app;
+    // Capture the reqId Fastify assigns; the response header isn't exposed by
+    // default in Fastify v5, but req.id is the same value Pino's child logger
+    // emits as `reqId` on every entry tied to that request.
+    let observedReqId: string | undefined;
+    app.addHook('onRequest', (req, _reply, done) => {
+      observedReqId = req.id;
+      done();
+    });
+    await app.inject({
+      method: 'GET',
+      url: `/api/trpc/health.ping?input=${encodeTrpcInput({})}`,
+    });
+    if (!built.axiom) throw new Error('expected Axiom destination');
+    await built.axiom.end();
+
+    expect(observedReqId).toBeDefined();
+    expect(fetchSpy).toHaveBeenCalled();
+    const ndjson = fetchSpy.mock.calls
+      .map((call) => {
+        const body = call[1]?.body;
+        return typeof body === 'string' ? body : '';
+      })
+      .join('');
+    const matched = ndjson
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as { reqId?: string })
+      .find((entry) => entry.reqId === observedReqId);
+    expect(matched).toBeDefined();
   });
 });
 

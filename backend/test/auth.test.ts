@@ -69,6 +69,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     CLOUDINARY_CLOUD_NAME: 'test-cloud',
     CLOUDINARY_API_KEY: 'test-key',
     CLOUDINARY_API_SECRET: 'test-secret',
+    AXIOM_ENDPOINT: 'https://api.axiom.co',
     ...overrides,
   };
 }

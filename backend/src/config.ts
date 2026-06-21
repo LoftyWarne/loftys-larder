@@ -48,6 +48,11 @@ const configSchema = z
     CLOUDINARY_CLOUD_NAME: z.string().min(1),
     CLOUDINARY_API_KEY: z.string().min(1),
     CLOUDINARY_API_SECRET: z.string().min(1),
+    // Axiom ingest credentials (DEC-75). Required in production so logs reach
+    // the aggregator; optional in dev/test where logs stay on stdout.
+    AXIOM_TOKEN: z.string().min(1).optional(),
+    AXIOM_DATASET: z.string().min(1).optional(),
+    AXIOM_ENDPOINT: z.url().default('https://api.axiom.co'),
   })
   .refine(
     (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),
@@ -55,6 +60,22 @@ const configSchema = z
       path: ['ALLOWED_ORIGIN'],
       message:
         'ALLOWED_ORIGIN is required outside production (used by the dev-only CORS origin).',
+    },
+  )
+  .refine(
+    (value) => value.NODE_ENV !== 'production' || Boolean(value.AXIOM_TOKEN),
+    {
+      path: ['AXIOM_TOKEN'],
+      message:
+        'AXIOM_TOKEN is required in production (Pino → Axiom transport, DEC-75).',
+    },
+  )
+  .refine(
+    (value) => value.NODE_ENV !== 'production' || Boolean(value.AXIOM_DATASET),
+    {
+      path: ['AXIOM_DATASET'],
+      message:
+        'AXIOM_DATASET is required in production (Pino → Axiom transport, DEC-75).',
     },
   );
 

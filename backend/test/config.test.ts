@@ -48,6 +48,8 @@ describe('loadConfig', () => {
     const config = loadConfig({
       ...envWithout('ALLOWED_ORIGIN'),
       NODE_ENV: 'production',
+      AXIOM_TOKEN: 'xaat-test',
+      AXIOM_DATASET: 'lofty-prod',
     });
     expect(config.ALLOWED_ORIGIN).toBeUndefined();
     expect(config.NODE_ENV).toBe('production');
@@ -133,6 +135,44 @@ describe('loadConfig', () => {
         MAGIC_LINK_ALLOWED_EMAILS: 'alice@example.com,not-an-email',
       }),
     ).toThrowError(ConfigValidationError);
+  });
+
+  it('rejects production without AXIOM_TOKEN', () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        NODE_ENV: 'production',
+        AXIOM_DATASET: 'lofty-prod',
+      }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('rejects production without AXIOM_DATASET', () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        NODE_ENV: 'production',
+        AXIOM_TOKEN: 'xaat-test',
+      }),
+    ).toThrowError(ConfigValidationError);
+  });
+
+  it('accepts production with both AXIOM_TOKEN and AXIOM_DATASET set', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      NODE_ENV: 'production',
+      AXIOM_TOKEN: 'xaat-test',
+      AXIOM_DATASET: 'lofty-prod',
+    });
+    expect(config.AXIOM_TOKEN).toBe('xaat-test');
+    expect(config.AXIOM_DATASET).toBe('lofty-prod');
+    expect(config.AXIOM_ENDPOINT).toBe('https://api.axiom.co');
+  });
+
+  it('allows missing AXIOM_TOKEN outside production', () => {
+    const config = loadConfig({ ...baseEnv, NODE_ENV: 'development' });
+    expect(config.AXIOM_TOKEN).toBeUndefined();
+    expect(config.AXIOM_DATASET).toBeUndefined();
   });
 
   it('accepts both postgres:// and postgresql:// DATABASE_URL prefixes', () => {

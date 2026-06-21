@@ -47,3 +47,28 @@ From DEC-71, verbatim:
 FEAT-08-specific addendum:
 
 - FEAT-09 ships, real traffic exercises `pg-pool`, and any burst shows **peak RSS > 70% of the machine's memory ceiling** on the Fly dashboard's Metrics chart, *or* **sustained `pg-pool` queue depth > 0** in the logs. Either is the cue to actually run the load script the original FEAT-08 spec describes and confirm the estimate empirically.
+
+---
+
+## 2026-06-21 — Log volume baseline (FEAT-44)
+
+**To be filled after the first week of production traffic.** Stub committed alongside the Pino → Axiom transport so the slot exists when the first numbers arrive.
+
+### What to record once data exists
+
+- Daily event count to Axiom (`stats('count')` over a 24h window in the Axiom dataset, on a representative day — not a deploy day, not the first day after launch).
+- 95th-percentile event size in bytes (the Axiom free tier silently drops oversized events; this is the leading indicator that an `info`-level log call is borderline).
+- Share of events at `info`, `warn`, `error`. A drift to >10% non-`info` is either a real signal (page someone) or noise to suppress at the call site.
+- Estimated days of retention available given Axiom's 30-day rolling window and current ingest rate. If projected retention falls below 25 days at the current ingest rate, that's the cue to either drop noisy logs or revisit DEC-75 (see "Revisit when" there).
+
+### Why a stub rather than a synthetic load run
+
+- Two-user household traffic is shaped almost entirely by real usage patterns (when meals get planned, when the shopping list is opened). Synthetic load doesn't approximate it usefully.
+- The actual measurement requires the deployed transport (FEAT-44) and a representative day of real requests — neither of which can be faked locally with value.
+- The transport ships as plumbing; this row is the agreement that we will measure it within the first month of meaningful usage, not later.
+
+### Revisit triggers
+
+- Axiom's "events ingested" panel shows a step change (>2× the baseline once established) without a corresponding feature shipping.
+- The Axiom dashboard surfaces dropped events (per-event size cap exceeded).
+- DEC-75's "revisit when" fires: an incident requires logs older than the rolling window, or Axiom pricing changes.

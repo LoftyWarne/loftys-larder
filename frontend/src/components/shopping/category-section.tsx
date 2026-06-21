@@ -8,6 +8,7 @@ import { ListLine } from './list-line.tsx';
 export interface CategorySectionProps {
   category: ShoppingListCategory;
   onToggle: (line: ShoppingListLine, nextChecked: boolean) => void;
+  queuedIngredientIds?: ReadonlySet<number>;
 }
 
 // Section per ingredient category. Headers render in the order the server
@@ -15,6 +16,7 @@ export interface CategorySectionProps {
 export function CategorySection({
   category,
   onToggle,
+  queuedIngredientIds,
 }: CategorySectionProps): React.ReactElement {
   return (
     <section
@@ -27,7 +29,12 @@ export function CategorySection({
       </h2>
       <ul className="rounded-md border bg-card px-3">
         {category.lines.map((line) => (
-          <ListLine key={line.ingredient.id} line={line} onToggle={onToggle} />
+          <ListLine
+            key={line.ingredient.id}
+            line={line}
+            onToggle={onToggle}
+            isQueued={queuedIngredientIds?.has(line.ingredient.id) ?? false}
+          />
         ))}
       </ul>
     </section>

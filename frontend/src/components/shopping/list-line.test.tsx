@@ -87,6 +87,20 @@ describe('ListLine', () => {
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 
+  it('renders a "Pending sync" indicator when isQueued is true', () => {
+    render(<ListLine line={makeLine()} onToggle={() => undefined} isQueued />);
+    const indicator = screen.getByRole('status', { name: /pending sync/i });
+    expect(indicator).toBeInTheDocument();
+    expect(indicator).toHaveAttribute('data-print-hide');
+  });
+
+  it('omits the "Pending sync" indicator by default', () => {
+    render(<ListLine line={makeLine()} onToggle={() => undefined} />);
+    expect(
+      screen.queryByRole('status', { name: /pending sync/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it('lists contributing recipes inside a collapsed-by-default disclosure', () => {
     const { container } = render(
       <ListLine line={makeLine()} onToggle={() => undefined} />,

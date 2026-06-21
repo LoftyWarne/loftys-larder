@@ -4,7 +4,9 @@ import type {
   ToggleShoppingItemCheckedResult,
 } from '@loftys-larder/shared';
 import { renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createInMemoryQueueStore } from '@/lib/offline-queue.ts';
 
 const { toggleMutateMock, getDataMock, setDataMock, cancelMock } = vi.hoisted(
   () => ({
@@ -72,12 +74,24 @@ const INPUT: ToggleShoppingItemCheckedInput = {
   isChecked: true,
 };
 
+function setOnline(value: boolean): void {
+  Object.defineProperty(navigator, 'onLine', {
+    configurable: true,
+    get: () => value,
+  });
+}
+
 beforeEach(() => {
   toggleMutateMock.mockReset();
   getDataMock.mockReset();
   setDataMock.mockReset();
   cancelMock.mockClear();
   mutationOptions = {};
+  setOnline(true);
+});
+
+afterEach(() => {
+  setOnline(true);
 });
 
 describe('useOptimisticCheckToggle', () => {
@@ -142,6 +156,71 @@ describe('useOptimisticCheckToggle', () => {
     const err = new Error('boom');
     onError(err, INPUT, { previous: undefined });
     expect(onErrorSpy).toHaveBeenCalledWith(err);
+  });
+
+  it('when offline, keeps the optimistic patch, enqueues, and suppresses onError', async () => {
+    setOnline(false);
+    getDataMock.mockReturnValue(LIST);
+    const store = createInMemoryQueueStore();
+    const onErrorSpy = vi.fn();
+    renderHook(() =>
+      useOptimisticCheckToggle({
+        planId: 9,
+        onError: onErrorSpy,
+        offlineQueueStore: store,
+      }),
+    );
+
+    const onMutate = mutationOptions.onMutate as (
+      input: ToggleShoppingItemCheckedInput,
+    ) => Promise<{ previous: GetShoppingListForPlanResult | undefined }>;
+    const onError = mutationOptions.onError as (
+      err: unknown,
+      vars: ToggleShoppingItemCheckedInput,
+      ctx: { previous: GetShoppingListForPlanResult | undefined } | undefined,
+    ) => void;
+
+    const ctx = await onMutate(INPUT);
+    setDataMock.mockClear();
+    onError(new TypeError('Failed to fetch'), INPUT, ctx);
+
+    expect(setDataMock).not.toHaveBeenCalled();
+    expect(onErrorSpy).not.toHaveBeenCalled();
+    await vi.waitFor(async () => {
+      const entries = await store.list();
+      expect(entries).toEqual([
+        expect.objectContaining({
+          planId: 9,
+          ingredientId: 100,
+          isChecked: true,
+        }),
+      ]);
+    });
+  });
+
+  it('successful mutation removes a matching queued entry', async () => {
+    const store = createInMemoryQueueStore();
+    await store.enqueue({
+      planId: 9,
+      ingredientId: 100,
+      isChecked: false,
+    });
+    renderHook(() =>
+      useOptimisticCheckToggle({ planId: 9, offlineQueueStore: store }),
+    );
+
+    const onSuccess = mutationOptions.onSuccess as (
+      data: unknown,
+      vars: ToggleShoppingItemCheckedInput,
+    ) => void;
+    onSuccess(
+      { planId: 9, ingredientId: 100, isChecked: true },
+      { planId: 9, ingredientId: 100, isChecked: true },
+    );
+
+    await vi.waitFor(async () => {
+      expect(await store.list()).toEqual([]);
+    });
   });
 
   it('reconciles the cache with the server-returned isChecked on settle', () => {

@@ -10,6 +10,12 @@ import { ShelfLifeBadge } from './shelf-life-badge.tsx';
 export interface ListLineProps {
   line: ShoppingListLine;
   onToggle: (line: ShoppingListLine, nextChecked: boolean) => void;
+  /**
+   * The toggle is sitting in the offline queue waiting for reconnect-drain
+   * (FEAT-43). The line renders a small "Pending sync" indicator; print CSS
+   * hides it via `data-print-hide`.
+   */
+  isQueued?: boolean;
 }
 
 // One shopping-list row. Tap-target sizing (min 44 px) and single-row layout
@@ -19,6 +25,7 @@ export interface ListLineProps {
 export function ListLine({
   line,
   onToggle,
+  isQueued = false,
 }: ListLineProps): React.ReactElement {
   const checkboxId = `shopping-line-${String(line.ingredient.id)}`;
   const totalLabel = `${formatQuantity(line.totalQuantity, line.unit.name)} ${line.unit.name}`;
@@ -54,6 +61,17 @@ export function ListLine({
             </span>
             {line.shelfLifeWarning && (
               <ShelfLifeBadge warning={line.shelfLifeWarning} />
+            )}
+            {isQueued && (
+              <span
+                data-shopping-pending-sync
+                data-print-hide
+                role="status"
+                aria-label="Pending sync"
+                className="rounded-sm bg-muted px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Pending sync
+              </span>
             )}
           </span>
         </label>

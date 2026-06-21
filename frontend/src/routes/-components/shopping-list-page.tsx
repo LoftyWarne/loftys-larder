@@ -1,9 +1,11 @@
 import type { ShoppingListLine } from '@loftys-larder/shared';
 import { useParams } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { CategorySection } from '@/components/shopping/category-section.tsx';
+import { useOfflineQueue } from '@/hooks/use-offline-queue.ts';
 import { useOptimisticCheckToggle } from '@/hooks/use-optimistic-check-toggle.ts';
+import { drainOfflineQueue } from '@/lib/offline-queue-drain.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 export function ShoppingListPage(): React.ReactElement {
@@ -17,14 +19,41 @@ export function ShoppingListPage(): React.ReactElement {
   );
 
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const offline = useOfflineQueue({ planId });
   const { toggle } = useOptimisticCheckToggle({
     planId,
+    offlineQueueStore: offline.store,
     onError: (err) => {
       setMutationError(
         err instanceof Error ? err.message : 'Could not update line',
       );
     },
   });
+
+  const drainMutation = trpc.shopping.toggleChecked.useMutation();
+  const drainMutateAsyncRef = useRef(drainMutation.mutateAsync);
+  drainMutateAsyncRef.current = drainMutation.mutateAsync;
+  const utils = trpc.useUtils();
+
+  // Drain on reconnect — and on mount if already online with queued entries.
+  // Captive portals lie about `navigator.onLine` (FEAT-43 gotcha), so drain
+  // failures stop short of clearing the entry; the next `online` flip retries.
+  useEffect(() => {
+    if (!offline.isOnline) return;
+    const lifecycle = { cancelled: false };
+    void (async () => {
+      const result = await drainOfflineQueue(offline.store, (input) =>
+        drainMutateAsyncRef.current(input),
+      );
+      if (lifecycle.cancelled) return;
+      if (result.drained > 0 && idIsValid) {
+        void utils.shopping.getForPlan.invalidate({ planId });
+      }
+    })();
+    return () => {
+      lifecycle.cancelled = true;
+    };
+  }, [offline.isOnline, offline.store, utils, planId, idIsValid]);
 
   function handleToggle(line: ShoppingListLine, nextChecked: boolean): void {
     setMutationError(null);
@@ -67,6 +96,15 @@ export function ShoppingListPage(): React.ReactElement {
         <p className="text-sm text-muted-foreground">
           Tap items off as you shop. The list refreshes when you reload.
         </p>
+        {!offline.isOnline && (
+          <p
+            data-shopping-offline-banner
+            role="status"
+            className="text-sm text-muted-foreground"
+          >
+            Offline — toggles will sync when you reconnect.
+          </p>
+        )}
       </header>
       {mutationError && (
         <p role="alert" className="text-sm text-destructive">
@@ -80,6 +118,7 @@ export function ShoppingListPage(): React.ReactElement {
               key={cat.category.id}
               category={cat}
               onToggle={handleToggle}
+              queuedIngredientIds={offline.queuedIngredientIds}
             />
           ))}
         </div>

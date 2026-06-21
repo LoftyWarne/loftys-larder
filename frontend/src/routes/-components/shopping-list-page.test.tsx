@@ -1,21 +1,31 @@
 import type { GetShoppingListForPlanResult } from '@loftys-larder/shared';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  __resetOfflineQueueStoreForTests,
+  createInMemoryQueueStore,
+  type OfflineQueueStore,
+} from '@/lib/offline-queue.ts';
 
 const {
   listUseQueryMock,
   toggleMutateMock,
+  drainMutateAsyncMock,
   getDataMock,
   setDataMock,
   cancelMock,
+  invalidateMock,
   paramsMock,
 } = vi.hoisted(() => ({
   listUseQueryMock: vi.fn(),
   toggleMutateMock: vi.fn(),
+  drainMutateAsyncMock: vi.fn().mockResolvedValue(undefined),
   getDataMock: vi.fn(),
   setDataMock: vi.fn(),
   cancelMock: vi.fn().mockResolvedValue(undefined),
+  invalidateMock: vi.fn().mockResolvedValue(undefined),
   paramsMock: vi.fn(),
 }));
 
@@ -33,15 +43,26 @@ vi.mock('@/lib/trpc.ts', () => ({
           cancel: cancelMock,
           getData: getDataMock,
           setData: setDataMock,
+          invalidate: invalidateMock,
         },
       },
     }),
     shopping: {
       getForPlan: { useQuery: listUseQueryMock },
       toggleChecked: {
-        useMutation: (opts: Record<string, unknown>) => {
-          mutationOptions = opts;
-          return { mutate: toggleMutateMock, isPending: false };
+        useMutation: (opts?: Record<string, unknown>) => {
+          // The optimistic hook passes onMutate/onError/onSettled; the drain
+          // mutation passes nothing. Discriminate so each test can address
+          // the right one.
+          if (opts && 'onMutate' in opts) {
+            mutationOptions = opts;
+            return { mutate: toggleMutateMock, isPending: false };
+          }
+          return {
+            mutateAsync: drainMutateAsyncMock,
+            mutate: vi.fn(),
+            isPending: false,
+          };
         },
       },
     },
@@ -112,14 +133,34 @@ function setup(options: SetupOptions = {}): void {
   });
 }
 
+function setOnline(value: boolean): void {
+  Object.defineProperty(navigator, 'onLine', {
+    configurable: true,
+    get: () => value,
+  });
+}
+
+let queueStore: OfflineQueueStore;
+
 beforeEach(() => {
   listUseQueryMock.mockReset();
   toggleMutateMock.mockReset();
+  drainMutateAsyncMock.mockReset();
+  drainMutateAsyncMock.mockResolvedValue(undefined);
   getDataMock.mockReset();
   setDataMock.mockReset();
   cancelMock.mockClear();
+  invalidateMock.mockClear();
   paramsMock.mockReset();
   mutationOptions = {};
+  queueStore = createInMemoryQueueStore();
+  __resetOfflineQueueStoreForTests(queueStore);
+  setOnline(true);
+});
+
+afterEach(() => {
+  __resetOfflineQueueStoreForTests(null);
+  setOnline(true);
 });
 
 describe('ShoppingListPage', () => {
@@ -174,7 +215,84 @@ describe('ShoppingListPage', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/invalid plan id/i);
   });
 
-  it('surfaces a mutation error at the top of the page when the hook calls onError', () => {
+  it('renders an offline banner when navigator.onLine is false', async () => {
+    setOnline(false);
+    setup();
+    render(<ShoppingListPage />);
+    expect(
+      screen.getByText(/offline — toggles will sync/i),
+    ).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it('shows the "Pending sync" indicator on queued lines', async () => {
+    await queueStore.enqueue({
+      planId: 9,
+      ingredientId: 100,
+      isChecked: true,
+    });
+    setOnline(false);
+    setup();
+    render(<ShoppingListPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('status', { name: /pending sync/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('drains the queue on mount when online and invalidates the list on success', async () => {
+    await queueStore.enqueue({
+      planId: 9,
+      ingredientId: 100,
+      isChecked: true,
+    });
+    setup();
+    render(<ShoppingListPage />);
+
+    await waitFor(() => {
+      expect(drainMutateAsyncMock).toHaveBeenCalledWith({
+        planId: 9,
+        ingredientId: 100,
+        isChecked: true,
+      });
+    });
+    await waitFor(() => {
+      expect(invalidateMock).toHaveBeenCalledWith({ planId: 9 });
+    });
+    expect(await queueStore.list()).toEqual([]);
+  });
+
+  it('drains on reconnect when an online event fires', async () => {
+    setOnline(false);
+    setup();
+    render(<ShoppingListPage />);
+
+    await act(async () => {
+      await queueStore.enqueue({
+        planId: 9,
+        ingredientId: 100,
+        isChecked: true,
+      });
+    });
+
+    expect(drainMutateAsyncMock).not.toHaveBeenCalled();
+
+    setOnline(true);
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(drainMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('surfaces a mutation error at the top of the page when the hook calls onError', async () => {
     setup();
     render(<ShoppingListPage />);
 
@@ -184,8 +302,9 @@ describe('ShoppingListPage', () => {
       ctx: { previous: GetShoppingListForPlanResult | undefined } | undefined,
     ) => void;
 
-    act(() => {
+    await act(async () => {
       onError(new Error('toggle failed'), undefined, { previous: undefined });
+      await Promise.resolve();
     });
 
     expect(screen.getByRole('alert')).toHaveTextContent('toggle failed');

@@ -4,6 +4,45 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-21 — FEAT-43 (Offline check-state queue + reconnect sync)
+
+**Status:** implementation complete. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean. Frontend tests **307/307** passing (27 new across 6 files). DoD boxes in `docs/feature-specs.md §FEAT-43` left unticked — human action. The spec's `[DEC-TBD: offline mutation queue, LWW conflict resolution accepted]` is still open; the implementation answers it (queue at the optimistic-hook layer, drain via standalone `useMutation`, LWW honoured because drain replays in `queuedAt` order and the server's post-reset response wins on settle).
+
+### Decisions taken at kick-off
+
+- **Hook-level enqueue, not a tRPC link.** The spec sketches "extend `trpc.ts` with a link that catches network errors and queues toggles." Adopted instead: catch the offline failure inside `useOptimisticCheckToggle.onError` and enqueue from there. Reasons: (a) a generic link would intercept *every* mutation's network errors and need a per-procedure allow-list — leaky; (b) the toggle hook already owns input shape + cache patches; (c) AGENTS.md flags the tRPC URL shape as stop-and-ask, and a network-error link is close enough to the surface that the conservative call is to leave `trpc.ts` untouched. The shape stays `httpBatchLink` → `/api/trpc/…` unchanged (cross-cutting #16 honoured).
+- **Hand-rolled IndexedDB wrapper, no `idb-keyval` dep.** ~120 lines of `openDB` / `withStore` / `promisifyRequest` over the native `IDBFactory`. Decision driven by AGENTS.md's stop-and-ask-before-new-dep rule; the IDB API is small enough that a wrapper costs less than the dep negotiation.
+- **`online`-event drain only, no `BackgroundSyncPlugin`.** FEAT-42 didn't wire a Background Sync handler; layering one in for FEAT-43 would expand the SW surface. The chosen path: drain in the page's `useEffect` on `isOnline === true` transitions (covers both reconnect and mount-already-online). Failures keep entries in the queue for the next `online` flip — the spec's "captive portals lie" gotcha is absorbed there.
+- **Queue keyed by `(planId, ingredientId)`; drain runs across all plans; indicator is plan-scoped.** Switching plans does not strand pending work. The visible "Pending sync" chip only renders on lines whose `ingredientId` matches a queue entry for the visible `planId`.
+- **One named cache bucket touched, none added.** `shopping-list-network-first` from FEAT-42 / DEC-86 still owns reads; FEAT-43 only adds a write-side queue. After drain, `utils.shopping.getForPlan.invalidate({ planId })` triggers a network-first refetch and the cache reconciles.
+
+### Drift from kick-off plan
+
+1. **`OfflineQueueStore` is an interface with two implementations + a singleton factory.** Kick-off plan named one IDB-backed module; jsdom omits `indexedDB`, so the contract-based split (in-memory + IDB sharing one interface) was the cheapest way to make the queue unit-testable without a `fake-indexeddb` dev-dep. The factory picks IDB when present, in-memory otherwise — also a graceful degradation path for browsers that disable IDB (private mode in some engines).
+2. **`__resetOfflineQueueStoreForTests` test seam.** Public-but-underscored export so the page-level integration tests can swap the singleton between cases without a full module re-import. The pattern matches what the SW tests already use for the `virtual:pwa-register` stub.
+3. **Standalone `useMutation` for the drain path** (not `mutateAsync` on the optimistic hook). The optimistic hook would have fired `onMutate`'s cache patch redundantly for each drain entry; the plain mutation avoids that. After the drain completes, one `invalidate({ planId })` lets server truth land via the network-first cache rule from DEC-86. `mutateAsync` is captured in a ref to keep the effect deps stable across renders.
+4. **`isQueued` indicator on `<ListLine>` is `role="status" aria-label="Pending sync"` with `data-print-hide`.** Matches the existing typographic chip patterns (no icon library); print stylesheet hides it via the same attribute the page header already uses.
+5. **Page-level integration tests landed.** Three new cases in `shopping-list-page.test.tsx` exercise drain-on-mount + invalidate, drain-on-reconnect, and the offline banner via the in-memory store. The "real IDB reload" probe stays a manual verification step (see `docs/feature-specs.md §FEAT-43` step 2).
+
+### Implementation details worth carrying
+
+- **`useOptimisticCheckToggle` decides offline vs online from `navigator.onLine` inside `onError`.** The check is `!navigator.onLine` (`navigator.onLine` is typed as `boolean`, never `undefined`). When offline: enqueue, keep the cache patch, suppress the user-supplied `onError`. When online: existing rollback + `onError` path runs unchanged. `onSuccess` removes any matching queue entry — protects against a live toggle landing during a drain pass that already enqueued the prior state.
+- **`drainOfflineQueue` returns `{ drained, remaining, error? }` and stops at the first failure.** The failing entry stays in the queue (plus everything after it) so the next `online` flip retries from the same point. No exponential backoff in v1 — explicit per the kick-off discussion.
+- **`useOfflineQueue` deduplicates its `setEntries` calls via a shallow-equal compare** (`sameEntries`). Without it, every mount produced an after-test `setEntries([])` resolve that React flagged with the `act(...)` warning; the equality bail-out keeps the hook quiet on idle renders.
+- **`shopping-list-page.tsx` cancellation flag is a mutable object** (`const lifecycle = { cancelled: false }`), not `let cancelled = false`. TS narrows the literal-false declaration aggressively enough that `if (cancelled)` reads as "always falsy" to `@typescript-eslint/no-unnecessary-condition`. Object-flagged cancellation sidesteps the narrow and reads identically at runtime.
+- **`useEffect` deps for the drain are `[offline.isOnline, offline.store, utils, planId, idIsValid]`.** Stable across renders in practice — `offline.store` is `useMemo`'d in the hook, `utils` is the same `useUtils()` ref across renders, `idIsValid` is derived from the route param.
+- **`useMemo(() => injected ?? getOfflineQueueStore(), [injected])` in `useOfflineQueue`.** Holds the store reference stable per render so the subscription effect doesn't re-run.
+- **Print CSS already covers the indicator** via the existing `[data-print-hide]` rule in `src/print.css`; no new stylesheet entry needed.
+
+### Open follow-ups
+
+- **Author the DEC.** `[DEC-TBD: offline mutation queue, LWW conflict resolution accepted]` is still open. Suggested content: hook-layer enqueue (no tRPC link), drain via standalone `useMutation`, `(planId, ingredientId)` collapse, `queuedAt`-ordered drain, stop-on-first-failure, LWW per DEC-36 with no row-version. Cross-refs: FEAT-38 (toggleChecked), FEAT-42 (PWA cache), DEC-36 (LWW), DEC-86 (network-first cache that pairs with the drain's invalidate).
+- **IDB persistence-across-reload is unit-test-uncovered.** The in-memory store is the test target; the IDB wrapper itself is audited by eye. The first time we want regression coverage on the IDB path, `fake-indexeddb` is the conventional dev-dep — small, ESM, test-only — and would let `offline-queue.test.ts` exercise the wrapper too. Flagged for the next time IDB behaviour changes.
+- **Captive-portal stale-`onLine` is accepted v1 risk.** If users report "I reconnected but nothing synced," the fix is either a periodic retry timer (cheap, drains every N seconds when the queue is non-empty) or a manual "retry sync" button on the offline banner.
+- **Procedure rename hazard remains.** The drain calls `trpc.shopping.toggleChecked.useMutation()` directly; a rename of `shopping.toggleChecked` would break compilation (good) and require an audit of the FEAT-42 cache regex + this file. Worth a note in any future router-renaming session, joining the same note from FEAT-42.
+
+---
+
 ## 2026-06-21 — FEAT-42 (PWA infrastructure: service worker + manifest + network-first for shopping list)
 
 **Status:** implementation complete. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm format:check` all clean. Frontend tests **280/280** passing (12 new across two files). `pnpm --filter frontend build` succeeds; `dist/sw.js` contains the `shopping\.getForPlan` regex + `NetworkFirst` handler + `shopping-list-network-first` cache bucket; `dist/manifest.webmanifest` carries the expected name, `start_url`, scope, and icon set. DoD boxes in `docs/feature-specs.md §FEAT-42` left unticked — human action. **DEC-86** authored at the same time (the spec's `[DEC-TBD: PWA network-first for shopping list]`).

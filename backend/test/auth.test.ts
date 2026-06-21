@@ -70,6 +70,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     CLOUDINARY_API_KEY: 'test-key',
     CLOUDINARY_API_SECRET: 'test-secret',
     AXIOM_ENDPOINT: 'https://api.axiom.co',
+    SENTRY_TRACES_SAMPLE_RATE: 0,
     ...overrides,
   };
 }

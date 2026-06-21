@@ -12,6 +12,7 @@ import type { AxiomDestination } from './plugins/axiom-destination.ts';
 import { randomUUID } from 'node:crypto';
 import { registerAuth } from './plugins/auth.ts';
 import { registerSecurity } from './plugins/security.ts';
+import { initSentry, registerSentryHooks } from './plugins/sentry.ts';
 import { createContext } from './trpc/context.ts';
 import { appRouter } from './trpc/router.ts';
 
@@ -26,6 +27,8 @@ export interface BuildAppOptions {
   // Redirect Pino's stdout sink in tests so the production-mode mirror
   // doesn't leak JSON into test output.
   stdout?: NodeJS.WritableStream;
+  // Skip Sentry init in tests where we don't want the global SDK state set.
+  skipSentry?: boolean;
 }
 
 export interface BuiltApp {
@@ -54,11 +57,21 @@ export async function buildAppWithLogger(
   // typed local keeps the FastifyInstance generic at its default base logger
   // so registerSecurity / registerAuth / routes stay assignable.
   const baseLogger: FastifyBaseLogger = logger;
+
+  // Initialise Sentry before any Fastify lifecycle runs so its HTTP
+  // integration patches `http` ahead of Fastify's listener. A missing DSN
+  // makes initSentry a no-op (DEC-76), so a Sentry-free dev/test path stays
+  // valid.
+  const sentryEnabled =
+    !options.skipSentry && initSentry(config, { logger: baseLogger });
+
   const app = Fastify({
     loggerInstance: baseLogger,
     genReqId: () => randomUUID(),
     disableRequestLogging: false,
   });
+
+  if (sentryEnabled) registerSentryHooks(app);
 
   await registerSecurity(app, config);
 

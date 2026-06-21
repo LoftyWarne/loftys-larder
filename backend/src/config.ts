@@ -53,6 +53,12 @@ const configSchema = z
     AXIOM_TOKEN: z.string().min(1).optional(),
     AXIOM_DATASET: z.string().min(1).optional(),
     AXIOM_ENDPOINT: z.url().default('https://api.axiom.co'),
+    // Sentry is best-effort observability (DEC-76). Missing DSN is a no-op
+    // init — Sentry shouldn't block boot the way Axiom does. SAMPLE_RATE
+    // defaults to 0 (traces off, DEC-77 explicitly punts distributed tracing).
+    SENTRY_DSN: z.url().optional(),
+    SENTRY_ENVIRONMENT: z.string().min(1).optional(),
+    SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
   })
   .refine(
     (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),

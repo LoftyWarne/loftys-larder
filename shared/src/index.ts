@@ -223,6 +223,12 @@ export {
 } from './schemas/plants.ts';
 export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export {
+  scrubPii,
+  type ScrubbableEvent,
+  type ScrubbableRequest,
+  type ScrubbableHeaders,
+} from './lib/scrub-pii.ts';
+export {
   shoppingListContributingSlotSchema,
   type ShoppingListContributingSlot,
   shelfLifeWarningSchema,

@@ -45,6 +45,7 @@ const devConfig: Config = {
   ALLOWED_ORIGIN: 'http://localhost:5173',
   DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
   AXIOM_ENDPOINT: 'https://api.axiom.co',
+  SENTRY_TRACES_SAMPLE_RATE: 0,
   ...authEnv,
 };
 
@@ -58,6 +59,7 @@ const prodConfig: Config = {
   AXIOM_TOKEN: 'test-axiom-token',
   AXIOM_DATASET: 'test-dataset',
   AXIOM_ENDPOINT: 'https://api.axiom.co',
+  SENTRY_TRACES_SAMPLE_RATE: 0,
   ...authEnv,
 };
 

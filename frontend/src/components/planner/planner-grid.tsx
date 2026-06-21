@@ -2,6 +2,7 @@ import type { PlanSlot } from '@loftys-larder/shared';
 import { useMemo } from 'react';
 
 import { BatchWarning } from '@/components/planner/batch-warning.tsx';
+import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { SlotCell } from '@/components/planner/slot-cell.tsx';
 import { eachDateInRange, formatDayLabel } from '@/lib/date-utils.ts';
 
@@ -10,6 +11,13 @@ export interface PlannerGridProps {
   rangeStart: string;
   rangeEnd: string;
   warningSlotIds?: ReadonlySet<number>;
+  /**
+   * Plant-point totals keyed by civil date (`YYYY-MM-DD`). `null` for a date
+   * means the count is loading; an absent key means "no opinion" (badge
+   * hidden). Mirrors the shape of `warningSlotIds` — read-only, derived
+   * externally, no business logic in the grid.
+   */
+  dayPlantCounts?: ReadonlyMap<string, number | null>;
   dndEnabled?: boolean;
   onSlotClick: (slot: PlanSlot) => void;
   onSlotClear?: (slot: PlanSlot) => void;
@@ -25,6 +33,7 @@ export function PlannerGrid({
   rangeStart,
   rangeEnd,
   warningSlotIds,
+  dayPlantCounts,
   dndEnabled = false,
   onSlotClick,
   onSlotClear,
@@ -92,9 +101,15 @@ export function PlannerGrid({
           <div role="row" key={date} className="contents">
             <div
               role="rowheader"
-              className="px-2 py-1 text-sm font-medium text-muted-foreground"
+              className="flex flex-col gap-1 px-2 py-1 text-sm font-medium text-muted-foreground"
             >
-              {formatDayLabel(date)}
+              <span>{formatDayLabel(date)}</span>
+              {dayPlantCounts?.has(date) && (
+                <PlantPointsBadge
+                  count={dayPlantCounts.get(date) ?? null}
+                  variant="day"
+                />
+              )}
             </div>
             {occasions.map((occasion) => {
               const slot = slotIndex.get(slotKey(date, occasion.id));

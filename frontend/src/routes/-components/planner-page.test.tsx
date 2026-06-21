@@ -21,6 +21,10 @@ const {
   cancelMock,
   paramsMock,
   searchMock,
+  plantsForPlanUseQueryMock,
+  plantsForDayUseQueriesMock,
+  plantsForDayInvalidateMock,
+  plantsForPlanInvalidateMock,
 } = vi.hoisted(() => ({
   planUseQueryMock: vi.fn(),
   recipesUseInfiniteQueryMock: vi.fn(),
@@ -32,6 +36,10 @@ const {
   cancelMock: vi.fn().mockResolvedValue(undefined),
   paramsMock: vi.fn(),
   searchMock: vi.fn(),
+  plantsForPlanUseQueryMock: vi.fn(),
+  plantsForDayUseQueriesMock: vi.fn(),
+  plantsForDayInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  plantsForPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 let mutationOptions: Record<string, unknown> = {};
@@ -59,6 +67,10 @@ vi.mock('@/lib/trpc.ts', () => ({
           setData: setDataMock,
         },
       },
+      plants: {
+        forDay: { invalidate: plantsForDayInvalidateMock },
+        forPlan: { invalidate: plantsForPlanInvalidateMock },
+      },
       recipes: {
         list: {
           fetch: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
@@ -66,6 +78,10 @@ vi.mock('@/lib/trpc.ts', () => ({
       },
     }),
     plans: { get: { useQuery: planUseQueryMock } },
+    plants: {
+      forPlan: { useQuery: plantsForPlanUseQueryMock },
+    },
+    useQueries: plantsForDayUseQueriesMock,
     recipes: {
       list: { useInfiniteQuery: recipesUseInfiniteQueryMock },
       get: { useQuery: vi.fn().mockReturnValue({ data: undefined }) },
@@ -186,6 +202,15 @@ function setup(options: SetupOptions = {}): void {
     isLoading: false,
     error: null,
   });
+
+  plantsForPlanUseQueryMock.mockReturnValue({
+    data: { count: 5 },
+    isLoading: false,
+    error: null,
+  });
+  plantsForDayUseQueriesMock.mockReturnValue([
+    { data: { count: 3 }, isLoading: false, error: null },
+  ]);
 }
 
 const noop = (): void => undefined;
@@ -215,6 +240,10 @@ beforeEach(() => {
   getDataMock.mockReset();
   paramsMock.mockReset();
   searchMock.mockReset();
+  plantsForPlanUseQueryMock.mockReset();
+  plantsForDayUseQueriesMock.mockReset();
+  plantsForDayInvalidateMock.mockClear();
+  plantsForPlanInvalidateMock.mockClear();
   mutationOptions = {};
   // Default to the large-viewport branch so the bank is visible and the
   // pre-FEAT-40 click-to-assign tests keep their assertions. Tests that need
@@ -247,6 +276,30 @@ describe('PlannerPage', () => {
       cooksBaseServings: null,
       comment: null,
     });
+  });
+
+  it('renders the plan-total plant points badge in the header', () => {
+    setup();
+    render(<PlannerPage />);
+    expect(
+      screen.getByLabelText('5 plant points in this plan'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders a plant points badge for each visible day', () => {
+    setup();
+    render(<PlannerPage />);
+    // PLAN spans a single day → useQueries was passed one option, mock returns count 3.
+    expect(screen.getByLabelText('3 plant points')).toBeInTheDocument();
+  });
+
+  it('renders a skeleton badge for an in-flight day query', () => {
+    setup();
+    plantsForDayUseQueriesMock.mockReturnValue([
+      { data: undefined, isLoading: true, error: null },
+    ]);
+    render(<PlannerPage />);
+    expect(screen.getByLabelText('Loading plant points')).toBeInTheDocument();
   });
 
   it('opens the slot editor when an assigned slot is tapped', async () => {

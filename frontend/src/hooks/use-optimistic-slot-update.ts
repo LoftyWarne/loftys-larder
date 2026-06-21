@@ -100,6 +100,12 @@ export function useOptimisticSlotUpdate({
       onError?.(err);
     },
     onSettled: (data) => {
+      // Plant-points are derived from slot state — refetch after any slot
+      // mutation so the per-day and plan-total badges reflect the new totals
+      // (FEAT-41). The DAG: slots.update → plans.get cache patched in place
+      // (LWW, no invalidate) + plants.* invalidated to drive a refetch.
+      void utils.plants.forDay.invalidate({ planId });
+      void utils.plants.forPlan.invalidate({ planId });
       // Swap the server-returned row into the cache without invalidating —
       // LWW reconciliation (DEC-36). The server result mirrors
       // `selectPlanSlots` exactly so the shape lines up.

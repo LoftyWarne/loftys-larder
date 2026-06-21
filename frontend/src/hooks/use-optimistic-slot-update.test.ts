@@ -8,14 +8,21 @@ import type {
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { updateMutateMock, getDataMock, setDataMock, cancelMock } = vi.hoisted(
-  () => ({
-    updateMutateMock: vi.fn(),
-    getDataMock: vi.fn(),
-    setDataMock: vi.fn(),
-    cancelMock: vi.fn().mockResolvedValue(undefined),
-  }),
-);
+const {
+  updateMutateMock,
+  getDataMock,
+  setDataMock,
+  cancelMock,
+  plantsForDayInvalidateMock,
+  plantsForPlanInvalidateMock,
+} = vi.hoisted(() => ({
+  updateMutateMock: vi.fn(),
+  getDataMock: vi.fn(),
+  setDataMock: vi.fn(),
+  cancelMock: vi.fn().mockResolvedValue(undefined),
+  plantsForDayInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  plantsForPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
+}));
 
 let mutationOptions: Record<string, unknown> = {};
 
@@ -28,6 +35,10 @@ vi.mock('@/lib/trpc.ts', () => ({
           getData: getDataMock,
           setData: setDataMock,
         },
+      },
+      plants: {
+        forDay: { invalidate: plantsForDayInvalidateMock },
+        forPlan: { invalidate: plantsForPlanInvalidateMock },
       },
     }),
     slots: {

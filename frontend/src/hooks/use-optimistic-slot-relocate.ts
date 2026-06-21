@@ -57,6 +57,11 @@ export function useOptimisticSlotRelocate({
       onError?.(err);
     },
     onSettled: (data) => {
+      // Relocate moves slot payload between dates so per-day plant-point
+      // totals can shift on either end; invalidate both granularities of
+      // plants.* to force a refetch (FEAT-41).
+      void utils.plants.forDay.invalidate({ planId });
+      void utils.plants.forPlan.invalidate({ planId });
       if (!data) return;
       const current = utils.plans.get.getData({ id: planId });
       if (!current) return;

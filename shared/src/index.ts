@@ -211,6 +211,16 @@ export {
   type PlannerSearch,
 } from './schemas/planner-search.ts';
 export { plansSearchSchema, type PlansSearch } from './schemas/plans-search.ts';
+export {
+  getDayPlantPointsInputSchema,
+  type GetDayPlantPointsInput,
+  getDayPlantPointsResultSchema,
+  type GetDayPlantPointsResult,
+  getPlanPlantPointsInputSchema,
+  type GetPlanPlantPointsInput,
+  getPlanPlantPointsResultSchema,
+  type GetPlanPlantPointsResult,
+} from './schemas/plants.ts';
 export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export {
   shoppingListContributingSlotSchema,

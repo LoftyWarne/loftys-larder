@@ -2,7 +2,9 @@ import { type AnyColumn, type SQL, sql } from 'drizzle-orm';
 
 import type { Db } from '../db/index.ts';
 import { ingredients } from '../db/schema/ingredients.ts';
-import { recipeIngredients } from '../db/schema/recipes.ts';
+import { mealPlans, mealPlanSlots } from '../db/schema/meal-plans.ts';
+import { recipeIngredients, recipes } from '../db/schema/recipes.ts';
+import type { Tx } from '../db/withTransaction.ts';
 
 // Recipe-level plant points: COUNT(DISTINCT ingredient_id) over the recipe's
 // ingredients filtered to `is_plant = true` (DEC-32 — never stored). DISTINCT
@@ -60,6 +62,122 @@ export async function selectRecipePlantPoints(
     where recipe_ingredients.recipe_id = ${recipeId}
       and ingredients.is_plant = true
   `);
+  const row = rows.rows[0];
+  return row ? row.count : 0;
+}
+
+// Day / plan plant points compose the recipe-level primitive over three
+// contribution sources per slot, unioned then DISTINCT-counted at the
+// ingredient_id level:
+//
+//   1. eating recipe                       — slot.recipe_id, when slot_type='recipe'
+//   2. batch traversal: eating recipe.base — when recipes.base_recipe_id IS NOT NULL
+//   3. cooks-base union                    — slot.cooks_base_recipe_id, any slot_type
+//
+// COUNT(DISTINCT ingredient_id) at the outer query gives the spec's dedup
+// for free, including the "meal's base = cooked base" case (DEC-32, FEAT-41).
+//
+// The household-scoped plan join keeps the helpers safe even if a caller
+// forgets the procedure-layer guard (DEC-17 / cross-cutting #3).
+
+type DbHandle = Db | Tx;
+
+interface DayPlantPointsArgs {
+  planId: number;
+  householdId: string;
+  date: string;
+}
+
+interface PlanPlantPointsArgs {
+  planId: number;
+  householdId: string;
+}
+
+export async function selectDayPlantPoints(
+  db: DbHandle,
+  { planId, householdId, date }: DayPlantPointsArgs,
+): Promise<number> {
+  return await countDistinctPlants(db, {
+    planId,
+    householdId,
+    dateFilter: sql`and meal_plan_slots.date = ${date}::date`,
+  });
+}
+
+export async function selectPlanPlantPoints(
+  db: DbHandle,
+  { planId, householdId }: PlanPlantPointsArgs,
+): Promise<number> {
+  return await countDistinctPlants(db, {
+    planId,
+    householdId,
+    dateFilter: sql``,
+  });
+}
+
+interface CountArgs {
+  planId: number;
+  householdId: string;
+  dateFilter: SQL;
+}
+
+async function countDistinctPlants(
+  db: DbHandle,
+  { planId, householdId, dateFilter }: CountArgs,
+): Promise<number> {
+  // Bare column references inside `sql` templates drop the table qualifier;
+  // both `recipe_ingredients` and `ingredients` carry an `id` column, so
+  // every join predicate and projection in the inner unions is fully
+  // qualified by name to dodge "column reference ambiguous". The outer
+  // SELECT projects only `ingredient_id` — single source, no shadowing.
+  const planFilter = sql`meal_plans.id = ${planId} and meal_plans.household_id = ${householdId}`;
+
+  const rows = await db.execute<{ count: number }>(sql`
+    select count(distinct contributions.ingredient_id)::int as count
+    from (
+      -- 1. eating-recipe ingredients
+      select recipe_ingredients.ingredient_id
+      from ${mealPlanSlots}
+      inner join ${mealPlans}
+        on meal_plans.id = meal_plan_slots.plan_id
+      inner join ${recipeIngredients}
+        on recipe_ingredients.recipe_id = meal_plan_slots.recipe_id
+      where ${planFilter}
+        and meal_plan_slots.slot_type = 'recipe'
+        ${dateFilter}
+
+      union all
+      -- 2. batch-version traversal: eating recipe's base
+      select recipe_ingredients.ingredient_id
+      from ${mealPlanSlots}
+      inner join ${mealPlans}
+        on meal_plans.id = meal_plan_slots.plan_id
+      inner join ${recipes}
+        on recipes.id = meal_plan_slots.recipe_id
+      inner join ${recipeIngredients}
+        on recipe_ingredients.recipe_id = recipes.base_recipe_id
+      where ${planFilter}
+        and meal_plan_slots.slot_type = 'recipe'
+        and recipes.base_recipe_id is not null
+        ${dateFilter}
+
+      union all
+      -- 3. cooks-base union (independent of slot_type)
+      select recipe_ingredients.ingredient_id
+      from ${mealPlanSlots}
+      inner join ${mealPlans}
+        on meal_plans.id = meal_plan_slots.plan_id
+      inner join ${recipeIngredients}
+        on recipe_ingredients.recipe_id = meal_plan_slots.cooks_base_recipe_id
+      where ${planFilter}
+        and meal_plan_slots.cooks_base_recipe_id is not null
+        ${dateFilter}
+    ) as contributions
+    inner join ${ingredients}
+      on ingredients.id = contributions.ingredient_id
+    where ingredients.is_plant = true
+  `);
+
   const row = rows.rows[0];
   return row ? row.count : 0;
 }

@@ -9,14 +9,20 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { DndProvider } from '@/components/planner/dnd-provider.tsx';
 import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
+import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useDayPlantPoints } from '@/hooks/use-day-plant-points.ts';
 import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { useOptimisticSlotRelocate } from '@/hooks/use-optimistic-slot-relocate.ts';
 import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
 import { deriveBatchSupplyWarnings } from '@/lib/batch-supply.ts';
-import { clampRange, formatDayRangeLabel } from '@/lib/date-utils.ts';
+import {
+  clampRange,
+  eachDateInRange,
+  formatDayRangeLabel,
+} from '@/lib/date-utils.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 export function PlannerPage(): React.ReactElement {
@@ -86,6 +92,32 @@ export function PlannerPage(): React.ReactElement {
         : new Set<number>(),
     [planQuery.data],
   );
+
+  // Plant-points display (FEAT-41). Per-day badges via N batched `forDay`
+  // queries; plan-total badge via a single `forPlan`. Cache invalidation on
+  // slot mutations lives in the optimistic hooks themselves so the badges
+  // refresh in lock-step with the slots they derive from.
+  const visibleDateRange = useMemo(() => {
+    if (!planQuery.data) return null;
+    return clampRange(
+      planQuery.data.startDate,
+      planQuery.data.endDate,
+      search.start,
+      search.end,
+    );
+  }, [planQuery.data, search.start, search.end]);
+  const visibleDates = useMemo(
+    () =>
+      visibleDateRange
+        ? eachDateInRange(visibleDateRange.start, visibleDateRange.end)
+        : [],
+    [visibleDateRange],
+  );
+  const planTotalQuery = trpc.plants.forPlan.useQuery(
+    { planId },
+    { enabled: idIsValid && Boolean(planQuery.data) },
+  );
+  const dayPlantCounts = useDayPlantPoints(planId, visibleDates);
 
   if (!idIsValid) {
     return <p role="alert">Invalid plan id.</p>;
@@ -250,9 +282,15 @@ export function PlannerPage(): React.ReactElement {
       )}
       <div className="space-y-4">
         <header className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-2xl font-semibold">
-            {formatDayRangeLabel(plan.startDate, plan.endDate)}
-          </h1>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h1 className="text-2xl font-semibold">
+              {formatDayRangeLabel(plan.startDate, plan.endDate)}
+            </h1>
+            <PlantPointsBadge
+              count={planTotalQuery.data?.count ?? null}
+              variant="plan"
+            />
+          </div>
           <div className="flex items-center gap-3">
             {selectedRecipe && (
               <p className="text-sm text-muted-foreground" role="status">
@@ -280,6 +318,7 @@ export function PlannerPage(): React.ReactElement {
             rangeStart={visible.start}
             rangeEnd={visible.end}
             warningSlotIds={batchWarningSlots}
+            dayPlantCounts={dayPlantCounts}
             // Slot ↔ slot drag works at every viewport — touch-and-hold
             // (200 ms) lifts a populated slot, drops on another slot to
             // move or swap. Bank → slot still only at `lg+`, since the

@@ -4,6 +4,50 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-21 — FEAT-41 (Plant points: day + plan with batch traversal and base-cook union)
+
+**Status:** implementation complete; not yet committed at write time. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean across all three workspaces. Backend: 479/479 passing via Testcontainers (Colima socket workaround: `DOCKER_HOST=unix:///Users/conorwarne/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`). Frontend: 268/268 passing — the pre-existing `recipe-comments.test.tsx` flake (two cases under React 19 + `user.type` on a controlled `<textarea>`) was rewritten to use `fireEvent.change`, so the full suite is now reliably green. DoD boxes in `docs/feature-specs.md §FEAT-41` left unticked — human action.
+
+### Decisions taken at kick-off
+
+- **Two literal procedures, not one bundled summary.** `plants.forDay({ planId, date })` and `plants.forPlan({ planId })` mirror the spec verbatim. The planner page issues one `forPlan` for the header total and one `forDay` per visible date; tRPC's `httpBatchLink` coalesces all of them into a single HTTP round-trip (≤ 14 day-queries at the plan cap), so the per-procedure API surface costs nothing at runtime. Considered extending `forPlan` to return `{ totalCount, perDay }` — cheaper to revisit later than to over-design now.
+- **Helper layer doesn't reuse `recipePlantPointsExpr`.** The recipe-level helper is a correlated subquery; the day/plan layer is one grouped query with `COUNT(DISTINCT)` over a `UNION ALL`. Layering traversal on top of a correlated subquery would have spawned N+1 SQL where one query suffices. The recipe-level helper stays "pure and small" per its existing file comment.
+- **`COUNT(DISTINCT ingredient_id)` over `UNION ALL` does all the dedup.** Spec's three dedup cases (same plant in two prep types on one recipe; same plant in the meal *and* its traversed base; same plant in the meal's referenced base *and* the slot's cooked base) all collapse to "two rows with the same `ingredient_id` count once." No application-side dedup, no temporal restriction on cooks-base (a later-in-the-day base cook still contributes to that day's count — spec's manual-verification step 2 confirms).
+- **Out-of-range `forDay` returns 0, not `BAD_REQUEST`.** The same query that returns 0 for an "empty day" returns 0 for a date outside the plan; matching them is simpler than threshold-validating the date against the plan's start/end. Flagged as drift-tolerable.
+- **Cache invalidation lives inside the optimistic hooks.** `useOptimisticSlotUpdate` and `useOptimisticSlotRelocate` already own the "after any slot mutation settles" surface; adding `utils.plants.forDay.invalidate({ planId })` + `utils.plants.forPlan.invalidate({ planId })` to their `onSettled` keeps the badge refresh in lock-step with the data it derives from. Alternative (subscribe in the page and refetch on a key prop) would have leaked plant-points knowledge into every consumer of those hooks.
+- **Badge skeleton instead of "blank until ready".** Per-day queries resolve quickly but not instantly; a neutral animated `🌱 ·` chip prevents the rowheader from shifting on first paint. `count={null}` is the in-flight signal, `count={0}` is a visible badge with the number `0`.
+
+### Drift from kick-off plan
+
+1. **Open `[DEC-TBD]` not authored.** Spec carries `[DEC-TBD: plant-points traversal rules for batch and base-cook slots]`. The implementation answers it (union-DISTINCT shape, cooks-base included regardless of `slot_type`, no temporal restriction), but writing the actual DEC entry to `docs/design-decisions.md` is a human action per the project's DEC discipline. Flagging for the next doc pass.
+2. **Pre-existing test flake fixed inline.** `recipe-comments.test.tsx` had two cases that called `user.type` against a React 19 controlled `<textarea>`; the typing-vs-render race interleaved the prior textarea value with the typed characters (`type('after')` after a `clear()` produced `aaaaaaafataearaaaa`). Swapped both to `fireEvent.change({ target: { value: … } })` which sets the controlled value atomically and exercises the same observable behaviour (button-disabled-over-limit; edit-saves-trimmed-text). Carried because the broken typing path will bite anything else that takes the same shape.
+3. **Added `useDayPlantPoints` hook.** Kick-off plan said "small helper hook." Materialised as `frontend/src/hooks/use-day-plant-points.ts`, wrapping `trpc.useQueries` to issue one `forDay` per visible date and return a `ReadonlyMap<string, number | null>` (the shape the grid consumes). Stable date-array identity is the caller's responsibility — page memoises `visibleDates` on `(planQuery.data, search.start, search.end)`. No surprise here; just naming it for the record.
+
+### Implementation details worth carrying
+
+- **Helper SQL is one query with three `UNION ALL` legs.** Eating-recipe ingredients (gated on `slot_type='recipe'`), batch-version traversal (`recipes.base_recipe_id IS NOT NULL`, joining `recipe_ingredients` on the base), and cooks-base union (`slot.cooks_base_recipe_id IS NOT NULL`, any `slot_type`). Outer `SELECT count(DISTINCT contributions.ingredient_id)::int` over the inner set, filtered to `ingredients.is_plant = true`. The household-scoped plan join is the same `mealPlans.householdId = $1` predicate the rest of the surface uses — keeps the helper safe even if a caller forgets the procedure-layer guard.
+- **The bare-column-render trap survived another round.** Inside `sql` templates, column references like `${mealPlanSlots.recipeId}` render as `recipe_id` without the table qualifier. Both `recipe_ingredients` and `ingredients` carry an `id`, so every join predicate inside the inner unions had to be hand-qualified (`recipe_ingredients.ingredient_id`, `recipes.base_recipe_id`, etc.) to dodge "column reference ambiguous." The pattern is the same one `lib/plant-points.ts`'s original comment documents and `recipe-social.ts` rediscovered the hard way last month.
+- **`forDay` vs `forPlan` share one inner function** parameterised by a `dateFilter: SQL` fragment (`and meal_plan_slots.date = ${date}::date` for `forDay`, empty `sql` `` ` ` `` for `forPlan`). Avoids two near-identical 60-line SQL templates drifting apart.
+- **Plan guard in the procedure mirrors `loadHouseholdPlan` from `plans.ts`/`shopping.ts`.** Local `assertHouseholdPlan` rather than importing — kept the dependency arrows shallow.
+- **Badge component is single-file plain Tailwind, no icon library.** `🌱` glyph for the leaf, `aria-label="N plant points"` (or "N plant points in this plan" for the plan variant). Loading state is `🌱 ·` with `animate-pulse` and `role="status"` + `aria-label="Loading plant points"`. Two variants (`day` / `plan`) tweak padding + font-weight only.
+- **`PlannerGrid.dayPlantCounts` mirrors `warningSlotIds`** in spirit — a read-only externally-derived map, no business logic in the grid. Absent key → no badge; key with `null` → skeleton; key with number → numeric badge. The grid is now a pure presentational surface for both per-slot warnings and per-day badges.
+- **Optimistic hook invalidation is fire-and-forget.** Both `void utils.plants.forDay.invalidate({ planId })` and `void utils.plants.forPlan.invalidate({ planId })` run before the `setQueryData` swap; the badges refetch async while `plans.get` reconciles LWW in-place. No waterfall.
+- **No new dependencies, no migration.** All columns already existed from earlier feature work; the helper composes existing schema. Frontend pulls in no icon library.
+
+### Open follow-ups
+
+- **Author the DEC.** Spec's `[DEC-TBD: plant-points traversal rules for batch and base-cook slots]` is still open. Suggested content: union-DISTINCT shape, cooks-base included regardless of `slot_type`, dedup-via-DISTINCT principle, no temporal restriction. Cross-refs: FEAT-19 (recipe-level), FEAT-23 (batch traversal), FEAT-32 (base cooking).
+- **`forPlan` per-day breakdown.** If a future view wants a denser summary (e.g. "plant points heatmap across the plan"), either issue N `forDay` queries or extend `forPlan` to return `{ totalCount, perDay }`. Today's API is the literal spec shape; extending is cheap.
+- **React 19 + `user.type` on controlled `<textarea>` is a known shape.** Two tests hit it in `recipe-comments.test.tsx`; the fix-pattern is `fireEvent.change({ target: { value: … } })`. If a future test does multi-keystroke typing into a controlled textarea and shows interleaving symptoms, reach for the same fix rather than `user.type`.
+
+### Known limitations / not in scope
+
+- **Plant-points by week / month** — not in v1. The two procedures answer the planner's two display surfaces (day badge, plan total) and nothing else.
+- **Plant-points history / trend chart** — not in scope; FEAT-41 is a display feature, not analytics. The `non-goals.md` posture on dashboards covers this.
+- **Per-day breakdown inside `forPlan`** — see open follow-ups; trivial to add when a consumer needs it.
+
+---
+
 ## 2026-06-20 — FEAT-40 ship, mobile nav refresh, DnD widened
 
 **Status:** all changes committed (`6f3d1b5` … `594dbba`). Backend: 459/459 green; frontend: 260/260 green. Pre-existing `recipe-comments.test.tsx` flake under parallel load still surfaces intermittently (unrelated — passes in isolation).

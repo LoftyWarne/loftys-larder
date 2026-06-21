@@ -4,6 +4,49 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-21 — FEAT-45 (Sentry frontend + backend with PII scrubbing and req.id tag)
+
+**Status:** implementation complete. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm --filter backend build`, `pnpm --filter frontend build` all clean. Backend vitest **56/56** passing across the FEAT-44/45 touch area (scrub-pii, sentry, logger, config, server). Frontend vitest **310/310** passing (3 new in `src/lib/sentry.test.ts`). DoD boxes in `docs/feature-specs.md §FEAT-45` left unticked — human action. Deploy-gate (real Sentry event for a synthetic error, scrubbed payload + `reqId` tag) is a manual probe. The spec's `[DEC-TBD: Sentry beforeSend PII scrubbing; replay disabled to skip cookie consent]` is closed by DEC-76; `[DEC-TBD: absolute-threshold alert; percentage-based unsuitable at low traffic]` by DEC-78.
+
+### Decisions taken at kick-off
+
+- **`scrubPii` in `/shared/src/lib/`, not duplicated per side.** Identical logic on both ends; `/shared` already carries one runtime utility (`occasion-order`) so this is precedent-consistent, not net-new layering. Backend imports via the relative path the rest of the workspace uses (`'../../../shared/src/index.ts'`); frontend via the package name (`'@loftys-larder/shared'`) per its existing tsconfig path map.
+- **Backend `reqId` propagation via a Fastify `onRequest` hook calling `Sentry.getIsolationScope().setTag(...)`, not tRPC middleware.** Catches errors thrown by Fastify plugins, the auth pre-handler, *and* tRPC procedures. Sentry v9's HTTP integration (loaded by default in `Sentry.init`) creates a per-request isolation scope via OpenTelemetry context before Fastify's lifecycle starts; `onRequest` is the earliest Fastify hook, so the request-bound scope already exists by the time we tag it. The test verifies concurrency safety by simulating two requests with distinct scopes — proves the tag never leaks across them.
+- **DSN optional in every env; init is a no-op when absent.** Unlike Axiom (the only structured-log destination, DEC-75 + FEAT-44's fail-fast posture), Sentry is best-effort observability. A missing DSN in production logs a single Pino `warn` line and continues; dev/test silently no-op. Matches DEC-76's stance and avoids breaking local dev when contributors haven't set up their own DSN.
+- **Synthetic-error endpoint deliberately omitted.** The spec asks for "synthetic error in dev shows up in Sentry" as a manual gate-check — adding a permanent shipped surface (e.g. `health.crash`) inverts the cost. Tests assert the SDK transport receives the scrubbed event deterministically; the gate-check is a one-off DevTools throw, not a maintained procedure.
+- **`tracesSampleRate: 0` default.** DEC-77 explicitly punts distributed tracing. Sentry's auto-instrumentation would otherwise sample at the SDK default once OTel attaches — pinning to 0 keeps the APM surface off until it earns its cost.
+- **Frontend `integrations: []` to omit replay.** Not just disabling — leaving replay out of the integrations list keeps it out of the bundle entirely. DEC-76 / non-goal "Session replay in Sentry" is the source of truth; the structural absence is stronger than a runtime flag.
+- **CSP work deferred to FEAT-48.** `helmet`'s default CSP would block frontend → Sentry in prod, but FEAT-48 owns the explicit `connect-src` allowlist with `*.ingest.sentry.io`. Backend → Sentry works regardless of CSP. Documented as the gap to close before the deploy-gate ticks.
+
+### Drift from kick-off plan
+
+1. **`scrubPii` signature relaxed from `<T extends ScrubbableEvent>(event: T): T` to `<T>(event: T): T` with structural narrowing inside.** Sentry's `ErrorEvent` requires `type: undefined` as a discriminant and `RequestEventData` lacks an index signature; either would reject the stricter constraint at the `Sentry.init({ beforeSend })` call site. The generic-with-internal-narrowing form preserves Sentry's declared types end-to-end without `as`-casts inside `sentry.ts`.
+2. **`SENTRY_ENVIRONMENT` env var added** even though kick-off only listed `SENTRY_DSN`. Cheap addition; lets prod-alert filters target `production` while dev events stay tagged separately. Defaults to `NODE_ENV` server-side, to `import.meta.env.MODE` client-side.
+3. **`firstNonEmpty()` helper for the frontend env-fallback chain.** `??` only handles nullish; an empty-string env var (`VITE_SENTRY_ENVIRONMENT=` in a .env file, common pattern) would otherwise pin Sentry's `environment` to `""`. The helper treats empty strings as absent and ends in a `'development'` default so the field is never blank.
+4. **`BuildAppOptions.skipSentry` added** so server tests that don't want global Sentry SDK state (the side effect of `Sentry.init`) can skip init cleanly. Used by no test today; in place because the alternative is harder to bolt on later.
+5. **Backend `captureException` exported via `export { captureException } from '@sentry/node'`** rather than `export const captureException = Sentry.captureException`. The const form loses overload typing; the re-export preserves it.
+6. **`frontend/src/env.d.ts` created** to type `VITE_SENTRY_DSN` / `VITE_SENTRY_ENVIRONMENT` against `ImportMetaEnv`. Lives alongside `vite-plugin-pwa/client` augmentation already in `tsconfig.json#compilerOptions.types`.
+
+### Implementation details worth carrying
+
+- **Bundle size:** backend `dist/server.js` went from 4.5MB (post-FEAT-44) to 6.0MB. The bulk is `@sentry/node` + its OpenTelemetry transitive deps (`@opentelemetry/instrumentation-*`, `@sentry/opentelemetry`). Still well within the 512MB Fly machine class (FEAT-05 baseline image was 229MB). Worth re-checking cold-start once FEAT-52 measures it — Sentry's OTel patches `http` at init time and may push the boot path by 30-50ms.
+- **Sentry init ordering matters for OTel patching of `http`.** v9 recommends `node --import ./instrument.js` so init runs before any module imports `http`. We call `Sentry.init` inside `buildAppWithLogger` before `Fastify()` is constructed; Fastify's HTTP server is created at `app.listen()` time, not at import, so the patch lands in time. If we ever take a hard dep on Sentry's tracing/spans, move init to a separate `instrument.js` and load with `--import` to avoid races.
+- **`beforeSend` and `beforeBreadcrumb` both pass through `scrubPii`.** Breadcrumbs can carry URL query params and navigation history that may include email-shaped values. Same scrubber, same contract.
+- **Frontend init runs *before* React renders.** `main.tsx` calls `initSentry()` between the CSS imports and `ReactDOM.createRoot(...)`. Auto-captured unhandled errors and promise rejections from the very first frame land in Sentry without needing an ErrorBoundary in place. If we add one later (e.g., a TanStack Router error component or a `Sentry.ErrorBoundary` wrapper), it slots in without re-architecting the init.
+- **Backend test uses a real Fastify instance with `getIsolationScope` / `setupFastifyErrorHandler` doubles.** The injectables in `RegisterSentryHooksOptions` make this clean: the test asserts each request's `setTag('reqId', …)` lands on a *distinct* scope object. That's the concurrency invariant DEC-77 leans on — if Sentry ever changes its scope semantics under us, this test goes red.
+- **`@sentry/node@9.47.1` and `@sentry/react@9.47.1` both ESM-shipping** via the `exports.import` condition. Confirmed at install. The `^9.0.0` ranges in package.json resolved to 9.47.1; check on upgrade that the v9 API surface (`getIsolationScope`, `setupFastifyErrorHandler`, `beforeSend(event)` signature) hasn't shifted.
+
+### Open follow-ups
+
+- **Author the DECs.** DEC-76 already covers "beforeSend PII scrubbing + replay disabled" and DEC-78 covers the absolute-threshold alert — both pre-date FEAT-45. The `[DEC-TBD: ...]` markers in `docs/feature-specs.md §FEAT-45` are stylistic remnants; can be replaced with `(DEC-76)` / `(DEC-78)` references in a docs-only pass.
+- **CSP `connect-src` for Sentry ingest is FEAT-48.** Frontend → Sentry won't reach the dashboard in prod until that lands. Backend events flow regardless. Tracked as the gap that blocks the FEAT-45 deploy-gate.
+- **Sentry dashboard alert config is a human action.** DEC-78's >5 events / 5 min absolute threshold needs setting up via the Sentry UI. FEAT-51 will absorb the OPERATIONS.md doc step (file doesn't exist yet); for now, the alert config is a one-off the operator runs after the DSN is set.
+- **`flyctl secrets set SENTRY_DSN=…`** before the deploy-gate. Frontend needs `VITE_SENTRY_DSN` at build time — wire into the GitHub Actions deploy workflow (FEAT-49) as a build secret.
+- **No `Sentry.setUser(...)` wired.** Tempting hook for "who saw the error" but would put `user.id` (or email if we're sloppy) on every event. DEC-76's PII discipline pairs with "don't add PII intentionally" — left explicitly off. Revisit if multi-household ships.
+- **Frontend ErrorBoundary not added.** App-level boundary would let `componentDidCatch` push curated context (e.g., the route name) into Sentry events. Out of FEAT-45's scope; the SDK's global handlers already catch unhandled rejections. Worth a small follow-up FEAT once the gate-check shows what bubbles up unhandled vs needing structured catch.
+
+---
+
 ## 2026-06-21 — FEAT-44 (Pino → Axiom transport with req.id propagation)
 
 **Status:** implementation complete. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm --filter backend build` clean. New + adjacent vitest files (`test/logger.test.ts`, `test/config.test.ts`, `test/server.test.ts`) **42/42** passing. Testcontainer-backed suites unchanged — they were already failing on `main` in this shell with "Could not find a working container runtime strategy" (verified via `git stash`); unrelated to this change. DoD boxes in `docs/feature-specs.md §FEAT-44` left unticked — human action. Deploy-gate (real Axiom event correlated to a real `reqId`) is a human probe.

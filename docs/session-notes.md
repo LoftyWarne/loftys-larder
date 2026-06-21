@@ -4,6 +4,43 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-21 — FEAT-44 (Pino → Axiom transport with req.id propagation)
+
+**Status:** implementation complete. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm --filter backend build` clean. New + adjacent vitest files (`test/logger.test.ts`, `test/config.test.ts`, `test/server.test.ts`) **42/42** passing. Testcontainer-backed suites unchanged — they were already failing on `main` in this shell with "Could not find a working container runtime strategy" (verified via `git stash`); unrelated to this change. DoD boxes in `docs/feature-specs.md §FEAT-44` left unticked — human action. Deploy-gate (real Axiom event correlated to a real `reqId`) is a human probe.
+
+### Decisions taken at kick-off
+
+- **Custom Pino destination via `fetch`, not `pino.transport({ target: '@axiomhq/pino' })`.** The spec flags worker-thread transports + esbuild bundling as fragile (the runtime image only carries `dist/server.js`). A ~70-line in-process NDJSON batcher avoids that path entirely: no worker, no transport file on disk, no `node_modules` carry-over for the prod image. One ESM dep (`pino-pretty`) added for dev pretty-printing — flagged at kick-off, accepted.
+- **Multistream with stdout *and* Axiom in prod.** Fly's machine-level log feed still surfaces stdout, so the dual write keeps logs visible even if Axiom is unreachable. The cost is a duplicate write per entry — negligible at household traffic.
+- **Required-in-prod via Zod refines, not graceful fallback.** `loadConfig()` rejects production without `AXIOM_TOKEN` + `AXIOM_DATASET`. Same posture as `BETTER_AUTH_SECRET` / `RESEND_API_KEY` — fail at boot, not silently demote to stdout.
+- **`reqId` field name pinned to the FEAT-03 / DEC-77 spelling.** No renaming on the way through; Pino's child logger emits `reqId` already and the multistream is a pass-through. The integration test in `test/server.test.ts` asserts the wire shape so a drift to `req_id`/`requestId` would fail loudly.
+- **Response header for `reqId` left unexposed.** Fastify v5 defaults `requestIdHeader: false`; the FEAT-44 acceptance criterion explicitly allows this ("…if exposed"). Keeping the surface small until FEAT-45 needs it for Sentry cross-reference.
+
+### Drift from kick-off plan
+
+1. **`buildServerOptions` / `buildLoggerOptions` removed entirely** instead of kept as compat shims. The only call site was `server.ts`, which now needs the Axiom destination handle for shutdown drain — exposing the bundle directly is cleaner than threading the handle out separately. `buildApp` retained as a thin wrapper over `buildAppWithLogger` for the existing test signature.
+2. **`stdout` injection added to `BuildAppOptions` / `BuildLoggerOptions`.** Beyond fetch injection — needed in the integration test so production-mode logs don't leak JSON into vitest output (the multistream still mirrors to whatever stream you give it). Also a general-purpose test seam for future log assertions.
+3. **`FastifyBaseLogger` local annotation around the Pino instance.** Passing `loggerInstance: pino.Logger` narrows Fastify's generic to `Logger`, which then refuses `registerSecurity(app, …)` and friends (cross-plugin type drift). Going through `const baseLogger: FastifyBaseLogger = logger` keeps the FastifyInstance at the default base type and the plugin tree stays assignable. Worth re-checking if Fastify or `@types/pino` change either side.
+4. **`AXIOM_ENDPOINT` env var added** (defaults to `https://api.axiom.co`). Not in the kick-off file list; cheap to include and lets the unit tests run against a stub host without monkey-patching `fetch`. Also unlocks the EU region (`https://api.eu.axiom.co`) without code change.
+
+### Implementation details worth carrying
+
+- **`createAxiomDestination` batches NDJSON lines and POSTs to `/v1/datasets/<dataset>/ingest`.** Defaults: 100 entries or 1s, whichever first. Send is queued through a single chained `pending` promise so concurrent flushes serialise — keeps payload ordering stable and avoids HOL bursts. Per-flush failures surface via `onError` (silent default; server bootstrap could wire a Pino re-emit if useful). Timer uses `.unref()` so a pending flush doesn't hold the event loop open at shutdown.
+- **`axiom.end()` is called from `main()`'s SIGTERM/SIGINT path** after `app.close()`. Drains the last batch before `process.exit(0)`. Without it, the last second of logs disappears on every redeploy.
+- **`pino-pretty` runtime, not devDep.** Initially planned as devDep, but `LOG_LEVEL=info` in dev actually constructs the pretty stream — moving it to `dependencies` matches the import-time usage. Bundle grew to **4.5MB** (from ~3MB) on `pnpm --filter backend build`; well within the 512MB Fly machine class (DEC-71 / FEAT-05 baseline of 229MB image).
+- **"No request bodies in logs" is structural, not asserted.** Fastify's default request logger logs `req` (method/url/host/remoteAddress) + `res` (statusCode/responseTime), nothing else. The Axiom destination is a pass-through — it never sees a request body unless a call site explicitly logs one. The contract lives at the call sites, not in the transport.
+- **`docs/measurements.md` baseline is a *stub*.** No synthetic load run — the spec's manual verification is a deployed dashboard probe. The stub locks in what to record (daily event count, p95 event size, level mix, projected retention vs the 30-day rolling window) so the first measurement has a target shape.
+
+### Open follow-ups
+
+- **Author the DEC.** The spec's `[DEC-TBD: Pino → Axiom for structured logs, 30-day free-tier retention]` already has DEC-75 — but DEC-75 doesn't record the *transport* decision (custom in-process destination vs `@axiomhq/pino` worker). Worth either extending DEC-75 with the transport choice + rationale, or adding a small adjacent DEC pointing back to it. Trade-off captured: bundle simplicity over official SDK.
+- **`flyctl secrets set AXIOM_TOKEN=… AXIOM_DATASET=…`** before the next deploy, or boot fails loudly via the prod refine. This is the human deploy gate.
+- **First-week log volume measurement** — fill in `docs/measurements.md` once a representative day of real traffic exists in Axiom. Triggers in the stub list the conditions that would invalidate the 30-day-retention assumption.
+- **Stub onError handler in `createAxiomDestination` swallows everything.** Acceptable v1 — a failing Axiom shouldn't crash the app. If we ever care about visibility on transport failures (e.g., 401s after token rotation), wire it through Pino's stderr write in `server.ts`. Don't `console.log` it (FEAT-03 / AGENTS.md trap).
+- **FEAT-45 (Sentry) will need the same `reqId` field on its events.** DEC-77 cross-cutting #1 — the contract pinned in `test/server.test.ts`'s "carrying the request reqId" assertion is now load-bearing for Sentry's tag attach.
+
+---
+
 ## 2026-06-21 — FEAT-43 (Offline check-state queue + reconnect sync)
 
 **Status:** implementation complete. `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r format:check` clean. Frontend tests **307/307** passing (27 new across 6 files). DoD boxes in `docs/feature-specs.md §FEAT-43` left unticked — human action. The spec's `[DEC-TBD: offline mutation queue, LWW conflict resolution accepted]` is still open; the implementation answers it (queue at the optimistic-hook layer, drain via standalone `useMutation`, LWW honoured because drain replays in `queuedAt` order and the server's post-reset response wins on settle).

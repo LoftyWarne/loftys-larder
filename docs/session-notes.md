@@ -40,7 +40,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ### Open items / future work
 
-- **Testcontainers Docker-socket issue is unrelated** but worth recording: local backend integration tests can't run because Colima's storage driver rejects the docker.sock bind mount that `testcontainers` requires. Pre-existing — the FEAT-53 work didn't introduce or surface it. The new auth-exemption test runs only in CI until that's fixed.
+- **Testcontainers + Colima fixed in a follow-up.** A new `backend/test/setup-testcontainers.ts` (wired via `vitest.config.ts` `setupFiles`) auto-configures the three env vars Colima needs on macOS — `DOCKER_HOST` pointing at the Colima socket, `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` (the in-VM socket path), and `TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1`. The detection guard is "platform = darwin AND Colima socket present"; Linux CI is a no-op. Lifting the Colima blocker surfaced a separate latent bug: `auth.test.ts`'s `makeConfig` was missing `AXIOM_TOKEN` / `AXIOM_DATASET`, so the four `NODE_ENV=production` tests (one new, three pre-existing) crashed on the logger's prod refinement. Added the dummy creds; full 530-test backend suite now passes locally in ~30 s. The auth-exemption test from FEAT-53 is now exercised by every local + CI run.
 
 - **FEAT-54 (axe-core a11y)** extends `playwright.config.ts` with another project entry. Config kept extensible — a second `projects:` entry can add `playwright-axe` without touching the chromium project.
 

@@ -4,6 +4,49 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-22 — FEAT-50 (Nightly pg_dump → R2 backup workflow)
+
+**Status:** workflow + script + secrets checklist updates landed. No code paths exercised — gate check is a `workflow_dispatch` run that produces a dump which restores cleanly to a local Postgres (the manual restore drill is FEAT-51's territory). DoD in `docs/feature-specs.md §FEAT-50` left unticked.
+
+### Decisions taken at kick-off
+
+- **Postgres app name lives in a repo *variable* (`FLY_PG_APP`), not a secret.** Cluster names aren't sensitive and surfacing the target in logs / step summaries is operationally useful. Introduces a "GitHub Actions variables" section in `docs/secrets-checklist.md` — first use of `vars.*` in the repo.
+- **Failure notification is GitHub's built-in scheduled-workflow-failure email.** No Slack webhook, no auto-created issue. Zero new surface area; revisit if these silently rot. (Spec lists this as an open choice.)
+- **R2 upload via `aws s3 cp`** against the S3-compatible endpoint (`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`) with `AWS_DEFAULT_REGION=auto`. `aws` is pre-installed on `ubuntu-latest`; no third-party Cloudflare action needed.
+- **Cron `0 3 * * *` (UTC).** Off-peak for Europe/London household traffic regardless of BST/GMT.
+- **Retention is out-of-band.** Workflow only writes; an R2 lifecycle rule on `dumps/` does the pruning. Documented in the checklist so future-me doesn't go looking for delete logic in code.
+- **`postgresql-client-16`** explicit install from PGDG apt repo. A lower-major `pg_dump` cannot dump a higher-major server, so the runner's default (whatever Ubuntu ships) is the wrong default. Pin and bump in lockstep with the cluster.
+
+### Drift from kick-off plan
+
+1. **Single `BACKUP_DATABASE_URL` secret, not `PG_USER`/`PG_PASSWORD`/`PG_DATABASE` separately.** Cleaner for `pg_dump "$URL"`; one fewer secret to rotate. The URL host is hardcoded to `127.0.0.1:5432` because the script reaches the cluster via `flyctl proxy 5432:5432` — credentials come from `flyctl postgres connect`. This is the one judgment call I made without explicit approval; trivial to split if you'd rather.
+
+2. **Logic lives in `scripts/backup.sh`, not inlined in the workflow YAML.** Easier to audit and debuggable outside Actions (you can export the env vars locally and dry-run with a throwaway DB). The workflow file is thin glue. Spec listed both forms as acceptable.
+
+### Implementation decisions worth carrying
+
+- **Explicit TCP-readiness probe before `pg_dump`.** The script polls `/dev/tcp/127.0.0.1/5432` once per second for up to 30s, *and* checks the proxy PID is still alive on each iteration. The classic backup-rot pattern is `sleep N && pg_dump` where the proxy isn't ready yet — pg_dump fails, the workflow goes red, but the failure is opaque. The probe is the right shape.
+
+- **<1 KiB dump-size floor before upload.** A successful `pg_dump --format=custom` against an empty/wrong DB still produces a small valid custom-format file. The 1 KiB floor catches the obvious pathological case before we overwrite a known-good dump in R2 with a near-empty one. Not a substitute for the actual restore drill (FEAT-51).
+
+- **`pg_dump --no-owner --no-acl`.** Strips role / GRANT statements from the dump so it restores cleanly to a fresh Postgres with a different role name. Matches the restore-to-fresh-cluster path in FEAT-51 / DEC-73 rather than restore-in-place.
+
+- **`cleanup` trap kills the backgrounded `flyctl proxy` + removes the temp dump.** Important for `workflow_dispatch` reruns and for keeping local dry-runs hygienic; the runner gets torn down anyway in scheduled runs but the trap is the correct shape.
+
+- **`concurrency: backup` with `cancel-in-progress: false`.** A manual run during a scheduled run queues rather than aborting — avoids two `flyctl proxy` instances fighting over port 5432.
+
+### Open questions / next actions
+
+- **One-time setup the workflow assumes exists** (operator action before the first scheduled run):
+  1. Repo variable `FLY_PG_APP` set to the Postgres cluster name.
+  2. Repo secrets `BACKUP_DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` set.
+  3. R2 bucket created; lifecycle rule on `dumps/` configured.
+  4. `workflow_dispatch` triggered once; resulting `dumps/YYYY-MM-DD.dump` downloaded and restored to a local Postgres to verify a known row.
+- **The PGDG apt step pins to `postgresql-client-16`** by hardcoded major. If the Fly Postgres cluster runs a different major (15 / 17), bump in the workflow and consider extracting `PG_MAJOR` to a job-level env if it churns.
+- **FEAT-51's restore-drill log** is where the first successful gate-check should be recorded.
+
+---
+
 ## 2026-06-22 — FEAT-49 (GitHub Actions deploy workflow)
 
 **Status:** workflow file + secrets checklist written. No code paths exercised — first real verification is a push to `main` once the Fly app and runtime secrets exist. DoD in `docs/feature-specs.md §FEAT-49` left unticked.

@@ -343,6 +343,30 @@ describe('auth', () => {
       }
     });
 
+    it('exempts non-/api GETs so the SPA shell loads without a session', async () => {
+      // FEAT-05's bundled prod backend serves the SPA via @fastify/static at
+      // `/`. The auth pre-handler must let the shell + assets through; the
+      // SPA routes the user to /sign-in client-side. Without this exemption
+      // the prod backend 401s every browser request before the SPA can hand
+      // them over to Better Auth.
+      const app = await build({
+        NODE_ENV: 'production',
+        ALLOWED_ORIGIN: undefined,
+      });
+      try {
+        for (const url of ['/', '/sign-in', '/assets/index.js']) {
+          const response = await app.inject({ method: 'GET', url });
+          expect(response.statusCode).not.toBe(401);
+        }
+        // Cross-check: a POST to a non-/api path still 401s (it's not a
+        // static-asset shape).
+        const post = await app.inject({ method: 'POST', url: '/sign-in' });
+        expect(post.statusCode).toBe(401);
+      } finally {
+        await app.close();
+      }
+    });
+
     it('admits authenticated requests through to the tRPC layer', async () => {
       const app = await build({
         NODE_ENV: 'production',

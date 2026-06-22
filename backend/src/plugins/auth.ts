@@ -7,7 +7,8 @@ export interface RegisterAuthOptions {
   config: Config;
 }
 
-function isExempt(url: string, config: Config): boolean {
+function isExempt(req: FastifyRequest, config: Config): boolean {
+  const url = req.url;
   if (url.startsWith('/api/auth/')) return true;
   if (url.startsWith('/api/health')) return true;
   if (
@@ -16,6 +17,12 @@ function isExempt(url: string, config: Config): boolean {
   ) {
     return true;
   }
+  // The bundled prod backend serves the SPA same-origin via @fastify/static
+  // (FEAT-05, `STATIC_DIR`). The SPA shell, its assets, and the SPA fallback
+  // for non-/api paths all need to load without a session — the SPA itself
+  // routes the user to `/sign-in` client-side. tRPC / Better Auth API calls
+  // remain protected because they live under `/api/`.
+  if (req.method === 'GET' && !url.startsWith('/api/')) return true;
   return false;
 }
 
@@ -88,7 +95,7 @@ export function registerAuth(
         return;
       }
 
-      if (isExempt(req.url, config)) return;
+      if (isExempt(req, config)) return;
 
       await reply.code(401).send({ error: 'Unauthorized' });
     },

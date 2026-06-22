@@ -11,6 +11,7 @@ import { buildLoggerBundle } from './plugins/logger.ts';
 import type { AxiomDestination } from './plugins/axiom-destination.ts';
 import { randomUUID } from 'node:crypto';
 import { registerAuth } from './plugins/auth.ts';
+import { registerRateLimit } from './plugins/rate-limit.ts';
 import { registerSecurity } from './plugins/security.ts';
 import { initSentry, registerSentryHooks } from './plugins/sentry.ts';
 import { createContext } from './trpc/context.ts';
@@ -69,6 +70,10 @@ export async function buildAppWithLogger(
     loggerInstance: baseLogger,
     genReqId: () => randomUUID(),
     disableRequestLogging: false,
+    // Honour Cloudflare's forwarded IP headers so rate-limit buckets per
+    // real client rather than per CDN edge. We're orange-clouded (DEC-72),
+    // so a spoofed header requires bypassing Cloudflare.
+    trustProxy: true,
   });
 
   if (sentryEnabled) registerSentryHooks(app);
@@ -98,6 +103,8 @@ export async function buildAppWithLogger(
 
   const auth: Auth = createAuth({ config, db, sendMagicLink });
   registerAuth(app, { auth, config });
+
+  await registerRateLimit(app);
 
   await app.register(fastifyTRPCPlugin, {
     prefix: '/api/trpc',

@@ -4,6 +4,40 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-22 — FEAT-48 (Explicit CSP policy)
+
+**Status:** implementation complete. `pnpm --filter backend typecheck` clean, `pnpm --filter backend lint` clean, `test/security.test.ts` is 10/10 and `test/server.test.ts` still 12/12. DoD boxes in `docs/feature-specs.md §FEAT-48` left unticked — human action. Manual verification (load prod app, attempt `<script>` injection, confirm Sentry events still post) are operator probes.
+
+### Decisions taken at kick-off
+
+- **Sentry browser-ingest origin is its own env var (`SENTRY_BROWSER_INGEST_ORIGIN`)**, not parsed from `SENTRY_DSN`. Backend and frontend may use different Sentry projects; deriving from the backend DSN would have created an undocumented FE/BE coupling. Unset → `connect-src` omits the entry entirely.
+- **`style-src 'self' 'unsafe-inline'` accepted for v1**, anticipated by DEC-46. Radix UI (used by shadcn/ui per DEC-51) injects inline styles for popover/tooltip positioning; a nonce/hash strategy would need every Radix primitive to thread one through. Inline comment in `security.ts` flags the compromise + revisit trigger.
+- **`script-src` stays strict (`'self'` only).** DEC-46 explicitly calls out that adding `'unsafe-inline'` to `script-src` defeats the policy. Test #5 guards against accidental relaxation.
+- **`useDefaults: false` on helmet's CSP** so the policy is auditable in one place rather than split across helmet's defaults and our overrides. Every directive (default-src, base-uri, form-action, frame-ancestors, object-src, img-src, connect-src, script-src, style-src, font-src) is declared explicitly.
+- **Single host for Cloudinary**: `https://res.cloudinary.com`, not a wildcard. FEAT-48's "gotcha" note about `*.res.cloudinary.com` subdomains doesn't match how Cloudinary actually serves (single host with `/<cloud-name>/...` paths). Widen only if a real broken-image case surfaces.
+- **`X-Frame-Options: DENY`**, not the helmet default `SAMEORIGIN`. Aligns with `frame-ancestors 'none'`; the existing assertion in `server.test.ts` was updated.
+
+### Drift from kick-off plan
+
+1. **`CspDirectives` interface needed an index signature.** Helmet's `directives` field is typed `Record<string, null | Iterable<...> | typeof dangerouslyDisableDefaultSrc>`. A plain typed interface doesn't satisfy that contract — added `[directive: string]: Iterable<string>` alongside the explicit shape to keep both editor IntelliSense and helmet's signature happy without an `as unknown as` cast at the call site.
+2. **Bumped `frameguard` in helmet options to `{ action: 'deny' }`**, which surfaced an existing assertion in `server.test.ts:305` (`x-frame-options: SAMEORIGIN`). Flipped that test to expect `DENY` — the value is correct given `frame-ancestors 'none'`.
+3. **One ESLint conflict resolved by removing an `as Iterable<string>` cast.** `noUncheckedIndexedAccess` made `Record<string, Iterable<string>>` access return `Iterable<string> | undefined`, but adding `!` triggered `no-non-null-assertion`. The right fix was a typed interface — the cast was a sign the return type was too loose.
+
+### Implementation details worth carrying
+
+- **`STATIC_DIR` unset in tests means no SPA fallback route exists**, so the CSP test suite inspects headers on `/api/health` responses (helmet attaches them to every response). Fine for header-shape assertions; doesn't exercise the SPA HTML path itself.
+- **HSTS comes from helmet's defaults**, untouched. Only `contentSecurityPolicy` and `frameguard` are passed as overrides — other middleware (HSTS, X-Content-Type-Options, Referrer-Policy, etc.) stay at helmet 8's secure defaults. DEC-47's "review on helmet major upgrade" applies; we're currently on `helmet@8.1.0`.
+- **`buildCspDirectives` is exported** so the policy shape can be unit-tested without booting Fastify. Useful if future changes want to assert directive composition logic (e.g. conditional CSP additions for new third parties).
+- **Index signature on `CspDirectives`** loosens the type for helmet but the explicit keys are still type-checked at the return site — TS narrows on the literal. Adding a new directive means editing the interface AND the literal; the index signature only carries the helmet contract.
+
+### Open follow-ups
+
+- **Manual gate-check.** Load the prod app in a browser; DevTools console should show zero CSP violations. Attempt a `<script>alert(1)</script>` injection via a recipe note or shopping-list input; CSP should block execution (and React escaping should prevent it from rendering as a tag in the first place — defense in depth). Confirm Sentry browser events still POST.
+- **Frontend Sentry init needs the DSN to be set** for the `connect-src` allowlist to matter. FEAT-45 landed the SDK; the `SENTRY_BROWSER_INGEST_ORIGIN` env var added here is the CSP-side companion. If the FE Sentry project hasn't been provisioned yet, leave the env var unset — `connect-src` will just be `'self'` and the FE SDK no-ops without a DSN anyway.
+- **Vite dev: CSP not exercised.** In dev the SPA is served by Vite (`:5173`) which sets its own headers; the Fastify CSP only applies to responses Fastify itself serves. No dev/prod split is needed — manual verification of the policy must happen against a production-style build (or the Docker image) where Fastify serves the SPA HTML.
+
+---
+
 ## 2026-06-22 — FEAT-47 (/api/health endpoint with DB probe)
 
 **Status:** implementation complete. `pnpm --filter backend typecheck` and `pnpm --filter backend lint` clean. New `test/health.test.ts` is **5/5**; `test/server.test.ts` still **12/12** under the new server.ts ordering. The auth pre-handler's exemption string (`plugins/auth.ts:12`, `url.startsWith('/api/health')`) and rate-limit's exemption (`plugins/rate-limit.ts:22`) were already wired by FEAT-44/46 — this FEAT only adds the route handler itself. DoD boxes in `docs/feature-specs.md §FEAT-47` left unticked — human action. Manual gate-checks (`curl https://<domain>/api/health` → 200; stop the DB → 503; Fly dashboard goes healthy) are operator probes.

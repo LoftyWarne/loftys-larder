@@ -70,6 +70,11 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     CLOUDINARY_API_KEY: 'test-key',
     CLOUDINARY_API_SECRET: 'test-secret',
     AXIOM_ENDPOINT: 'https://api.axiom.co',
+    // Stubbed for the NODE_ENV=production cases below — the logger refuses
+    // to boot in prod without these (`src/plugins/logger.ts`). Real Axiom
+    // ingest is opt-in by passing `fetchImpl` through `BuildAppOptions`.
+    AXIOM_TOKEN: 'test-axiom-token',
+    AXIOM_DATASET: 'test-axiom-dataset',
     SENTRY_TRACES_SAMPLE_RATE: 0,
     ...overrides,
   };

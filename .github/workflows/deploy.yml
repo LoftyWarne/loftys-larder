@@ -1,0 +1,83 @@
+name: Deploy
+
+# Push to `main` deploys to Fly (DEC-40, DEC-65, DEC-66). The CI workflow runs
+# lint / typecheck / test on every push; this workflow waits for that run to
+# finish on `main` and only proceeds on success — so we don't pay the gate
+# cost twice. `workflow_dispatch` lets us re-deploy a SHA manually without an
+# empty commit.
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to deploy (defaults to current main HEAD)'
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  FLY_APP: loftys-larder-prod
+
+jobs:
+  deploy:
+    name: Deploy to Fly (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - name: Resolve commit SHA
+        id: sha
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "sha=${{ inputs.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy \
+            --app "$FLY_APP" \
+            --remote-only \
+            --release-command "pnpm drizzle-kit migrate" \
+            --image-label "sha-${{ steps.sha.outputs.sha }}"
+
+      - name: Capture release
+        id: release
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          RELEASE=$(flyctl releases --app "$FLY_APP" --json 2>/dev/null | jq -r '.[0] | "v\(.Version)"' || echo "unknown")
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Deploy"
+            echo ""
+            echo "- App: \`${FLY_APP}\`"
+            echo "- Commit: \`${{ steps.sha.outputs.sha }}\`"
+            echo "- Release: \`${{ steps.release.outputs.release }}\`"
+            echo ""
+            echo "Rollback: \`flyctl releases rollback <release> --app ${FLY_APP}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

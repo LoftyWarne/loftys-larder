@@ -1,5 +1,5 @@
 import type { IngredientListItem } from '@loftys-larder/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -254,7 +254,9 @@ describe('IngredientsPage', () => {
         advanceTimers: (ms: number) => vi.advanceTimersByTime(ms),
       });
       await typingUser.type(search, 'oni');
-      vi.advanceTimersByTime(250);
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
 
       await waitFor(() => {
         const calls = listUseQueryMock.mock.calls;

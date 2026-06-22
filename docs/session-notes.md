@@ -4,6 +4,14 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-22 — Fix act() warning in ingredients-page debounce test
+
+**Status:** fixed; full frontend suite green (310 tests, 44 files), no act warnings.
+
+The `debounces the search input before querying` test logged an "update to IngredientsPage inside a test was not wrapped in act(...)" warning. Cause: `vi.advanceTimersByTime(250)` fires the component's debounce `setTimeout`, which calls `setDebouncedSearch` — a React state update outside React's `act()` boundary. Fix: wrap the timer advance in `act(() => { ... })` (imported from `@testing-library/react`) so the update flushes inside the boundary. No component change needed.
+
+---
+
 ## 2026-06-22 — FEAT-53 (Playwright e2e for critical paths)
 
 **Status:** implementation complete; all 5 specs pass locally against the bundled backend + frontend in ~3 s. Definition-of-done left unticked.

@@ -17,7 +17,8 @@ There are two stores:
 
 | Secret | Purpose | Required by |
 |---|---|---|
-| `FLY_API_TOKEN` | Authenticates `flyctl` from the deploy workflow | FEAT-49 (this) |
+| `FLY_API_TOKEN` | Authenticates `flyctl` from the deploy and backup workflows | FEAT-49, FEAT-50 |
+| `BACKUP_DATABASE_URL` | Postgres connection string against the proxy: `postgres://postgres:<pwd>@127.0.0.1:5432/<db>` | FEAT-50 |
 | `R2_ACCOUNT_ID` | Cloudflare account for the off-site backup bucket | FEAT-50 |
 | `R2_ACCESS_KEY_ID` | R2 access key | FEAT-50 |
 | `R2_SECRET_ACCESS_KEY` | R2 secret | FEAT-50 |
@@ -26,6 +27,28 @@ There are two stores:
 Generate `FLY_API_TOKEN` with `flyctl auth token` (scoped to the deploy
 machine user, not your personal token, if you have an organisation token
 available).
+
+The credentials in `BACKUP_DATABASE_URL` come from `flyctl postgres connect`
+(or the cluster bootstrap output); the host is hardcoded to
+`127.0.0.1:5432` because the backup script reaches the cluster via
+`flyctl proxy 5432:5432`, not over the public internet.
+
+## GitHub Actions variables
+
+Non-sensitive configuration goes in repo *variables* (Settings → Secrets and
+variables → Actions → Variables) rather than secrets, so it surfaces in
+logs and summaries.
+
+| Variable | Purpose | Required by |
+|---|---|---|
+| `FLY_PG_APP` | Fly Postgres cluster name (e.g. `loftys-larder-prod-db`) | FEAT-50 |
+
+## R2 bucket lifecycle
+
+Retention is enforced by an R2 lifecycle rule, not by the backup workflow —
+the workflow only writes new objects. Configure in the Cloudflare dashboard
+(R2 → bucket → Object lifecycle) to delete objects under `dumps/` after the
+desired window (e.g. 30 days).
 
 ## Fly app secrets
 

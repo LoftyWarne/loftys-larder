@@ -1,0 +1,75 @@
+name: Backup
+
+# Nightly off-site backup of Fly Postgres → Cloudflare R2 (DEC-73). Fly's
+# own daily snapshots cover routine recovery; this workflow is the
+# vendor-catastrophe tier. Restore drills live in OPERATIONS.md (FEAT-51).
+#
+# Failure surfacing: GitHub emails the workflow owner on a failed scheduled
+# run. No extra alerting wired here.
+
+on:
+  schedule:
+    # 03:00 UTC ≈ 03:00–04:00 Europe/London. Off-peak for a household app.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+env:
+  # Run @v4 JS actions on Node.js 24 instead of the deprecated Node 20.
+  # Mirror of the CI workflow; remove once actions default to Node 24.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  backup:
+    name: pg_dump → R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install postgresql-client-16
+        # Match Fly Postgres' server major. Bump in lockstep with the
+        # cluster's Postgres version (a lower-major pg_dump cannot dump a
+        # higher-major server).
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Run backup
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_PG_APP: ${{ vars.FLY_PG_APP }}
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: bash scripts/backup.sh
+
+      - name: Summary
+        if: always()
+        env:
+          FLY_PG_APP: ${{ vars.FLY_PG_APP }}
+        run: |
+          {
+            echo "## Nightly backup"
+            echo ""
+            echo "- Source: \`${FLY_PG_APP}\`"
+            echo "- Key: \`dumps/$(date -u +%Y-%m-%d).dump\`"
+            echo "- Result: ${{ job.status }}"
+            echo ""
+            echo "Manual restore drill: see \`OPERATIONS.md\` (FEAT-51)."
+          } >> "$GITHUB_STEP_SUMMARY"

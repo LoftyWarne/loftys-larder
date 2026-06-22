@@ -4,6 +4,41 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-22 — FEAT-49 (GitHub Actions deploy workflow)
+
+**Status:** workflow file + secrets checklist written. No code paths exercised — first real verification is a push to `main` once the Fly app and runtime secrets exist. DoD in `docs/feature-specs.md §FEAT-49` left unticked.
+
+### Drift from kick-off plan
+
+1. **Deploy gates on the `CI` workflow via `workflow_run`,** not by re-running lint/typecheck/test inline. Matches the spec's "depends on the CI workflow successful" branch and avoids paying the gate cost twice on every push to `main`. Trade-off: `workflow_run` triggers always resolve the workflow file from the default branch, and the commit SHA must be propagated explicitly via `github.event.workflow_run.head_sha` — the workflow does this, and `actions/checkout` pins to that SHA so a fast follow-on push can't sneak into the wrong release.
+
+2. **Added `workflow_dispatch` with an optional `sha` input.** Outside the spec but lets us re-deploy a SHA without an empty commit (e.g. after rotating a Fly secret with `--stage`, or to retry a transient builder failure). User confirmed.
+
+3. **`concurrency: deploy-production` with `cancel-in-progress: false`.** A second push during a deploy queues instead of aborting mid-`release_command`. A cancelled deploy mid-migration would leave us in an awkward state with no clean rollback target — queueing is the safer default for our scale.
+
+4. **Surfaced "release id" as `flyctl releases --json | jq -r '.[0].Version'`,** wrapped in a `|| echo "unknown"` fallback so an unexpected `flyctl` output shape doesn't fail the deploy step *after* the deploy itself succeeded. The summary block in `$GITHUB_STEP_SUMMARY` is the operator's audit trail; downgrading to "unknown" is preferable to a red workflow for cosmetic reasons.
+
+### Discovered while writing the secrets checklist
+
+- **`VITE_SENTRY_DSN` is build-time, not runtime.** Vite bundles it into the SPA at build, so it has to reach the Fly remote builder as a Docker build arg — not a Fly app secret. The current `Dockerfile` doesn't declare `ARG VITE_SENTRY_DSN` or pass it into the build stage, so the frontend Sentry SDK no-ops in production today. Captured as a caveat in `docs/secrets-checklist.md` and flagged as a follow-up against FEAT-46 rather than scope-creeping FEAT-49. The Dockerfile change is small (`ARG` + `ENV` in the build stage, plus `--build-arg` plumbing through the deploy command) and should land before we rely on frontend error reporting.
+
+- **R2 credentials are GitHub Actions secrets, not Fly secrets.** FEAT-50's nightly `pg_dump → R2` workflow runs in CI and uses `flyctl proxy` to reach Postgres — the R2 client never runs inside the Fly app, so `R2_*` belong in the repo-level Actions store. Checklist groups them separately to avoid future confusion.
+
+### Implementation decisions worth carrying
+
+- **`flyctl deploy --remote-only`** is the chosen build location. The repo has no Docker buildx locally (noted in the FEAT-05 entry), and remote builds keep the workflow free of `docker login` / qemu / multi-arch concerns. Image is small enough (~229 MB per FEAT-05) that the Fly builder is the right tool.
+
+- **No CI workflow file changes.** `workflow_run` doesn't require `ci.yml` to be `workflow_call`-able — it triggers reactively on completion events. Leaving `ci.yml` untouched keeps the PR review surface minimal.
+
+- **Rollback path is documented as `flyctl releases rollback <version>`,** with an explicit note that one-way migrations defeat it and the recovery path is `pg_restore` from the R2 dump (FEAT-50/51). Catches the foot-gun ahead of time.
+
+### Open questions / next actions
+
+- **First-deploy bootstrap is a human action.** The checklist's `flyctl secrets set --stage` snippet expects the Fly app, the Fly Postgres cluster, and the apex domain to already exist (FEAT-05 / FEAT-09 / FEAT-13). FEAT-49 doesn't itself stand the app up.
+- **Pre-flight verification of the broken-migration safety net** is in the checklist but worth doing exactly once on a low-stakes branch so we *know* `release_command` aborts the way we expect — not the kind of thing to discover during a real incident.
+
+---
+
 ## 2026-06-22 — FEAT-48 (Explicit CSP policy)
 
 **Status:** implementation complete. `pnpm --filter backend typecheck` clean, `pnpm --filter backend lint` clean, `test/security.test.ts` is 10/10 and `test/server.test.ts` still 12/12. DoD boxes in `docs/feature-specs.md §FEAT-48` left unticked — human action. Manual verification (load prod app, attempt `<script>` injection, confirm Sentry events still post) are operator probes.

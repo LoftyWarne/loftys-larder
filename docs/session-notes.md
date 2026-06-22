@@ -4,6 +4,50 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-22 — FEAT-51 (OPERATIONS.md and rehearsed restore drills)
+
+**Status:** document written end-to-end; **drills deferred** by user choice at kick-off (option C). The rehearsal log is in place with explicit "not yet performed" placeholders and an entry template, so the gap is visible. DoD in `docs/feature-specs.md §FEAT-51` left unticked — neither the document gate-check nor the rehearsal AC items are tickable until a sceptical-reader pass + the three drills actually happen.
+
+### Decisions taken at kick-off
+
+- **Drills deferred (option C of the kick-off menu).** The document covers all written-content AC, but three rehearsal AC items (Fly snapshot, R2 dump, rollback) remain unmet by design. Each blocks on operator availability + a live production deploy. The FEAT is meaningfully *partial* until drills land; flagged here so it doesn't get marked complete on the strength of the doc alone.
+- **Fly snapshot restore uses fork cluster + ad-hoc `psql`,** not a staging app. DEC-65 forbids a persistent staging Fly app; spinning up a temporary fork cluster, connecting via `flyctl postgres connect`, verifying the canary, and destroying the fork is the cheapest path that still proves the snapshot is intact.
+- **Deterministic canary row** seeded into production: an `ingredients` row named `RESTORE-DRILL-CANARY`. Sentinel-name approach beats verifying against an organic row (which could be edited or removed during the months between rehearsals).
+- **Existing rate-limit section folded in verbatim** under its own heading. No information loss — the OPERATIONS.md skeleton stubbed at FEAT-46 already documented rate limits as one of three top-level concerns; FEAT-51 expands around it.
+- **Per-secret rotation table added** (committed at kick-off). `docs/secrets-checklist.md` already has the generic rotation procedure; OPERATIONS.md captures the *surface-specific gotchas* — what breaks if you rotate this wrong, not just how to mechanically rotate.
+
+### Drift from kick-off plan
+
+1. **Cross-reference `docs/secrets-checklist.md` rather than duplicate the secret inventory.** The kick-off plan said "inventory secrets in OPERATIONS.md"; that file already exists from FEAT-49 with the full source-of-truth tables. Duplicating would have created a drift surface. OPERATIONS.md instead carries a small pointer table (where each secret lives, two stores) and the per-secret rotation gotchas. AC "every secret and where it's configured" is satisfied by the cross-reference + the pointer table — confirm in review whether you prefer fuller in-doc inventory.
+
+2. **No Axiom alerts documented as a configured alert.** Audit of `backend/src/plugins/logger.ts` and `axiom-destination.ts` found no Axiom monitors wired — Axiom is the searchable destination, Sentry owns alerts. OPERATIONS.md says so explicitly under "Alerts and response → Axiom" rather than leaving it implied.
+
+3. **`Restore A` includes a "stopwatch from step 2 → step 3" callout.** Not in the spec's wording but matches the implementation note ("Run them with a stopwatch; record the time-to-restore") and gives the rehearsal-log template something concrete to fill.
+
+### Implementation decisions worth carrying
+
+- **Restore B uses `postgres:16` container on port `55432`,** not the project's Docker Compose. Avoids colliding with the dev DB on `5433` and any host Postgres on `5432`, and keeps the restore environment fully isolated from anything in `docker-compose.yml`. Re-run on `postgres:17` if/when the cluster bumps major.
+
+- **`pg_restore --exit-on-error`** is the documented flag, with a note that a restore that prints errors but exits zero is the classic false-confidence failure mode (mirrors the FEAT-50 `<1 KiB dump-size floor` reasoning).
+
+- **`flyctl postgres create --fork-from` syntax caveat** flagged explicitly. `flyctl`'s Postgres subcommands have historically changed shape; the doc tells the next reader what to do (`flyctl postgres create --help | head -40`, capture the new form in the next entry) rather than pretending the documented command is stable forever.
+
+- **One-way migrations explicitly call out `releases rollback` as the wrong tool.** Cross-references `Restore B` as the actual recovery path. This is the FEAT-49 session-notes "rollback foot-gun" written into the runbook proper.
+
+- **`/api/health` log-level note** mentioned under "Alerts → Axiom" so a future investigator doesn't wonder why their `path: "/api/health"` filter returns nothing — Fastify's per-request log is at `warn` for that route (`backend/src/routes/health.ts:44`).
+
+### Open questions / next actions
+
+- **Three drills to run** before this FEAT closes:
+  1. **Fork-from-snapshot rehearsal.** Pick a recent snapshot, fork, `flyctl postgres connect`, verify the canary, destroy the fork. Log time-to-canary-visible.
+  2. **R2 dump restore.** Download today's dump (after the cron has run at least once), `pg_restore` into a throwaway `postgres:16` container, verify the canary. Log time-to-canary-visible.
+  3. **Rollback rehearsal.** Empty commit to `main` → `Deploy` workflow → confirm new release serving via `flyctl releases` → `flyctl releases rollback v<n-1>` → confirm prior release serving (Axiom log line carrying the prior version tag, or a known fingerprint in the build).
+- **Seed the canary row** before the first drill, after the production schema is in place. The SQL in the doc assumes an `ingredients` table — verify the column list against the live schema at the moment of seeding (`unit` is currently mandatory per DEC-18; `created_at` / `updated_at` are added by Drizzle `$onUpdate` per DEC-16 and may not need explicit values).
+- **Sceptical-reader pass** is the FEAT-51 gate check. Read the document cold in a week and verify a stranger could follow it without context-from-conversation.
+- **`VITE_SENTRY_DSN` Dockerfile follow-up** referenced again in OPERATIONS.md's secrets section. The FEAT-46 task remains — frontend Sentry no-ops in prod until that lands.
+
+---
+
 ## 2026-06-22 — FEAT-50 (Nightly pg_dump → R2 backup workflow)
 
 **Status:** workflow + script + secrets checklist updates landed. No code paths exercised — gate check is a `workflow_dispatch` run that produces a dump which restores cleanly to a local Postgres (the manual restore drill is FEAT-51's territory). DoD in `docs/feature-specs.md §FEAT-50` left unticked.

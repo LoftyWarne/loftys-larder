@@ -14,6 +14,7 @@ import { registerAuth } from './plugins/auth.ts';
 import { registerRateLimit } from './plugins/rate-limit.ts';
 import { registerSecurity } from './plugins/security.ts';
 import { initSentry, registerSentryHooks } from './plugins/sentry.ts';
+import { registerHealth } from './routes/health.ts';
 import { createContext } from './trpc/context.ts';
 import { appRouter } from './trpc/router.ts';
 
@@ -87,6 +88,8 @@ export async function buildAppWithLogger(
     apiKey: config.CLOUDINARY_API_KEY,
     apiSecret: config.CLOUDINARY_API_SECRET,
   });
+
+  registerHealth(app);
 
   const transport: MagicLinkSender =
     options.sendMagicLink ??

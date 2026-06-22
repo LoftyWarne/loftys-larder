@@ -13,6 +13,7 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "e2e": "pnpm --filter @loftys-larder/e2e e2e",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"

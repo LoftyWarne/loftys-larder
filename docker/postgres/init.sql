@@ -8,3 +8,11 @@ CREATE DATABASE lofty_test;
 \connect lofty_test
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+\connect lofty_dev
+
+CREATE DATABASE lofty_e2e;
+
+\connect lofty_e2e
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;

@@ -13,3 +13,8 @@ frontend/src/routeTree.gen.ts
 
 # Drizzle's meta JSON is one-line generated content.
 backend/drizzle/meta
+
+# Playwright generates these per-run; nothing to format.
+e2e/.auth
+e2e/playwright-report
+e2e/test-results

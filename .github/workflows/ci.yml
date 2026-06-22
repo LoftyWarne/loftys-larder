@@ -49,3 +49,74 @@ jobs:
 
       - name: Test
         run: pnpm -r test
+
+  e2e:
+    name: e2e (playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+    services:
+      postgres:
+        image: postgres:17.2-alpine
+        env:
+          POSTGRES_USER: lofty
+          POSTGRES_PASSWORD: lofty
+          POSTGRES_DB: lofty_e2e
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U lofty -d lofty_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://lofty:lofty@localhost:5433/lofty_e2e
+      BASE_URL: http://127.0.0.1:3100
+      E2E_EMAIL: e2e@example.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('e2e/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @loftys-larder/e2e exec playwright install --with-deps chromium
+
+      - name: Prepare DB (migrate + reference seed)
+        run: pnpm --filter @loftys-larder/e2e prepare-db
+
+      - name: Build frontend
+        run: pnpm --filter @loftys-larder/frontend build
+
+      - name: Build backend
+        run: pnpm --filter @loftys-larder/backend build
+
+      - name: Run Playwright
+        run: pnpm e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 7

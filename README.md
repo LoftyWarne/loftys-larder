@@ -19,9 +19,14 @@ cp .env.example .env
 docker compose up -d postgres
 ```
 
-This boots Postgres 17 on host port `5433` with two databases — `lofty_dev`
-and `lofty_test` — and the `pg_trgm` extension installed in each. Data
-persists in the `loftys_larder_pgdata` named volume.
+This boots Postgres 17 on host port `5433` with three databases — `lofty_dev`,
+`lofty_test`, and `lofty_e2e` — and the `pg_trgm` extension installed in each.
+Data persists in the `loftys_larder_pgdata` named volume.
+
+If your volume predates the `lofty_e2e` DB, create it once with
+`docker exec loftys-larder-postgres psql -U lofty -d lofty_dev -c 'create database lofty_e2e'`
+followed by
+`docker exec loftys-larder-postgres psql -U lofty -d lofty_e2e -c 'create extension if not exists pg_trgm'`.
 
 The host port is intentionally non-default to avoid collisions with a system
 Postgres on 5432. Override via `POSTGRES_HOST_PORT` in `.env` if needed.
@@ -116,6 +121,24 @@ To auto-fix locally:
 pnpm format           # write Prettier changes
 pnpm lint:fix         # eslint --fix
 ```
+
+### End-to-end tests
+
+Playwright covers the critical-path flows against the bundled backend +
+frontend (per DEC-58). Locally:
+
+```sh
+cp e2e/.env.example e2e/.env             # one-time
+pnpm --filter @loftys-larder/e2e install:browsers   # one-time, ~150 MB
+pnpm --filter @loftys-larder/e2e prepare-db
+pnpm --filter @loftys-larder/frontend build
+pnpm --filter @loftys-larder/backend build
+pnpm e2e
+```
+
+The suite uses `lofty_e2e` and resets its household-scoped tables before each
+spec. The frontend `build` and backend `build` outputs are what Playwright's
+`webServer` runs — same artefact shape as production.
 
 ## Deploy
 

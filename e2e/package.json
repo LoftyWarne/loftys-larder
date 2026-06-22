@@ -1,0 +1,27 @@
+{
+  "name": "@loftys-larder/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "install:browsers": "playwright install --with-deps chromium",
+    "prepare-db": "tsx --env-file-if-exists=.env scripts/prepare-db.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.7",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.21.0",
+    "tsx": "^4.19.2",
+    "typescript": "*"
+  }
+}

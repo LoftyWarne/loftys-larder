@@ -302,6 +302,6 @@ describe('security headers', () => {
       url: `/api/trpc/health.ping?input=${encodeTrpcInput({})}`,
     });
     expect(response.headers['x-content-type-options']).toBe('nosniff');
-    expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(response.headers['x-frame-options']).toBe('DENY');
   });
 });

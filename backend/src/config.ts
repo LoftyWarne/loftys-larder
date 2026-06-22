@@ -59,6 +59,11 @@ const configSchema = z
     SENTRY_DSN: z.url().optional(),
     SENTRY_ENVIRONMENT: z.string().min(1).optional(),
     SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+    // Browser ingest origin for the frontend Sentry SDK (DEC-46). Added to
+    // CSP `connect-src` so the SPA can POST error events. Separate from
+    // SENTRY_DSN because the backend and frontend may use different Sentry
+    // projects; an unset value just omits the origin from the directive.
+    SENTRY_BROWSER_INGEST_ORIGIN: z.url().optional(),
   })
   .refine(
     (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),

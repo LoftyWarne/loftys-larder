@@ -4,6 +4,39 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-22 — FEAT-47 (/api/health endpoint with DB probe)
+
+**Status:** implementation complete. `pnpm --filter backend typecheck` and `pnpm --filter backend lint` clean. New `test/health.test.ts` is **5/5**; `test/server.test.ts` still **12/12** under the new server.ts ordering. The auth pre-handler's exemption string (`plugins/auth.ts:12`, `url.startsWith('/api/health')`) and rate-limit's exemption (`plugins/rate-limit.ts:22`) were already wired by FEAT-44/46 — this FEAT only adds the route handler itself. DoD boxes in `docs/feature-specs.md §FEAT-47` left unticked — human action. Manual gate-checks (`curl https://<domain>/api/health` → 200; stop the DB → 503; Fly dashboard goes healthy) are operator probes.
+
+### Decisions taken at kick-off
+
+- **Route file lives at `backend/src/routes/health.ts`**, not `backend/src/plugins/health.ts`. The spec is explicit about the path; created the new `routes/` directory. Logical separation from `plugins/` (which is for cross-cutting wiring like security, auth, rate-limit, logging) keeps intent clear — a route handler is not a plugin.
+- **Per-route `logLevel: 'warn'` to silence the access log**, instead of sampling. Sampling would need a custom serializer for one route's volume problem; `logLevel: 'warn'` is the one-line config that does the same job. Failures still log because the handler emits a `warn` explicitly.
+- **Timeout enforced in JS via `Promise.race`, not Postgres `statement_timeout`.** Postgres-side timeout only bounds the query itself, not the pool's connection-acquisition wait — which is the more likely failure mode under load (saturated pool of 10 connections per DEC-71). Racing in JS bounds the whole probe.
+- **503 body is `{ ok: false }` — no error details.** Fly only reads the status code; volunteering the cause would leak reconnaissance to scanners. The cause is in the structured `warn` log (Axiom-visible), not the response body.
+- **Probe failures log one structured `warn` with `reason: 'timeout' | 'error'`** (plus the `err` payload when an error reached us). One log per failed probe, zero per success — bounds Axiom volume at "failures only" instead of "every probe."
+- **Route registered before `registerAuth` / `registerRateLimit` in `server.ts`.** Both pre-handler hooks already early-exit on `/api/health`, so order isn't load-bearing for correctness; clustering the route registration near `app.decorate('db', db)` keeps the file readable.
+
+### Drift from kick-off plan
+
+1. **Three lint-driven micro-edits, no behaviour change.** The `eslint-config-strict-type-checked` rules forced: `() => {}` → `() => undefined` for the swallow catch (`@typescript-eslint/no-empty-function`); braced body on `setTimeout(() => { resolve('timeout'); })` (`@typescript-eslint/no-confusing-void-expression`); `Array<Record<string, unknown>>` → `Record<string, unknown>[]` in the test (`@typescript-eslint/array-type`). Substantively identical to the planned code.
+2. **`captureLogs` types `loggerInstance` as `FastifyBaseLogger`, not `ReturnType<typeof pino>`.** Pino's generic defaults produce a `Logger<never, boolean>` that Fastify's `loggerInstance` option rejects (it wants `Logger<string, boolean>`). The widening trick used in `server.ts:60` (`const baseLogger: FastifyBaseLogger = logger`) is the same workaround. Documented inline in `buildHealthApp`.
+
+### Implementation details worth carrying
+
+- **`probe.catch(() => undefined)` is load-bearing.** When the 2 s timeout wins, the underlying `db.execute` promise is left to settle on its own. Without an attached handler, a later reject would surface as an unhandledRejection and trip Sentry (FEAT-45). The no-op catch is the cheapest mitigation; the `.then(() => 'ok')` derivative used in `Promise.race` is independently handled by Promise.race itself.
+- **`db.execute(sql\`select 1\`)` acquires + releases a pool connection.** With `POOL_MAX = 10` (DEC-71) and the timeout at 2 s, a saturated pool either drains in time (200ms per request × 10 = 2s) and the probe succeeds, or doesn't and Fly correctly marks the machine unhealthy. The timeout encodes "if we can't even get a connection, we're not healthy."
+- **Fake-timer test pattern for the 2 s timeout.** `vi.useFakeTimers()` + `app.inject(...)` returns a promise; awaiting `vi.advanceTimersByTimeAsync(2_000)` flushes both timer queue and microtasks, after which the inject promise resolves with the 503. Restored in `afterEach` with `vi.useRealTimers()` so subsequent tests aren't affected.
+- **Auth-exemption test mounts a stub `auth`**, not the real `createAuth(...)`. `Auth['api']['getSession']` returning `null` is the only thing the pre-handler reads; the wildcard `/api/auth/*` handler is registered but never invoked from `/api/health`. Side-effect import of `trpc/context.ts` carries the `FastifyInstance['db']` augmentation along so the decorate call typechecks. Trade-off: the test doesn't exercise the real Better Auth handler tree — that's covered by `server.test.ts`'s existing auth cases.
+
+### Open follow-ups
+
+- **Manual gate-check.** `curl https://<domain>/api/health` against the deployed Fly app should return 200; with Postgres stopped (or unreachable via firewall), 503; Fly dashboard should show the machine as healthy under normal operation. Endpoint goes live as soon as FEAT-47 ships; no separate enable step.
+- **FEAT-49 unblock.** This FEAT was a hard dependency for "robust deploys" — Fly's health-check path (`/api/health`, declared in `fly.toml` since FEAT-05) now resolves to a real handler. The release-command migration step in FEAT-49 can rely on the health probe to gate traffic.
+- **Testcontainer environment unblock.** Same pre-existing colima/docker-socket issue carried over from FEAT-44/45/46. Not specific to this FEAT; 14 testcontainer-backed suites can't bootstrap in this shell. Worth a one-off investigation outside any feature scope.
+
+---
+
 ## 2026-06-22 — FEAT-46 (Rate limiting via @fastify/rate-limit)
 
 **Status:** implementation complete. `pnpm -r typecheck` and `pnpm -r lint` clean. Non-testcontainer vitest suites **89/89** passing (rate-limit, server, config, logger, sentry, scrub-pii, cloudinary-sign, date-utils) — the new `test/rate-limit.test.ts` is 8/8. Testcontainer-backed suites failed to bootstrap with "Could not find a working container runtime strategy"; same colima docker-socket mount issue that's been present in this shell since FEAT-44/45, unrelated to this change. DoD boxes in `docs/feature-specs.md §FEAT-46` left unticked — human action. Manual gate-checks (burst `/api/trpc/health.ping` past 100/min and the magic-link endpoint past 5/hr) are operator probes.

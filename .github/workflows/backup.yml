@@ -44,6 +44,11 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
+          # The runner ships a v16 client and PGDG routes /usr/bin/pg_dump
+          # through pg_wrapper, so a bare `pg_dump` can still resolve to v16
+          # (a lower-major pg_dump cannot dump the v17 server). Put the
+          # versioned bin dir first on PATH so `pg_dump` is the real v17.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master

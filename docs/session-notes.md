@@ -4,6 +4,42 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-23 — Backup workflow: pg_dump major mismatch (16 vs 17)
+
+**Status:** fixed in `.github/workflows/backup.yml`. Not yet verified against a real scheduled run.
+
+### Symptom
+
+`backup.yml` run failed at the `pg_dump` step:
+
+```
+pg_dump: error: aborting because of server version mismatch
+pg_dump: detail: server version: 17.7; pg_dump version: 16.14 (Ubuntu 16.14-1.pgdg24.04+1)
+```
+
+A lower-major `pg_dump` refuses to dump a higher-major server.
+
+### Root cause
+
+The install step already installs `postgresql-client-17` (commit `3ee5c2f`), so the package was present — but a bare `pg_dump` still resolved to v16. On `ubuntu-latest` (24.04) `/usr/bin/pg_dump` is routed through PGDG's `pg_wrapper`, and the runner ships a preinstalled v16 client, so the wrapper/PATH resolution landed on v16 instead of the v17 binary at `/usr/lib/postgresql/17/bin/`.
+
+### Fix
+
+Append the versioned bin dir to `GITHUB_PATH` in the install step:
+
+```yaml
+echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+```
+
+`GITHUB_PATH` (not `export PATH`) is required because each workflow step is a fresh shell — the `Run backup` step that invokes `scripts/backup.sh` needs the v17 binary first on PATH. `scripts/backup.sh` is unchanged; it calls a bare `pg_dump`, which now resolves to v17.
+
+### Carry-forward
+
+- **Bump in lockstep with the Fly Postgres major.** When the cluster moves to 18, both the `postgresql-client-NN` package *and* the `/usr/lib/postgresql/NN/bin` PATH line must change together.
+- Optional hardening not done: log `pg_dump --version` in the install step; assert the `pg_dump` major ≥ server major in `backup.sh` so future drift fails loudly with a clear message instead of mid-dump.
+
+---
+
 ## 2026-06-23 — FEAT-54 (WCAG 2.1 AA spot-check via axe-core)
 
 **Status:** implementation complete; 18 a11y tests + all 5 existing critical-path specs green locally (23 / 23). Definition-of-done left unticked.

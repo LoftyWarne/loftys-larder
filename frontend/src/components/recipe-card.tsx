@@ -38,7 +38,7 @@ export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
         ) : (
           <div
             aria-hidden="true"
-            className="flex h-full w-full items-center justify-center text-xs text-muted-foreground"
+            className="flex h-full w-full items-center justify-center text-xs text-foreground/70"
           >
             No image
           </div>

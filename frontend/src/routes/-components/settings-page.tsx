@@ -278,7 +278,7 @@ function DangerZone({
       <div className="space-y-1">
         <h2
           id="danger-zone-heading"
-          className="text-base font-semibold text-destructive"
+          className="text-base font-semibold text-destructive dark:text-red-400"
         >
           Danger zone
         </h2>

@@ -45,7 +45,25 @@ async function sendRateLimited(
   await reply.send(body);
 }
 
-export async function registerRateLimit(app: FastifyInstance): Promise<void> {
+export interface RateLimitOptions {
+  // Per-minute caps for the global IP/session bucket. Defaults match
+  // production sizing; the rate-limit unit tests assert behaviour against
+  // these defaults so they must remain stable. `server.ts` overrides them
+  // upward under NODE_ENV=test so the e2e suite (axe scans across many
+  // navigations) doesn't trip the IP bucket via /api/auth/get-session — the
+  // auth preHandler skips that path, so its requests never get the
+  // higher sessioned credit.
+  ipMaxPerMinute?: number;
+  sessionMaxPerMinute?: number;
+}
+
+export async function registerRateLimit(
+  app: FastifyInstance,
+  options: RateLimitOptions = {},
+): Promise<void> {
+  const ipMax = options.ipMaxPerMinute ?? 100;
+  const sessionMax = options.sessionMaxPerMinute ?? 300;
+
   // Register the plugin so `createRateLimit` is decorated, but with
   // global: false — we drive the per-request check from a single preHandler
   // hook below so the 429 response shape stays under our control instead of
@@ -53,7 +71,7 @@ export async function registerRateLimit(app: FastifyInstance): Promise<void> {
   await app.register(rateLimit, { global: false });
 
   const checkGlobal = app.createRateLimit({
-    max: (req) => (req.session ? 300 : 100),
+    max: (req) => (req.session ? sessionMax : ipMax),
     timeWindow: '1 minute',
     keyGenerator: (req) =>
       req.session ? `session:${req.session.id}` : `ip:${req.ip}`,

@@ -14,6 +14,7 @@ The document is the artefact; the [rehearsal log](#rehearsal-log) at the bottom 
 - [Restore A — Fly Postgres snapshot to a fork cluster](#restore-a--fly-postgres-snapshot-to-a-fork-cluster)
 - [Restore B — R2 dump to a fresh local Postgres](#restore-b--r2-dump-to-a-fresh-local-postgres)
 - [Rate limits](#rate-limits)
+- [Accessibility — documented axe-core exceptions](#accessibility--documented-axe-core-exceptions)
 - [Secret rotation](#secret-rotation)
 - [Rehearsal log](#rehearsal-log)
 
@@ -275,6 +276,18 @@ and a `Retry-After` header. The body is an HTTP-level envelope, not a tRPC one �
 
 - Store is in-memory. The single Fly machine in `lhr` plus auto-stop (DEC-63 / DEC-64) means counters reset whenever the machine wakes from sleep. Accepted v1 trade-off — if scaled out, plug Redis via the plugin's `redis` option.
 - Limits sized for household traffic, not adversarial scale (`docs/non-goals.md`). If Cloudflare's edge surfaces patterns that suggest these are wrong in either direction, revisit.
+- Under `NODE_ENV=test` the caps are raised to 10 000 IP / 30 000 session per minute (`backend/src/server.ts`) so the e2e suite — particularly the axe-core spot-check, which does many navigations in quick succession and pays IP-bucket cost on every `/api/auth/get-session` call — does not trip the limiter. Production sizing is unaffected.
+
+---
+
+## Accessibility — documented axe-core exceptions
+
+The `e2e/specs/a11y.spec.ts` spot-check runs axe-core against the main views (sign-in, home, recipe browse, recipe editor, plan list, planner, shopping list, ingredients, settings) in both light and dark themes, with WCAG 2.1 AA tags enabled. The gate fails on any `serious` or `critical` violation; `moderate` and `minor` findings are surfaced in the test report but do not fail CI.
+
+| View | Theme | Rule | Reason for exception |
+|---|---|---|---|
+
+*No accepted exceptions at the time of writing — all serious/critical findings have been fixed in source.* If you waive a future finding, prefer fixing it in the component; add a row here only after exhausting that route, and link to the rule's `dequeuniversity.com` page in the reason column.
 
 ---
 

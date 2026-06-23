@@ -4,6 +4,52 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-23 — FEAT-54 (WCAG 2.1 AA spot-check via axe-core)
+
+**Status:** implementation complete; 18 a11y tests + all 5 existing critical-path specs green locally (23 / 23). Definition-of-done left unticked.
+
+### Surface
+
+- `e2e/specs/a11y.spec.ts` — single new spec covering 9 views × 2 themes = 18 tests:
+  sign-in (public), home, recipe browse, recipe editor, plan list, planner, shopping list, ingredients, settings.
+  Uses `@axe-core/playwright` with WCAG 2.1 AA tags (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`).
+  Fails on any `impact ∈ {serious, critical}`; `moderate`/`minor` are surfaced in the test output but don't fail the run.
+- Theme is driven by `page.emulateMedia({ colorScheme })` — the seeded e2e user is on `themePreference: 'system'`, so the `<html class="dark">` toggle follows the emulated value. The spec polls for the class before scanning, so axe sees the right computed styles.
+- `e2e/package.json` — added `@axe-core/playwright ^4.11.3` and `axe-core ^4.11.4`. The latter is needed explicitly because the d.ts re-exports `axe-core` types, which pnpm doesn't auto-hoist.
+- `OPERATIONS.md` — new "Accessibility — documented axe-core exceptions" section (empty exception table; everything was fixed in source).
+
+### Drift from the kick-off plan, with rationale
+
+1. **Scope expansion** to 9 views (added `/ingredients`, `/settings`, `/plans` to the original 5). User extended scope during kick-off.
+
+2. **Rate-limit cap raised under `NODE_ENV=test`.** The blocker that took the most time to diagnose. The Fastify rate-limit plugin caps unsessioned requests at 100/min per IP. The auth plugin's preHandler short-circuits for `/api/auth/*` (`backend/src/plugins/auth.ts:86`), so `/api/auth/get-session` never gets `req.session` hydrated and counts against the IP bucket. axe runs many navigations in quick succession, the bucket filled, get-session 429'd, the React app treated that as "not authed" and rendered `/sign-in`. The classic symptom: most tests fail with `heading not found, page shows "Sign in"`; the later tests in the run start passing once the limiter's 60-second window rolls.
+
+   Fix: `registerRateLimit` now takes an optional `{ ipMaxPerMinute, sessionMaxPerMinute }`; defaults (100 / 300) are unchanged so the 8 unit tests in `backend/test/rate-limit.test.ts` keep passing. `server.ts` passes 10 000 / 30 000 when `config.NODE_ENV === 'test'`. Production sizing is untouched.
+
+   **If you change the rate-limit plugin again,** keep this in mind: e2e (and any future stress-shaped tests) need to opt into the higher caps. The lift in `server.ts` is the only seam — don't push the env check down into the plugin, that broke vitest's defaults (`NODE_ENV=test` would unintentionally raise caps inside the unit tests).
+
+3. **Sign-in tests use `browser.newContext()` per test instead of `test.use({ storageState: ... })`.** In Playwright 1.49, the describe-scoped form was leaking the empty storageState into the sibling authed describe (every authed test landed on `/sign-in`). The per-test fresh-context pattern is contained inside `a11y.spec.ts`'s public describe. The fixture-based authed describe is unchanged.
+
+4. **Three real axe findings fixed in source, none waived.**
+   - `frontend/src/components/recipe-card.tsx` — "No image" placeholder used `text-muted-foreground` on `bg-muted`, which fails AA in light theme (≈3.5:1). Bumped to `text-foreground/70`. axe's `color-contrast` rule checks visible text regardless of `aria-hidden`, so the parent's `aria-hidden="true"` didn't excuse it.
+   - `frontend/src/components/planner/recipe-bank.tsx` — `<ul role="listbox">` had `<li>` children wrapping `<button role="option">`. axe's `aria-required-children` walks past `role="presentation"` / `role="none"` elements, so the `<li>` now carries `role="presentation"` and the button is treated as a direct option of the listbox. Also fixes the `listitem` violation (the `<li>` had no `role="list"` parent because `role="listbox"` overrode `<ul>`'s implicit role).
+   - `frontend/src/routes/-components/settings-page.tsx` — `#danger-zone-heading` used `text-destructive` (`oklch(0.396 0.141 25.723)` in dark mode) against `bg-background` (`oklch(0.145 0 0)`). Low contrast. Added `dark:text-red-400` only on the heading; the global token was left alone because other `text-destructive` consumers (smaller text, alert paragraphs) were passing already.
+
+### Things I considered and deliberately didn't do
+
+- **Project per theme in `playwright.config.ts`.** Would have meant the other functional specs ran twice. Looped `emulateMedia` inside the single a11y spec instead.
+- **Dark-mode override of the global `--destructive` token.** More invasive; would touch every `text-destructive` and `bg-destructive` consumer. Narrow heading-only override was enough.
+- **Toggling the theme via the settings page UI.** Brittle, slower, and ironic when one of the views under test *is* the settings page.
+
+### Verification
+
+- `pnpm --filter @loftys-larder/e2e e2e` — 23 passed (5 critical-path + 18 a11y).
+- `pnpm --filter backend test rate-limit` — 8 passed (defaults preserved).
+- `pnpm --filter frontend test --run` — 310 passed.
+- `pnpm -r typecheck` and `pnpm -r lint` — clean across all four workspaces.
+
+---
+
 ## 2026-06-22 — Fix broken deploy `release_command` (no `--release-command` flag)
 
 **Status:** fixed and verified locally; deploy workflow, `fly.toml`, and a new bundled migrator land together. Docs corrected across AGENTS.md / README / plan / feature-specs / DEC-40.

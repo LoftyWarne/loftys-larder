@@ -143,7 +143,10 @@ function RecipeBankRow({
     disabled: !dndEnabled,
   });
   return (
-    <li>
+    // role="presentation" so axe walks past the <li> when matching
+    // listbox's required `role="option"` children — the button below carries
+    // the actual option semantics.
+    <li role="presentation">
       <button
         type="button"
         id={`recipe-bank-${String(recipe.id)}`}

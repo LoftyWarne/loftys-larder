@@ -107,7 +107,12 @@ export async function buildAppWithLogger(
   const auth: Auth = createAuth({ config, db, sendMagicLink });
   registerAuth(app, { auth, config });
 
-  await registerRateLimit(app);
+  await registerRateLimit(
+    app,
+    config.NODE_ENV === 'test'
+      ? { ipMaxPerMinute: 10_000, sessionMaxPerMinute: 30_000 }
+      : {},
+  );
 
   await app.register(fastifyTRPCPlugin, {
     prefix: '/api/trpc',

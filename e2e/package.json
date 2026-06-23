@@ -17,7 +17,9 @@
     "prepare-db": "tsx --env-file-if-exists=.env scripts/prepare-db.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "^1.49.1",
+    "axe-core": "^4.11.4",
     "@types/node": "^22.10.7",
     "@types/pg": "^8.20.0",
     "pg": "^8.21.0",

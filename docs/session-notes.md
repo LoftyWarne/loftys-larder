@@ -144,7 +144,7 @@ The `debounces the search input before querying` test logged an "update to Ingre
 
 ### Implementation decisions worth carrying
 
-- **Restore B uses `postgres:16` container on port `55432`,** not the project's Docker Compose. Avoids colliding with the dev DB on `5433` and any host Postgres on `5432`, and keeps the restore environment fully isolated from anything in `docker-compose.yml`. Re-run on `postgres:17` if/when the cluster bumps major.
+- **Restore B uses `postgres:17` container on port `55432`,** not the project's Docker Compose. Matches the Fly Postgres cluster's major. Avoids colliding with the dev DB on `5433` and any host Postgres on `5432`, and keeps the restore environment fully isolated from anything in `docker-compose.yml`. Bump if/when the cluster moves to a new major.
 
 - **`pg_restore --exit-on-error`** is the documented flag, with a note that a restore that prints errors but exits zero is the classic false-confidence failure mode (mirrors the FEAT-50 `<1 KiB dump-size floor` reasoning).
 
@@ -158,7 +158,7 @@ The `debounces the search input before querying` test logged an "update to Ingre
 
 - **Three drills to run** before this FEAT closes:
   1. **Fork-from-snapshot rehearsal.** Pick a recent snapshot, fork, `flyctl postgres connect`, verify the canary, destroy the fork. Log time-to-canary-visible.
-  2. **R2 dump restore.** Download today's dump (after the cron has run at least once), `pg_restore` into a throwaway `postgres:16` container, verify the canary. Log time-to-canary-visible.
+  2. **R2 dump restore.** Download today's dump (after the cron has run at least once), `pg_restore` into a throwaway `postgres:17` container, verify the canary. Log time-to-canary-visible.
   3. **Rollback rehearsal.** Empty commit to `main` → `Deploy` workflow → confirm new release serving via `flyctl releases` → `flyctl releases rollback v<n-1>` → confirm prior release serving (Axiom log line carrying the prior version tag, or a known fingerprint in the build).
 - **Seed the canary row** before the first drill, after the production schema is in place. The SQL in the doc assumes an `ingredients` table — verify the column list against the live schema at the moment of seeding (`unit` is currently mandatory per DEC-18; `created_at` / `updated_at` are added by Drizzle `$onUpdate` per DEC-16 and may not need explicit values).
 - **Sceptical-reader pass** is the FEAT-51 gate check. Read the document cold in a week and verify a stranger could follow it without context-from-conversation.
@@ -177,7 +177,7 @@ The `debounces the search input before querying` test logged an "update to Ingre
 - **R2 upload via `aws s3 cp`** against the S3-compatible endpoint (`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`) with `AWS_DEFAULT_REGION=auto`. `aws` is pre-installed on `ubuntu-latest`; no third-party Cloudflare action needed.
 - **Cron `0 3 * * *` (UTC).** Off-peak for Europe/London household traffic regardless of BST/GMT.
 - **Retention is out-of-band.** Workflow only writes; an R2 lifecycle rule on `dumps/` does the pruning. Documented in the checklist so future-me doesn't go looking for delete logic in code.
-- **`postgresql-client-16`** explicit install from PGDG apt repo. A lower-major `pg_dump` cannot dump a higher-major server, so the runner's default (whatever Ubuntu ships) is the wrong default. Pin and bump in lockstep with the cluster.
+- **`postgresql-client-17`** explicit install from PGDG apt repo. A lower-major `pg_dump` cannot dump a higher-major server, so the runner's default (whatever Ubuntu ships) is the wrong default. Pin and bump in lockstep with the cluster.
 
 ### Drift from kick-off plan
 
@@ -204,7 +204,7 @@ The `debounces the search input before querying` test logged an "update to Ingre
   2. Repo secrets `BACKUP_DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` set.
   3. R2 bucket created; lifecycle rule on `dumps/` configured.
   4. `workflow_dispatch` triggered once; resulting `dumps/YYYY-MM-DD.dump` downloaded and restored to a local Postgres to verify a known row.
-- **The PGDG apt step pins to `postgresql-client-16`** by hardcoded major. If the Fly Postgres cluster runs a different major (15 / 17), bump in the workflow and consider extracting `PG_MAJOR` to a job-level env if it churns.
+- **The PGDG apt step pins to `postgresql-client-17`** by hardcoded major to match the current Fly Postgres cluster. If the cluster moves to a different major, bump in the workflow and consider extracting `PG_MAJOR` to a job-level env if it churns.
 - **FEAT-51's restore-drill log** is where the first successful gate-check should be recorded.
 
 ---

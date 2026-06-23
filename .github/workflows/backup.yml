@@ -31,7 +31,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install postgresql-client-16
+      - name: Install postgresql-client-17
         # Match Fly Postgres' server major. Bump in lockstep with the
         # cluster's Postgres version (a lower-major pg_dump cannot dump a
         # higher-major server).
@@ -43,7 +43,7 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-16
+          sudo apt-get install -y postgresql-client-17
 
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master

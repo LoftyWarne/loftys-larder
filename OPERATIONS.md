@@ -36,7 +36,7 @@ The document is the artefact; the [rehearsal log](#rehearsal-log) at the bottom 
 
 No staging environment by design (DEC-65). Migrations land in production via release-command; Testcontainers + the restore drills below are the mitigation.
 
-The CLI tools assumed below: `flyctl` (authenticated against `FLY_API_TOKEN`'s org), `psql` and `pg_restore` from `postgresql-client-16` (server major — keep in lockstep), `aws` CLI (against R2's S3-compatible endpoint), `jq`. Versions current at the date of each rehearsal entry.
+The CLI tools assumed below: `flyctl` (authenticated against `FLY_API_TOKEN`'s org), `psql` and `pg_restore` from `postgresql-client-17` (server major — keep in lockstep), `aws` CLI (against R2's S3-compatible endpoint), `jq`. Versions current at the date of each rehearsal entry.
 
 ---
 
@@ -224,7 +224,7 @@ aws s3 cp "s3://$R2_BUCKET/dumps/<YYYY-MM-DD>.dump" /tmp/restore.dump \
 docker run --rm --name restore-drill -d \
   -e POSTGRES_USER=lofty -e POSTGRES_PASSWORD=lofty -e POSTGRES_DB=lofty_restore \
   -p 55432:5432 \
-  postgres:16
+  postgres:17
 
 # 4. Wait for ready, then restore. The dump has no owner/acl statements;
 #    pg_restore runs cleanly as the bootstrap superuser.
@@ -247,7 +247,7 @@ rm -f /tmp/restore.dump
 **Stopwatch from step 2 → step 5 result visible** is the meaningful number.
 
 **Common gotchas:**
-- `pg_restore` major version must match (or exceed) the source server's major. The backup workflow installs `postgresql-client-16`; if the cluster moves to 17, bump both in lockstep.
+- `pg_restore` major version must match (or exceed) the source server's major. The backup workflow installs `postgresql-client-17` to match the current cluster; if the cluster's Postgres major changes, bump both in lockstep.
 - `--exit-on-error` is deliberate — a restore that prints errors but exits zero is the failure mode that gives false confidence (FEAT-50's < 1 KiB-floor exists for the same reason). If you see errors, stop and investigate before declaring the dump good.
 - Port `55432` avoids colliding with the dev Postgres on `5433` and a host-Postgres on `5432`.
 

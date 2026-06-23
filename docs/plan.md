@@ -190,7 +190,7 @@ A **Fly Postgres** cluster runs in `lhr`, attached to the app via `flyctl postgr
 
 Migrations run via Fly's release_command pattern: `release_command = "node /app/migrate.js"` in `fly.toml` (a bundled drizzle-orm migrator) ensures migrations execute before the new release accepts traffic. There is no `flyctl deploy --release-command` flag — the release command lives in `fly.toml`.
 
-Secrets (Cloudinary credentials, Resend API key, Sentry DSNs, Better Auth secret, Axiom token, R2 credentials, `FLY_API_TOKEN` for the backup workflow) are set via `flyctl secrets set` or GitHub Actions secrets as appropriate — never committed.
+Secrets (Cloudinary credentials, Resend API key, Sentry DSNs, Better Auth secret, Axiom token, R2 credentials, `FLY_API_TOKEN` for the `Deploy` workflow, `FLY_API_TOKEN_BACKUP` for the `Backup` workflow) are set via `flyctl secrets set` or GitHub Actions secrets as appropriate — never committed.
 
 **Backup & rollback.** Fly Postgres takes automated daily snapshots. A nightly GitHub Actions workflow runs `pg_dump` via `flyctl proxy` and uploads the dump to a Cloudflare R2 bucket — off-site insurance against a Fly-level catastrophe. Restore drills documented in `OPERATIONS.md`: Fly snapshot list + restore-to-new-cluster procedure, and R2-dump-to-fresh-cluster procedure; both rehearsed once before launch. App rollback via `flyctl releases rollback`.
 

@@ -53,7 +53,8 @@ Two stores:
 |---|---|---|
 | Backend runtime config (DB, auth, Resend, Cloudinary, Axiom, Sentry) | Fly app secrets | See `docs/secrets-checklist.md` § "Fly app secrets" |
 | `VITE_SENTRY_DSN` (frontend) | Docker build arg, **not** Fly secret | Build-time only; bundled into the SPA. Not yet wired through the Dockerfile (FEAT-46 follow-up) — frontend Sentry no-ops in production until then |
-| `FLY_API_TOKEN`, `BACKUP_DATABASE_URL`, `R2_*` | GitHub Actions secrets | `Deploy` and `Backup` workflows |
+| `FLY_API_TOKEN` (deploy token, API app) | GitHub Actions secret | `Deploy` workflow |
+| `FLY_API_TOKEN_BACKUP` (deploy token, Postgres app), `BACKUP_DATABASE_URL`, `R2_*` | GitHub Actions secrets | `Backup` workflow |
 | `FLY_PG_APP` | GitHub Actions **variable** (not secret) | Postgres cluster name is non-sensitive; surfaces in step summaries |
 
 For rotation of each, see [§ Secret rotation](#secret-rotation) below.
@@ -319,7 +320,8 @@ Takes effect on the next workflow run; no Fly restart needed.
 
 | Secret | Rotation gotcha |
 |---|---|
-| `FLY_API_TOKEN` | Generate with `flyctl auth token`. Prefer an org-scoped deploy token over a personal one. Rotating immediately invalidates the prior token; the next deploy or backup run uses the new one |
+| `FLY_API_TOKEN` | App-scoped deploy token for `loftys-larder-prod`. Regenerate with `flyctl tokens create deploy --app loftys-larder-prod --name github-actions-deploy --expiry 8760h \| gh secret set FLY_API_TOKEN --repo LoftyWarne/loftys-larder`. Rotating immediately invalidates the prior token; the next `Deploy` run uses the new one |
+| `FLY_API_TOKEN_BACKUP` | App-scoped deploy token for the Postgres cluster (`loftys-larder-prod-db`). Regenerate the same way against that app and pipe into `gh secret set FLY_API_TOKEN_BACKUP`. Never concatenate with `FLY_API_TOKEN` into a single secret — a newline between two deploy tokens corrupts the macaroon discharge and `flyctl` fails with `missing third-party discharge token` |
 | `BACKUP_DATABASE_URL` | Host stays `127.0.0.1:5432` (script tunnels via `flyctl proxy`); only the credentials in the URL change. Validate by triggering `Backup` via `workflow_dispatch` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Rotate the R2 key at the Cloudflare dashboard, set the new value in GitHub, then trigger `Backup` to confirm. The bucket name is non-sensitive but in secrets to keep all R2 config in one place |
 | `FLY_PG_APP` (variable) | Only rotates if the Postgres cluster is renamed — uncommon |

@@ -2005,7 +2005,7 @@ Conventions:
 - [ ] `flyctl deploy` runs against the production app, with the `fly.toml` `release_command` (`node /app/migrate.js`) applying migrations before traffic shifts
 - [ ] Migration failure aborts the deploy (no traffic shifts)
 - [ ] Workflow surfaces deploy result (commit SHA, release id)
-- [ ] All required `flyctl secrets` (Cloudinary, Resend, Sentry DSNs, Better Auth secret, Axiom token, R2 credentials, `FLY_API_TOKEN`) are checklisted and set ahead of first deploy
+- [ ] All required `flyctl secrets` (Cloudinary, Resend, Sentry DSNs, Better Auth secret, Axiom token, R2 credentials, `FLY_API_TOKEN`, `FLY_API_TOKEN_BACKUP`) are checklisted and set ahead of first deploy
 - [ ] Documented rollback: `flyctl releases rollback <release-id>`
 
 **Implementation notes:**
@@ -2036,7 +2036,7 @@ Conventions:
 **Files:**
 - `.github/workflows/backup.yml` (cron)
 - `scripts/backup.sh` (or inline in the workflow)
-- GitHub secrets: `FLY_API_TOKEN`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`
+- GitHub secrets: `FLY_API_TOKEN_BACKUP` (deploy token scoped to the Postgres app), `BACKUP_DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`
 
 **Acceptance criteria:**
 - [ ] Workflow runs daily on a cron schedule (off-peak, e.g. 03:00 UTC)

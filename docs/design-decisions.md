@@ -768,7 +768,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Alternatives:** Rely on Fly snapshots only; backup to S3; no backups (unacceptable).
 - **Why it won:** Two backup tiers, different failure modes. Fly snapshots cover routine recovery; R2 dumps cover Fly-level catastrophe (account loss, regional disaster, vendor closure). R2 is cheap (~$0.50/month at this volume).
 - **Consequences (+):** Vendor-catastrophe insurance at trivial cost. Two recovery paths.
-- **Consequences (−):** `pg_dump` is logical — restore times grow with data. Restore drills require occasional re-rehearsal as procedures drift. `FLY_API_TOKEN` for the workflow is a sensitive secret to rotate.
+- **Consequences (−):** `pg_dump` is logical — restore times grow with data. Restore drills require occasional re-rehearsal as procedures drift. `FLY_API_TOKEN_BACKUP` (deploy token scoped to the Postgres cluster) is a sensitive secret to rotate; kept separate from the `Deploy` workflow's `FLY_API_TOKEN` so neither workflow can authenticate against the other's app.
 - **Revisit when:** Restore time becomes operationally problematic (much-larger dataset).
 - **Cross-refs:** FEAT-50, FEAT-51.
 

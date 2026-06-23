@@ -17,16 +17,22 @@ There are two stores:
 
 | Secret | Purpose | Required by |
 |---|---|---|
-| `FLY_API_TOKEN` | Authenticates `flyctl` from the deploy and backup workflows | FEAT-49, FEAT-50 |
-| `BACKUP_DATABASE_URL` | Postgres connection string against the proxy: `postgres://postgres:<pwd>@127.0.0.1:5432/<db>` | FEAT-50 |
+| `FLY_API_TOKEN` | App-scoped deploy token for the API app; authenticates `flyctl deploy` | FEAT-49 |
+| `FLY_API_TOKEN_BACKUP` | App-scoped deploy token for the Postgres cluster; authenticates `flyctl proxy` in the backup workflow | FEAT-50 |
+| `BACKUP_DATABASE_URL` | Postgres connection string against the proxy: `postgres://<role>:<pwd>@127.0.0.1:5432/<db>` | FEAT-50 |
 | `R2_ACCOUNT_ID` | Cloudflare account for the off-site backup bucket | FEAT-50 |
 | `R2_ACCESS_KEY_ID` | R2 access key | FEAT-50 |
 | `R2_SECRET_ACCESS_KEY` | R2 secret | FEAT-50 |
 | `R2_BUCKET` | R2 bucket name (e.g. `loftys-larder-backups`) | FEAT-50 |
 
-Generate `FLY_API_TOKEN` with `flyctl auth token` (scoped to the deploy
-machine user, not your personal token, if you have an organisation token
-available).
+Generate each Fly token with `flyctl tokens create deploy --app <app> --name
+<label> --expiry 8760h` — app-scoped deploy tokens have the smallest blast
+radius (the deploy token cannot touch the Postgres cluster and vice versa).
+Pipe the output directly into `gh secret set` so the value never sits in
+shell scrollback. Avoid concatenating multiple tokens into a single secret:
+a deploy token's macaroon and discharge are comma-separated internally, and
+a newline between two tokens causes `flyctl` to fail with `missing
+third-party discharge token`.
 
 The credentials in `BACKUP_DATABASE_URL` come from `flyctl postgres connect`
 (or the cluster bootstrap output); the host is hardcoded to

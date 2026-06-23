@@ -4,6 +4,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-22 — Fix broken deploy `release_command` (no `--release-command` flag)
+
+**Status:** fixed and verified locally; deploy workflow, `fly.toml`, and a new bundled migrator land together. Docs corrected across AGENTS.md / README / plan / feature-specs / DEC-40.
+
+The deploy workflow failed in GitHub Actions with `Error: unknown flag: --release-command`. Two layered bugs:
+
+1. **`flyctl deploy` has no `--release-command` flag.** Fly reads the release command from `fly.toml` under `[deploy]`. Removed the flag from `.github/workflows/deploy.yml`; added `[deploy] release_command = "node /app/migrate.js"` to `fly.toml`.
+2. **Even moved to `fly.toml`, `pnpm drizzle-kit migrate` couldn't run in the runtime image.** The release machine boots the prod image, which (DEC-61) carries only `server.js` + the SPA — no pnpm/corepack, no `drizzle-kit` (dev-only), no `node_modules`, and crucially no `drizzle/` SQL files. So the original command was never runnable there regardless of how it was invoked.
+
+**Fix (programmatic migrator, DEC-61-consistent):**
+- New `backend/src/migrate.ts` — drizzle-orm's `migrate()` from `drizzle-orm/node-postgres/migrator` (part of the runtime dep, so no drizzle-kit in prod). Validates **only** `DATABASE_URL` (reusing the now-exported `databaseUrlSchema` from `config.ts`), not the full app config — a missing Cloudinary/auth secret must not block a DB migration.
+- `backend/build.ts` — second esbuild entrypoint; switched `outfile`→`outdir`, emits `dist/migrate.js` (~900 kb) alongside `dist/server.js`.
+- `Dockerfile` runtime stage — copies `dist/migrate.js` **and** the `drizzle/` SQL folder into `/app`. `migrate.js` resolves `migrationsFolder` relative to its own dir, so `/app/migrate.js` + `/app/drizzle` line up.
+
+**Verified:** typecheck + lint clean; both bundles build; `node migrate.js` against a **fresh** DB applies all 8 migrations (21 public tables), is idempotent on re-run, and needs only `DATABASE_URL`. Confirmed in a `/tmp` dir mirroring the `/app` prod layout.
+
+**Not yet done:** the change isn't committed; a real Fly deploy hasn't exercised it. The pre-flight broken-migration safety-net rehearsal (noted elsewhere in these notes) is still worth doing once on a low-stakes branch.
+
+---
+
 ## 2026-06-22 — Fix act() warning in ingredients-page debounce test
 
 **Status:** fixed; full frontend suite green (310 tests, 44 files), no act warnings.

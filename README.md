@@ -147,8 +147,13 @@ Cloudflare orange-cloud DNS. From FEAT-49 onwards CI handles deploys on
 push to `main`; until then, deploy manually from a clean working tree:
 
 ```sh
-flyctl deploy --release-command "pnpm drizzle-kit migrate"
+flyctl deploy
 ```
+
+The database migration runs automatically as Fly's `release_command` (defined
+in `fly.toml`) before the new release takes traffic — it boots the runtime
+image and runs `node /app/migrate.js`, a bundled drizzle-orm migrator, so
+production never needs `drizzle-kit`.
 
 Rollback (re-pins the previous release):
 

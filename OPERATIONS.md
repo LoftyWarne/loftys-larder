@@ -30,7 +30,7 @@ The document is the artefact; the [rehearsal log](#rehearsal-log) at the bottom 
 | Backups (off-site) | Cloudflare R2 bucket, key `dumps/YYYY-MM-DD.dump` (DEC-73) |
 | Logs (30-day) | Axiom dataset configured via `AXIOM_DATASET` (DEC-75) |
 | Errors | Sentry, frontend + backend (DEC-76) |
-| Deploy trigger | Push to `main` → CI → `Deploy` workflow → `flyctl deploy --release-command "pnpm drizzle-kit migrate"` (DEC-40) |
+| Deploy trigger | Push to `main` → CI → `Deploy` workflow → `flyctl deploy`; the `fly.toml` `release_command` (`node /app/migrate.js`) applies migrations before traffic shifts (DEC-40) |
 | Off-hours backup cron | GitHub Actions `Backup` workflow, daily `0 3 * * *` UTC |
 
 No staging environment by design (DEC-65). Migrations land in production via release-command; Testcontainers + the restore drills below are the mitigation.

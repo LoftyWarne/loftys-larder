@@ -156,7 +156,7 @@ These are the canonical script names. If `package.json` is missing one, ask befo
 | Generate migration | `pnpm --filter backend db:generate` |
 | Run migration | `pnpm --filter backend db:migrate` (or `pnpm drizzle-kit migrate`) |
 | Build image | `docker build .` |
-| Deploy | `flyctl deploy --release-command "pnpm drizzle-kit migrate"` (CI does this on push to `main`) |
+| Deploy | `flyctl deploy` (the `release_command` runs the migrate bundle; configured in `fly.toml`, not a CLI flag. CI does this on push to `main`) |
 | Rollback | `flyctl releases rollback` |
 
 Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the underlying issue.

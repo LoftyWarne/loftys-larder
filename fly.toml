@@ -9,6 +9,14 @@ primary_region = "lhr"
   # Multi-stage Dockerfile in the repo root.
   dockerfile = "Dockerfile"
 
+# Migrations run as a Fly release command on every deploy (DEC-40, DEC-65).
+# There is no `flyctl deploy --release-command` flag; this is the only place
+# Fly reads it. The release machine boots the runtime image and runs the
+# bundled migrate entrypoint (drizzle-orm's programmatic migrator, DEC-61)
+# before the new version goes live — prod never needs drizzle-kit.
+[deploy]
+  release_command = "node /app/migrate.js"
+
 [http_service]
   internal_port = 3000
   force_https = true

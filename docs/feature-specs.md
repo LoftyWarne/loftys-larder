@@ -1990,7 +1990,7 @@ Conventions:
 
 ### FEAT-49 — GitHub Actions deploy workflow
 
-**Goal:** On push to `main`, build the multi-stage image and run `flyctl deploy --release-command "pnpm drizzle-kit migrate"` so migrations execute before traffic shifts; secrets pre-configured via `flyctl secrets set`. `[DEC-TBD: migrations run via release_command on deploy]` `[DEC-TBD: no staging environment, mitigated by Testcontainers and restore drills]`
+**Goal:** On push to `main`, build the multi-stage image and run `flyctl deploy`; the `fly.toml` `release_command` (a bundled drizzle-orm migrator, `node /app/migrate.js`) executes migrations before traffic shifts; secrets pre-configured via `flyctl secrets set`. `[DEC-TBD: migrations run via release_command on deploy]` `[DEC-TBD: no staging environment, mitigated by Testcontainers and restore drills]`
 
 **Estimate:** 2 hr. **Depends on:** FEAT-07, 06, 09. **Enables:** FEAT-50.
 
@@ -2002,7 +2002,7 @@ Conventions:
 **Acceptance criteria:**
 - [ ] Workflow triggers on push to `main` only
 - [ ] Re-runs lint, typecheck, test as a gate (or depends on the CI workflow successful)
-- [ ] `flyctl deploy --release-command "pnpm drizzle-kit migrate"` runs against the production app
+- [ ] `flyctl deploy` runs against the production app, with the `fly.toml` `release_command` (`node /app/migrate.js`) applying migrations before traffic shifts
 - [ ] Migration failure aborts the deploy (no traffic shifts)
 - [ ] Workflow surfaces deploy result (commit SHA, release id)
 - [ ] All required `flyctl secrets` (Cloudinary, Resend, Sentry DSNs, Better Auth secret, Axiom token, R2 credentials, `FLY_API_TOKEN`) are checklisted and set ahead of first deploy

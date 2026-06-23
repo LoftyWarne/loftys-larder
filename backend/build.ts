@@ -4,13 +4,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const outfile = path.resolve(here, 'dist/server.js');
+const outdir = path.resolve(here, 'dist');
 
-await rm(path.dirname(outfile), { recursive: true, force: true });
+await rm(outdir, { recursive: true, force: true });
 
 const result = await build({
-  entryPoints: [path.resolve(here, 'src/server.ts')],
-  outfile,
+  // server.js is the app; migrate.js is the Fly release-command entrypoint
+  // that runs drizzle-orm's programmatic migrator (DEC-40, DEC-61).
+  entryPoints: [
+    path.resolve(here, 'src/server.ts'),
+    path.resolve(here, 'src/migrate.ts'),
+  ],
+  outdir,
   bundle: true,
   platform: 'node',
   format: 'esm',

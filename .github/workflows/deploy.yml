@@ -59,7 +59,6 @@ jobs:
           flyctl deploy \
             --app "$FLY_APP" \
             --remote-only \
-            --release-command "pnpm drizzle-kit migrate" \
             --image-label "sha-${{ steps.sha.outputs.sha }}"
 
       - name: Capture release

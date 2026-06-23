@@ -413,7 +413,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 ### DEC-40 — Migrations run via Fly `release_command` on deploy to `main`
 
-- **Chosen:** GitHub Actions deploy workflow runs `flyctl deploy --release-command "pnpm drizzle-kit migrate"`. Migrations execute before the new release accepts traffic.
+- **Chosen:** GitHub Actions deploy workflow runs `flyctl deploy`; the `release_command` is configured in `fly.toml` (there is no `flyctl deploy --release-command` CLI flag) and runs `node /app/migrate.js` — a bundled drizzle-orm programmatic migrator (no `drizzle-kit` in the runtime image, DEC-61). Migrations execute before the new release accepts traffic.
 - **Alternatives:** Run migrations inside the app on startup; run them as a separate manual step.
 - **Why it won:** `release_command` is the Fly idiom for "do this before traffic shifts" — fails-fast if the migration fails. Running on startup races between machines; running manually is error-prone.
 - **Consequences (+):** A failing migration aborts the deploy before the new code accepts traffic. Bad migrations don't half-apply on rolling machines.

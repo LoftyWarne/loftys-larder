@@ -5,7 +5,10 @@ import { z } from 'zod';
 // households row with this id.
 export const CURRENT_HOUSEHOLD_ID = '00000000-0000-4000-8000-000000000001';
 
-const databaseUrlSchema = z
+// Exported so the standalone migrate entrypoint can validate just the DB URL
+// without pulling in the full app config (auth secrets, Cloudinary, etc.) —
+// migrations must not depend on unrelated secrets being present.
+export const databaseUrlSchema = z
   .url()
   .refine((value) => /^postgres(ql)?:\/\//.test(value), {
     message: 'DATABASE_URL must be a postgres:// or postgresql:// URL.',

@@ -84,12 +84,16 @@ bootstrap, stage everything then run the deploy workflow.
 
 ### Frontend Sentry DSN
 
-`VITE_SENTRY_DSN` is bundled into the SPA at **build time**, not runtime — it
-lives in the image, not in Fly secrets. With remote `flyctl deploy --remote-only`
-the build happens on Fly's remote builder, so the DSN needs to be passed as a
-build arg through the Dockerfile. The Dockerfile does not currently expose
-that arg; until it does, the frontend Sentry SDK no-ops in production. Wiring
-the build arg is a follow-up — track against FEAT-46.
+`VITE_SENTRY_DSN` and `VITE_SENTRY_ENVIRONMENT` are bundled into the SPA at
+**build time** — they live in the image, not in Fly secrets. Vite auto-loads
+`frontend/.env.production` during `pnpm build`, so the values are committed
+there rather than threaded through a Dockerfile build arg. A Sentry DSN is not
+a credential (it's embedded in every page the SPA serves and visible to anyone
+with DevTools); committing keeps the value next to the code that uses it.
+
+To rotate the DSN, edit `frontend/.env.production` and redeploy. To disable
+the frontend SDK entirely, blank `VITE_SENTRY_DSN` — `initSentry` no-ops on
+empty (`frontend/src/lib/sentry.ts`).
 
 ## First-deploy bootstrap
 

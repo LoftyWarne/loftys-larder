@@ -1,167 +1,102 @@
 # Lofty's Larder
 
-A single-household meal planner. See `docs/plan.md` for the strategy and
-`docs/feature-specs.md` for the executable feature list. `AGENTS.md` is the
-contract for working in this repo — read it before contributing.
+A single-household web app for managing recipes, planning meals across custom date ranges, and generating aggregated, category-grouped shopping lists.
 
-## Local dev
+## Why
 
-### Prerequisites
+Two cooks sharing one kitchen want one dataset: a library of recipes, a meal plan they can both edit from their phones, and a shopping list that adds up exactly what the plan needs. Off-the-shelf planners assume per-serving data entry, snapshot recipes so edits don't propagate, and bolt on features (pantry tracking, URL import, AI suggestions) that two people who already cook don't need. Lofty's Larder is deliberately narrow: whole-recipe quantities scaled by serving count, recipes referenced by FK so edits flow through to plans, and a shopping list that's a printable, offline-readable checklist. It is built for one household — not a SaaS product.
 
-- Docker (Compose v2)
-- Node — version pinned in `.nvmrc` (`nvm use` picks it up)
-- pnpm 10.x
+## Status
 
-### Start Postgres
+Honest state: **all six build phases are implemented in code, but the project has not completed its human verification gate or a real production launch.** It is best described as feature-complete and pre-launch, not "shipped."
+
+What's in the tree and working:
+
+- **Backend** — Fastify + tRPC + Drizzle. Procedures for health, ingredients, recipes, recipe drafts, plans, slots, shopping list, plant points, uploads, and user/account. Eight migrations covering auth, the recipes domain, meal plans, and shopping-list items.
+- **Frontend** — Vite + React + TanStack Router/Query + shadcn/ui. Sign-in, settings, ingredient dictionary, recipe browse/detail/editor, planner grid with click-to-assign, plan list, and shopping list. Component tests alongside each page.
+- **Auth** — magic-link via Better Auth + Resend, gated to an allow-list. No passwords.
+- **PWA** — service worker + manifest; network-first cache for the shopping-list read with offline check-state queue and reconnect sync. (Icons are placeholder art — final brand assets are tracked separately.)
+- **Observability & ops** — Pino → Axiom with `req.id` propagation, Sentry front + back with PII scrubbing, rate limiting, explicit CSP, `/api/health`. CI, deploy, and nightly `pg_dump` → R2 backup workflows are in `.github/workflows/`.
+- **Tests** — Vitest + Testcontainers (backend), React Testing Library (frontend), and six Playwright critical-path specs including an `axe-core` a11y spot-check.
+
+What's outstanding / not done:
+
+- **Definition-of-Done boxes in `docs/feature-specs.md` are all unticked — by design.** Verification is a human action in this project; "implemented + tests pass" is the agent's ceiling.
+- **Restore drills have not been rehearsed.** `OPERATIONS.md` documents both restore paths and rollback, but the rehearsal log is empty — the procedures are written and reviewed, not yet validated against a real cluster.
+- **Cold-start has not been measured empirically** (FEAT-52). Auto-stop is enabled with a 3-second budget; the always-on decision waits on a real measurement.
+- **No confirmed public deployment.** The Fly app (`loftys-larder-prod`, `lhr`) and Cloudflare setup are configured; first-time domain/app provisioning is a documented runbook, not a completed launch.
+
+## Running it
+
+There is no public demo — it's a private, allow-list-gated single-household app. To run locally:
+
+**Prerequisites:** Docker (Compose v2), Node (version pinned in `.nvmrc`, `nvm use`), pnpm 10.x.
 
 ```sh
+pnpm install
+
+# Postgres (port 5433; creates lofty_dev, lofty_test, lofty_e2e with pg_trgm)
 cp .env.example .env
 docker compose up -d postgres
-```
 
-This boots Postgres 17 on host port `5433` with three databases — `lofty_dev`,
-`lofty_test`, and `lofty_e2e` — and the `pg_trgm` extension installed in each.
-Data persists in the `loftys_larder_pgdata` named volume.
-
-If your volume predates the `lofty_e2e` DB, create it once with
-`docker exec loftys-larder-postgres psql -U lofty -d lofty_dev -c 'create database lofty_e2e'`
-followed by
-`docker exec loftys-larder-postgres psql -U lofty -d lofty_e2e -c 'create extension if not exists pg_trgm'`.
-
-The host port is intentionally non-default to avoid collisions with a system
-Postgres on 5432. Override via `POSTGRES_HOST_PORT` in `.env` if needed.
-
-### Gate check
-
-```sh
-psql "$DATABASE_URL" -c 'select version();'
-psql "$DATABASE_URL" -c '\dx'           # pg_trgm should be listed
-psql "$DATABASE_URL_TEST" -c '\dx'      # same on the test DB
-```
-
-### Tear-down
-
-- `docker compose down` — stops the container, keeps the volume.
-- `docker compose down -v` — also removes `loftys_larder_pgdata` and wipes
-  all local data.
-
-> Note: backend integration tests (added in a later FEAT) use Testcontainers
-> for ephemeral per-run isolation rather than `lofty_test` in the Compose
-> Postgres. The in-Compose test DB is for ad-hoc scripts and manual probing.
-
-### Run the backend
-
-```sh
+# Backend — edit BETTER_AUTH_SECRET, RESEND_API_KEY, MAGIC_LINK_ALLOWED_EMAILS
 cp backend/.env.example backend/.env
-# Edit BETTER_AUTH_SECRET, RESEND_API_KEY, and MAGIC_LINK_ALLOWED_EMAILS to
-# values for your machine. The other vars work out of the box.
-pnpm --filter backend dev
+pnpm --filter backend dev        # http://localhost:3000
+
+# Frontend (separate terminal)
+pnpm --filter frontend dev       # http://localhost:5173, proxies /api/* to backend
 ```
 
-The backend refuses to boot without `DATABASE_URL`, `BETTER_AUTH_SECRET`,
-`BETTER_AUTH_URL`, `RESEND_API_KEY`, `MAGIC_LINK_TRUSTED_ORIGIN`, and
-`MAGIC_LINK_ALLOWED_EMAILS` (config validation runs at startup). A real Resend
-API key is only needed if you want a magic-link email to actually arrive — for
-plain server-boot you can leave the placeholder; the send call only fires when
-someone hits `/api/auth/sign-in/magic-link`.
+The backend refuses to boot without its required env vars (validated at startup). A real Resend key is only needed for a magic-link email to actually arrive; magic-link requests for addresses not on `MAGIC_LINK_ALLOWED_EMAILS` are silently dropped. Smoke test: open `/sign-in`, enter an allow-listed email, click the link. See the git history of this file for the fuller dev runbook (gate checks, PWA notes, e2e setup).
 
-Magic-link requests are gated by `MAGIC_LINK_ALLOWED_EMAILS` (comma-separated).
-Requests for any address not on the list are silently dropped — by design
-(single-household MVP).
-
-> `tsx watch` reloads on source changes, **not** on `backend/.env` changes.
-> If you edit `.env` (allow-list, API keys, anything), Ctrl-C and re-run
-> `pnpm --filter backend dev` (or `pnpm dev` at the repo root) for the new
-> values to take effect.
-
-### Run the frontend
+**Quality gates** (same as CI):
 
 ```sh
-pnpm --filter frontend dev
+pnpm format:check && pnpm -r lint && pnpm -r typecheck && pnpm -r test
 ```
 
-Vite serves on `http://localhost:5173` and proxies `/api/*` to the backend
-(default `http://localhost:3000`, override via `BACKEND_URL`). The backend
-must be running for sign-in to work.
+## Architecture
 
-Smoke test the magic-link flow: open `http://localhost:5173/sign-in`, enter
-an email on `MAGIC_LINK_ALLOWED_EMAILS`, and check that inbox. Hitting `/`
-without a session redirects to `/sign-in`.
+A pnpm monorepo with three workspaces: `/backend` (Fastify + tRPC + Drizzle), `/frontend` (Vite/React), and `/shared` (the type pipeline — shared Zod schemas and a type-only export of the tRPC `AppRouter`). The backend's tRPC router is the single source of truth for API shapes; the frontend imports its *type* (not runtime) and calls procedures with full inference via `@trpc/react-query`, so there's no codegen and no possible front/back drift. Forms validate against the same Zod schemas the procedures use. In production a single Fly.io app serves the API at `/api/*` and the built frontend at the root (same-origin, no CORS); in dev, Vite's proxy reproduces same-origin against a separate Fastify process. Full strategy, data model, and build order in [`docs/plan.md`](docs/plan.md).
 
-### PWA install + offline shopping list
+## Stack
 
-Production builds register a service worker via `vite-plugin-pwa`
-(`registerType: 'autoUpdate'`). The shopping-list tRPC read
-(`shopping.getForPlan`) uses a `NetworkFirst` runtime cache with a 3-second
-timeout, so killing connectivity and reloading still renders the last
-fetched list. Dev builds skip SW registration to keep Vite HMR clean. The
-manifest + icons live under `frontend/public/icons/` (placeholder art; the
-swap for final brand assets is tracked separately). See DEC-86 for the
-cache shape and trade-offs.
+| Concern | Choice | Why |
+|---|---|---|
+| Frontend | React + Vite | Fast dev loop; clean fit with shadcn/ui and TanStack |
+| Routing | TanStack Router | Typed routes; planner date range lives in URL search params |
+| Server state | TanStack Query via `@trpc/react-query` | Caching + optimistic updates for snappy slot assignment |
+| Forms | React Hook Form + Zod | Same Zod schemas as the API; minimal re-renders |
+| Styling | Tailwind + shadcn/ui | Utility-first; components owned outright; dark mode built in |
+| Backend | Fastify | Native async, first-class TS types, low per-request overhead |
+| API contract | tRPC | Typed RPC for one TS client + one TS server; no codegen, no drift |
+| Validation | Zod | One validation library end-to-end |
+| Database | PostgreSQL (Fly Postgres prod, Docker dev) | Trigram search, mature, in-region private networking |
+| ORM | Drizzle | Schema-as-code + migrations; SQL-like queries without losing types |
+| Search | `ILIKE` + `pg_trgm` GIN index | Indexed substring search; trivial upgrade path to FTS |
+| Auth | Better Auth + Resend magic links | Passwordless removes all credential management |
+| Media | Cloudinary direct browser upload | Binary never touches the API path |
+| Logging / errors | Pino → Axiom; Sentry front + back | Structured logs + symmetric error capture with PII scrubbing |
+| Host | Fly.io (`lhr`, auto-stop) behind Cloudflare | Docker-native, idle-cheap, edge caching + TLS |
+| Tests | Vitest + Testcontainers, RTL, Playwright | Real Postgres in tests; component + critical-path E2E |
+| CI/CD | GitHub Actions + `flyctl` | Sufficient at this scale; deploy on push to `main` |
 
-## Quality gates
+## Decisions and trade-offs
 
-ESLint (typed, `@typescript-eslint` strict-type-checked) and Prettier own
-code quality and formatting. Husky runs `lint-staged` on `pre-commit`,
-applying Prettier and `eslint --fix` to staged files.
+A few of the more consequential ones — the full log (86 entries) is in [`docs/design-decisions.md`](docs/design-decisions.md):
 
-The same commands run in CI on every push (any branch) and PRs to
-`main`, in `.github/workflows/ci.yml`:
+- **Recipes are referenced by FK, never snapshotted onto slots (DEC-22).** Editing a recipe propagates to past plans. Snapshotting was rejected as copy-on-assign complexity for a problem nobody at household scale has; the shopping list's quantity-bound check-reset covers the only mid-shop surprise.
+- **Single enforced unit per ingredient (DEC-18).** Shopping-list aggregation stays a pure sum with no conversion table. The cost is paid by the data-entry user (manual conversion), not the cooking user.
+- **Single-household MVP with a multi-tenancy-*ready* schema (DEC-17).** Domain tables carry `householdId` and code reads a `CURRENT_HOUSEHOLD_ID` constant — but there's no scope resolver, no membership joins. The future tenancy mechanism is unknown enough that pre-building an abstraction would likely fit none of them.
+- **Last-write-wins everywhere (DEC-36).** No row-version columns, no locks. "Last device to sync wins" is the accepted shopping-list trade-off; a CRDT-lite design is the named upgrade path if real conflicts appear.
+- **All user text is plain text (DEC-49).** No markdown, no HTML, no `dangerouslySetInnerHTML` — React's escaping is the XSS mitigation.
+- **No staging environment (DEC-65).** Migrations run against prod via Fly `release_command`. Testcontainers tests (exercising the actual SQL Drizzle emits) plus rehearsed restore drills are the mitigation.
+- **Account deletion is tombstoning, not cascade (DEC-29).** A leaving cook can't take the shared library with them; `addedBy`/`createdBy`/`chefUser` columns go null.
 
-```sh
-pnpm format:check     # prettier --check
-pnpm -r lint          # eslint per workspace
-pnpm -r typecheck     # tsc per workspace
-pnpm -r test          # vitest per workspace
-```
+## Roadmap / non-goals
 
-To auto-fix locally:
+This project's negative space is documented as carefully as its features. Pantry tracking, recipe URL import, AI suggestions, cross-household sharing, grocery-API integration, dietary/allergen filtering, and per-user timezones are explicit non-goals — each with the reasoning and the condition that would force a revisit. Deferred decisions (multi-tenancy mechanism, shopping-list conflict resolution beyond LWW, email-provider fallback, always-on vs auto-stop) are tracked with their trigger conditions. See [`docs/non-goals.md`](docs/non-goals.md).
 
-```sh
-pnpm format           # write Prettier changes
-pnpm lint:fix         # eslint --fix
-```
+## License
 
-### End-to-end tests
-
-Playwright covers the critical-path flows against the bundled backend +
-frontend (per DEC-58). Locally:
-
-```sh
-cp e2e/.env.example e2e/.env             # one-time
-pnpm --filter @loftys-larder/e2e install:browsers   # one-time, ~150 MB
-pnpm --filter @loftys-larder/e2e prepare-db
-pnpm --filter @loftys-larder/frontend build
-pnpm --filter @loftys-larder/backend build
-pnpm e2e
-```
-
-The suite uses `lofty_e2e` and resets its household-scoped tables before each
-spec. The frontend `build` and backend `build` outputs are what Playwright's
-`webServer` runs — same artefact shape as production.
-
-## Deploy
-
-Production runs on Fly.io (`loftys-larder-prod`, region `lhr`) behind
-Cloudflare orange-cloud DNS. From FEAT-49 onwards CI handles deploys on
-push to `main`; until then, deploy manually from a clean working tree:
-
-```sh
-flyctl deploy
-```
-
-The database migration runs automatically as Fly's `release_command` (defined
-in `fly.toml`) before the new release takes traffic — it boots the runtime
-image and runs `node /app/migrate.js`, a bundled drizzle-orm migrator, so
-production never needs `drizzle-kit`.
-
-Rollback (re-pins the previous release):
-
-```sh
-flyctl releases rollback
-```
-
-First-time setup — domain purchase, `flyctl apps create`, custom-domain
-attach, Cloudflare DNS and cache rules — is one-shot and documented as
-a runbook in `docs/session-notes.md`. Every command run there should be
-captured verbatim; FEAT-51 lifts the sequence into `OPERATIONS.md`.
+No license. This is a private, single-household project — not published for reuse or distribution. All rights reserved.

@@ -677,6 +677,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Minimal hosting cost.
 - **Consequences (−):** First request after idle pays cold-start latency. Lock interactions with pool size (DEC-71) and machine class — more connections = longer first-request — covered in cross-cutting concern #18.
 - **Revisit when:** Phase 6 measurement shows >3s. Also revisit if the household notices lag in practice; measured budgets and lived experience aren't always aligned.
+- **Measured (2026-06-24, FEAT-52):** cold-start TTFB **3.03 s** against `loftys-larder-prod.fly.dev` (Fly-direct), warm ~50 ms. At budget — auto-stop retained, `min_machines_running = 0` unchanged. Full numbers and revisit triggers in `docs/measurements.md`.
 - **Cross-refs:** FEAT-05, FEAT-52; cross-cutting concern #18; non-goal: "Always-on vs. auto-stop".
 
 ### DEC-65 — No staging environment

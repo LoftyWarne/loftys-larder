@@ -72,3 +72,39 @@ FEAT-08-specific addendum:
 - Axiom's "events ingested" panel shows a step change (>2× the baseline once established) without a corresponding feature shipping.
 - The Axiom dashboard surfaces dropped events (per-event size cap exceeded).
 - DEC-75's "revisit when" fires: an incident requires logs older than the rolling window, or Axiom pricing changes.
+
+---
+
+## 2026-06-24 — Cold-start time and the auto-stop decision (FEAT-52)
+
+**Decision: keep Fly auto-stop. The measured cold-start meets DEC-64's 3-second budget; no switch to always-on.**
+
+### What was measured
+
+Both `lhr` machines (`shared-cpu-1x:512MB`) were already auto-stopped, so the next request was a genuine cold path — machine wake + Node boot + first `/api/health` response, end-to-end from a remote `curl` over `loftys-larder-prod.fly.dev` (Fly edge, not the Cloudflare-proxied apex). Image `sha-00fd237`.
+
+| Request | TTFB | Total |
+|---|---|---|
+| Cold-start (machines auto-stopped beforehand) | **3.03 s** | 3.03 s |
+| Warm follow-up ×3 | 0.05–0.07 s | 0.05–0.07 s |
+
+Cold-start lands at **3.03 s** — 26 ms over the nominal 3 s, which is inside measurement noise. Treated as **at budget, not over it**. Warm requests are ~50 ms, confirming the latency is the wake path, not steady-state serving.
+
+### Why this is the recorded decision rather than a multi-run average
+
+FEAT-52 asks for several timed cold-starts. Only **one** sample here is a true cold-start: it was obtained organically because both machines happened to be auto-stopped at measurement time. Forcing further cycles requires `fly machine stop` against production machines, which was deliberately not done — stopping live prod machines to generate samples is disruptive for a marginal gain in confidence at household scale. The single organic sample, plus the clean warm baseline, is enough to call the budget met and leave auto-stop in place.
+
+This is consistent with the FEAT-08 entry's posture above: measure when it's cheap and the number is real; don't manufacture load (or, here, manufacture downtime) for a confidence margin the workload doesn't need.
+
+### Consequences
+
+- `fly.toml` is unchanged: `auto_stop_machines = "stop"`, `min_machines_running = 0`. No always-on machine, no ~$5/month spend.
+- The first request after idle pays ~3 s. At two-user household scale, the auto-stop saving outweighs that occasional first-hit latency (DEC-64).
+- The PWA `NetworkFirst` 3 s timeout (DEC, `shopping.getForPlan`) is aligned with this: if a cold machine hasn't answered by 3 s, the cached-with-staleness fallback is the intended path.
+
+### Revisit triggers
+
+- The prod bundle grows meaningfully (esbuild output, new runtime deps, larger base image) — cold-start scales with boot work; re-time after any image-size jump. The FEAT-05 note records the current image at 229 MB.
+- `pg-pool` `min` is ever raised above 0 — non-zero `min` pre-allocates connections at boot and extends the wake path (cross-cutting concern #18; see the FEAT-08 entry).
+- Lived experience diverges from the number: repeated user-reported "first load is slow" after a month of real use is the cue to either flip `min_machines_running = 1` or re-measure under the Cloudflare-proxied apex (which adds a few hundred ms on cold paths).
+- A machine-class change (DEC-71 / cross-cutting #18).

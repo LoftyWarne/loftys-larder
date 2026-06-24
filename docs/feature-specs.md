@@ -2103,7 +2103,7 @@ Conventions:
 
 ### FEAT-52 — Cold-start time measurement and auto-stop decision
 
-**Goal:** Measure cold-start time after the machine has been auto-stopped; if it exceeds a 3-second budget for the user's first request, reconsider auto-stop (always-on at ~$5/month is the alternative). `[DEC-TBD: 3-second cold-start budget; auto-stop unless exceeded]`
+**Goal:** Measure cold-start time after the machine has been auto-stopped; if it exceeds a 3-second budget for the user's first request, reconsider auto-stop (always-on at ~$5/month is the alternative). (DEC-64: 3-second cold-start budget; auto-stop unless exceeded. Measured 2026-06-24 — see `docs/measurements.md`.)
 
 **Estimate:** 1–2 hr. **Depends on:** FEAT-05, 06, 14. **Enables:** none specifically; informs ops cost decision.
 

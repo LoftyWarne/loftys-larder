@@ -57,6 +57,7 @@ vi.mock('@/lib/trpc.ts', () => ({
       recipes: {
         get: { invalidate: recipeGetInvalidateMock },
         list: { fetch: recipesListFetchMock },
+        references: { invalidate: vi.fn().mockResolvedValue(undefined) },
       },
       ingredients: {
         list: { fetch: ingredientsListFetchMock, invalidate: vi.fn() },
@@ -69,6 +70,7 @@ vi.mock('@/lib/trpc.ts', () => ({
     recipes: {
       get: { useQuery: recipeGetUseQueryMock },
       references: { useQuery: referencesUseQueryMock },
+      createSource: { useMutation: () => ({ mutateAsync: vi.fn() }) },
       updateHeader: { useMutation: updateHeaderUseMutationMock },
       replaceIngredients: { useMutation: replaceIngredientsUseMutationMock },
       replaceMethod: { useMutation: replaceMethodUseMutationMock },
@@ -158,6 +160,7 @@ const RECIPE: Recipe = {
   sourceId: null,
   sourceName: null,
   sourceUrl: null,
+  sourceDetail: null,
   caloriesPerServing: null,
   proteinPerServing: null,
   carbsPerServing: null,

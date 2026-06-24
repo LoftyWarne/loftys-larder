@@ -9,6 +9,7 @@ import {
   addRelatedRecipeResultSchema,
   createRecipeInputSchema,
   createRecipeResultSchema,
+  createSourceInputSchema,
   deleteRecipeCommentInputSchema,
   deleteRecipeCommentResultSchema,
   editRecipeCommentInputSchema,
@@ -22,6 +23,7 @@ import {
   listRelatedRecipesResultSchema,
   rateRecipeInputSchema,
   rateRecipeResultSchema,
+  recipeReferenceItemSchema,
   recipeReferencesSchema,
   recipeSchema,
   removeRelatedRecipeInputSchema,
@@ -49,6 +51,7 @@ import {
   type ListRelatedRecipesResult,
   type RateRecipeResult,
   type Recipe,
+  type RecipeReferenceItem,
   type RecipeReferences,
   type RemoveRelatedRecipeResult,
   type ReplaceRecipeIngredientsResult,
@@ -110,6 +113,36 @@ export const recipesRouter = router({
           .orderBy(asc(recipeSources.name)),
       ]);
       return { units, prepTypes, sources };
+    }),
+
+  // Inline source creation from the recipe editor — mirrors ingredients.create.
+  // The household-scoped unique index makes the name collision a CONFLICT.
+  createSource: protectedProcedure
+    .input(createSourceInputSchema)
+    .output(recipeReferenceItemSchema)
+    .mutation(async ({ ctx, input }): Promise<RecipeReferenceItem> => {
+      try {
+        const inserted = await ctx.db
+          .insert(recipeSources)
+          .values({ householdId: CURRENT_HOUSEHOLD_ID, name: input.name })
+          .returning({ id: recipeSources.id, name: recipeSources.name });
+        const row = inserted[0];
+        if (!row) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Insert returned no row',
+          });
+        }
+        return row;
+      } catch (error) {
+        if (isUniqueViolation(error, 'recipe_sources_household_name_unique')) {
+          throw domainConflict(
+            'SOURCE_NAME_TAKEN',
+            'A source with this name already exists',
+          );
+        }
+        throw error;
+      }
     }),
 
   list: protectedProcedure
@@ -242,6 +275,7 @@ export const recipesRouter = router({
               estimatedCostPerServing: recipes.estimatedCostPerServing,
               sourceId: recipes.sourceId,
               sourceUrl: recipes.sourceUrl,
+              sourceDetail: recipes.sourceDetail,
               sourceName: recipeSources.name,
               caloriesPerServing: recipes.caloriesPerServing,
               proteinPerServing: recipes.proteinPerServing,
@@ -306,6 +340,7 @@ export const recipesRouter = router({
         sourceId: header.sourceId,
         sourceName: header.sourceName,
         sourceUrl: header.sourceUrl,
+        sourceDetail: header.sourceDetail,
         caloriesPerServing: header.caloriesPerServing,
         proteinPerServing: header.proteinPerServing,
         carbsPerServing: header.carbsPerServing,
@@ -352,6 +387,7 @@ export const recipesRouter = router({
           estimatedCostPerServing: input.estimatedCostPerServing,
           sourceId: input.sourceId,
           sourceUrl: input.sourceUrl,
+          sourceDetail: input.sourceDetail,
           caloriesPerServing: input.caloriesPerServing,
           proteinPerServing: input.proteinPerServing,
           carbsPerServing: input.carbsPerServing,
@@ -400,6 +436,8 @@ export const recipesRouter = router({
       if (patch.sourceId !== undefined) patchValues.sourceId = patch.sourceId;
       if (patch.sourceUrl !== undefined)
         patchValues.sourceUrl = patch.sourceUrl;
+      if (patch.sourceDetail !== undefined)
+        patchValues.sourceDetail = patch.sourceDetail;
       if (patch.caloriesPerServing !== undefined)
         patchValues.caloriesPerServing = patch.caloriesPerServing;
       if (patch.proteinPerServing !== undefined)
@@ -1020,6 +1058,37 @@ function domainBadRequest(
     message,
     cause: { code, ...metadata },
   });
+}
+
+function domainConflict(
+  code: DomainErrorCode,
+  message: string,
+  metadata: Record<string, unknown> = {},
+): TRPCError {
+  return new TRPCError({
+    code: 'CONFLICT',
+    message,
+    cause: { code, ...metadata },
+  });
+}
+
+// PG SQLSTATE 23505 = unique_violation, with the constraint/index name on
+// `error.constraint`. Drizzle wraps driver errors, so walk the cause chain.
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (typeof current !== 'object') return false;
+    const candidate = current as {
+      code?: unknown;
+      constraint?: unknown;
+      cause?: unknown;
+    };
+    if (candidate.code === '23505' && candidate.constraint === constraint) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
 }
 
 async function assertSourceInHousehold(

@@ -68,6 +68,7 @@ export const recipes = pgTable(
       onDelete: 'restrict',
     }),
     sourceUrl: text(),
+    sourceDetail: text(),
     caloriesPerServing: smallint(),
     proteinPerServing: smallint(),
     carbsPerServing: smallint(),

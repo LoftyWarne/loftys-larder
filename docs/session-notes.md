@@ -4,6 +4,33 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Recipe sources: inline creation + per-recipe detail
+
+**Status:** implemented + tested (frontend 326, backend 536). Schema change (one nullable column) applied to dev. No new dependency.
+
+### Why
+
+A source isn't always a URL — it can be a cookbook or a family/friend recipe. The model already split a reusable household-scoped named source (`recipes.source_id` → `recipe_sources`) from the per-recipe `source_url`, but **nothing ever inserted into `recipe_sources`**, and the editor's `<select>` only rendered `{sources.length > 0 && …}`. So the picker was permanently empty and only URLs were recordable in practice.
+
+### What
+
+- **`recipes.source_detail`** (new nullable `text` column; migration `0008_motionless_grey_gargoyle.sql`) — an optional per-recipe free-text detail (e.g. `p.142`, "via Aunt Sally"). Added to `recipeSchema` (get DTO) and `recipeHeaderWritableSchema`; persisted by `create` / `updateHeader`; returned by `get`.
+- **`recipes.createSource` mutation** — modelled on `ingredients.create`; inserts into the household-scoped `recipe_sources`, mapping the `recipe_sources_household_name_unique` violation to `CONFLICT` / `SOURCE_NAME_TAKEN` (new domain error code). The `isUniqueViolation` / `domainConflict` helpers were duplicated locally in `recipes.ts` (they already existed privately in `ingredients.ts`).
+- **Editor (`header-fields.tsx`)** — the dead `<select>` is replaced by the `SearchableCombobox` primitive (always rendered), with an inline "Create source …" action wired to a new optional `createSource` prop. A locally-merged option list lets a just-created source resolve to its label before the parent's `recipes.references` query refetches. Added a "Source detail" field. Both editor pages wire `createSource` + invalidate `recipes.references`.
+- **Detail page** — renders `source_detail` next to the source name (linked if `source_url` present).
+
+### Design choices (user-confirmed at kick-off)
+
+- **Named-source + detail**, not a typed-source enum (website/cookbook/family/friend) and not structured cookbook fields. The reusable `recipe_sources` model is unchanged; the only new structure is the one `source_detail` column.
+- No edit/delete UI for `recipe_sources` themselves — FK stays `onDelete: restrict`.
+
+### Carry-forward
+
+- No DEC was opened: this is additive within the existing source model (no decision was reversed). If typed sources or cookbook metadata are ever wanted, that *would* be a DEC.
+- `isUniqueViolation` now lives in both `ingredients.ts` and `recipes.ts`. If a third consumer appears, lift it to a shared `util/` helper (currently below the rule-of-three threshold).
+
+---
+
 ## 2026-06-24 — Recipe editor: overall "Save & Finish" button
 
 **Status:** implemented + tested. No schema, backend, DTO, or dependency change. Frontend-only.

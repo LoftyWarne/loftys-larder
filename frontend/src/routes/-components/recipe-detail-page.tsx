@@ -77,20 +77,27 @@ export function RecipeDetailPage(): React.ReactElement {
               {String(recipe.ratingCount)})
             </span>
           )}
-          {recipe.sourceName && (
+          {(recipe.sourceName ?? recipe.sourceDetail) && (
             <span>
               ·{' '}
-              {recipe.sourceUrl ? (
-                <a
-                  href={recipe.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="hover:underline"
-                >
-                  {recipe.sourceName}
-                </a>
-              ) : (
-                recipe.sourceName
+              {recipe.sourceName &&
+                (recipe.sourceUrl ? (
+                  <a
+                    href={recipe.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="hover:underline"
+                  >
+                    {recipe.sourceName}
+                  </a>
+                ) : (
+                  recipe.sourceName
+                ))}
+              {recipe.sourceDetail && (
+                <>
+                  {recipe.sourceName ? ', ' : ''}
+                  {recipe.sourceDetail}
+                </>
               )}
             </span>
           )}

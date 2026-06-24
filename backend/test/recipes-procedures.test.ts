@@ -219,6 +219,7 @@ describe('recipes procedures', () => {
     description?: string;
     sourceId?: number;
     sourceUrl?: string;
+    sourceDetail?: string;
     imageUrl?: string;
     baseRecipeId?: number;
     pairedRecipeId?: number;
@@ -235,6 +236,7 @@ describe('recipes procedures', () => {
         isBase: options.isBase ?? false,
         sourceId: options.sourceId,
         sourceUrl: options.sourceUrl,
+        sourceDetail: options.sourceDetail,
         imageUrl: options.imageUrl,
         baseRecipeId: options.baseRecipeId,
         pairedRecipeId: options.pairedRecipeId,
@@ -291,6 +293,68 @@ describe('recipes procedures', () => {
       await expect(caller.recipes.references()).rejects.toMatchObject({
         code: 'UNAUTHORIZED',
       });
+    });
+  });
+
+  describe('createSource', () => {
+    it('creates a source scoped to the current household', async () => {
+      const caller = createCaller(makeContext());
+      const created = await caller.recipes.createSource({
+        name: 'Ottolenghi Simple',
+      });
+
+      expect(created).toMatchObject({ name: 'Ottolenghi Simple' });
+      expect(created.id).toBeGreaterThan(0);
+
+      const rows = await db
+        .select({
+          name: recipeSources.name,
+          householdId: recipeSources.householdId,
+        })
+        .from(recipeSources)
+        .where(eq(recipeSources.id, created.id));
+      expect(rows[0]).toMatchObject({
+        name: 'Ottolenghi Simple',
+        householdId: CURRENT_HOUSEHOLD_ID,
+      });
+    });
+
+    it('rejects a duplicate name in the same household with CONFLICT', async () => {
+      const caller = createCaller(makeContext());
+      await caller.recipes.createSource({ name: 'Mum’s recipes' });
+
+      await expect(
+        caller.recipes.createSource({ name: 'Mum’s recipes' }),
+      ).rejects.toMatchObject({
+        code: 'CONFLICT',
+        cause: { code: 'SOURCE_NAME_TAKEN' },
+      });
+    });
+
+    it('allows the same name in a different household', async () => {
+      await db
+        .insert(recipeSources)
+        .values({ householdId: OTHER_HOUSEHOLD_ID, name: 'Shared Name' });
+
+      const caller = createCaller(makeContext());
+      const created = await caller.recipes.createSource({
+        name: 'Shared Name',
+      });
+      expect(created.id).toBeGreaterThan(0);
+    });
+
+    it('rejects an empty name', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.createSource({ name: '   ' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects without a session', async () => {
+      const caller = createCaller(makeContext({ authenticated: false }));
+      await expect(
+        caller.recipes.createSource({ name: 'X' }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });
 
@@ -426,6 +490,7 @@ describe('recipes procedures', () => {
         description: 'A simple soup.',
         sourceId: sourceRow.id,
         sourceUrl: 'https://example.test/onion-soup',
+        sourceDetail: 'p.142',
       });
       await insertRecipeIngredient(recipeId, onion, {
         quantity: '300',
@@ -446,6 +511,7 @@ describe('recipes procedures', () => {
         description: 'A simple soup.',
         sourceName: 'Mob Kitchen',
         sourceUrl: 'https://example.test/onion-soup',
+        sourceDetail: 'p.142',
         plantPointsCount: 1,
       });
       expect(result.method.map((m) => m.instruction)).toEqual([
@@ -599,6 +665,7 @@ describe('recipes procedures', () => {
         caloriesPerServing: 410,
         proteinPerServing: 18,
         sourceUrl: 'https://example.test/lentil-dal',
+        sourceDetail: 'p.142',
       });
 
       const rows = await db
@@ -614,6 +681,7 @@ describe('recipes procedures', () => {
       expect(row.caloriesPerServing).toBe(410);
       expect(row.proteinPerServing).toBe(18);
       expect(row.sourceUrl).toBe('https://example.test/lentil-dal');
+      expect(row.sourceDetail).toBe('p.142');
     });
 
     it('creates a base recipe when isBase is true', async () => {
@@ -696,6 +764,22 @@ describe('recipes procedures', () => {
         name: 'Renamed',
         description: 'Original description',
       });
+    });
+
+    it('updates the source detail', async () => {
+      const recipeId = await insertRecipe({ name: 'WithSource' });
+
+      const caller = createCaller(makeContext());
+      await caller.recipes.updateHeader({
+        id: recipeId,
+        patch: { sourceDetail: 'p.88' },
+      });
+
+      const rows = await db
+        .select({ sourceDetail: recipes.sourceDetail })
+        .from(recipes)
+        .where(eq(recipes.id, recipeId));
+      expect(rows[0]?.sourceDetail).toBe('p.88');
     });
 
     it('clears a nullable column when null is supplied', async () => {

@@ -12,7 +12,7 @@ Honest state: **all six build phases are implemented in code, but the project ha
 
 What's in the tree and working:
 
-- **Backend** — Fastify + tRPC + Drizzle. Procedures for health, ingredients, recipes, recipe drafts, plans, slots, shopping list, plant points, uploads, and user/account. Eight migrations covering auth, the recipes domain, meal plans, and shopping-list items.
+- **Backend** — Fastify + tRPC + Drizzle. Procedures for health, ingredients, recipes, recipe drafts, plans, slots, shopping list, plant points, uploads, and user/account. Nine migrations covering auth, the recipes domain, meal plans, and shopping-list items.
 - **Frontend** — Vite + React + TanStack Router/Query + shadcn/ui. Sign-in, settings, ingredient dictionary, recipe browse/detail/editor, planner grid with click-to-assign, plan list, and shopping list. Component tests alongside each page.
 - **Auth** — magic-link via Better Auth + Resend, gated to an allow-list. No passwords.
 - **PWA** — service worker + manifest; network-first cache for the shopping-list read with offline check-state queue and reconnect sync. (Icons are placeholder art — final brand assets are tracked separately.)

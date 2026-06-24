@@ -1,5 +1,6 @@
+import type { RecipeReferenceItem } from '@loftys-larder/shared';
 import { useNavigate } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import {
   HeaderFields,
@@ -23,6 +24,7 @@ function blankDefaults(): HeaderFormValues {
     estimatedCostPerServing: null,
     sourceId: null,
     sourceUrl: null,
+    sourceDetail: null,
     caloriesPerServing: null,
     proteinPerServing: null,
     carbsPerServing: null,
@@ -37,9 +39,20 @@ function blankDefaults(): HeaderFormValues {
 
 export function RecipeNewPage(): React.ReactElement {
   const navigate = useNavigate();
+  const utils = trpc.useUtils();
   const referencesQuery = trpc.recipes.references.useQuery();
   const createMutation = trpc.recipes.create.useMutation();
+  const createSourceMutation = trpc.recipes.createSource.useMutation();
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const createSource = useCallback(
+    async (name: string): Promise<RecipeReferenceItem> => {
+      const created = await createSourceMutation.mutateAsync({ name });
+      await utils.recipes.references.invalidate();
+      return created;
+    },
+    [createSourceMutation, utils.recipes.references],
+  );
 
   const defaults = useMemo(blankDefaults, []);
   const serverDefaults = useMemo<NewRecipeDraftShape>(
@@ -109,6 +122,7 @@ export function RecipeNewPage(): React.ReactElement {
         mode="create"
         defaultValues={draft.mergedDefaults.header}
         sources={sources}
+        createSource={createSource}
         onSubmit={handleSubmit}
         onValuesChange={(values) => {
           draft.queueAutosave('header', values);

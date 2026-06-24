@@ -69,6 +69,7 @@ export const recipeSchema = recipeListItemSchema.extend({
   sourceId: sourceIdSchema.nullable(),
   sourceName: z.string().nullable(),
   sourceUrl: z.string().nullable(),
+  sourceDetail: z.string().nullable(),
   estimatedCostPerServing: z.string().nullable(),
   caloriesPerServing: z.number().int().nullable(),
   proteinPerServing: z.number().int().nullable(),
@@ -139,6 +140,19 @@ const recipeNameSchema = z
 const recipeDescriptionSchema = z.string().trim().min(1).max(5000).nullable();
 const recipeImageUrlSchema = z.string().trim().min(1).max(2000).nullable();
 const recipeSourceUrlSchema = z.string().trim().min(1).max(2000).nullable();
+const recipeSourceDetailSchema = z.string().trim().min(1).max(500).nullable();
+const recipeSourceNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Source name is required')
+  .max(200, 'Source name must be 200 characters or fewer');
+
+// Inline source creation from the recipe editor — mirrors createIngredientInput.
+export const createSourceInputSchema = z.object({
+  name: recipeSourceNameSchema,
+});
+
+export type CreateSourceInput = z.infer<typeof createSourceInputSchema>;
 const recipeServingsSchema = z.number().int().min(1).max(SMALLINT_MAX);
 const recipeTimeSchema = z.number().int().min(0).max(SMALLINT_MAX).nullable();
 const recipeMacroSchema = z.number().int().min(0).max(SMALLINT_MAX).nullable();
@@ -181,6 +195,7 @@ const recipeHeaderWritableSchema = z.object({
   estimatedCostPerServing: recipeMoneySchema,
   sourceId: sourceIdSchema.nullable(),
   sourceUrl: recipeSourceUrlSchema,
+  sourceDetail: recipeSourceDetailSchema,
   caloriesPerServing: recipeMacroSchema,
   proteinPerServing: recipeMacroSchema,
   carbsPerServing: recipeMacroSchema,

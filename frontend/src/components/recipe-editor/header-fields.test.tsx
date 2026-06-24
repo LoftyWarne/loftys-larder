@@ -25,6 +25,7 @@ function blankDefaults(): HeaderFormValues {
     estimatedCostPerServing: null,
     sourceId: null,
     sourceUrl: null,
+    sourceDetail: null,
     caloriesPerServing: null,
     proteinPerServing: null,
     carbsPerServing: null,
@@ -128,17 +129,18 @@ describe('HeaderFields', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('omits the source picker when no sources exist', () => {
+  it('renders the source combobox even when no sources exist', () => {
     renderHeader({ sources: [] });
-    expect(screen.queryByLabelText('Source')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Source')).toBeInTheDocument();
   });
 
-  it('coerces a chosen source into a numeric id at submit time', async () => {
+  it('submits the chosen source as a numeric id', async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderHeader();
 
     await user.type(screen.getByLabelText('Name'), 'Borsch');
-    await user.selectOptions(screen.getByLabelText('Source'), '12');
+    await user.click(screen.getByLabelText('Source'));
+    await user.click(await screen.findByRole('option', { name: 'Mob' }));
     await user.click(screen.getByRole('button', { name: 'Save details' }));
 
     await waitFor(() => {
@@ -147,5 +149,48 @@ describe('HeaderFields', () => {
     const submitted = onSubmit.mock.calls[0]?.[0];
     if (!submitted) throw new Error('expected one submit call');
     expect(submitted.sourceId).toBe(12);
+  });
+
+  it('creates a new source inline and selects it on submit', async () => {
+    const user = userEvent.setup();
+    const createSource = vi
+      .fn<(name: string) => Promise<RecipeReferenceItem>>()
+      .mockResolvedValue({ id: 99, name: 'Ottolenghi Simple' });
+    const { onSubmit } = renderHeader({ sources: [], createSource });
+
+    await user.type(screen.getByLabelText('Name'), 'Roast Cauliflower');
+    await user.click(screen.getByLabelText('Source'));
+    await user.type(screen.getByLabelText('Source'), 'Ottolenghi Simple');
+    await user.click(
+      await screen.findByRole('option', { name: /Create source/ }),
+    );
+
+    await waitFor(() => {
+      expect(createSource).toHaveBeenCalledWith('Ottolenghi Simple');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    const submitted = onSubmit.mock.calls[0]?.[0];
+    if (!submitted) throw new Error('expected one submit call');
+    expect(submitted.sourceId).toBe(99);
+  });
+
+  it('submits the source detail value', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderHeader();
+
+    await user.type(screen.getByLabelText('Name'), 'Pie');
+    await user.type(screen.getByLabelText('Source detail'), 'p.142');
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    const submitted = onSubmit.mock.calls[0]?.[0];
+    if (!submitted) throw new Error('expected one submit call');
+    expect(submitted.sourceDetail).toBe('p.142');
   });
 });

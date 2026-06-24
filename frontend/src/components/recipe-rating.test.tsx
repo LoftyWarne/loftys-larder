@@ -72,6 +72,7 @@ const BASE_RECIPE: Recipe = {
   sourceId: null,
   sourceName: null,
   sourceUrl: null,
+  sourceDetail: null,
   caloriesPerServing: null,
   proteinPerServing: null,
   carbsPerServing: null,

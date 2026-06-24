@@ -94,6 +94,7 @@ const FULL_RECIPE: Recipe = {
   sourceId: null,
   sourceName: null,
   sourceUrl: null,
+  sourceDetail: null,
   caloriesPerServing: null,
   proteinPerServing: null,
   carbsPerServing: null,
@@ -177,6 +178,24 @@ describe('RecipeDetailPage', () => {
       .parentElement?.querySelectorAll('ol li');
     expect(methodItems?.[0]).toHaveTextContent('Sauté onions.');
     expect(methodItems?.[1]).toHaveTextContent('Simmer.');
+  });
+
+  it('shows the source name with its detail and links to the URL', () => {
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...FULL_RECIPE,
+        sourceName: 'Ottolenghi Simple',
+        sourceUrl: 'https://example.test/recipe',
+        sourceDetail: 'p.142',
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    const link = screen.getByRole('link', { name: 'Ottolenghi Simple' });
+    expect(link).toHaveAttribute('href', 'https://example.test/recipe');
+    expect(screen.getByText(/p\.142/)).toBeInTheDocument();
   });
 
   it('marks the recipe as a base recipe when isBase is true', () => {

@@ -1,6 +1,7 @@
 import type {
   CreateIngredientInput,
   Recipe,
+  RecipeReferenceItem,
   RecipeReferences,
   ReplaceRecipeIngredientsLine,
   ReplaceRecipeMethodStepInput,
@@ -63,6 +64,7 @@ export function RecipeEditPage(): React.ReactElement {
   );
 
   const createIngredientMutation = trpc.ingredients.create.useMutation();
+  const createSourceMutation = trpc.recipes.createSource.useMutation();
   const updateHeader = trpc.recipes.updateHeader.useMutation();
   const replaceIngredients = trpc.recipes.replaceIngredients.useMutation();
   const replaceMethod = trpc.recipes.replaceMethod.useMutation();
@@ -141,6 +143,15 @@ export function RecipeEditPage(): React.ReactElement {
       };
     },
     [createIngredientMutation, utils.ingredients.list],
+  );
+
+  const createSource = useCallback(
+    async (name: string): Promise<RecipeReferenceItem> => {
+      const created = await createSourceMutation.mutateAsync({ name });
+      await utils.recipes.references.invalidate();
+      return created;
+    },
+    [createSourceMutation, utils.recipes.references],
   );
 
   const searchBases = useCallback(
@@ -369,6 +380,7 @@ export function RecipeEditPage(): React.ReactElement {
         mode="edit"
         defaultValues={defaults.header}
         sources={references.sources}
+        createSource={createSource}
         onSubmit={handleHeaderSubmit}
         onValuesChange={(values) => {
           draft.queueAutosave('header', values);
@@ -483,6 +495,7 @@ const EMPTY_DRAFT_SHAPE: EditorDraftShape = {
     estimatedCostPerServing: null,
     sourceId: null,
     sourceUrl: null,
+    sourceDetail: null,
     caloriesPerServing: null,
     proteinPerServing: null,
     carbsPerServing: null,
@@ -508,6 +521,7 @@ function toHeaderDefaults(recipe: Recipe): HeaderFormValues {
     estimatedCostPerServing: recipe.estimatedCostPerServing,
     sourceId: recipe.sourceId,
     sourceUrl: recipe.sourceUrl,
+    sourceDetail: recipe.sourceDetail,
     caloriesPerServing: recipe.caloriesPerServing,
     proteinPerServing: recipe.proteinPerServing,
     carbsPerServing: recipe.carbsPerServing,
@@ -530,6 +544,7 @@ const PATCH_KEYS = [
   'estimatedCostPerServing',
   'sourceId',
   'sourceUrl',
+  'sourceDetail',
   'caloriesPerServing',
   'proteinPerServing',
   'carbsPerServing',

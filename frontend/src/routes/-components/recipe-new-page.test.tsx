@@ -29,6 +29,9 @@ const {
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     useUtils: () => ({
+      recipes: {
+        references: { invalidate: vi.fn().mockResolvedValue(undefined) },
+      },
       recipeDrafts: {
         getForRecipe: { invalidate: draftGetForRecipeInvalidateMock },
         getNewDrafts: { invalidate: draftGetNewDraftsInvalidateMock },
@@ -37,6 +40,7 @@ vi.mock('@/lib/trpc.ts', () => ({
     recipes: {
       references: { useQuery: referencesUseQueryMock },
       create: { useMutation: createUseMutationMock },
+      createSource: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     },
     recipeDrafts: {
       getForRecipe: { useQuery: draftGetForRecipeUseQueryMock },

@@ -4,12 +4,24 @@ import {
   type RecipeReferenceItem,
 } from '@loftys-larder/shared';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { forwardRef, useCallback, useEffect, useImperativeHandle } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from 'react';
 import { useForm, type UseFormRegister } from 'react-hook-form';
 
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
+import {
+  SearchableCombobox,
+  type SearchableComboboxOption,
+} from '@/components/searchable-combobox.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { getDomainErrorCode } from '@/lib/domain-error.ts';
 
 type HeaderFormValues = CreateRecipeInput;
 
@@ -23,6 +35,10 @@ export interface HeaderFieldsProps {
   // `false` when the save was rejected, so the "Save & Finish" flow can tell
   // whether it may navigate away.
   onSubmit: (values: HeaderFormValues) => Promise<boolean>;
+  // Creates a new household source from the combobox's "Create …" action and
+  // resolves to the created reference. Omit to disable inline source creation
+  // (the combobox then only selects existing sources).
+  createSource?: (name: string) => Promise<RecipeReferenceItem>;
   submitLabel?: string;
   savedNoticeKey?: number;
   // Fires on every form value change. Used by the draft autosave hook —
@@ -30,7 +46,7 @@ export interface HeaderFieldsProps {
   onValuesChange?: (values: HeaderFormValues) => void;
 }
 
-const FALLBACK_SOURCE_NONE_ID = '';
+type SourceOption = SearchableComboboxOption;
 
 export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
   function HeaderFields(
@@ -39,6 +55,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
       defaultValues,
       sources,
       onSubmit,
+      createSource,
       submitLabel,
       savedNoticeKey,
       onValuesChange,
@@ -70,6 +87,68 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
     const submitting = form.formState.isSubmitting;
     const errors = form.formState.errors;
     const register = form.register;
+
+    // Locally-created sources are merged with the server list so a just-created
+    // source resolves to its label before the parent's references query
+    // refetches.
+    const [createdSources, setCreatedSources] = useState<SourceOption[]>([]);
+    const [sourceCreateError, setSourceCreateError] = useState<string>();
+    // Bumped to remount the combobox, clearing unmatched typed text after a
+    // failed create.
+    const [sourceComboboxKey, setSourceComboboxKey] = useState(0);
+
+    const sourceOptions = useMemo<SourceOption[]>(() => {
+      const merged: SourceOption[] = sources.map((s) => ({
+        id: s.id,
+        label: s.name,
+      }));
+      for (const created of createdSources) {
+        if (!merged.some((o) => o.id === created.id)) merged.push(created);
+      }
+      return merged;
+    }, [sources, createdSources]);
+
+    const selectedSourceId = form.watch('sourceId') ?? null;
+    const selectedSource =
+      selectedSourceId === null
+        ? null
+        : (sourceOptions.find((o) => o.id === selectedSourceId) ?? null);
+
+    const searchSources = useCallback(
+      (query: string): SourceOption[] => {
+        const trimmed = query.trim().toLowerCase();
+        if (trimmed === '') return sourceOptions;
+        return sourceOptions.filter((o) =>
+          o.label.toLowerCase().includes(trimmed),
+        );
+      },
+      [sourceOptions],
+    );
+
+    const handleSourceCreate = useCallback(
+      (name: string): void => {
+        if (!createSource) return;
+        setSourceCreateError(undefined);
+        void createSource(name)
+          .then((created) => {
+            setCreatedSources((prev) =>
+              prev.some((o) => o.id === created.id)
+                ? prev
+                : [...prev, { id: created.id, label: created.name }],
+            );
+            form.setValue('sourceId', created.id, { shouldDirty: true });
+          })
+          .catch((error: unknown) => {
+            if (getDomainErrorCode(error) === 'SOURCE_NAME_TAKEN') {
+              setSourceCreateError('A source with this name already exists');
+              setSourceComboboxKey((k) => k + 1);
+              return;
+            }
+            throw error;
+          });
+      },
+      [createSource, form],
+    );
 
     const submit = form.handleSubmit(async (values) => {
       await onSubmit(values);
@@ -174,6 +253,47 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
           />
         </div>
 
+        <div className="space-y-1">
+          <label htmlFor="recipe-source" className="text-sm font-medium">
+            Source
+          </label>
+          <SearchableCombobox<SourceOption>
+            key={sourceComboboxKey}
+            id="recipe-source"
+            value={selectedSource}
+            onChange={(option) => {
+              setSourceCreateError(undefined);
+              form.setValue('sourceId', option?.id ?? null, {
+                shouldDirty: true,
+              });
+            }}
+            searchQuery={searchSources}
+            placeholder="Cookbook, website, person…"
+            ariaLabel="Source"
+            disabled={submitting}
+            emptyMessage="No matching sources"
+            onCreate={createSource ? handleSourceCreate : undefined}
+            createLabel={(query) => `Create source “${query}”`}
+          />
+          {sourceCreateError && (
+            <p role="alert" className="text-sm text-destructive">
+              {sourceCreateError}
+            </p>
+          )}
+        </div>
+
+        <FieldText
+          id="recipe-source-detail"
+          label="Source detail"
+          placeholder="e.g. p.142, via Aunt Sally"
+          disabled={submitting}
+          register={register('sourceDetail', {
+            setValueAs: (value) =>
+              value === '' || value === null ? null : String(value),
+          })}
+          error={errors.sourceDetail?.message}
+        />
+
         <FieldText
           id="recipe-source-url"
           label="Source URL"
@@ -185,32 +305,6 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
           })}
           error={errors.sourceUrl?.message}
         />
-
-        {sources.length > 0 && (
-          <div className="space-y-1">
-            <label htmlFor="recipe-source" className="text-sm font-medium">
-              Source
-            </label>
-            <select
-              id="recipe-source"
-              disabled={submitting}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              {...register('sourceId', {
-                setValueAs: (value) =>
-                  value === FALLBACK_SOURCE_NONE_ID || value === null
-                    ? null
-                    : Number(value),
-              })}
-            >
-              <option value={FALLBACK_SOURCE_NONE_ID}>— No source —</option>
-              {sources.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
 
         {mode === 'create' && (
           <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -239,6 +333,7 @@ interface FieldTextProps {
   id: string;
   label: string;
   type?: string;
+  placeholder?: string;
   autoFocus?: boolean;
   disabled?: boolean;
   register: ReturnType<UseFormRegister<HeaderFormValues>>;
@@ -249,6 +344,7 @@ function FieldText({
   id,
   label,
   type = 'text',
+  placeholder,
   autoFocus,
   disabled,
   register,
@@ -262,6 +358,7 @@ function FieldText({
       <Input
         id={id}
         type={type}
+        placeholder={placeholder}
         autoFocus={autoFocus}
         autoComplete="off"
         disabled={disabled}

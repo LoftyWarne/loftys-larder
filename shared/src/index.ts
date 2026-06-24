@@ -55,6 +55,8 @@ export {
   type GetRecipeInput,
   createRecipeInputSchema,
   type CreateRecipeInput,
+  createSourceInputSchema,
+  type CreateSourceInput,
   createRecipeResultSchema,
   type CreateRecipeResult,
   updateRecipeHeaderInputSchema,

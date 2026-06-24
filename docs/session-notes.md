@@ -4,6 +4,36 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Recipe editor: "Unsaved draft restored" notice never cleared after save
+
+**Status:** bug fixed + regression test added. Frontend-only. No schema / backend / DTO / dependency change. Touches the draft-autosave cross-cutting mechanism (DEC-28 / FEAT-22) — approved before editing.
+
+### The bug
+
+On the edit page, the "Unsaved draft restored." banner stayed on screen after saving a section, and a phantom `recipe_drafts` row was left behind for any recipe opened in the editor — even when nothing was edited.
+
+### Root cause
+
+The banner is gated on `draftPresent = loadedDraft !== null && !draftClearedLocally` (`use-recipe-draft.ts`). `clearSection` only deletes the draft row and flips `draftClearedLocally` **when no sections remain**; otherwise it `flushUpsert`s the remainder. The draft *always* contained `ingredients` and `method` sections regardless of user action, so saving the header could never empty it:
+
+- `IngredientList` and `MethodEditor` emitted their full current state into the draft via a `useEffect` that fired **on mount** and on **every re-render** — their `onLinesChange` / `onStepsChange` props are inline arrows in `recipe-edit-page.tsx`, so the prop identity (and thus the effect) changed each render.
+- `HeaderFields` never had this problem: it emits via `form.watch(...)`, which only fires on real user input.
+
+### Fix
+
+Both editors now emit only on a genuine change — baseline recorded on first run via a `lastEmittedRef`, then emit only when the serialized payload differs. This matches the header's `form.watch` behaviour: mounting/re-rendering an untouched section no longer marks it dirty, so `clearSection` after the last drafted save empties the draft, deletes the row, and clears the banner.
+
+### Carry-forward (the gotcha)
+
+- **Don't autosave from a `useEffect` keyed on an inline callback prop.** Same family as the textarea-autosize gotcha below (2026-06-24 method-steps note): an inline `onChange`-style prop is a fresh function each render, so any effect listing it as a dep re-runs every render. For autosave that silently marks a section dirty on mount and on every parent re-render. Guard with a "last-emitted value" ref, or mirror `HeaderFields` and drive autosave from `form.watch` rather than an effect.
+
+### Files
+
+- `frontend/src/components/recipe-editor/ingredient-list.tsx`, `method-editor.tsx` — guarded emit.
+- `frontend/src/routes/-components/recipe-edit-page.test.tsx` — new regression test: draft restored → save details → banner gone (fails before the fix).
+
+---
+
 ## 2026-06-24 — New-recipe page: signpost it as step 1 of 2
 
 **Status:** copy-only change to `recipe-new-page.tsx`; tested (frontend 332). No schema / backend / dependency change.

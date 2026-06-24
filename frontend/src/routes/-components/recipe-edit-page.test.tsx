@@ -310,6 +310,43 @@ describe('RecipeEditPage', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Draft name');
   });
 
+  it('removes the unsaved-draft notice after the section is saved', async () => {
+    updateHeaderMutateAsyncMock.mockResolvedValue({ id: 7 });
+    draftDeleteMutateMock.mockImplementation(
+      (_input: unknown, opts: { onSuccess?: () => void }) => {
+        opts.onSuccess?.();
+      },
+    );
+    draftGetForRecipeUseQueryMock.mockReturnValue({
+      data: {
+        id: 99,
+        draftData: {
+          version: 1,
+          fields: { header: { ...toHeaderShape(RECIPE), name: 'Draft name' } },
+        },
+        lastUpdatedAt: 1700000000000,
+      },
+      isSuccess: true,
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    expect(screen.getByText('Unsaved draft restored.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText('Unsaved draft restored.'),
+      ).not.toBeInTheDocument();
+    });
+    expect(draftDeleteMutateMock).toHaveBeenCalledWith(
+      { recipeId: 7 },
+      expect.any(Object),
+    );
+  });
+
   it('discards the draft when the discard button is clicked', async () => {
     draftGetForRecipeUseQueryMock.mockReturnValue({
       data: {

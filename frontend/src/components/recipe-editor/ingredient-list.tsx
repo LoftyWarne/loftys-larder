@@ -11,6 +11,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -161,15 +162,26 @@ export const IngredientList = forwardRef<
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // Autosave only on real edits. Emitting on mount (or on a bare re-render —
+  // onLinesChange is an inline prop, so its identity changes each render) would
+  // mark this section dirty even when untouched, leaving a draft row that can
+  // never be cleared. Mirrors the header's form.watch behaviour.
+  const lastEmittedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!onLinesChange) return;
-    onLinesChange(
-      lines.map((line) => ({
-        ingredient: line.ingredient,
-        quantity: line.quantity,
-        prepTypeId: line.prepTypeId,
-      })),
-    );
+    const payload = lines.map((line) => ({
+      ingredient: line.ingredient,
+      quantity: line.quantity,
+      prepTypeId: line.prepTypeId,
+    }));
+    const serialized = JSON.stringify(payload);
+    if (lastEmittedRef.current === null) {
+      lastEmittedRef.current = serialized;
+      return;
+    }
+    if (lastEmittedRef.current === serialized) return;
+    lastEmittedRef.current = serialized;
+    onLinesChange(payload);
   }, [lines, onLinesChange]);
 
   const serverErrorsByIndex = useMemo(() => {

@@ -75,9 +75,22 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       return initialSteps.map(toDraft);
     });
 
+    // Autosave only on real edits. Emitting on mount (or on a bare re-render —
+    // onStepsChange is an inline prop, so its identity changes each render)
+    // would mark this section dirty even when untouched, leaving a draft row
+    // that can never be cleared. Mirrors the header's form.watch behaviour.
+    const lastEmittedRef = useRef<string | null>(null);
     useEffect(() => {
       if (!onStepsChange) return;
-      onStepsChange(steps.map((step) => ({ instruction: step.instruction })));
+      const payload = steps.map((step) => ({ instruction: step.instruction }));
+      const serialized = JSON.stringify(payload);
+      if (lastEmittedRef.current === null) {
+        lastEmittedRef.current = serialized;
+        return;
+      }
+      if (lastEmittedRef.current === serialized) return;
+      lastEmittedRef.current = serialized;
+      onStepsChange(payload);
     }, [steps, onStepsChange]);
     const [submitting, setSubmitting] = useState(false);
     const focusNewIndex = useRef<number | null>(null);

@@ -77,7 +77,7 @@ function MealRow({ slot }: { slot: PlanSlot }): React.ReactElement {
 
 function QuickActions(): React.ReactElement {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
       <Button asChild>
         <Link to="/plans">New plan</Link>
       </Button>
@@ -205,8 +205,9 @@ export function IndexPage(): React.ReactElement {
             </section>
           )}
 
-          {/* Primary navigation lives at the foot of the page. */}
-          <div className="flex flex-wrap gap-2">
+          {/* Primary navigation lives at the foot of the page. A 2-up grid on
+              phones keeps the four buttons tidy; an auto-width row from `sm`. */}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             <Button asChild>
               <Link
                 to="/plans/$planId"

@@ -17,7 +17,7 @@ The authed home page (`/`) was still FEAT-05 bootstrap scaffolding — it called
 - **`index-page.tsx` rewritten** into a dashboard built entirely from existing procedures: greeting (`user.getMe`), the active plan via `plans.list({ status: 'active' }).items[0]` (same "active plan = first item" pattern `shopping-index-page.tsx` uses), and its slots via `plans.get`.
   - **Today** — every occasion for `todayInLondon()`, sorted by `occasionId`. Live recipes link to `/recipes/$recipeId`; markers / deleted recipes / empty occasions stay plain text.
   - **Coming up** — remaining days in the plan (one bordered block per day), showing only *planned* meals; a day with nothing planned still renders, marked "— not planned —".
-  - Footer action row: Open planner (primary deep-link) · Shopping list · New plan · Browse recipes. Empty-state card (no active plan) keeps New plan / Browse recipes.
+  - Footer action row: Open planner (primary deep-link) · Shopping list · New plan · Browse recipes. Laid out as a 2-up grid (`grid-cols-2`) on phones so the four buttons read as a tidy 2×2 rather than a ragged wrap, switching to an auto-width inline row from `sm`. Empty-state card (no active plan) keeps New plan / Browse recipes.
 - **`hourInLondon()`** added to `frontend/src/lib/date-utils.ts` — small additive helper wrapping the one tolerated `new Date()` behind an `Intl` London-tz read (mirrors `todayInLondon`, keeps DEC-33 discipline), used only for the time-of-day greeting.
 - The backend `health.ping` procedure is untouched — only its UI consumer was removed. `docs/measurements.md` / `docs/non-goals.md` references to `health.ping` (DB-load measurement) remain accurate.
 

@@ -87,6 +87,20 @@ When a recipe's ingredient row combobox is typed with a name that isn't in the d
 
 ---
 
+## 2026-06-24 — Recipe detail: "Base recipe" label on the recipe page
+
+**Status:** implemented + tested. No schema, backend, or DTO change.
+
+### What
+
+The recipe detail page (`recipe-detail-page.tsx`) now renders a "Base recipe" pill inline in the metadata row (alongside Serves / time / plant points / ratings) when `recipe.isBase` is true. `recipes.get` already returned `isBase`, so this was a pure presentation change. Added two tests in `recipe-detail-page.test.tsx` asserting the badge shows for a base recipe and not for a non-base one.
+
+### Carry-forward
+
+- Same `bg-secondary` / `text-secondary-foreground` pill styling as the browse-card label below, kept consistent across surfaces. Lives at the start of the existing flex-wrap metadata `<p>` so it flows with the other facts.
+
+---
+
 ## 2026-06-24 — Recipes browse: "Base recipe" label on cards
 
 **Status:** implemented + tested. No schema, backend, or DTO change.

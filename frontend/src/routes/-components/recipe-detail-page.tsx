@@ -58,6 +58,11 @@ export function RecipeDetailPage(): React.ReactElement {
           <p className="text-muted-foreground">{recipe.description}</p>
         )}
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          {recipe.isBase && (
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+              Base recipe
+            </span>
+          )}
           <span>Serves {String(recipe.baseServings)}</span>
           {recipe.totalTimeMins !== null && (
             <span>· {String(recipe.totalTimeMins)} min total</span>

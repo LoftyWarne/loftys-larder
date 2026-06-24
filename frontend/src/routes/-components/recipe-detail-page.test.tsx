@@ -179,6 +179,28 @@ describe('RecipeDetailPage', () => {
     expect(methodItems?.[1]).toHaveTextContent('Simmer.');
   });
 
+  it('marks the recipe as a base recipe when isBase is true', () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, isBase: true },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    expect(screen.getByText('Base recipe')).toBeInTheDocument();
+  });
+
+  it('does not show the base recipe badge for a non-base recipe', () => {
+    getUseQueryMock.mockReturnValue({
+      data: FULL_RECIPE,
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    expect(screen.queryByText('Base recipe')).not.toBeInTheDocument();
+  });
+
   it('shows a not-found state when the get query returns NOT_FOUND', () => {
     getUseQueryMock.mockReturnValue({
       data: undefined,

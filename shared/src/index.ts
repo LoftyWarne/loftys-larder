@@ -6,6 +6,8 @@ export {
   nameSchema,
   updateProfileInputSchema,
   type UpdateProfileInput,
+  setNameInputSchema,
+  type SetNameInput,
   meSchema,
   type Me,
   deleteAccountInputSchema,

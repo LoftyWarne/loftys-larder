@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
@@ -24,6 +25,11 @@ import { Route as AuthedRecipesRecipeIdIndexRouteImport } from './routes/_authed
 import { Route as AuthedRecipesRecipeIdEditRouteImport } from './routes/_authed/recipes/$recipeId.edit'
 import { Route as AuthedPlansPlanIdShoppingRouteImport } from './routes/_authed/plans/$planId_.shopping'
 
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
@@ -100,6 +106,7 @@ const AuthedPlansPlanIdShoppingRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/sign-in': typeof SignInRoute
+  '/welcome': typeof WelcomeRoute
   '/ingredients': typeof AuthedIngredientsRoute
   '/settings': typeof AuthedSettingsRoute
   '/shopping': typeof AuthedShoppingRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
+  '/welcome': typeof WelcomeRoute
   '/ingredients': typeof AuthedIngredientsRoute
   '/settings': typeof AuthedSettingsRoute
   '/shopping': typeof AuthedShoppingRoute
@@ -131,6 +139,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
   '/sign-in': typeof SignInRoute
+  '/welcome': typeof WelcomeRoute
   '/_authed/ingredients': typeof AuthedIngredientsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
   '/_authed/shopping': typeof AuthedShoppingRoute
@@ -149,6 +158,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/sign-in'
+    | '/welcome'
     | '/ingredients'
     | '/settings'
     | '/shopping'
@@ -163,6 +173,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
+    | '/welcome'
     | '/ingredients'
     | '/settings'
     | '/shopping'
@@ -179,6 +190,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authed'
     | '/sign-in'
+    | '/welcome'
     | '/_authed/ingredients'
     | '/_authed/settings'
     | '/_authed/shopping'
@@ -196,11 +208,19 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   SignInRoute: typeof SignInRoute
+  WelcomeRoute: typeof WelcomeRoute
   AuthVerifyRoute: typeof AuthVerifyRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in': {
       id: '/sign-in'
       path: '/sign-in'
@@ -336,6 +356,7 @@ const AuthedRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   SignInRoute: SignInRoute,
+  WelcomeRoute: WelcomeRoute,
   AuthVerifyRoute: AuthVerifyRoute,
 }
 export const routeTree = rootRouteImport

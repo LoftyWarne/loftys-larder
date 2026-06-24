@@ -4,6 +4,30 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — First-run onboarding: new users must set a name at `/welcome`
+
+**Status:** Frontend-only feature + tests added. One new Zod form schema in `/shared`. No DB schema / backend procedure / dependency change. Extends FEAT-15 (protected routing) and FEAT-16 (name in settings); no new DEC minted.
+
+### Why
+
+Better Auth's magic-link plugin creates a new user with `name: ""` (`name: name || ""` in the plugin source) and our sign-in never passes a name, so every new account started nameless. `name` surfaces on shared records (chef dropdown, recipe/plan/comment attribution), so a blank name leaks into the household UI.
+
+### Change
+
+A new user is now gated behind a `/welcome` onboarding step and can't reach the app until they choose a name.
+
+- `authedBeforeLoad` (`authed-layout.tsx`) redirects any session whose `user.name` is blank/whitespace to `/welcome`. The name is read from the session `getSession()` already returns — no extra round-trip.
+- New `routes/welcome.tsx` (thin shell) + `routes/-components/welcome-page.tsx`. `welcomeBeforeLoad` bounces no-session users to `/sign-in` and already-named users to `/`, so the two gates can't loop. The form saves via the existing `user.updateProfile`, refreshes the session, and navigates home.
+- `setNameInputSchema` added to `shared/src/schemas/user.ts` — a name-required form schema (vs. `updateProfileInputSchema`, where name is optional). Submission still routes through `user.updateProfile`.
+
+### Decisions worth carrying
+
+- **Reused `user.updateProfile`, not Better Auth's `updateUser`** — keeps the auth surface narrow (DEC-41/42). No backend change was needed.
+- **The gate fires for *any* blank name, not just freshly-created accounts.** Name was previously optional, so any pre-existing account with an empty name will hit `/welcome` on its next navigation. This is intended (a blank name shouldn't appear on shared records), but flagged in case an empty-name account surprises someone.
+- `refreshSession()` isn't strictly required for the gate (it re-reads via a fresh `getSession()`), but kept for parity with the settings page so a future header that renders the name stays fresh.
+
+---
+
 ## 2026-06-24 — New recipe: scroll to the next section after "Save & continue"
 
 **Status:** UX tweak + tests added. Frontend-only. No schema / backend / DTO / dependency change. No new helper or cross-cutting change.

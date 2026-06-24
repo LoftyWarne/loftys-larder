@@ -13,8 +13,8 @@ Honest state: **all six build phases are implemented in code, but the project ha
 What's in the tree and working:
 
 - **Backend** — Fastify + tRPC + Drizzle. Procedures for health, ingredients, recipes, recipe drafts, plans, slots, shopping list, plant points, uploads, and user/account. Nine migrations covering auth, the recipes domain, meal plans, and shopping-list items.
-- **Frontend** — Vite + React + TanStack Router/Query + shadcn/ui. Sign-in, settings, a home dashboard (the active plan's meals for today plus the rest of the week), ingredient dictionary, recipe browse/detail/editor, planner grid with click-to-assign, plan list, and shopping list. Component tests alongside each page.
-- **Auth** — magic-link via Better Auth + Resend, gated to an allow-list. No passwords.
+- **Frontend** — Vite + React + TanStack Router/Query + shadcn/ui. Sign-in, first-run name onboarding, settings, a home dashboard (the active plan's meals for today plus the rest of the week), ingredient dictionary, recipe browse/detail/editor, planner grid with click-to-assign, plan list, and shopping list. Component tests alongside each page.
+- **Auth** — magic-link via Better Auth + Resend, gated to an allow-list. No passwords. New users are created without a name and must set one at a `/welcome` gate before the app unlocks.
 - **PWA** — service worker + manifest; network-first cache for the shopping-list read with offline check-state queue and reconnect sync. (Icons are placeholder art — final brand assets are tracked separately.)
 - **Observability & ops** — Pino → Axiom with `req.id` propagation, Sentry front + back with PII scrubbing, rate limiting, explicit CSP, `/api/health`. CI, deploy, and nightly `pg_dump` → R2 backup workflows are in `.github/workflows/`.
 - **Tests** — Vitest + Testcontainers (backend), React Testing Library (frontend), and six Playwright critical-path specs including an `axe-core` a11y spot-check.

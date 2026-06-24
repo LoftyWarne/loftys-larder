@@ -77,9 +77,29 @@ describe('authedBeforeLoad', () => {
     });
   });
 
-  it('does nothing when a session is present', async () => {
-    getSessionMock.mockResolvedValue({ data: { user: { id: 'u1' } } });
+  it('does nothing when a session with a name is present', async () => {
+    getSessionMock.mockResolvedValue({
+      data: { user: { id: 'u1', name: 'Ada' } },
+    });
     await expect(authedBeforeLoad()).resolves.toBeUndefined();
+  });
+
+  it('redirects to /welcome when the user has not set a name', async () => {
+    getSessionMock.mockResolvedValue({
+      data: { user: { id: 'u1', name: '' } },
+    });
+    await expect(authedBeforeLoad()).rejects.toMatchObject({
+      options: { to: '/welcome' },
+    });
+  });
+
+  it('treats a whitespace-only name as unset', async () => {
+    getSessionMock.mockResolvedValue({
+      data: { user: { id: 'u1', name: '   ' } },
+    });
+    await expect(authedBeforeLoad()).rejects.toMatchObject({
+      options: { to: '/welcome' },
+    });
   });
 });
 

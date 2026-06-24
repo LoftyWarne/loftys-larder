@@ -96,10 +96,13 @@ export function RecipeNewPage(): React.ReactElement {
 
   return (
     <section className="mx-auto max-w-3xl space-y-6">
-      <h1 className="text-2xl font-semibold">New recipe</h1>
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-muted-foreground">Step 1 of 2</p>
+        <h1 className="text-2xl font-semibold">New recipe</h1>
+      </div>
       <p className="text-sm text-muted-foreground">
-        Fill in the details and save. You&rsquo;ll then be able to add
-        ingredients, method, and a photo.
+        Start with the basics and save. Next you&rsquo;ll add ingredients,
+        method, and a photo.
       </p>
 
       {draft.draftPresent && (
@@ -127,7 +130,7 @@ export function RecipeNewPage(): React.ReactElement {
         onValuesChange={(values) => {
           draft.queueAutosave('header', values);
         }}
-        submitLabel="Create recipe"
+        submitLabel="Save & continue →"
       />
 
       {submitError && (

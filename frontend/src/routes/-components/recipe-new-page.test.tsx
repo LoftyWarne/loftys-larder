@@ -96,7 +96,7 @@ describe('RecipeNewPage', () => {
     render(<RecipeNewPage />);
 
     await user.type(screen.getByLabelText('Name'), 'Borsch');
-    await user.click(screen.getByRole('button', { name: 'Create recipe' }));
+    await user.click(screen.getByRole('button', { name: 'Save & continue →' }));
 
     await waitFor(() => {
       expect(createMutateAsyncMock).toHaveBeenCalledTimes(1);
@@ -139,7 +139,7 @@ describe('RecipeNewPage', () => {
     render(<RecipeNewPage />);
 
     await user.type(screen.getByLabelText('Name'), 'New Soup');
-    await user.click(screen.getByRole('button', { name: 'Create recipe' }));
+    await user.click(screen.getByRole('button', { name: 'Save & continue →' }));
 
     await waitFor(() => {
       expect(draftDeleteMutateMock).toHaveBeenCalledWith(
@@ -155,7 +155,7 @@ describe('RecipeNewPage', () => {
     render(<RecipeNewPage />);
 
     await user.type(screen.getByLabelText('Name'), 'Borsch');
-    await user.click(screen.getByRole('button', { name: 'Create recipe' }));
+    await user.click(screen.getByRole('button', { name: 'Save & continue →' }));
 
     expect(await screen.findByText('boom')).toBeVisible();
     expect(navigateMock).not.toHaveBeenCalled();

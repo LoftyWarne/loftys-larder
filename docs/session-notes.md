@@ -4,6 +4,28 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — New-recipe page: signpost it as step 1 of 2
+
+**Status:** copy-only change to `recipe-new-page.tsx`; tested (frontend 332). No schema / backend / dependency change.
+
+### Why
+
+User feedback: starting a recipe was "not especially clear". `/recipes/new` shows only the **Details** header and a button labelled **"Create recipe"**, which reads as terminal — but it really just creates the bare recipe row and redirects to `/recipes/$recipeId/edit`, where ingredients, method, batch settings, and the photo live. The split is architectural, not arbitrary: `replaceIngredients` / `replaceMethod` save against a recipe **ID**, so the row must exist before those sections can save.
+
+Two options were offered (relabel/clarify vs. a single full-page form that buffers ingredients/method client-side and flushes after create). User chose the light touch; the two-step flow stays.
+
+### What
+
+- `recipe-new-page.tsx`: added a **"Step 1 of 2"** label above the heading; reworded the intro to "Start with the basics and save. Next you'll add ingredients, method, and a photo."; renamed the submit button **"Create recipe" → "Save & continue →"** (`submitLabel` prop on `HeaderFields`).
+- `recipe-new-page.test.tsx`: updated the three `getByRole('button', { name: ... })` queries to the new label.
+
+### Carry-forward
+
+- FEAT-21's spec/acceptance criteria untouched — this is a copy refinement to a shipped feature, not a FEAT amendment.
+- If "Step 1 of 2" ever feels misleading, the deferred alternative is the single full-page create form (buffer ingredients/method in the existing `useRecipeDraft` shape, flush after the create mutation returns an id).
+
+---
+
 ## 2026-06-24 — Home page: active-plan dashboard (retires the FEAT-05 ping placeholder)
 
 **Status:** implemented + tested (frontend 332). No schema change, no backend change, no new dependency.

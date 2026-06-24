@@ -60,6 +60,24 @@ export function todayInLondon(now: Date = new Date()): string {
   return formatCivilDate({ year, month, day });
 }
 
+const LONDON_HOUR_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London',
+  hour: '2-digit',
+  hour12: false,
+});
+
+// Returns the current hour (0–23) in Europe/London. Wraps the one tolerated
+// `new Date()` like `todayInLondon` so time-of-day UI (e.g. the home-page
+// greeting) doesn't reach for `new Date()` directly (DEC-33).
+export function hourInLondon(now: Date = new Date()): number {
+  const part = LONDON_HOUR_FORMATTER.formatToParts(now).find(
+    (p) => p.type === 'hour',
+  );
+  // Intl can emit "24" for midnight under hour12:false; normalise to 0.
+  const hour = Number(part?.value ?? '0');
+  return hour === 24 ? 0 : hour;
+}
+
 // Inclusive day-by-day expansion of a YYYY-MM-DD range. Throws on inverted
 // ranges to match the backend's contract.
 export function eachDateInRange(start: string, end: string): string[] {

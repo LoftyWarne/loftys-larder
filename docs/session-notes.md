@@ -4,6 +4,31 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Home page: active-plan dashboard (retires the FEAT-05 ping placeholder)
+
+**Status:** implemented + tested (frontend 332). No schema change, no backend change, no new dependency.
+
+### Why
+
+The authed home page (`/`) was still FEAT-05 bootstrap scaffolding — it called `health.ping` and rendered the server `reqId` with a "Re-ping" button. That earned its keep while wiring the tRPC pipeline; it has no place in the shipped app. Home is deliberately low-traffic (de-emphasised on phones — it's just the app-title link), so its job is a "where do I stand?" landing, not to compete with the primary nav.
+
+### What
+
+- **`index-page.tsx` rewritten** into a dashboard built entirely from existing procedures: greeting (`user.getMe`), the active plan via `plans.list({ status: 'active' }).items[0]` (same "active plan = first item" pattern `shopping-index-page.tsx` uses), and its slots via `plans.get`.
+  - **Today** — every occasion for `todayInLondon()`, sorted by `occasionId`. Live recipes link to `/recipes/$recipeId`; markers / deleted recipes / empty occasions stay plain text.
+  - **Coming up** — remaining days in the plan (one bordered block per day), showing only *planned* meals; a day with nothing planned still renders, marked "— not planned —".
+  - Footer action row: Open planner (primary deep-link) · Shopping list · New plan · Browse recipes. Empty-state card (no active plan) keeps New plan / Browse recipes.
+- **`hourInLondon()`** added to `frontend/src/lib/date-utils.ts` — small additive helper wrapping the one tolerated `new Date()` behind an `Intl` London-tz read (mirrors `todayInLondon`, keeps DEC-33 discipline), used only for the time-of-day greeting.
+- The backend `health.ping` procedure is untouched — only its UI consumer was removed. `docs/measurements.md` / `docs/non-goals.md` references to `health.ping` (DB-load measurement) remain accurate.
+
+### Drift / carry-forward
+
+- **A "This week" overview card was built then removed at the user's request.** It showed the plan date range, "X / Y slots planned", and the plant-points total (reusing `PlantPointsBadge` + `plants.forPlan`). Per the user, Home leads with Today/Coming up and the plan buttons moved to the footer. Net effect: **the plant-points total and the plan date range no longer surface anywhere on Home** — fold one into the Today header if that turns out to be missed.
+- **No "recently added recipes" section** — `recipes.list` is alphabetical only; a recency view would need a new backend ordering (a stop-and-ask), so it was left out by design.
+- FEAT-05's acceptance criteria (the bootstrap index calling `health.ping`) were intentionally **not** edited — that was the bootstrap deliverable; this is net-new work on top, not a FEAT-05 amendment.
+
+---
+
 ## 2026-06-24 — Recipe sources: inline creation + per-recipe detail
 
 **Status:** implemented + tested (frontend 326, backend 536). Schema change (one nullable column) applied to dev. No new dependency.

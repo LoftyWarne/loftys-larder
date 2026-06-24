@@ -5,6 +5,7 @@ import {
   eachDateInRange,
   formatCivilDate,
   formatDayLabel,
+  hourInLondon,
   parseCivilDate,
   todayInLondon,
 } from './date-utils.ts';
@@ -113,5 +114,22 @@ describe('formatDayLabel', () => {
     expect(label).toMatch(/Mon/);
     expect(label).toMatch(/15/);
     expect(label).toMatch(/Jun/);
+  });
+});
+
+describe('hourInLondon', () => {
+  it('adds the BST offset in summer', () => {
+    // 12:00 UTC on 2026-06-24 is 13:00 BST (UTC+1) in London.
+    expect(hourInLondon(new Date('2026-06-24T12:00:00Z'))).toBe(13);
+  });
+
+  it('matches UTC in winter (no DST)', () => {
+    // 09:00 UTC on 2026-01-14 is 09:00 GMT in London.
+    expect(hourInLondon(new Date('2026-01-14T09:00:00Z'))).toBe(9);
+  });
+
+  it('normalises midnight to 0', () => {
+    // 00:00 GMT on 2026-01-15 — Intl can emit "24"; helper returns 0.
+    expect(hourInLondon(new Date('2026-01-15T00:00:00Z'))).toBe(0);
   });
 });

@@ -45,7 +45,14 @@ export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
         )}
       </div>
       <div className="space-y-1 p-3">
-        <p className="font-medium leading-tight">{recipe.name}</p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-medium leading-tight">{recipe.name}</p>
+          {recipe.isBase && (
+            <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+              Base recipe
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {timeLabel && <span>{timeLabel}</span>}
           {timeLabel && <span aria-hidden="true">·</span>}

@@ -108,6 +108,13 @@ describe('RecipesPage', () => {
     expect(screen.getByText('Roast chicken')).toBeInTheDocument();
   });
 
+  it('labels base recipes and leaves non-base recipes unlabelled', () => {
+    setup({ items: [{ ...TOMATO, isBase: true }, ROAST] });
+    render(<RecipesPage />);
+    expect(screen.getByText('Base recipe')).toBeInTheDocument();
+    expect(screen.getAllByText('Base recipe')).toHaveLength(1);
+  });
+
   it('renders an image with the recipe name as alt text', () => {
     setup({ items: [TOMATO] });
     render(<RecipesPage />);

@@ -4,6 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Recipes browse: "Base recipe" label on cards
+
+**Status:** implemented + tested. No schema, backend, or DTO change.
+
+### What
+
+`RecipeCard` now renders a "Base recipe" pill next to the name when `recipe.isBase` is true. `RecipeListItem` already carried `isBase`, so this was a pure presentation change in `frontend/src/components/recipe-card.tsx`. Added a test in `recipes-page.test.tsx` asserting the label shows for a base recipe and not for a non-base one.
+
+### Carry-forward
+
+- Styled as a plain `span` with `bg-secondary` / `text-secondary-foreground` tokens — there's no `Badge` UI primitive in the project (consistent with `plant-points-badge`, `shelf-life-badge`). Mirrors the planner recipe bank's existing `· base` affordance (`recipe-bank.tsx`), just card-styled.
+
+---
+
 ## 2026-06-23 — Backup workflow: pg_dump major mismatch (16 vs 17)
 
 **Status:** fixed in `.github/workflows/backup.yml`. Not yet verified against a real scheduled run.

@@ -54,7 +54,7 @@ export function RecipeNewPage(): React.ReactElement {
     serverDefaults,
   });
 
-  async function handleSubmit(values: HeaderFormValues): Promise<void> {
+  async function handleSubmit(values: HeaderFormValues): Promise<boolean> {
     setSubmitError(null);
     try {
       const result = await createMutation.mutateAsync(values);
@@ -65,9 +65,11 @@ export function RecipeNewPage(): React.ReactElement {
         to: '/recipes/$recipeId/edit',
         params: { recipeId: String(result.id) },
       });
+      return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save';
       setSubmitError(message);
+      return false;
     }
   }
 

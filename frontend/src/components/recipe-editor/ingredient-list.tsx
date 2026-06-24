@@ -5,9 +5,17 @@ import {
   type RecipeReferenceItem,
   type ReplaceRecipeIngredientsLine,
 } from '@loftys-larder/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from 'react';
 
 import { IngredientForm } from '@/components/ingredient-form.tsx';
+import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
 import {
   SearchableCombobox,
   type SearchableComboboxOption,
@@ -70,7 +78,9 @@ export interface IngredientListProps {
   ) =>
     | Promise<readonly IngredientPickerOption[]>
     | readonly IngredientPickerOption[];
-  onSubmit: (lines: ReplaceRecipeIngredientsLine[]) => Promise<void>;
+  // Resolves `true` once the lines are saved and `false` when validation
+  // fails or the save is rejected, so "Save & Finish" can gate navigation.
+  onSubmit: (lines: ReplaceRecipeIngredientsLine[]) => Promise<boolean>;
   // Reference data (categories + units) for the inline create form. When this
   // and `createIngredient` are both provided, the ingredient combobox offers a
   // "Create …" action for a name that isn't in the list yet. Omit either to
@@ -106,18 +116,24 @@ function newRowKey(): string {
   return `new-${String(nextRowSeed)}`;
 }
 
-export function IngredientList({
-  initialLines,
-  initialDraftLines,
-  prepTypes,
-  searchIngredients,
-  onSubmit,
-  onLinesChange,
-  serverErrors,
-  savedNoticeKey,
-  references,
-  createIngredient,
-}: IngredientListProps): React.ReactElement {
+export const IngredientList = forwardRef<
+  RecipeSectionHandle,
+  IngredientListProps
+>(function IngredientList(
+  {
+    initialLines,
+    initialDraftLines,
+    prepTypes,
+    searchIngredients,
+    onSubmit,
+    onLinesChange,
+    serverErrors,
+    savedNoticeKey,
+    references,
+    createIngredient,
+  },
+  ref,
+): React.ReactElement {
   // The row awaiting an inline-created ingredient, plus the typed name that
   // seeds the create form. `null` when the create dialog is closed.
   const [createState, setCreateState] = useState<{
@@ -224,9 +240,7 @@ export function IngredientList({
     }
   }
 
-  async function handleSubmit(event: React.SyntheticEvent): Promise<void> {
-    event.preventDefault();
-
+  const runSubmit = useCallback(async (): Promise<boolean> => {
     let firstInvalid = -1;
     const validated = lines.map((line, index) => {
       const updated: DraftLine = {
@@ -247,7 +261,7 @@ export function IngredientList({
 
     if (firstInvalid >= 0) {
       setLines(validated);
-      return;
+      return false;
     }
 
     const payload: ReplaceRecipeIngredientsLine[] = lines.map((line) => {
@@ -267,17 +281,20 @@ export function IngredientList({
 
     setSubmitting(true);
     try {
-      await onSubmit(payload);
+      return await onSubmit(payload);
     } finally {
       setSubmitting(false);
     }
-  }
+  }, [lines, onSubmit]);
+
+  useImperativeHandle(ref, () => ({ submit: runSubmit }), [runSubmit]);
 
   return (
     <>
       <form
         onSubmit={(event) => {
-          void handleSubmit(event);
+          event.preventDefault();
+          void runSubmit();
         }}
         className="space-y-4"
         noValidate
@@ -462,6 +479,6 @@ export function IngredientList({
       )}
     </>
   );
-}
+});
 
 export type { IngredientPickerOption };

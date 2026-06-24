@@ -25,6 +25,7 @@ const {
   draftGetForRecipeInvalidateMock,
   draftGetNewDraftsInvalidateMock,
   useParamsMock,
+  navigateMock,
 } = vi.hoisted(() => ({
   recipeGetUseQueryMock: vi.fn(),
   referencesUseQueryMock: vi.fn(),
@@ -47,6 +48,7 @@ const {
   draftGetForRecipeInvalidateMock: vi.fn(),
   draftGetNewDraftsInvalidateMock: vi.fn(),
   useParamsMock: vi.fn(),
+  navigateMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
@@ -115,6 +117,7 @@ vi.mock('@tanstack/react-router', async () => {
       );
     },
     useParams: useParamsMock,
+    useNavigate: () => navigateMock,
   };
 });
 
@@ -361,6 +364,44 @@ describe('RecipeEditPage', () => {
     expect(
       screen.queryByLabelText('Search paired recipes'),
     ).not.toBeInTheDocument();
+  });
+
+  it('flushes every section and returns to the recipe view on Save & Finish', async () => {
+    updateHeaderMutateAsyncMock.mockResolvedValue({ id: 7 });
+    replaceIngredientsMutateAsyncMock.mockResolvedValue(undefined);
+    replaceMethodMutateAsyncMock.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Renamed soup');
+    await user.click(screen.getByRole('button', { name: 'Save & Finish' }));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({
+        to: '/recipes/$recipeId',
+        params: { recipeId: '7' },
+      });
+    });
+    expect(updateHeaderMutateAsyncMock.mock.calls[0]?.[0]).toEqual({
+      id: 7,
+      patch: { name: 'Renamed soup' },
+    });
+    expect(replaceIngredientsMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(replaceMethodMutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not navigate on Save & Finish when a section save fails', async () => {
+    updateHeaderMutateAsyncMock.mockRejectedValue(new Error('header boom'));
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Renamed soup');
+    await user.click(screen.getByRole('button', { name: 'Save & Finish' }));
+
+    expect(await screen.findByText('header boom')).toBeVisible();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it('keeps other sections enabled when one section save fails', async () => {

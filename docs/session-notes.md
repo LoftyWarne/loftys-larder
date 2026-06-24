@@ -4,6 +4,27 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Recipe editor: overall "Save & Finish" button
+
+**Status:** implemented + tested. No schema, backend, DTO, or dependency change. Frontend-only.
+
+### What
+
+The editor was four independent section forms (Details, Batch cooking, Ingredients, Method), each with its own validation and per-section save button, and no single way to commit everything and leave. Added a footer with a **Save & Finish** button (plus a **Cancel** link) that flushes every section and returns the user to the recipe **view** page (`/recipes/$recipeId`) on success.
+
+- **`section-handle.ts`** (new) — shared `RecipeSectionHandle` type (`submit: () => Promise<boolean>`).
+- **`header-fields.tsx`, `batch-fields.tsx`, `ingredient-list.tsx`, `method-editor.tsx`** — each wrapped in `forwardRef` + `useImperativeHandle`, exposing `submit()` that runs the section's existing validation + save and resolves `true` (saved or nothing-to-save) / `false` (validation failed or save rejected). Their `onSubmit` prop now returns `Promise<boolean>` instead of `Promise<void>`. Per-section save buttons are unchanged in behaviour.
+- **`recipe-edit-page.tsx`** — the four section handlers return booleans; added one ref per section, `handleSaveAndFinish`, and the footer.
+- **`recipe-new-page.tsx`** — `handleSubmit` returns a boolean to match the new `HeaderFields` contract (create flow behaviour unchanged — it only uses `HeaderFields`).
+
+### Carry-forward (the gotcha)
+
+- **Save & Finish stops at the first failing section, it does not attempt all four.** The sections share one top-level error slot (`topLevelError`), and `handleIngredientsSubmit` / `handleMethodSubmit` call `setTopLevelError(null)` on entry. If a later section ran after an earlier one failed, it would wipe the failing section's message. So the flush is sequential and returns on the first `false`. Earlier sections that already saved stay saved (LWW, DEC-36); navigation only fires once all four pass.
+- **Image uploads are not part of the flush.** The image uploader saves immediately on upload (`handleImageChange`), so there's no pending image state to commit.
+- **Edit-page test needed a `useNavigate` mock.** The router mock previously only stubbed `Link` + `useParams`; the page now calls `useNavigate()`. `useNavigate` itself is lazy (returns a function; only touches router context when called), so existing tests didn't break, but the Save & Finish test asserts on a `navigateMock`.
+
+---
+
 ## 2026-06-24 — Recipe editor: method steps auto-grow to fit content
 
 **Status:** implemented + tested. No schema, backend, DTO, or dependency change. Frontend-only, plus one new exported constant in `/shared`.

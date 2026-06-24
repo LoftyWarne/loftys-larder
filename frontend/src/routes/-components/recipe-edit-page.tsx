@@ -6,9 +6,9 @@ import type {
   ReplaceRecipeMethodStepInput,
   UpdateRecipeHeaderInput,
 } from '@loftys-larder/shared';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { TRPCClientError } from '@trpc/client';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import {
   BatchFields,
@@ -30,6 +30,8 @@ import {
   MethodEditor,
   type MethodDraftStep,
 } from '@/components/recipe-editor/method-editor.tsx';
+import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
+import { Button } from '@/components/ui/button.tsx';
 import { useRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -47,6 +49,7 @@ export function RecipeEditPage(): React.ReactElement {
   const recipeId = Number.parseInt(params.recipeId, 10);
   const idIsValid = Number.isInteger(recipeId) && recipeId > 0;
 
+  const navigate = useNavigate();
   const utils = trpc.useUtils();
   const recipeQuery = trpc.recipes.get.useQuery(
     { id: recipeId },
@@ -77,6 +80,12 @@ export function RecipeEditPage(): React.ReactElement {
     [],
   );
   const [topLevelError, setTopLevelError] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);
+
+  const headerRef = useRef<RecipeSectionHandle>(null);
+  const batchRef = useRef<RecipeSectionHandle>(null);
+  const ingredientsRef = useRef<RecipeSectionHandle>(null);
+  const methodRef = useRef<RecipeSectionHandle>(null);
 
   const recipe = recipeQuery.data ?? null;
 
@@ -199,27 +208,31 @@ export function RecipeEditPage(): React.ReactElement {
     await utils.recipes.get.invalidate({ id: recipeId });
   }
 
-  async function handleHeaderSubmit(values: HeaderFormValues): Promise<void> {
+  async function handleHeaderSubmit(
+    values: HeaderFormValues,
+  ): Promise<boolean> {
     setTopLevelError(null);
     const patch = diffHeader(serverHeader, values);
     if (Object.keys(patch).length === 0) {
       setHeaderSavedKey(Date.now());
       draft.clearSection('header');
-      return;
+      return true;
     }
     try {
       await updateHeader.mutateAsync({ id: recipeId, patch });
       await invalidate();
       setHeaderSavedKey(Date.now());
       draft.clearSection('header');
+      return true;
     } catch (err) {
       setTopLevelError(extractMessage(err));
+      return false;
     }
   }
 
   async function handleIngredientsSubmit(
     lines: ReplaceRecipeIngredientsLine[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     setTopLevelError(null);
     setIngredientErrors([]);
     try {
@@ -227,6 +240,7 @@ export function RecipeEditPage(): React.ReactElement {
       await invalidate();
       setIngredientsSavedKey(Date.now());
       draft.clearSection('ingredients');
+      return true;
     } catch (err) {
       const lineError = mapIngredientLineError(err, lines);
       if (lineError) {
@@ -234,20 +248,23 @@ export function RecipeEditPage(): React.ReactElement {
       } else {
         setTopLevelError(extractMessage(err));
       }
+      return false;
     }
   }
 
   async function handleMethodSubmit(
     steps: ReplaceRecipeMethodStepInput[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     setTopLevelError(null);
     try {
       await replaceMethod.mutateAsync({ recipeId, steps });
       await invalidate();
       setMethodSavedKey(Date.now());
       draft.clearSection('method');
+      return true;
     } catch (err) {
       setTopLevelError(extractMessage(err));
+      return false;
     }
   }
 
@@ -267,14 +284,38 @@ export function RecipeEditPage(): React.ReactElement {
 
   async function handleBatchSubmit(
     changes: Partial<BatchFieldsValues>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     setBatchError(null);
     try {
       await setBatchFields.mutateAsync({ id: recipeId, ...changes });
       await invalidate();
       setBatchSavedKey(Date.now());
+      return true;
     } catch (err) {
       setBatchError(mapBatchError(err));
+      return false;
+    }
+  }
+
+  // Flush every section, then return to the recipe view. Each section runs its
+  // own validation + save and reports success. We stop at the first failure so
+  // its error stays on screen — the sections share one top-level error slot, so
+  // letting a later section run would clear the failing one's message. Earlier
+  // sections have already saved; navigation only happens once all four pass.
+  async function handleSaveAndFinish(): Promise<void> {
+    setFinishing(true);
+    try {
+      const sections = [headerRef, batchRef, ingredientsRef, methodRef];
+      for (const section of sections) {
+        const saved = (await section.current?.submit()) ?? false;
+        if (!saved) return;
+      }
+      await navigate({
+        to: '/recipes/$recipeId',
+        params: { recipeId: String(recipeId) },
+      });
+    } finally {
+      setFinishing(false);
     }
   }
 
@@ -324,6 +365,7 @@ export function RecipeEditPage(): React.ReactElement {
       )}
 
       <HeaderFields
+        ref={headerRef}
         mode="edit"
         defaultValues={defaults.header}
         sources={references.sources}
@@ -335,6 +377,7 @@ export function RecipeEditPage(): React.ReactElement {
       />
 
       <BatchFields
+        ref={batchRef}
         initial={{
           isBase: recipe.isBase,
           baseRecipeId: recipe.baseRecipeId,
@@ -366,6 +409,7 @@ export function RecipeEditPage(): React.ReactElement {
       />
 
       <IngredientList
+        ref={ingredientsRef}
         initialLines={recipe.ingredients}
         initialDraftLines={defaults.ingredients}
         prepTypes={references.prepTypes}
@@ -381,6 +425,7 @@ export function RecipeEditPage(): React.ReactElement {
       />
 
       <MethodEditor
+        ref={methodRef}
         initialSteps={recipe.method}
         initialDraftSteps={defaults.method}
         onSubmit={handleMethodSubmit}
@@ -404,6 +449,25 @@ export function RecipeEditPage(): React.ReactElement {
           Image saved.
         </p>
       )}
+
+      <div className="flex items-center justify-end gap-3 border-t pt-6">
+        <Link
+          to="/recipes/$recipeId"
+          params={{ recipeId: String(recipeId) }}
+          className="text-sm text-muted-foreground hover:underline"
+        >
+          Cancel
+        </Link>
+        <Button
+          type="button"
+          onClick={() => {
+            void handleSaveAndFinish();
+          }}
+          disabled={finishing}
+        >
+          {finishing ? 'Saving…' : 'Save & Finish'}
+        </Button>
+      </div>
     </section>
   );
 }

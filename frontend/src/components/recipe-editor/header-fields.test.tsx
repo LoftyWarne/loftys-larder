@@ -38,15 +38,15 @@ function blankDefaults(): HeaderFormValues {
 }
 
 type OnSubmitMock = ReturnType<
-  typeof vi.fn<(values: HeaderFormValues) => Promise<void>>
+  typeof vi.fn<(values: HeaderFormValues) => Promise<boolean>>
 >;
 
 function renderHeader(overrides: Partial<HeaderFieldsProps> = {}): {
   onSubmit: OnSubmitMock;
 } {
   const onSubmit: OnSubmitMock = vi
-    .fn<(values: HeaderFormValues) => Promise<void>>()
-    .mockResolvedValue(undefined);
+    .fn<(values: HeaderFormValues) => Promise<boolean>>()
+    .mockResolvedValue(true);
   render(
     <HeaderFields
       mode="create"

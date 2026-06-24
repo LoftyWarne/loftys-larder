@@ -56,7 +56,9 @@ vi.mock('@/lib/trpc.ts', () => ({
         get: { invalidate: recipeGetInvalidateMock },
         list: { fetch: recipesListFetchMock },
       },
-      ingredients: { list: { fetch: ingredientsListFetchMock } },
+      ingredients: {
+        list: { fetch: ingredientsListFetchMock, invalidate: vi.fn() },
+      },
       recipeDrafts: {
         getForRecipe: { invalidate: draftGetForRecipeInvalidateMock },
         getNewDrafts: { invalidate: draftGetNewDraftsInvalidateMock },
@@ -69,6 +71,10 @@ vi.mock('@/lib/trpc.ts', () => ({
       replaceIngredients: { useMutation: replaceIngredientsUseMutationMock },
       replaceMethod: { useMutation: replaceMethodUseMutationMock },
       setBatchFields: { useMutation: setBatchFieldsUseMutationMock },
+    },
+    ingredients: {
+      references: { useQuery: () => ({ data: { categories: [], units: [] } }) },
+      create: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     },
     recipeDrafts: {
       getForRecipe: { useQuery: draftGetForRecipeUseQueryMock },

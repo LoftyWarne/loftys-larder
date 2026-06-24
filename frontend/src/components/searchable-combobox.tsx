@@ -32,6 +32,14 @@ export interface SearchableComboboxProps<T extends SearchableComboboxOption> {
   emptyMessage?: string;
   className?: string;
   inputClassName?: string;
+  // When set, a "create" action is offered in the listbox whenever the trimmed
+  // input is non-empty and doesn't exactly match an existing option (case
+  // insensitive). Selecting it calls `onCreate` with the trimmed query and
+  // closes the listbox — the caller decides what creating means. Keeps the
+  // primitive generic (FEAT-21): ingredient is the first consumer, others opt
+  // out by leaving it undefined.
+  onCreate?: (query: string) => void;
+  createLabel?: (query: string) => string;
 }
 
 export interface SearchableComboboxHandle {
@@ -57,6 +65,8 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
     emptyMessage = EMPTY_MESSAGE_DEFAULT,
     className,
     inputClassName,
+    onCreate,
+    createLabel,
   } = props;
 
   const generatedId = useId();
@@ -102,7 +112,13 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
       .then((results) => {
         if (cancelled) return;
         setOptions(results);
-        setActiveIndex(results.length > 0 ? 0 : -1);
+        const willShowCreate =
+          onCreate !== undefined &&
+          debouncedQuery.length > 0 &&
+          !results.some(
+            (o) => o.label.toLowerCase() === debouncedQuery.toLowerCase(),
+          );
+        setActiveIndex(results.length > 0 || willShowCreate ? 0 : -1);
       })
       .finally(() => {
         if (!cancelled) setSearching(false);
@@ -110,13 +126,33 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, open, searchQuery]);
+  }, [debouncedQuery, open, searchQuery, onCreate]);
+
+  // The create action is offered against the *searched* query (`debouncedQuery`)
+  // so it stays in lockstep with the options list — `activeIndex` is computed
+  // from the same basis in the search effect. The create item sits at index
+  // `options.length`, one past the last option.
+  const showCreate =
+    onCreate !== undefined &&
+    debouncedQuery.length > 0 &&
+    !options.some(
+      (o) => o.label.toLowerCase() === debouncedQuery.toLowerCase(),
+    );
+  const navCount = options.length + (showCreate ? 1 : 0);
+  const createActive = showCreate && activeIndex === options.length;
+  const createId = `${listboxId}-create`;
 
   const activeId = useMemo(() => {
+    if (createActive) return createId;
     if (activeIndex < 0 || activeIndex >= options.length) return undefined;
     const option = options[activeIndex];
     return option ? `${listboxId}-opt-${String(option.id)}` : undefined;
-  }, [activeIndex, options, listboxId]);
+  }, [activeIndex, options, listboxId, createActive, createId]);
+
+  function fireCreate(): void {
+    onCreate?.(debouncedQuery);
+    setOpen(false);
+  }
 
   function commit(option: T): void {
     onChange(option);
@@ -137,8 +173,8 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
         return;
       }
       setActiveIndex((index) => {
-        if (options.length === 0) return -1;
-        return (index + 1) % options.length;
+        if (navCount === 0) return -1;
+        return (index + 1) % navCount;
       });
       return;
     }
@@ -149,14 +185,18 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
         return;
       }
       setActiveIndex((index) => {
-        if (options.length === 0) return -1;
-        return (index - 1 + options.length) % options.length;
+        if (navCount === 0) return -1;
+        return (index - 1 + navCount) % navCount;
       });
       return;
     }
     if (event.key === 'Enter') {
       if (open && activeIndex >= 0) {
         event.preventDefault();
+        if (createActive) {
+          fireCreate();
+          return;
+        }
         const option = options[activeIndex];
         if (option) commit(option);
       }
@@ -234,11 +274,11 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
           }}
           className="z-50 max-h-60 w-[var(--radix-popover-trigger-width)] overflow-auto rounded-md border border-input bg-popover p-1 text-sm shadow-md"
         >
-          {searching && options.length === 0 ? (
+          {searching && options.length === 0 && !showCreate ? (
             <p role="status" className="p-2 text-muted-foreground">
               Searching…
             </p>
-          ) : options.length === 0 ? (
+          ) : options.length === 0 && !showCreate ? (
             <p role="status" className="p-2 text-muted-foreground">
               {emptyMessage}
             </p>
@@ -273,6 +313,30 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
                   </li>
                 );
               })}
+              {showCreate && (
+                <li
+                  id={createId}
+                  role="option"
+                  aria-selected={createActive}
+                  className={cn(
+                    'cursor-pointer rounded-sm px-2 py-1.5',
+                    createActive ? 'bg-accent text-accent-foreground' : '',
+                  )}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                  }}
+                  onMouseEnter={() => {
+                    setActiveIndex(options.length);
+                  }}
+                  onClick={() => {
+                    fireCreate();
+                  }}
+                >
+                  {createLabel
+                    ? createLabel(debouncedQuery)
+                    : `Create “${debouncedQuery}”`}
+                </li>
+              )}
             </ul>
           )}
         </PopoverPrimitive.Content>

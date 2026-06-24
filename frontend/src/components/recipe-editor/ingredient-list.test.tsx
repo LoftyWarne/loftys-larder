@@ -1,9 +1,11 @@
 import type {
+  IngredientReferences,
   RecipeIngredientLine,
   RecipeReferenceItem,
 } from '@loftys-larder/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { TRPCClientError } from '@trpc/client';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -11,6 +13,17 @@ import {
   type IngredientListProps,
   type IngredientPickerOption,
 } from './ingredient-list.tsx';
+
+const REFERENCES: IngredientReferences = {
+  categories: [{ id: 5, name: 'Vegetables' }],
+  units: [{ id: 1, name: 'g' }],
+};
+
+function makeTrpcError(cause: { code: string }): TRPCClientError<never> {
+  const err = new TRPCClientError<never>('boom');
+  Object.assign(err, { shape: { data: { cause } } });
+  return err;
+}
 
 const PREP_TYPES: RecipeReferenceItem[] = [
   { id: 21, name: 'chopped' },
@@ -172,6 +185,131 @@ describe('IngredientList', () => {
       await screen.findByText(/Quantity must be a non-negative number/i),
     ).toBeVisible();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('creates an ingredient inline and selects it into the row', async () => {
+    const user = userEvent.setup();
+    const createIngredient = vi.fn().mockResolvedValue({
+      id: 201,
+      label: 'Carrot',
+      defaultUnitId: 1,
+      unitName: 'g',
+    } satisfies IngredientPickerOption);
+    const { onSubmit } = setup({
+      references: REFERENCES,
+      createIngredient,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    const ingredientInput = screen.getByLabelText('Ingredient for row 1');
+    await user.click(ingredientInput);
+    await user.type(ingredientInput, 'Carrot');
+
+    await user.click(
+      await screen.findByRole('option', { name: /Create .*Carrot/ }),
+    );
+
+    // The create dialog opens, prefilled with the typed name.
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Carrot');
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Create ingredient' }),
+    );
+
+    await waitFor(() => {
+      expect(createIngredient).toHaveBeenCalledTimes(1);
+    });
+    expect(createIngredient.mock.calls[0]?.[0]).toEqual({
+      name: 'Carrot',
+      categoryId: 5,
+      defaultUnitId: 1,
+      isPlant: false,
+      averageShelfLifeDays: null,
+    });
+
+    // Dialog closes and the new ingredient is selected for the row.
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(ingredientInput).toHaveValue('Carrot');
+    // The create-form submit must not bubble to the outer ingredients form and
+    // trip its quantity validation (React events propagate through portals).
+    expect(
+      screen.queryByText(/Quantity must be a non-negative number/i),
+    ).toBeNull();
+
+    await user.type(screen.getByLabelText('Quantity for row 1'), '2');
+    await user.click(screen.getByRole('button', { name: 'Save ingredients' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual([
+      { ingredientId: 201, quantity: '2', unitId: 1, prepTypeId: null },
+    ]);
+  });
+
+  it('clears the typed text from the row when the create dialog is cancelled', async () => {
+    const user = userEvent.setup();
+    const createIngredient = vi.fn();
+    setup({ references: REFERENCES, createIngredient });
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    await user.click(screen.getByLabelText('Ingredient for row 1'));
+    await user.type(screen.getByLabelText('Ingredient for row 1'), 'Carrot');
+
+    await user.click(
+      await screen.findByRole('option', { name: /Create .*Carrot/ }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(createIngredient).not.toHaveBeenCalled();
+    // The remounted combobox is empty again.
+    expect(screen.getByLabelText('Ingredient for row 1')).toHaveValue('');
+  });
+
+  it('surfaces INGREDIENT_NAME_TAKEN on the create form', async () => {
+    const user = userEvent.setup();
+    const createIngredient = vi
+      .fn()
+      .mockRejectedValue(makeTrpcError({ code: 'INGREDIENT_NAME_TAKEN' }));
+    setup({ references: REFERENCES, createIngredient });
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    const ingredientInput = screen.getByLabelText('Ingredient for row 1');
+    await user.click(ingredientInput);
+    await user.type(ingredientInput, 'Leek');
+
+    await user.click(
+      await screen.findByRole('option', { name: /Create .*Leek/ }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Create ingredient' }),
+    );
+
+    expect(
+      await within(dialog).findByText(
+        'An ingredient with this name already exists',
+      ),
+    ).toBeVisible();
+  });
+
+  it('does not offer inline create without references or a create handler', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    const ingredientInput = screen.getByLabelText('Ingredient for row 1');
+    await user.click(ingredientInput);
+    await user.type(ingredientInput, 'Carrot');
+
+    expect(await screen.findByText('No matches')).toBeVisible();
+    expect(screen.queryByRole('option', { name: /Create/ })).toBeNull();
   });
 
   it('renders server-side line errors next to the offending row', () => {

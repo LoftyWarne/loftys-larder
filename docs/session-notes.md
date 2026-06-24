@@ -4,6 +4,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Recipe editor: create ingredient inline from the picker
+
+**Status:** implemented + tested. No schema, backend, DTO, or dependency change — reuses the existing `ingredients.create` / `ingredients.references` procedures and the `IngredientForm` dialog.
+
+### What
+
+When a recipe's ingredient row combobox is typed with a name that isn't in the dictionary, a "Create '<name>'" action now appears in the dropdown. Selecting it opens `IngredientForm` (full create form — category + unit are NOT NULL, so name-only isn't an option) prefilled with the typed name; on success the new ingredient is created and selected into that row.
+
+- **`searchable-combobox.tsx`** gained two optional, generic props: `onCreate?(query)` and `createLabel?(query)`. The create action is keyboard-navigable (sits one past the last option at index `options.length`), shows even with zero matches, and is suppressed when the query exactly matches an option (case-insensitive). No behaviour change for the base/pair pickers, which don't pass them. Kept the primitive data-source-agnostic per FEAT-21 / cross-cutting #6.
+- **`ingredient-list.tsx`** gained optional `references` + `createIngredient` props; both must be supplied to enable inline create. Surfaces `INGREDIENT_NAME_TAKEN` on the form's name field via `getDomainErrorCode`, same as the Ingredient Dictionary.
+- **`recipe-edit-page.tsx`** wires `ingredients.references` (query) + `ingredients.create` (mutation), maps the created row → picker option, and invalidates `ingredients.list`.
+
+### Carry-forward (two bugs found + fixed during the change)
+
+1. **Cancel must clear the typed text.** The combobox seeds its input from `value?.label`, and on cancel the row's `ingredient` is still `null`, so the unmatched text would linger. Fix: a per-row `comboboxResetKey` bumped on dismiss remounts that row's combobox, resetting the input. Applies to Cancel, Escape, and outside-click (all routed through `dismissCreate`).
+
+2. **React portal event bubbling.** The create `<Dialog>` was a React *child* of the editor's outer `<form>`. Radix portals it to `document.body`, but React propagates synthetic events through the React tree, not the DOM tree — so clicking the dialog's submit button bubbled a `submit` into the outer form's `onSubmit`, ran its validation, and showed "Quantity must be a non-negative number…" under the qty input. Fix: render the dialog as a **sibling** of the form (fragment), not a descendant. **Watch for this any time a portaled form/control lives inside another form's JSX subtree.** Guarded by an assertion in the inline-create test (verified load-bearing: re-nesting reproduces the symptom).
+
+---
+
 ## 2026-06-24 — Recipes browse: "Base recipe" label on cards
 
 **Status:** implemented + tested. No schema, backend, or DTO change.

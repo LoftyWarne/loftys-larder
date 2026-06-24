@@ -1,4 +1,5 @@
 import type {
+  CreateIngredientInput,
   Recipe,
   RecipeReferences,
   ReplaceRecipeIngredientsLine,
@@ -52,11 +53,13 @@ export function RecipeEditPage(): React.ReactElement {
     { enabled: idIsValid, retry: false },
   );
   const referencesQuery = trpc.recipes.references.useQuery();
+  const ingredientReferencesQuery = trpc.ingredients.references.useQuery();
   const credentialsQuery = trpc.uploads.getRecipeImageCredentials.useQuery(
     undefined,
     { enabled: false },
   );
 
+  const createIngredientMutation = trpc.ingredients.create.useMutation();
   const updateHeader = trpc.recipes.updateHeader.useMutation();
   const replaceIngredients = trpc.recipes.replaceIngredients.useMutation();
   const replaceMethod = trpc.recipes.replaceMethod.useMutation();
@@ -115,6 +118,20 @@ export function RecipeEditPage(): React.ReactElement {
       }));
     },
     [utils.ingredients.list],
+  );
+
+  const createIngredient = useCallback(
+    async (values: CreateIngredientInput): Promise<IngredientPickerOption> => {
+      const created = await createIngredientMutation.mutateAsync(values);
+      await utils.ingredients.list.invalidate();
+      return {
+        id: created.id,
+        label: created.name,
+        defaultUnitId: created.defaultUnitId,
+        unitName: created.defaultUnitName,
+      };
+    },
+    [createIngredientMutation, utils.ingredients.list],
   );
 
   const searchBases = useCallback(
@@ -353,6 +370,8 @@ export function RecipeEditPage(): React.ReactElement {
         initialDraftLines={defaults.ingredients}
         prepTypes={references.prepTypes}
         searchIngredients={searchIngredients}
+        references={ingredientReferencesQuery.data}
+        createIngredient={createIngredient}
         onSubmit={handleIngredientsSubmit}
         onLinesChange={(lines) => {
           draft.queueAutosave('ingredients', lines);

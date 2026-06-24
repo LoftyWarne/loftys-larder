@@ -21,9 +21,11 @@ const FRUITS: Fruit[] = [
 function Harness({
   initialValue = null,
   searchQuery,
+  onCreate,
 }: {
   initialValue?: Fruit | null;
   searchQuery: (query: string) => Promise<readonly Fruit[]> | readonly Fruit[];
+  onCreate?: (query: string) => void;
 }): React.ReactElement {
   const [value, setValue] = useState<Fruit | null>(initialValue);
   return (
@@ -33,7 +35,14 @@ function Harness({
       searchQuery={searchQuery}
       ariaLabel="Pick a fruit"
       debounceMs={50}
+      onCreate={onCreate}
     />
+  );
+}
+
+function filterFruits(q: string): readonly Fruit[] {
+  return FRUITS.filter((f) =>
+    f.label.toLowerCase().includes(q.trim().toLowerCase()),
   );
 }
 
@@ -179,6 +188,66 @@ describe('SearchableCombobox', () => {
     expect(input.getAttribute('aria-activedescendant')).toMatch(
       /combobox-.*-listbox-opt-2/,
     );
+  });
+
+  it('offers a create action for an unmatched query and fires onCreate on click', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness searchQuery={filterFruits} onCreate={onCreate} />);
+
+    const input = screen.getByRole('combobox');
+    await user.click(input);
+    await user.type(input, 'Cherry');
+
+    const createOption = await screen.findByRole('option', {
+      name: /Create .*Cherry/,
+    });
+    await user.click(createOption);
+
+    expect(onCreate).toHaveBeenCalledExactlyOnceWith('Cherry');
+  });
+
+  it('shows the create action even when there are no matches', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness searchQuery={filterFruits} onCreate={onCreate} />);
+
+    const input = screen.getByRole('combobox');
+    await user.click(input);
+    await user.type(input, 'zzz');
+
+    expect(screen.queryByText('No matches')).toBeNull();
+    expect(
+      await screen.findByRole('option', { name: /Create .*zzz/ }),
+    ).toBeVisible();
+  });
+
+  it('does not offer create when the query exactly matches an option', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness searchQuery={filterFruits} onCreate={onCreate} />);
+
+    const input = screen.getByRole('combobox');
+    await user.click(input);
+    await user.type(input, 'apple');
+
+    expect(await screen.findByRole('option', { name: 'Apple' })).toBeVisible();
+    expect(screen.queryByRole('option', { name: /Create/ })).toBeNull();
+  });
+
+  it('fires onCreate via keyboard navigation to the create action', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness searchQuery={filterFruits} onCreate={onCreate} />);
+
+    const input = screen.getByRole('combobox');
+    await user.click(input);
+    await user.type(input, 'zzz');
+    await screen.findByRole('option', { name: /Create .*zzz/ });
+
+    await user.keyboard('{Enter}');
+
+    expect(onCreate).toHaveBeenCalledExactlyOnceWith('zzz');
   });
 
   it('keeps the input value in sync when the parent updates the selection', async () => {

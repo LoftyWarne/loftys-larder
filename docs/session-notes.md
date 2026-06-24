@@ -4,6 +4,28 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — New recipe: scroll to the next section after "Save & continue"
+
+**Status:** UX tweak + tests added. Frontend-only. No schema / backend / DTO / dependency change. No new helper or cross-cutting change.
+
+### Change
+
+"Save & continue" on the new-recipe page (step 1 of 2) navigates to the editor (step 2). The editor opened at the top — re-showing the header the user had just filled in. It now scrolls down to the next section the user fills in.
+
+Which section: the **Batch options** section (is-base / pairing), i.e. the literal next section after the header — chosen over Ingredients in conversation.
+
+### How
+
+- `recipe-new-page.tsx`: the post-create `navigate(...)` carries `hash: 'recipe-batch-heading'` (the id already on the BatchFields `<h2>` — no markup change needed).
+- `recipe-edit-page.tsx`: a `useLocation`-driven effect scrolls the hash-targeted element into view once the recipe has loaded and its sections render, guarded by a ref so it fires once. Hash-generic, so any future in-page hash link to a section heading works the same way; default editing (no hash) still opens at the top.
+
+### Tests
+
+- New-page navigation assertion updated to expect the hash.
+- Edit-page router mock gained `useLocation` (returns `{ hash: '' }` by default; overridable per test). Two cases added: scrolls the hash target into view once loaded; does not scroll without a hash. `Element.prototype.scrollIntoView` is stubbed (jsdom doesn't implement it); the loose-alias cast keeps `@typescript-eslint/unbound-method` off the captured reference.
+
+---
+
 ## 2026-06-24 — Recipe editor: "Unsaved draft restored" notice never cleared after save
 
 **Status:** bug fixed + regression test added. Frontend-only. No schema / backend / DTO / dependency change. Touches the draft-autosave cross-cutting mechanism (DEC-28 / FEAT-22) — approved before editing.

@@ -7,9 +7,14 @@ import type {
   ReplaceRecipeMethodStepInput,
   UpdateRecipeHeaderInput,
 } from '@loftys-larder/shared';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+} from '@tanstack/react-router';
 import { TRPCClientError } from '@trpc/client';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   BatchFields,
@@ -114,6 +119,20 @@ export function RecipeEditPage(): React.ReactElement {
     enabled: idIsValid && recipe !== null,
     serverDefaults: serverDefaults ?? EMPTY_DRAFT_SHAPE,
   });
+
+  // Arriving from "Save & continue" on a new recipe, the URL carries a hash
+  // pointing at the section to start on. The target only exists once the recipe
+  // has loaded and its sections render, so scroll then — once.
+  const { hash } = useLocation();
+  const recipeLoaded = recipe !== null && draft.isReady;
+  const scrolledRef = useRef(false);
+  useEffect(() => {
+    if (scrolledRef.current || !hash || !recipeLoaded) return;
+    const target = document.getElementById(hash);
+    if (!target) return;
+    scrolledRef.current = true;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [hash, recipeLoaded]);
 
   const searchIngredients = useCallback(
     async (query: string): Promise<readonly IngredientPickerOption[]> => {

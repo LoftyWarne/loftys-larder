@@ -77,6 +77,8 @@ export function RecipeNewPage(): React.ReactElement {
       await navigate({
         to: '/recipes/$recipeId/edit',
         params: { recipeId: String(result.id) },
+        // Land on the next section to fill in rather than the header just saved.
+        hash: 'recipe-batch-heading',
       });
       return true;
     } catch (err) {

@@ -26,6 +26,7 @@ const {
   draftGetNewDraftsInvalidateMock,
   useParamsMock,
   navigateMock,
+  useLocationMock,
 } = vi.hoisted(() => ({
   recipeGetUseQueryMock: vi.fn(),
   referencesUseQueryMock: vi.fn(),
@@ -49,6 +50,7 @@ const {
   draftGetNewDraftsInvalidateMock: vi.fn(),
   useParamsMock: vi.fn(),
   navigateMock: vi.fn(),
+  useLocationMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
@@ -120,6 +122,7 @@ vi.mock('@tanstack/react-router', async () => {
     },
     useParams: useParamsMock,
     useNavigate: () => navigateMock,
+    useLocation: useLocationMock,
   };
 });
 
@@ -189,6 +192,7 @@ const RECIPE: Recipe = {
 beforeEach(() => {
   vi.clearAllMocks();
   useParamsMock.mockReturnValue({ recipeId: '7' });
+  useLocationMock.mockReturnValue({ hash: '' });
   recipeGetUseQueryMock.mockReturnValue({
     data: RECIPE,
     isLoading: false,
@@ -245,6 +249,40 @@ describe('RecipeEditPage', () => {
     expect(
       screen.getByRole('button', { name: 'Save method' }),
     ).toBeInTheDocument();
+  });
+
+  it('scrolls the hash-targeted section into view once the recipe loads', async () => {
+    useLocationMock.mockReturnValue({ hash: 'recipe-batch-heading' });
+    const scrollIntoView = vi.fn();
+    // jsdom does not implement scrollIntoView; stub it on the prototype. The
+    // loose alias keeps the unbound-method rule off the captured reference.
+    const proto = Element.prototype as unknown as Record<string, unknown>;
+    const original = proto.scrollIntoView;
+    proto.scrollIntoView = scrollIntoView;
+    try {
+      render(<RecipeEditPage />);
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      });
+      const target = document.getElementById('recipe-batch-heading');
+      expect(scrollIntoView.mock.instances[0]).toBe(target);
+    } finally {
+      proto.scrollIntoView = original;
+    }
+  });
+
+  it('does not scroll when the location carries no hash', () => {
+    useLocationMock.mockReturnValue({ hash: '' });
+    const scrollIntoView = vi.fn();
+    const proto = Element.prototype as unknown as Record<string, unknown>;
+    const original = proto.scrollIntoView;
+    proto.scrollIntoView = scrollIntoView;
+    try {
+      render(<RecipeEditPage />);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      proto.scrollIntoView = original;
+    }
   });
 
   it('sends only the changed field on header save', async () => {

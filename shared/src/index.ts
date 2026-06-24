@@ -128,6 +128,7 @@ export {
   type ListRelatedRecipesResult,
   relatedRecipeItemSchema,
   type RelatedRecipeItem,
+  RECIPE_INSTRUCTION_MAX_LENGTH,
 } from './schemas/recipes.ts';
 export {
   RECIPE_DRAFT_VERSION,

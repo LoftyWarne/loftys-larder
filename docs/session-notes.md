@@ -4,6 +4,25 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Recipe editor: method steps auto-grow to fit content
+
+**Status:** implemented + tested. No schema, backend, DTO, or dependency change. Frontend-only, plus one new exported constant in `/shared`.
+
+### What
+
+Method-step textareas in the recipe editor now grow to fit their content instead of a fixed 2 rows, the 5,000-char-per-step limit is now visible at the input, and a scroll-jump regression introduced by the auto-grow was fixed.
+
+- **`method-editor.tsx`** — each step `<textarea>` auto-sizes to its content. Initial sizing (existing/draft steps, which may be multi-line) runs once in a `useLayoutEffect`; live typing is sized in `onChange`. Classes: `min-h-16 resize-none overflow-hidden`.
+- **Char limit surfaced.** `maxLength={RECIPE_INSTRUCTION_MAX_LENGTH}` on each textarea, plus a `1234 / 5000` counter that appears only within 500 chars of the cap.
+- **`shared/src/schemas/recipes.ts`** — extracted the magic `5000` into exported `RECIPE_INSTRUCTION_MAX_LENGTH` (mirrors `RECIPE_COMMENT_MAX_LENGTH`) with a friendly `.max()` message; re-exported from the barrel.
+
+### Carry-forward (the gotcha)
+
+- **Don't autosize from an inline ref callback.** `ref={(el) => …}` is a fresh function each render, so React detaches/reattaches it on *every* re-render. The first version called `autosize` there, which sets `height:auto` to measure — momentarily collapsing tall textareas. When the debounced draft autosave (`queueAutosave('method', …)`) fired a parent re-render, every textarea collapsed, the document shrank, and the browser clamped scroll back to the top — so a long step couldn't be scrolled to. Fix: size once on mount via `useLayoutEffect`, size on typing via `onChange`; the inline height persists on the DOM node across re-renders, so the ref no longer needs to resize.
+- **`autosize` restores scroll position** (`scrollX/scrollY` captured before the `auto` reset, restored only if it actually moved) as defense — the guard also keeps jsdom's unimplemented `window.scrollTo` quiet in tests.
+
+---
+
 ## 2026-06-24 — Reference data (units, prep types) seeded into prod via the release command
 
 **Status:** implemented + verified locally (seed run twice = clean no-op; 9 units + 6 prep types present). No schema change, no dependency change. Touches the deploy surface (DEC-40) — approved.

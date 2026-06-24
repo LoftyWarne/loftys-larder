@@ -2,7 +2,14 @@ import type {
   RecipeMethodStep,
   ReplaceRecipeMethodStepInput,
 } from '@loftys-larder/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { RECIPE_INSTRUCTION_MAX_LENGTH } from '@loftys-larder/shared';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { Button } from '@/components/ui/button.tsx';
 
@@ -66,6 +73,28 @@ export function MethodEditor({
   const [submitting, setSubmitting] = useState(false);
   const focusNewIndex = useRef<number | null>(null);
   const textareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
+
+  // Resetting height to `auto` briefly collapses the textarea so we can read
+  // its true scrollHeight. That collapse shrinks the document, which can make
+  // the browser clamp the scroll position — so capture and restore it.
+  const autosize = useCallback((el: HTMLTextAreaElement) => {
+    const { scrollX, scrollY } = window;
+    el.style.height = 'auto';
+    el.style.height = `${String(el.scrollHeight)}px`;
+    if (window.scrollX !== scrollX || window.scrollY !== scrollY) {
+      window.scrollTo(scrollX, scrollY);
+    }
+  }, []);
+
+  // Size the initially-seeded steps once after mount. Typing is handled in the
+  // textarea's onChange; we deliberately do NOT autosize on every ref attach,
+  // because the ref callback re-runs on every render and would thrash heights
+  // (and the scroll position) when an unrelated re-render occurs.
+  useLayoutEffect(() => {
+    for (const el of textareaRefs.current.values()) {
+      autosize(el);
+    }
+  }, [autosize]);
 
   const updateStep = useCallback((rowKey: string, instruction: string) => {
     setSteps((current) =>
@@ -189,15 +218,23 @@ export function MethodEditor({
                   }}
                   aria-label={`Step ${String(index + 1)} text`}
                   rows={2}
-                  className="flex w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  maxLength={RECIPE_INSTRUCTION_MAX_LENGTH}
+                  className="flex min-h-16 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   value={step.instruction}
                   onChange={(event) => {
                     updateStep(step.rowKey, event.target.value);
+                    autosize(event.currentTarget);
                   }}
                 />
                 {step.error && (
                   <p role="alert" className="text-sm text-destructive">
                     {step.error}
+                  </p>
+                )}
+                {step.instruction.length >=
+                  RECIPE_INSTRUCTION_MAX_LENGTH - 500 && (
+                  <p className="text-right text-xs text-muted-foreground">
+                    {step.instruction.length} / {RECIPE_INSTRUCTION_MAX_LENGTH}
                   </p>
                 )}
               </div>

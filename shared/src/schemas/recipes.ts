@@ -155,7 +155,15 @@ const recipeQuantitySchema = z
     /^\d+(\.\d{1,3})?$/,
     'Quantity must be a non-negative number with up to 3 decimal places',
   );
-const recipeInstructionSchema = z.string().trim().min(1).max(5000);
+export const RECIPE_INSTRUCTION_MAX_LENGTH = 5000;
+const recipeInstructionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(
+    RECIPE_INSTRUCTION_MAX_LENGTH,
+    `Step text must be ${String(RECIPE_INSTRUCTION_MAX_LENGTH)} characters or fewer`,
+  );
 
 // Fields editable on the recipe header via `create` and `updateHeader`.
 // Deliberately excludes `isBase`, `baseRecipeId`, and `pairedRecipeId` — those

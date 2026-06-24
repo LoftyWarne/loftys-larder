@@ -37,8 +37,10 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 COPY --from=build --chown=node:node /repo/backend/dist/server.js ./server.js
-# migrate.js + the generated SQL run as the Fly release_command (see fly.toml).
+# migrate.js + the generated SQL run as the Fly release_command (see fly.toml);
+# seed-reference.js runs right after to populate the global reference tables.
 COPY --from=build --chown=node:node /repo/backend/dist/migrate.js ./migrate.js
+COPY --from=build --chown=node:node /repo/backend/dist/seed-reference.js ./seed-reference.js
 COPY --from=build --chown=node:node /repo/backend/drizzle ./drizzle
 COPY --from=build --chown=node:node /repo/frontend/dist ./public
 

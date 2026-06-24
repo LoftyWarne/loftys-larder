@@ -4,6 +4,29 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-24 — Reference data (units, prep types) seeded into prod via the release command
+
+**Status:** implemented + verified locally (seed run twice = clean no-op; 9 units + 6 prep types present). No schema change, no dependency change. Touches the deploy surface (DEC-40) — approved.
+
+### What
+
+The reference lookup tables (`units_of_measurement`, `preparation_types`, plus `ingredient_categories`, `meal_occasions`) have no edit UI, and the seed path (`runSeeds` → `seedReference`) only ran in dev (`pnpm seed`) and tests — so units/prep types never reached the prod DB (prod only ran `migrate.js`). Fixed by bundling a reference-only seed entrypoint and chaining it into the Fly release command.
+
+- **`backend/src/seed-reference.ts`** — new standalone entrypoint mirroring `migrate.ts` (parses only `DATABASE_URL`, fresh `max:1` pool, standalone Pino). Builds `withTransaction` via the canonical `makeWithTransaction(db)` and calls `runReferenceSeeds`.
+- **`backend/src/db/seeds/index.ts`** — new `runReferenceSeeds(withTransaction)`, a reference-only wrapper around `seedReference` (deliberately excludes `seedHousehold`).
+- **`backend/build.ts`** — `src/seed-reference.ts` added to esbuild entrypoints → `dist/seed-reference.js`.
+- **`Dockerfile`** — copies `dist/seed-reference.js` into the runtime image.
+- **`fly.toml`** — `release_command = "node /app/migrate.js && node /app/seed-reference.js"`.
+
+### Carry-forward
+
+- **Purely additive / data-safe.** `seedReference` is only `INSERT … ON CONFLICT (name) DO NOTHING` on four tables — no `TRUNCATE`/`DELETE`/`UPDATE`, no reference to any other table. Re-running on every deploy is a no-op once seeded and retains all prod data. (The only data-wiping path in the repo is the test-only `resetHouseholdData()` in `e2e/fixtures/db.ts`.)
+- **Can't rename/remove a reference value via this path** — it only adds missing names. Renames/removals need a deliberate data migration.
+- **Single source of truth** stays in `backend/src/db/seeds/reference.ts`; edit the constants there and the next deploy seeds new rows. Don't hand-insert into prod.
+- **Household row out of scope** — `runReferenceSeeds` excludes it. If prod is ever missing `CURRENT_HOUSEHOLD_ID`, switch the release call to `runSeeds` (household + reference, also idempotent).
+
+---
+
 ## 2026-06-24 — Recipe editor: create ingredient inline from the picker
 
 **Status:** implemented + tested. No schema, backend, DTO, or dependency change — reuses the existing `ingredients.create` / `ingredients.references` procedures and the `IngredientForm` dialog.

@@ -28,3 +28,16 @@ export async function runDevSeeds(
     await seedDevRecipes(tx);
   });
 }
+
+// Reference-only subset of `runSeeds`, used by the production seed entrypoint
+// (`src/seed-reference.ts`) that runs as part of the Fly release command. The
+// household row is deliberately excluded — this seeds the global lookup tables
+// (units, prep types, ingredient categories, meal occasions) only. Idempotent
+// via per-seed `ON CONFLICT DO NOTHING`, so it is safe to run on every deploy.
+export async function runReferenceSeeds(
+  withTransaction: WithTransaction,
+): Promise<void> {
+  await withTransaction(async (tx) => {
+    await seedReference(tx);
+  });
+}

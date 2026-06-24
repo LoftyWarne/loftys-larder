@@ -10,10 +10,13 @@ await rm(outdir, { recursive: true, force: true });
 
 const result = await build({
   // server.js is the app; migrate.js is the Fly release-command entrypoint
-  // that runs drizzle-orm's programmatic migrator (DEC-40, DEC-61).
+  // that runs drizzle-orm's programmatic migrator (DEC-40, DEC-61);
+  // seed-reference.js runs after it in the same release command to populate the
+  // global reference tables (units, prep types, …).
   entryPoints: [
     path.resolve(here, 'src/server.ts'),
     path.resolve(here, 'src/migrate.ts'),
+    path.resolve(here, 'src/seed-reference.ts'),
   ],
   outdir,
   bundle: true,

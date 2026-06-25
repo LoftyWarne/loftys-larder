@@ -238,6 +238,72 @@ describe('SlotEditorSheet — base cooking', () => {
       screen.queryByTestId('base-suggestion-hint'),
     ).not.toBeInTheDocument();
   });
+
+  it('shows the "Cooking a base for batch use?" section when the meal has a base', () => {
+    render(
+      <SlotEditorSheet
+        open
+        slot={BASE_SLOT}
+        members={[]}
+        isSaving={false}
+        hasBaseSupply={true}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByText('Cooking a base for batch use?'),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the "Cooking a base for batch use?" section when the meal has no base', () => {
+    const flatSlot: PlanSlot = {
+      ...BASE_SLOT,
+      recipe: BASE_SLOT.recipe
+        ? { ...BASE_SLOT.recipe, baseRecipeId: null }
+        : null,
+    };
+    render(
+      <SlotEditorSheet
+        open
+        slot={flatSlot}
+        members={[]}
+        isSaving={false}
+        hasBaseSupply={true}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(
+      screen.queryByText('Cooking a base for batch use?'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the section for a flat meal even when a cooked base is already recorded', () => {
+    const flatSlotWithBase: PlanSlot = {
+      ...BASE_SLOT,
+      recipe: BASE_SLOT.recipe
+        ? { ...BASE_SLOT.recipe, baseRecipeId: null }
+        : null,
+      cooksBaseRecipeId: 22,
+      cooksBaseServings: 8,
+      cooksBaseRecipe: { id: 22, name: 'Tomato Base', isDeleted: false },
+    };
+    render(
+      <SlotEditorSheet
+        open
+        slot={flatSlotWithBase}
+        members={[]}
+        isSaving={false}
+        hasBaseSupply={true}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(
+      screen.queryByText('Cooking a base for batch use?'),
+    ).not.toBeInTheDocument();
+  });
 });
 
 // Reference `BASE_RECIPE` so the assertions stay rooted to a stable mock row

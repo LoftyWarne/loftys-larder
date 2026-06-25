@@ -4,6 +4,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-25 — Slot editor: hide the base-cook section unless the meal is a batch-version
+
+**Status:** UX tweak + tests added. Frontend-only. No schema / backend / DTO / dependency change. Refines FEAT-32's slot editor; no new DEC minted.
+
+### Change
+
+The "Cooking a base for batch use?" section in the slot-editor sheet now only renders when the eating recipe is a batch-version (i.e. has a `base_recipe_id`). A recipe with no base defined has nothing to batch-cook, so the section is hidden outright.
+
+FEAT-32's acceptance criterion (line 1314) describes the base-cook combobox as an always-present optional picker. In practice it's only meaningful for batch-version meals — for every other recipe it was an inert picker that, if filled, would record a `cooks_base_*` pair the meal can't relate to. Gating it on `mealIsBatchVersion` matches the pre-suggestion logic already in the sheet (the suggested base only appears for batch-versions).
+
+### How
+
+- `slot-editor-sheet.tsx`: factored `mealIsBatchVersion` out of the existing `isBatchVersion(...)` call (the batch-supply warning reuses it), then added `showCookedBaseSection = state.slotType === 'recipe' && mealIsBatchVersion` and wrapped the fieldset in it.
+
+### Decision worth carrying
+
+- **Hidden unconditionally when the recipe has no base — even if a `cooks_base_*` pair is already recorded on the slot.** An earlier draft kept the section visible when `state.baseRecipe !== null` so stranded data stayed editable; the user chose the stricter rule. A flat recipe carrying a stale cooked-base pair won't expose it in the editor. Not a concern in practice (the pair is only ever set through this same section, which required a batch-version meal to appear), but flagged in case a data-migration or pair-switch ever leaves a flat recipe holding `cooks_base_recipe_id`.
+
+---
+
 ## 2026-06-24 — First-run onboarding: new users must set a name at `/welcome`
 
 **Status:** Frontend-only feature + tests added. One new Zod form schema in `/shared`. No DB schema / backend procedure / dependency change. Extends FEAT-15 (protected routing) and FEAT-16 (name in settings); no new DEC minted.

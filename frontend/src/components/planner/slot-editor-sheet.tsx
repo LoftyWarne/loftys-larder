@@ -133,12 +133,21 @@ export function SlotEditorSheet({
     { enabled: showSuggestion },
   );
 
+  const mealIsBatchVersion =
+    state !== null && isBatchVersion(mealRecipe, slotRecipe, state.recipe);
+
   const showBatchWarning =
     state !== null &&
     state.slotType === 'recipe' &&
-    isBatchVersion(mealRecipe, slotRecipe, state.recipe) &&
+    mealIsBatchVersion &&
     state.baseRecipe === null &&
     !hasBaseSupply;
+
+  // "Cooking a base for batch use?" only makes sense when the eating recipe is
+  // a batch-version of a base. A recipe with no base defined has nothing to
+  // batch-cook, so hide the section unconditionally.
+  const showCookedBaseSection =
+    state !== null && state.slotType === 'recipe' && mealIsBatchVersion;
 
   // Pair-switch destination — the slot's pairedRecipe sub-object joined by the
   // server. Surfaces only when the saved recipe has a pair AND the sibling is
@@ -400,78 +409,86 @@ export function SlotEditorSheet({
                 />
               )}
 
-              <fieldset className="flex flex-col gap-2 rounded-md border border-input bg-muted/30 p-2">
-                <legend className="text-sm font-medium">
-                  Cooking a base for batch use?
-                </legend>
-                <SearchableCombobox<RecipeOption>
-                  value={
-                    state.baseRecipe
-                      ? {
-                          id: state.baseRecipe.id,
-                          label: state.baseRecipe.name,
-                          recipe: minimalRecipeListItem(
-                            state.baseRecipe.id,
-                            state.baseRecipe.name,
-                            null,
-                          ),
+              {showCookedBaseSection && (
+                <fieldset className="flex flex-col gap-2 rounded-md border border-input bg-muted/30 p-2">
+                  <legend className="text-sm font-medium">
+                    Cooking a base for batch use?
+                  </legend>
+                  <SearchableCombobox<RecipeOption>
+                    value={
+                      state.baseRecipe
+                        ? {
+                            id: state.baseRecipe.id,
+                            label: state.baseRecipe.name,
+                            recipe: minimalRecipeListItem(
+                              state.baseRecipe.id,
+                              state.baseRecipe.name,
+                              null,
+                            ),
+                          }
+                        : null
+                    }
+                    onChange={(option) => {
+                      setState((prev) => {
+                        if (!prev) return prev;
+                        if (!option) {
+                          return {
+                            ...prev,
+                            baseRecipe: null,
+                            baseServings: '',
+                          };
                         }
-                      : null
-                  }
-                  onChange={(option) => {
-                    setState((prev) => {
-                      if (!prev) return prev;
-                      if (!option) {
-                        return { ...prev, baseRecipe: null, baseServings: '' };
-                      }
-                      const next: EditorState = {
-                        ...prev,
-                        baseRecipe: {
-                          id: option.recipe.id,
-                          name: option.recipe.name,
-                        },
-                      };
-                      if (prev.baseServings === '') {
-                        next.baseServings = String(option.recipe.baseServings);
-                      }
-                      return next;
-                    });
-                  }}
-                  searchQuery={baseSearchQuery}
-                  ariaLabel="Search base recipe"
-                  placeholder="Search base recipe"
-                />
-                {showSuggestion && suggestionQuery.data && (
-                  <button
-                    type="button"
-                    onClick={handleApplySuggestion}
-                    data-testid="base-suggestion-hint"
-                    className="self-start rounded-md border border-dashed border-primary px-2 py-1 text-xs text-primary hover:bg-accent"
-                  >
-                    Suggested: {suggestionQuery.data.name} — use this?
-                  </button>
-                )}
-                {state.baseRecipe !== null && (
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium">Base servings</span>
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      value={state.baseServings}
-                      onChange={(event) => {
-                        setState((prev) =>
-                          prev
-                            ? { ...prev, baseServings: event.target.value }
-                            : prev,
-                        );
-                      }}
-                      required
-                    />
-                  </label>
-                )}
-                {showBatchWarning && <BatchWarning />}
-              </fieldset>
+                        const next: EditorState = {
+                          ...prev,
+                          baseRecipe: {
+                            id: option.recipe.id,
+                            name: option.recipe.name,
+                          },
+                        };
+                        if (prev.baseServings === '') {
+                          next.baseServings = String(
+                            option.recipe.baseServings,
+                          );
+                        }
+                        return next;
+                      });
+                    }}
+                    searchQuery={baseSearchQuery}
+                    ariaLabel="Search base recipe"
+                    placeholder="Search base recipe"
+                  />
+                  {showSuggestion && suggestionQuery.data && (
+                    <button
+                      type="button"
+                      onClick={handleApplySuggestion}
+                      data-testid="base-suggestion-hint"
+                      className="self-start rounded-md border border-dashed border-primary px-2 py-1 text-xs text-primary hover:bg-accent"
+                    >
+                      Suggested: {suggestionQuery.data.name} — use this?
+                    </button>
+                  )}
+                  {state.baseRecipe !== null && (
+                    <label className="flex flex-col gap-1 text-sm">
+                      <span className="font-medium">Base servings</span>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        value={state.baseServings}
+                        onChange={(event) => {
+                          setState((prev) =>
+                            prev
+                              ? { ...prev, baseServings: event.target.value }
+                              : prev,
+                          );
+                        }}
+                        required
+                      />
+                    </label>
+                  )}
+                  {showBatchWarning && <BatchWarning />}
+                </fieldset>
+              )}
             </>
           )}
 

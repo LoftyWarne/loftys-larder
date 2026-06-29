@@ -175,20 +175,22 @@ function describeSlotForA11y(slot: PlanSlot, shortBy?: number): string {
     slot.comment !== null && slot.comment !== ''
       ? `, comment: ${slot.comment}`
       : '';
+  const headcount = slot.dinerUserIds.length + slot.guestCount;
+  const eating = headcount > 0 ? `, ${String(headcount)} eating` : '';
   const base = `${slot.occasionName} on ${slot.date}`;
   if (slot.items.length > 0) {
     const names = slot.items
       .map((item) => describeItemForA11y(item))
       .join(', ');
-    return `${base}: ${names}${short}${note}`;
+    return `${base}: ${names}${short}${eating}${note}`;
   }
   if (slot.slotType === 'recipe') {
-    return `${base}: recipe${short}${note}`;
+    return `${base}: recipe${short}${eating}${note}`;
   }
   if (slot.slotType === 'empty') {
     return `${base}: empty slot${note}`;
   }
-  return `${base}: ${STATE_LABEL[slot.slotType]}${short}${note}`;
+  return `${base}: ${STATE_LABEL[slot.slotType]}${short}${eating}${note}`;
 }
 
 function describeItemForA11y(item: PlanSlotItem): string {

@@ -15,6 +15,8 @@ const BASE_SLOT: PlanSlot = {
   chefUserId: null,
   comment: null,
   items: [],
+  dinerUserIds: [],
+  guestCount: 0,
 };
 
 function eatItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {

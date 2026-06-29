@@ -80,6 +80,11 @@ interface EditorState {
   chefUserId: string | null;
   comment: string;
   items: EditorItem[];
+  // Who's eating: ids of the household members present.
+  dinerUserIds: string[];
+  // Accountless diners (kids, guests). String for input round-trip, like
+  // `servings`.
+  guestCount: string;
 }
 
 export interface SlotEditorSheetProps {
@@ -97,7 +102,11 @@ export interface SlotEditorSheetProps {
   ) => void;
 }
 
-function toEditorItem(recipe: AddableRecipe, kind: SlotItemKind): EditorItem {
+function toEditorItem(
+  recipe: AddableRecipe,
+  kind: SlotItemKind,
+  defaultServings: number,
+): EditorItem {
   return {
     recipeId: recipe.id,
     name: recipe.name,
@@ -105,7 +114,7 @@ function toEditorItem(recipe: AddableRecipe, kind: SlotItemKind): EditorItem {
     isBase: recipe.isBase,
     baseRecipeId: recipe.baseRecipeId,
     isDeleted: recipe.isDeleted,
-    servings: String(recipe.baseServings),
+    servings: String(defaultServings),
     kind,
   };
 }
@@ -144,6 +153,8 @@ export function SlotEditorSheet({
         servings: String(item.servings),
         kind: item.kind,
       })),
+      dinerUserIds: [...slot.dinerUserIds],
+      guestCount: String(slot.guestCount),
     });
   }, [slot]);
 
@@ -202,6 +213,7 @@ export function SlotEditorSheet({
 
   const shortBy = liveBalances?.shortfallBySlot.get(slot.id);
   const remainingByBase = liveBalances?.remainingByBase;
+  const headcount = headcountOf(state);
 
   function addRecipe(recipe: AddableRecipe, kind: SlotItemKind): void {
     setState((prev) => {
@@ -209,7 +221,15 @@ export function SlotEditorSheet({
       // Guard against duplicates — the same recipe can't appear twice in one
       // slot, in either role.
       if (prev.items.some((it) => it.recipeId === recipe.id)) return prev;
-      return { ...prev, items: [...prev.items, toEditorItem(recipe, kind)] };
+      // An `eat` dish feeds the table, so default it to the headcount when one
+      // is set; a `cook_ahead` base is a batch, so keep its own base servings.
+      const headcount = headcountOf(prev);
+      const defaultServings =
+        kind === 'eat' && headcount > 0 ? headcount : recipe.baseServings;
+      return {
+        ...prev,
+        items: [...prev.items, toEditorItem(recipe, kind, defaultServings)],
+      };
     });
   }
 
@@ -232,6 +252,8 @@ export function SlotEditorSheet({
         chefUserId: null,
         comment: null,
         items: [],
+        dinerUserIds: [],
+        guestCount: 0,
       },
       { optimisticItems: [] },
     );
@@ -488,6 +510,71 @@ export function SlotEditorSheet({
             </select>
           </label>
 
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">
+              Who&apos;s eating{' '}
+              <span className="font-normal text-muted-foreground">
+                {headcount > 0
+                  ? `(${String(headcount)} eating)`
+                  : '(nobody yet)'}
+              </span>
+            </legend>
+            {members.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {members.map((member) => {
+                  const selected = state.dinerUserIds.includes(member.id);
+                  return (
+                    <label
+                      key={member.id}
+                      className={cn(
+                        'flex cursor-pointer items-center gap-1 rounded-md border border-input px-3 py-1 text-sm transition',
+                        selected && 'border-primary bg-accent',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => {
+                          setState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  dinerUserIds: selected
+                                    ? prev.dinerUserIds.filter(
+                                        (id) => id !== member.id,
+                                      )
+                                    : [...prev.dinerUserIds, member.id],
+                                }
+                              : prev,
+                          );
+                        }}
+                        className="sr-only"
+                      />
+                      {member.name}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <span>Guests</span>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={state.guestCount}
+                aria-label="Number of guests"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setState((prev) =>
+                    prev ? { ...prev, guestCount: value } : prev,
+                  );
+                }}
+                className="w-20"
+              />
+            </label>
+          </fieldset>
+
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium">Comment</span>
             <textarea
@@ -529,6 +616,21 @@ export function SlotEditorSheet({
   );
 }
 
+// `guestCount` round-trips through a string input; parse it leniently (empty or
+// garbage → 0) so a half-typed value never blocks a save.
+function parseGuestCount(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) ? parsed : 0;
+}
+
+// Headcount = named members present + guests. Drives the "(N eating)" label and
+// the new-dish servings prefill.
+function headcountOf(state: EditorState): number {
+  return (
+    state.dinerUserIds.length + Math.max(0, parseGuestCount(state.guestCount))
+  );
+}
+
 interface BuiltSave {
   input: UpdateSlotInput;
   optimisticItems: PlanSlotItem[];
@@ -550,6 +652,12 @@ function buildInputForSave(
     parsed.push({ item, servings });
   }
 
+  // An empty slot carries no attendance (the schema refine enforces this too).
+  const isEmpty = state.slotType === 'empty';
+  const guestCount = isEmpty
+    ? 0
+    : Math.max(0, parseGuestCount(state.guestCount));
+
   const input: UpdateSlotInput = {
     slotId: slot.id,
     slotType: state.slotType,
@@ -561,6 +669,8 @@ function buildInputForSave(
       kind: item.kind,
       sortOrder: index,
     })),
+    dinerUserIds: isEmpty ? [] : state.dinerUserIds,
+    guestCount,
   };
 
   const optimisticItems: PlanSlotItem[] = parsed.map(

@@ -114,6 +114,8 @@ function applySlotPatch(
             chefUserId: input.chefUserId,
             comment: input.comment,
             items,
+            dinerUserIds: input.dinerUserIds,
+            guestCount: input.guestCount,
           }
         : slot,
     ),

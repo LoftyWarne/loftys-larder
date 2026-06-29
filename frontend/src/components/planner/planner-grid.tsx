@@ -1,12 +1,15 @@
-import type { PlanSlot } from '@loftys-larder/shared';
+import type { HouseholdMember, PlanSlot } from '@loftys-larder/shared';
 import { useMemo } from 'react';
 
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { SlotCell } from '@/components/planner/slot-cell.tsx';
+import { SlotDinersChip } from '@/components/planner/slot-diners-chip.tsx';
 import { eachDateInRange, formatDayLabel } from '@/lib/date-utils.ts';
 
 export interface PlannerGridProps {
   slots: readonly PlanSlot[];
+  // Household members, to resolve a slot's diner ids to names for the chip.
+  members: readonly HouseholdMember[];
   rangeStart: string;
   rangeEnd: string;
   // Base-consumption shortfall per slot id (how many base servings short),
@@ -30,6 +33,7 @@ interface OccasionColumn {
 
 export function PlannerGrid({
   slots,
+  members,
   rangeStart,
   rangeEnd,
   shortfallBySlot,
@@ -42,6 +46,12 @@ export function PlannerGrid({
     () => eachDateInRange(rangeStart, rangeEnd),
     [rangeStart, rangeEnd],
   );
+
+  const memberNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const member of members) map.set(member.id, member.name);
+    return map;
+  }, [members]);
 
   const occasions = useMemo<OccasionColumn[]>(() => {
     const seen = new Map<number, string>();
@@ -120,6 +130,14 @@ export function PlannerGrid({
                       slot={slot}
                       dndEnabled={dndEnabled}
                       shortBy={shortfallBySlot?.get(slot.id)}
+                      chefChip={
+                        <SlotDinersChip
+                          dinerNames={slot.dinerUserIds.map(
+                            (id) => memberNameById.get(id) ?? 'Unknown',
+                          )}
+                          guestCount={slot.guestCount}
+                        />
+                      }
                       onClick={() => {
                         onSlotClick(slot);
                       }}

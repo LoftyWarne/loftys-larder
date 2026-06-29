@@ -63,6 +63,8 @@ const SLOT_EMPTY: PlanSlot = {
   chefUserId: null,
   comment: null,
   items: [],
+  dinerUserIds: [],
+  guestCount: 0,
 };
 
 const PLAN: GetPlanResult = {
@@ -92,6 +94,8 @@ const ASSIGN_INPUT: UpdateSlotInput = {
   chefUserId: null,
   comment: null,
   items: [{ recipeId: 10, servings: 2, kind: 'eat', sortOrder: 0 }],
+  dinerUserIds: [],
+  guestCount: 0,
 };
 
 beforeEach(() => {

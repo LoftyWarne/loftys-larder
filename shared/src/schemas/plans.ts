@@ -61,6 +61,11 @@ export const planSlotSchema = z.object({
   chefUserId: z.string().nullable(),
   comment: z.string().nullable(),
   items: z.array(planSlotItemSchema),
+  // Who's eating: the household members present plus a guest count for diners
+  // with no account (kids, guests). Headcount = dinerUserIds.length + guestCount,
+  // derived in the UI, never stored.
+  dinerUserIds: z.array(z.string()),
+  guestCount: z.number().int().nonnegative(),
 });
 export type PlanSlot = z.infer<typeof planSlotSchema>;
 

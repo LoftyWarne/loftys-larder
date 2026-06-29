@@ -17,11 +17,13 @@ import { users } from '../../db/schema/auth.ts';
 import * as schema from '../../db/schema/index.ts';
 import {
   mealPlans,
+  mealPlanSlotDiners,
   mealPlanSlotItems,
   mealPlanSlots,
 } from '../../db/schema/meal-plans.ts';
 import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
+import { loadSlotDiners } from '../../lib/slot-diners.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import { formatCivilDate } from '../../lib/date-utils.ts';
@@ -54,7 +56,10 @@ export const slotsRouter = router({
       }
 
       if (input.chefUserId !== null) {
-        await assertUserExists(ctx.db, input.chefUserId);
+        await assertUserExists(ctx.db, input.chefUserId, 'SLOT_CHEF_NOT_FOUND');
+      }
+      for (const dinerUserId of input.dinerUserIds) {
+        await assertUserExists(ctx.db, dinerUserId, 'SLOT_DINER_NOT_FOUND');
       }
 
       const withTransaction = makeWithTransaction(ctx.db);
@@ -65,9 +70,11 @@ export const slotsRouter = router({
             slotType: input.slotType,
             chefUserId: input.chefUserId,
             comment: input.comment,
+            guestCount: input.guestCount,
           })
           .where(eq(mealPlanSlots.id, slot.id));
         await replaceSlotItems(tx, slot.id, input.items);
+        await replaceSlotDiners(tx, slot.id, input.dinerUserIds);
       });
 
       const selected = await selectSlotById(ctx.db, slot.id);
@@ -96,10 +103,13 @@ export const slotsRouter = router({
             cause: { code: 'SLOT_RELOCATE_CROSS_PLAN' },
           });
         }
-        const [sourceItems, destItems] = await Promise.all([
-          loadRawSlotItems(tx, source.id),
-          loadRawSlotItems(tx, dest.id),
-        ]);
+        const [sourceItems, destItems, sourceDiners, destDiners] =
+          await Promise.all([
+            loadRawSlotItems(tx, source.id),
+            loadRawSlotItems(tx, dest.id),
+            loadRawSlotDiners(tx, source.id),
+            loadRawSlotDiners(tx, dest.id),
+          ]);
         const destPopulated = dest.slotType !== 'empty' || destItems.length > 0;
 
         // Dest receives source's content unconditionally; source receives
@@ -121,6 +131,15 @@ export const slotsRouter = router({
           await replaceSlotItems(tx, source.id, destItems);
         }
 
+        // Diners ride along with the slot's content (the "who's eating" set).
+        await tx
+          .delete(mealPlanSlotDiners)
+          .where(inArray(mealPlanSlotDiners.slotId, [source.id, dest.id]));
+        await replaceSlotDiners(tx, dest.id, sourceDiners);
+        if (destPopulated) {
+          await replaceSlotDiners(tx, source.id, destDiners);
+        }
+
         return { sourceSlotId: source.id, destSlotId: dest.id };
       });
       const [sourceSlot, destSlot] = await Promise.all([
@@ -137,20 +156,25 @@ interface SlotMeta {
   slotType: typeof mealPlanSlots.$inferSelect.slotType;
   chefUserId: string | null;
   comment: string | null;
+  guestCount: number;
 }
 
-type MetaPatch = Pick<SlotMeta, 'slotType' | 'chefUserId' | 'comment'>;
+type MetaPatch = Pick<
+  SlotMeta,
+  'slotType' | 'chefUserId' | 'comment' | 'guestCount'
+>;
 
 function metaPatch(slot: SlotMeta): MetaPatch {
   return {
     slotType: slot.slotType,
     chefUserId: slot.chefUserId,
     comment: slot.comment,
+    guestCount: slot.guestCount,
   };
 }
 
 function emptyMetaPatch(): MetaPatch {
-  return { slotType: 'empty', chefUserId: null, comment: null };
+  return { slotType: 'empty', chefUserId: null, comment: null, guestCount: 0 };
 }
 
 // Replace the slot's items with `items`, reinserting in the given order. The
@@ -197,6 +221,32 @@ async function loadRawSlotItems(
     .from(mealPlanSlotItems)
     .where(eq(mealPlanSlotItems.slotId, slotId))
     .orderBy(asc(mealPlanSlotItems.sortOrder), asc(mealPlanSlotItems.id));
+}
+
+// Replace the slot's named diners with `userIds`. Like `replaceSlotItems`, the
+// caller may have batch-deleted prior rows already (relocate does); this helper
+// also clears the slot's own rows so `update` can call it standalone.
+async function replaceSlotDiners(
+  tx: Tx,
+  slotId: number,
+  userIds: readonly string[],
+): Promise<void> {
+  await tx
+    .delete(mealPlanSlotDiners)
+    .where(eq(mealPlanSlotDiners.slotId, slotId));
+  if (userIds.length === 0) return;
+  await tx
+    .insert(mealPlanSlotDiners)
+    .values(userIds.map((userId) => ({ slotId, userId })));
+}
+
+async function loadRawSlotDiners(tx: Tx, slotId: number): Promise<string[]> {
+  const rows = await tx
+    .select({ userId: mealPlanSlotDiners.userId })
+    .from(mealPlanSlotDiners)
+    .where(eq(mealPlanSlotDiners.slotId, slotId))
+    .orderBy(asc(mealPlanSlotDiners.userId));
+  return rows.map((row) => row.userId);
 }
 
 async function loadSlotItemRecipeIds(
@@ -247,6 +297,7 @@ async function loadHouseholdSlotContent(
       slotType: mealPlanSlots.slotType,
       chefUserId: mealPlanSlots.chefUserId,
       comment: mealPlanSlots.comment,
+      guestCount: mealPlanSlots.guestCount,
     })
     .from(mealPlanSlots)
     .innerJoin(mealPlans, eq(mealPlanSlots.planId, mealPlans.id))
@@ -334,7 +385,11 @@ async function assertRecipeIsBase(
   }
 }
 
-async function assertUserExists(db: DbHandle, userId: string): Promise<void> {
+async function assertUserExists(
+  db: DbHandle,
+  userId: string,
+  code: 'SLOT_CHEF_NOT_FOUND' | 'SLOT_DINER_NOT_FOUND',
+): Promise<void> {
   const rows = await db
     .select({ id: users.id })
     .from(users)
@@ -343,8 +398,11 @@ async function assertUserExists(db: DbHandle, userId: string): Promise<void> {
   if (!rows[0]) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message: 'Chef user not found',
-      cause: { code: 'SLOT_CHEF_NOT_FOUND' },
+      message:
+        code === 'SLOT_CHEF_NOT_FOUND'
+          ? 'Chef user not found'
+          : 'Diner user not found',
+      cause: { code },
     });
   }
 }
@@ -363,6 +421,7 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
       slotType: mealPlanSlots.slotType,
       chefUserId: mealPlanSlots.chefUserId,
       comment: mealPlanSlots.comment,
+      guestCount: mealPlanSlots.guestCount,
     })
     .from(mealPlanSlots)
     .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
@@ -376,6 +435,7 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
     });
   }
   const items = (await loadSlotItems(db, [slotId])).get(slotId) ?? [];
+  const dinerUserIds = (await loadSlotDiners(db, [slotId])).get(slotId) ?? [];
   return {
     id: row.id,
     planId: row.planId,
@@ -386,5 +446,7 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
     chefUserId: row.chefUserId,
     comment: row.comment,
     items,
+    dinerUserIds,
+    guestCount: row.guestCount,
   };
 }

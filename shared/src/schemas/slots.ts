@@ -42,6 +42,13 @@ export const updateSlotInputSchema = z
     chefUserId: z.string().min(1).nullable(),
     comment: slotCommentSchema.nullable(),
     items: z.array(slotItemInputSchema),
+    // Who's eating: named household members + a guest count for accountless
+    // diners. Allowed on any slot type that's actually a meal; cleared when the
+    // slot goes empty (see the refine below). Full-replace, like `items`: the
+    // caller always declares the complete set. The procedure checks each user
+    // id exists in the household.
+    dinerUserIds: z.array(z.string().min(1)),
+    guestCount: z.number().int().nonnegative(),
   })
   .refine(
     (value) => {
@@ -52,6 +59,15 @@ export const updateSlotInputSchema = z
       path: ['items'],
       message:
         'eat items are required when slotType is recipe, and not allowed otherwise',
+    },
+  )
+  .refine(
+    (value) =>
+      value.slotType !== 'empty' ||
+      (value.dinerUserIds.length === 0 && value.guestCount === 0),
+    {
+      path: ['dinerUserIds'],
+      message: 'an empty slot cannot have diners or guests',
     },
   );
 export type UpdateSlotInput = z.infer<typeof updateSlotInputSchema>;

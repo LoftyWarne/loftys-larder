@@ -30,6 +30,7 @@ import {
 import { households } from '../src/db/schema/household.ts';
 import {
   mealPlans,
+  mealPlanSlotDiners,
   mealPlanSlotItems,
   mealPlanSlots,
 } from '../src/db/schema/meal-plans.ts';
@@ -1114,6 +1115,15 @@ describe('plans procedures', () => {
         )
         .returning({ id: mealPlanSlots.id });
       if (!recipeSourceSlot) throw new Error('expected source slot');
+      // Who's-eating on the recipe slot: one named diner + one guest, to prove
+      // attendance copies alongside the dishes.
+      await db
+        .update(mealPlanSlots)
+        .set({ guestCount: 1 })
+        .where(eq(mealPlanSlots.id, recipeSourceSlot.id));
+      await db
+        .insert(mealPlanSlotDiners)
+        .values({ slotId: recipeSourceSlot.id, userId: USER_ID });
       await db.insert(mealPlanSlotItems).values([
         {
           slotId: recipeSourceSlot.id,
@@ -1163,6 +1173,8 @@ describe('plans procedures', () => {
       );
       expect(recipeSlot?.slotType).toBe('recipe');
       expect(recipeSlot?.chefUserId).toBe(USER_ID);
+      expect(recipeSlot?.dinerUserIds).toEqual([USER_ID]);
+      expect(recipeSlot?.guestCount).toBe(1);
       expect(recipeSlot?.items).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ recipeId, servings: 3, kind: 'eat' }),

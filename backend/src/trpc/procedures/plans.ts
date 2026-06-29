@@ -33,10 +33,12 @@ import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import * as schema from '../../db/schema/index.ts';
 import {
   mealPlans,
+  mealPlanSlotDiners,
   mealPlanSlotItems,
   mealPlanSlots,
 } from '../../db/schema/meal-plans.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
+import { loadSlotDiners } from '../../lib/slot-diners.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import {
@@ -450,6 +452,7 @@ export const plansRouter = router({
           slotType: mealPlanSlots.slotType,
           chefUserId: mealPlanSlots.chefUserId,
           comment: mealPlanSlots.comment,
+          guestCount: mealPlanSlots.guestCount,
         })
         .from(mealPlanSlots)
         .where(eq(mealPlanSlots.planId, sourceRow.id));
@@ -477,6 +480,12 @@ export const plansRouter = router({
         if (list) list.push(item);
         else itemsBySourceSlot.set(item.slotId, [item]);
       }
+
+      // Who's-eating travels with the duplicated slot, like its dishes and chef.
+      const dinersBySourceSlot = await loadSlotDiners(
+        ctx.db,
+        sourceSlots.map((slot) => slot.id),
+      );
 
       const sourceDates = eachDateInRange(
         sourceRow.startDate,
@@ -536,6 +545,7 @@ export const plansRouter = router({
             slotType: slot.slotType,
             chefUserId: slot.chefUserId,
             comment: slot.comment,
+            guestCount: slot.guestCount,
           };
         });
 
@@ -576,6 +586,21 @@ export const plansRouter = router({
         });
         if (itemValues.length > 0) {
           await tx.insert(mealPlanSlotItems).values(itemValues);
+        }
+
+        const dinerValues = sourceSlots.flatMap((slot) => {
+          const userIds = dinersBySourceSlot.get(slot.id);
+          if (!userIds || userIds.length === 0) return [];
+          const shifted = dateMap.get(formatCivilDate(slot.date));
+          if (!shifted) return [];
+          const newSlotId = newSlotByKey.get(
+            `${formatCivilDate(shifted)}:${String(slot.occasionId)}`,
+          );
+          if (newSlotId === undefined) return [];
+          return userIds.map((userId) => ({ slotId: newSlotId, userId }));
+        });
+        if (dinerValues.length > 0) {
+          await tx.insert(mealPlanSlotDiners).values(dinerValues);
         }
 
         return { plan: toPlanDto(row), slotCount: insertedSlots.length };
@@ -676,16 +701,18 @@ async function selectPlanSlots(
       slotType: mealPlanSlots.slotType,
       chefUserId: mealPlanSlots.chefUserId,
       comment: mealPlanSlots.comment,
+      guestCount: mealPlanSlots.guestCount,
     })
     .from(mealPlanSlots)
     .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
     .where(eq(mealPlanSlots.planId, planId))
     .orderBy(asc(mealPlanSlots.date), asc(mealPlanSlots.occasionId));
 
-  const itemsBySlot = await loadSlotItems(
-    db,
-    rows.map((row) => row.id),
-  );
+  const slotIds = rows.map((row) => row.id);
+  const [itemsBySlot, dinersBySlot] = await Promise.all([
+    loadSlotItems(db, slotIds),
+    loadSlotDiners(db, slotIds),
+  ]);
 
   return rows.map((row) => ({
     id: row.id,
@@ -697,5 +724,7 @@ async function selectPlanSlots(
     chefUserId: row.chefUserId,
     comment: row.comment,
     items: itemsBySlot.get(row.id) ?? [],
+    dinerUserIds: dinersBySlot.get(row.id) ?? [],
+    guestCount: row.guestCount,
   }));
 }

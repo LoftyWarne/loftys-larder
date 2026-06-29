@@ -6,6 +6,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -89,6 +90,10 @@ export const mealPlanSlots = pgTable(
     slotType: slotType().notNull(),
     chefUserId: text().references(() => users.id, { onDelete: 'set null' }),
     comment: text(),
+    // Extra diners with no app account (kids, guests). The named household
+    // members eating the slot live in `meal_plan_slot_diners`; the headcount the
+    // planner shows is `diners + guest_count`, computed, never stored.
+    guestCount: smallint().notNull().default(0),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`),
@@ -103,6 +108,35 @@ export const mealPlanSlots = pgTable(
       table.date,
       table.occasionId,
     ),
+    check(
+      'meal_plan_slots_guest_count_non_negative',
+      sql`${table.guestCount} >= 0`,
+    ),
+  ],
+);
+
+// The household members eating a slot (the "who" behind the headcount). Like
+// `chef_user_id` this is informational, never an authorisation predicate
+// (DEC-17). The composite PK keeps a member from being added twice. Rows are
+// insert/delete-only (the slot editor declares the full set), so there's no
+// `updated_at`. The link drops on user delete; the slot + its guest count
+// survive, matching the tombstoning intent (DEC-29).
+export const mealPlanSlotDiners = pgTable(
+  'meal_plan_slot_diners',
+  {
+    slotId: integer()
+      .notNull()
+      .references(() => mealPlanSlots.id, { onDelete: 'cascade' }),
+    userId: text()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp({ withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.slotId, table.userId] }),
+    index('meal_plan_slot_diners_slot_id_idx').on(table.slotId),
   ],
 );
 

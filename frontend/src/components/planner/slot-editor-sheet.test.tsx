@@ -71,6 +71,8 @@ const RECIPE_SLOT: PlanSlot = {
   chefUserId: null,
   comment: null,
   items: [eat()],
+  dinerUserIds: [],
+  guestCount: 0,
 };
 
 const SLOT_WITH_BASE: PlanSlot = {
@@ -344,5 +346,74 @@ describe('SlotEditorSheet — meal items', () => {
     expect(screen.getByTestId('base-remaining')).toHaveTextContent(
       '5 left in plan',
     );
+  });
+});
+
+describe("SlotEditorSheet — who's eating", () => {
+  const MEMBERS = [
+    { id: 'u1', name: 'Conor', email: 'conor@example.com' },
+    { id: 'u2', name: 'Sam', email: 'sam@example.com' },
+  ];
+
+  it('saves the selected members and guest count', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      <SlotEditorSheet
+        open
+        slot={RECIPE_SLOT}
+        members={MEMBERS}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Conor' }));
+    await user.clear(screen.getByLabelText('Number of guests'));
+    await user.type(screen.getByLabelText('Number of guests'), '2');
+    expect(screen.getByText('(3 eating)')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.dinerUserIds).toEqual(['u1']);
+    expect(input.guestCount).toBe(2);
+  });
+
+  it('prefills a newly added dish with the headcount', async () => {
+    const user = userEvent.setup();
+    // A standalone recipe whose own baseServings (2) differs from the headcount.
+    setupListMock([listItem({ id: 50, name: 'Paella', baseServings: 2 })]);
+    const onSave = vi.fn();
+    render(
+      <SlotEditorSheet
+        open
+        slot={{ ...RECIPE_SLOT, items: [] }}
+        members={MEMBERS}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+    // Headcount = 1 member + 3 guests = 4.
+    await user.click(screen.getByRole('checkbox', { name: 'Conor' }));
+    await user.clear(screen.getByLabelText('Number of guests'));
+    await user.type(screen.getByLabelText('Number of guests'), '3');
+
+    await user.click(screen.getByRole('combobox', { name: 'Add a dish' }));
+    await user.click(await screen.findByText('Paella'));
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.items).toEqual([
+      expect.objectContaining({ recipeId: 50, kind: 'eat', servings: 4 }),
+    ]);
   });
 });

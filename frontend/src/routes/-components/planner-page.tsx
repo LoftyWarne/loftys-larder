@@ -173,6 +173,8 @@ export function PlannerPage(): React.ReactElement {
         chefUserId: null,
         comment: null,
         items: [],
+        dinerUserIds: [],
+        guestCount: 0,
       },
       optimisticItems: [],
     });
@@ -261,6 +263,7 @@ export function PlannerPage(): React.ReactElement {
         {visible ? (
           <PlannerGrid
             slots={plan.slots}
+            members={membersQuery.data?.members ?? []}
             rangeStart={visible.start}
             rangeEnd={visible.end}
             shortfallBySlot={baseBalances.shortfallBySlot}
@@ -328,6 +331,8 @@ function assignSingleEat(
           sortOrder: 0,
         },
       ],
+      dinerUserIds: [],
+      guestCount: 0,
     },
     optimisticItems: [
       {

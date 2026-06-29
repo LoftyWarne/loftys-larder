@@ -78,6 +78,13 @@
       "when": 1782733345292,
       "tag": "0010_complex_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782756198149,
+      "tag": "0011_slot_diners",
+      "breakpoints": true
     }
   ]
 }

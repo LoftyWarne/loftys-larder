@@ -22,6 +22,7 @@ import {
 import { households } from '../src/db/schema/household.ts';
 import {
   mealPlans,
+  mealPlanSlotDiners,
   mealPlanSlotItems,
   mealPlanSlots,
 } from '../src/db/schema/meal-plans.ts';
@@ -256,6 +257,15 @@ describe('slots procedures', () => {
       .orderBy(mealPlanSlotItems.sortOrder);
   }
 
+  async function readDiners(slotId: number): Promise<string[]> {
+    const rows = await db
+      .select({ userId: mealPlanSlotDiners.userId })
+      .from(mealPlanSlotDiners)
+      .where(eq(mealPlanSlotDiners.slotId, slotId))
+      .orderBy(mealPlanSlotDiners.userId);
+    return rows.map((row) => row.userId);
+  }
+
   describe('update — meal items', () => {
     it('assigns eat dishes to an empty slot', async () => {
       const planId = await insertPlan();
@@ -265,6 +275,8 @@ describe('slots procedures', () => {
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
+        dinerUserIds: [],
+        guestCount: 0,
         slotType: 'recipe',
         chefUserId: null,
         comment: null,
@@ -291,6 +303,8 @@ describe('slots procedures', () => {
       const caller = createCaller(makeContext());
       await caller.slots.update({
         slotId,
+        dinerUserIds: [],
+        guestCount: 0,
         slotType: 'recipe',
         chefUserId: null,
         comment: null,
@@ -309,6 +323,8 @@ describe('slots procedures', () => {
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
+        dinerUserIds: [],
+        guestCount: 0,
         slotType: 'eat_out',
         chefUserId: null,
         comment: null,
@@ -326,6 +342,8 @@ describe('slots procedures', () => {
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
+        dinerUserIds: [],
+        guestCount: 0,
         slotType: 'recipe',
         chefUserId: USER_ID,
         comment: 'extra spicy',
@@ -343,6 +361,8 @@ describe('slots procedures', () => {
       await expect(
         caller.slots.update({
           slotId,
+          dinerUserIds: [],
+          guestCount: 0,
           slotType: 'recipe',
           chefUserId: 'ghost-user',
           comment: null,
@@ -358,6 +378,8 @@ describe('slots procedures', () => {
       await expect(
         caller.slots.update({
           slotId,
+          dinerUserIds: [],
+          guestCount: 0,
           slotType: 'empty',
           chefUserId: null,
           comment: null,
@@ -373,6 +395,8 @@ describe('slots procedures', () => {
       await expect(
         caller.slots.update({
           slotId,
+          dinerUserIds: [],
+          guestCount: 0,
           slotType: 'empty',
           chefUserId: null,
           comment: null,
@@ -391,6 +415,8 @@ describe('slots procedures', () => {
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
+        dinerUserIds: [],
+        guestCount: 0,
         slotType: 'recipe',
         chefUserId: null,
         comment: null,
@@ -411,6 +437,8 @@ describe('slots procedures', () => {
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
+        dinerUserIds: [],
+        guestCount: 0,
         slotType: 'eat_out',
         chefUserId: null,
         comment: null,
@@ -430,6 +458,8 @@ describe('slots procedures', () => {
       await expect(
         caller.slots.update({
           slotId,
+          dinerUserIds: [],
+          guestCount: 0,
           slotType: 'eat_out',
           chefUserId: null,
           comment: null,
@@ -457,6 +487,8 @@ describe('slots procedures', () => {
       await expect(
         caller.slots.update({
           slotId,
+          dinerUserIds: [],
+          guestCount: 0,
           slotType: 'recipe',
           chefUserId: null,
           comment: null,
@@ -478,6 +510,8 @@ describe('slots procedures', () => {
       // Re-saving the same item (servings edit) must not be rejected.
       const result = await caller.slots.update({
         slotId,
+        dinerUserIds: [],
+        guestCount: 0,
         slotType: 'recipe',
         chefUserId: null,
         comment: null,
@@ -496,6 +530,8 @@ describe('slots procedures', () => {
       await expect(
         caller.slots.update({
           slotId,
+          dinerUserIds: [],
+          guestCount: 0,
           slotType: 'recipe',
           chefUserId: null,
           comment: null,
@@ -560,6 +596,139 @@ describe('slots procedures', () => {
       await expect(
         caller.slots.relocate({ sourceSlotId: sourceId, destSlotId: destId }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    });
+
+    it('carries diners and guest count with a moved slot', async () => {
+      const planId = await insertPlan();
+      const sourceId = await insertSlot(planId, { slotType: 'recipe' });
+      const destId = await insertSlot(planId, { occasionId: secondOccasionId });
+      const r = await insertRecipe('Stew');
+      await caller_seedRecipeWithDiners(sourceId, r);
+
+      const caller = createCaller(makeContext());
+      const result = await caller.slots.relocate({
+        sourceSlotId: sourceId,
+        destSlotId: destId,
+      });
+      expect(result.destSlot.dinerUserIds).toEqual([USER_ID]);
+      expect(result.destSlot.guestCount).toBe(2);
+      expect(result.sourceSlot.dinerUserIds).toEqual([]);
+      expect(result.sourceSlot.guestCount).toBe(0);
+      expect(await readDiners(destId)).toEqual([USER_ID]);
+      expect(await readDiners(sourceId)).toEqual([]);
+    });
+
+    // Arrange helper: a recipe slot with one named diner + two guests, set
+    // through the procedure so the diner/guest rows exist for the move.
+    async function caller_seedRecipeWithDiners(
+      slotId: number,
+      recipeId: number,
+    ): Promise<void> {
+      const caller = createCaller(makeContext());
+      await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId, servings: 4, kind: 'eat', sortOrder: 0 }],
+        dinerUserIds: [USER_ID],
+        guestCount: 2,
+      });
+    }
+  });
+
+  describe("update — who's eating", () => {
+    it('persists named diners and a guest count', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const r = await insertRecipe('Tagine');
+      const caller = createCaller(makeContext());
+      const result = await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId: r, servings: 4, kind: 'eat', sortOrder: 0 }],
+        dinerUserIds: [USER_ID, OTHER_USER_ID],
+        guestCount: 3,
+      });
+      expect(result.slot.dinerUserIds).toEqual([USER_ID, OTHER_USER_ID]);
+      expect(result.slot.guestCount).toBe(3);
+      expect(await readDiners(slotId)).toEqual([USER_ID, OTHER_USER_ID]);
+    });
+
+    it('full-replaces the diner set on update', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId, { slotType: 'recipe' });
+      const r = await insertRecipe('Pho');
+      const caller = createCaller(makeContext());
+      await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+        dinerUserIds: [USER_ID, OTHER_USER_ID],
+        guestCount: 1,
+      });
+      const result = await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+        dinerUserIds: [OTHER_USER_ID],
+        guestCount: 0,
+      });
+      expect(result.slot.dinerUserIds).toEqual([OTHER_USER_ID]);
+      expect(result.slot.guestCount).toBe(0);
+      expect(await readDiners(slotId)).toEqual([OTHER_USER_ID]);
+    });
+
+    it('drops diners and guests when the slot is cleared to empty', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId, { slotType: 'recipe' });
+      const r = await insertRecipe('Ramen');
+      const caller = createCaller(makeContext());
+      await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+        dinerUserIds: [USER_ID],
+        guestCount: 2,
+      });
+      const result = await caller.slots.update({
+        slotId,
+        slotType: 'empty',
+        chefUserId: null,
+        comment: null,
+        items: [],
+        dinerUserIds: [],
+        guestCount: 0,
+      });
+      expect(result.slot.dinerUserIds).toEqual([]);
+      expect(result.slot.guestCount).toBe(0);
+      expect(await readDiners(slotId)).toEqual([]);
+    });
+
+    it('rejects an unknown diner', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const r = await insertRecipe('Dal');
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'recipe',
+          chefUserId: null,
+          comment: null,
+          items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+          dinerUserIds: ['ghost-user'],
+          guestCount: 0,
+        }),
+      ).rejects.toMatchObject({ cause: { code: 'SLOT_DINER_NOT_FOUND' } });
     });
   });
 });

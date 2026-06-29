@@ -4,6 +4,32 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-29 — "Who's eating & how many" on planner slots
+
+**Status:** Shipped. Schema change (new table + column + migration `0011_slot_diners`), new shared Zod fields, backend + frontend. No new DEC yet — see the DEC-29 flag below.
+
+### Change
+
+- **Slots now record who's eating.** New concept, distinct from `chefUserId` (who *cooks*) and per-dish `servings` (recipe scale). Two pieces:
+  - `meal_plan_slots.guest_count` (`smallint NOT NULL DEFAULT 0`, CHECK `>= 0`) — accountless diners (kids/guests).
+  - New junction `meal_plan_slot_diners` (composite PK `(slot_id, user_id)`, both FKs `cascade`) — the named household members present.
+  - **Headcount = diners + guests, computed, never stored** (same ethos as plant points, DEC-32).
+- **Shared Zod:** `planSlotSchema` + `updateSlotInputSchema` gained `dinerUserIds` + `guestCount`. Full-replace semantics like `items` (the editor always declares the complete set); a refine forbids attendance on an `empty` slot.
+- **Backend:** `slots.update` validates each diner exists (`SLOT_DINER_NOT_FOUND`, distinct from chef's code) and persists inside the existing `withTransaction`; `slots.relocate` moves/swaps attendance with the slot; `plans.duplicate` copies it; `selectSlotById`/`selectPlanSlots` return it. New loader `backend/src/lib/slot-diners.ts` mirrors `slot-items.ts`.
+- **Frontend:** slot editor gained a "Who's eating" section (member toggle chips + a guests number input + a live "(N eating)" total). New `eat` dishes prefill their `servings` from the headcount (editable); `cook_ahead` bases keep their own base servings (a batch, not the table). New `SlotDinersChip` renders on the grid via the slot card's previously-unused `chefChip` region; `PlannerGrid` resolves diner ids → names.
+
+### Worth carrying
+
+- **The `chefChip` extension region is now used** — the prior session note ("chefChip still unrendered, obvious next companion") is resolved; it carries the diners chip, not a chef chip.
+- **Schema-default false start.** First tried `z.array(...).default([])` / `.default(0)` on the input to spare existing call sites, but it split `z.input` vs `z.output` and made the optimistic hook's `input` carry optional fields (risking a meta-only edit wiping diners). Reverted to **required fields**; full-replace is the right model. Don't reach for `.default()` here again.
+- **DEC-29 flag (open):** the diner junction uses `onDelete: cascade` on the user FK — a composite PK can't `set null` like `chef_user_id` does. The link drops on user deletion while the slot + guest count survive (consistent with tombstoning's intent; FEAT-35 keeps the user row anyway so it rarely fires). Worth a DEC entry / confirmation against DEC-29 before this is considered closed.
+
+### Verification
+
+`pnpm -r typecheck`, `lint`, `format:check` clean. Backend Testcontainers suites pass (persist / full-replace / clear-drops / relocate-carries / duplicate-copies / unknown-diner-rejected). Frontend **363** tests pass (chip unit, editor save + headcount prefill, page→grid→chip wiring). Definition-of-done boxes left unticked (human action).
+
+---
+
 ## 2026-06-29 — Empty-slot "Add meal" affordance
 
 **Status:** Shipped. Frontend-only (`slot-cell.tsx`); no schema, no shared Zod, no new DEC.

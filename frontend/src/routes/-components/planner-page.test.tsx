@@ -131,6 +131,8 @@ const EMPTY_SLOT: PlanSlot = {
   chefUserId: null,
   comment: null,
   items: [],
+  dinerUserIds: [],
+  guestCount: 0,
 };
 
 const RECIPE_SLOT: PlanSlot = {
@@ -268,6 +270,8 @@ describe('PlannerPage', () => {
       chefUserId: null,
       comment: null,
       items: [{ recipeId: 10, servings: 2, kind: 'eat', sortOrder: 0 }],
+      dinerUserIds: [],
+      guestCount: 0,
     });
   });
 
@@ -277,6 +281,25 @@ describe('PlannerPage', () => {
     expect(
       screen.getByLabelText('5 plant points in this plan'),
     ).toBeInTheDocument();
+  });
+
+  it("shows who's eating on a slot, resolving member ids to names", () => {
+    setup({
+      members: {
+        members: [{ id: 'u1', name: 'Conor', email: 'conor@example.com' }],
+      },
+      plan: {
+        ...PLAN,
+        slots: [
+          EMPTY_SLOT,
+          { ...RECIPE_SLOT, dinerUserIds: ['u1'], guestCount: 2 },
+        ],
+      },
+    });
+    render(<PlannerPage />);
+    const chip = screen.getByTestId('slot-diners');
+    expect(chip).toHaveTextContent('Conor +2');
+    expect(chip).toHaveTextContent('(3)');
   });
 
   it('renders a plant points badge for each visible day', () => {
@@ -340,6 +363,8 @@ describe('PlannerPage', () => {
       chefUserId: null,
       comment: null,
       items: [],
+      dinerUserIds: [],
+      guestCount: 0,
     });
   });
 
@@ -365,6 +390,8 @@ describe('PlannerPage', () => {
       chefUserId: null,
       comment: null,
       items: [],
+      dinerUserIds: [],
+      guestCount: 0,
     });
   });
 

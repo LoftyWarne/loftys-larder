@@ -49,6 +49,8 @@ function slot(spec: SlotSpec): PlanSlot {
     chefUserId: null,
     comment: null,
     items: items.map(item),
+    dinerUserIds: [],
+    guestCount: 0,
   };
 }
 

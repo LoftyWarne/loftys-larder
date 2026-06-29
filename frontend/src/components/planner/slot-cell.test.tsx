@@ -182,6 +182,23 @@ describe('SlotCell', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
+  it('renders the slot comment when present', () => {
+    render(
+      <SlotCell
+        slot={{ ...RECIPE_SLOT, comment: 'Use the leftover chicken' }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('slot-comment')).toHaveTextContent(
+      'Use the leftover chicken',
+    );
+  });
+
+  it('omits the comment line when there is no comment', () => {
+    render(<SlotCell slot={RECIPE_SLOT} onClick={() => undefined} />);
+    expect(screen.queryByTestId('slot-comment')).not.toBeInTheDocument();
+  });
+
   it('renders a prepped base on an otherwise-empty occasion', () => {
     render(
       <SlotCell

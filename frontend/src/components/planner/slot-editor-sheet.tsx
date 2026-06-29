@@ -322,7 +322,6 @@ export function SlotEditorSheet({
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           <span className="min-w-0 truncate text-sm">
-                            {item.kind === 'cook_ahead' && '🍲 '}
                             {item.name}
                             {item.isDeleted && (
                               <span className="ml-1 text-xs text-muted-foreground">

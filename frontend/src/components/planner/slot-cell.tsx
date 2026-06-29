@@ -1,6 +1,6 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
-import { Trash2 } from 'lucide-react';
+import { MessageSquare, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
@@ -81,7 +81,9 @@ export function SlotCell({
         data-slot-type={slot.slotType}
         className={cn(
           'flex flex-1 flex-col items-stretch gap-1 rounded-md p-2 text-left focus:outline-none focus:ring-2 focus:ring-ring',
-          dndEnabled && slot.slotType !== 'empty' && 'cursor-grab',
+          dndEnabled && slot.slotType !== 'empty'
+            ? 'cursor-grab'
+            : 'cursor-pointer',
           showClear && 'pr-8',
           slot.slotType === 'empty' && 'text-muted-foreground italic',
         )}
@@ -93,7 +95,21 @@ export function SlotCell({
           </span>
         )}
         {chefChip}
-        {commentLine}
+        {commentLine ??
+          (slot.comment !== null && slot.comment !== '' && (
+            <span
+              data-testid="slot-comment"
+              className="flex items-start gap-1 text-xs text-muted-foreground italic"
+            >
+              <MessageSquare
+                className="mt-0.5 h-3 w-3 shrink-0"
+                aria-hidden="true"
+              />
+              <span className="min-w-0 break-words whitespace-pre-wrap">
+                {slot.comment}
+              </span>
+            </span>
+          ))}
       </button>
       {showClear && (
         <button
@@ -120,7 +136,6 @@ function SlotBody({ slot }: { slot: PlanSlot }): React.ReactElement {
             data-testid="slot-item-row"
           >
             <span className="min-w-0 truncate">
-              {item.kind === 'cook_ahead' && '🍲 '}
               <span className="font-medium">{item.recipeName}</span>
               {item.isDeleted && (
                 <span className="ml-1 text-xs text-muted-foreground">
@@ -148,20 +163,24 @@ function SlotBody({ slot }: { slot: PlanSlot }): React.ReactElement {
 function describeSlotForA11y(slot: PlanSlot, shortBy?: number): string {
   const short =
     shortBy !== undefined && shortBy > 0 ? `, short by ${String(shortBy)}` : '';
+  const note =
+    slot.comment !== null && slot.comment !== ''
+      ? `, comment: ${slot.comment}`
+      : '';
   const base = `${slot.occasionName} on ${slot.date}`;
   if (slot.items.length > 0) {
     const names = slot.items
       .map((item) => describeItemForA11y(item))
       .join(', ');
-    return `${base}: ${names}${short}`;
+    return `${base}: ${names}${short}${note}`;
   }
   if (slot.slotType === 'recipe') {
-    return `${base}: recipe${short}`;
+    return `${base}: recipe${short}${note}`;
   }
   if (slot.slotType === 'empty') {
-    return `${base}: empty slot`;
+    return `${base}: empty slot${note}`;
   }
-  return `${base}: ${STATE_LABEL[slot.slotType]}${short}`;
+  return `${base}: ${STATE_LABEL[slot.slotType]}${short}${note}`;
 }
 
 function describeItemForA11y(item: PlanSlotItem): string {

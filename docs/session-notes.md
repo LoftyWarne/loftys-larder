@@ -4,6 +4,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-29 — Slot comments on the planner + card polish
+
+**Status:** Shipped. Frontend-only (`slot-cell.tsx`, `slot-editor-sheet.tsx`); no schema, no shared Zod, no new DEC.
+
+### Change
+
+- **Slot comments now render on the planner grid.** The comment was already stored (`meal_plan_slots.comment`), carried on `PlanSlot`, and editable in the slot-editor sheet, but nothing displayed it on the grid. `SlotCell` already had an unused `commentLine` ReactNode region (the FEAT-31 "future content" slot); it now defaults to rendering `slot.comment` directly — a muted italic line with a `MessageSquare` icon, `whitespace-pre-wrap` + `break-words`. An explicit `commentLine` prop still overrides if a caller ever passes one. Wiring lives in `SlotCell` (not `PlannerGrid`) so every cell picks it up with no grid change, keeping the slot card the single owner of its layout (cross-cutting #14). Plain-text via React escaping (DEC-49). The comment is also appended to the card's aria-label so screen readers announce it.
+- **Dropped the 🍲 emoji** that prefixed `cook_ahead` (base) dish names in both the `SlotCell` body and the slot-editor dish rows. Base dishes are still distinguished by the "Base" type badge.
+- **Pointer cursor on slots.** The slot card is a clickable button (opens the editor) but only carried `cursor-grab` when DnD was enabled. It now shows `cursor-pointer` whenever it's clickable-but-not-draggable; `cursor-grab` still wins for a populated slot with DnD on.
+
+### Worth carrying
+
+- The `chefChip` extension region on `SlotCell` is still unrendered — the slot's assigned chef does not surface on the grid yet. Comments were the ask; chef chip is the obvious next companion if wanted.
+
+### Verification
+
+`pnpm --filter frontend typecheck` + `lint` clean. Frontend **354** tests pass (added two `SlotCell` comment tests).
+
+---
+
 ## 2026-06-29 — Unified dish picker; drop the separate base modal
 
 **Status:** Shipped. Frontend-only; no schema, no shared Zod, no new DEC. Model unchanged (DEC-89 items, DEC-25 slot_type enum).

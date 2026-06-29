@@ -484,31 +484,35 @@ export function SlotEditorSheet({
             </fieldset>
           )}
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">Chef</span>
-            <select
-              value={state.chefUserId ?? ''}
-              onChange={(event) => {
-                setState((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        chefUserId:
-                          event.target.value === '' ? null : event.target.value,
-                      }
-                    : prev,
-                );
-              }}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Unassigned</option>
-              {members.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {showDishes && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Chef</span>
+              <select
+                value={state.chefUserId ?? ''}
+                onChange={(event) => {
+                  setState((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          chefUserId:
+                            event.target.value === ''
+                              ? null
+                              : event.target.value,
+                        }
+                      : prev,
+                  );
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">Unassigned</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">
@@ -643,8 +647,10 @@ function buildInputForSave(
   const trimmedComment = state.comment.trim();
   const commentValue = trimmedComment === '' ? null : trimmedComment;
 
-  // Dishes only belong to a "Cooking" slot; any other type clears them.
+  // Dishes and a chef only belong to a "Cooking" slot; any other type clears
+  // them (the Chef field is hidden off the recipe slot too).
   const items = state.slotType === 'recipe' ? state.items : [];
+  const chefUserId = state.slotType === 'recipe' ? state.chefUserId : null;
   const parsed: { item: EditorItem; servings: number }[] = [];
   for (const item of items) {
     const servings = Number.parseInt(item.servings, 10);
@@ -661,7 +667,7 @@ function buildInputForSave(
   const input: UpdateSlotInput = {
     slotId: slot.id,
     slotType: state.slotType,
-    chefUserId: state.chefUserId,
+    chefUserId,
     comment: commentValue,
     items: parsed.map(({ item, servings }, index) => ({
       recipeId: item.recipeId,

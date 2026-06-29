@@ -110,6 +110,64 @@ beforeEach(() => {
   setupListMock([]);
 });
 
+describe('SlotEditorSheet — chef field', () => {
+  const MEMBERS = [{ id: 'u1', name: 'Conor', email: 'conor@example.com' }];
+
+  it('shows the Chef field on a Cooking slot', () => {
+    render(
+      <SlotEditorSheet
+        open
+        slot={RECIPE_SLOT}
+        members={MEMBERS}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Chef')).toBeInTheDocument();
+  });
+
+  it('hides the Chef field on a non-Cooking slot', () => {
+    render(
+      <SlotEditorSheet
+        open
+        slot={{ ...RECIPE_SLOT, slotType: 'eat_out', items: [] }}
+        members={MEMBERS}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(screen.queryByText('Chef')).not.toBeInTheDocument();
+  });
+
+  it('clears a previously set chef when switching off the Cooking type', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      <SlotEditorSheet
+        open
+        slot={{ ...RECIPE_SLOT, chefUserId: 'u1' }}
+        members={MEMBERS}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+    await user.click(screen.getByText('Eat out'));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.slotType).toBe('eat_out');
+    expect(input.chefUserId).toBeNull();
+  });
+});
+
 describe('SlotEditorSheet — meal items', () => {
   it('renders the dishes and no base-cook section', () => {
     render(

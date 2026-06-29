@@ -9,6 +9,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactElement,
+  type ReactNode,
   type Ref,
 } from 'react';
 
@@ -40,6 +41,11 @@ export interface SearchableComboboxProps<T extends SearchableComboboxOption> {
   // out by leaving it undefined.
   onCreate?: (query: string) => void;
   createLabel?: (query: string) => string;
+  // Custom rendering for an option row. Defaults to `option.label`. Lets a
+  // consumer add a right-aligned adornment (e.g. a type badge) without forking
+  // the primitive (FEAT-21). The string `label` is still used for matching,
+  // the input value, and the create-action comparison.
+  renderOption?: (option: T) => ReactNode;
 }
 
 export interface SearchableComboboxHandle {
@@ -67,6 +73,7 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
     inputClassName,
     onCreate,
     createLabel,
+    renderOption,
   } = props;
 
   const generatedId = useId();
@@ -309,7 +316,7 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
                       commit(option);
                     }}
                   >
-                    {option.label}
+                    {renderOption ? renderOption(option) : option.label}
                   </li>
                 );
               })}

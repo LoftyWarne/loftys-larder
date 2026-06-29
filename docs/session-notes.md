@@ -4,6 +4,32 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-29 — Unified dish picker; drop the separate base modal
+
+**Status:** Shipped. Frontend-only; no schema, no shared Zod, no new DEC. Model unchanged (DEC-89 items, DEC-25 slot_type enum).
+
+### Change
+
+Folded base-cooking into the slot editor. Removed the separate `+ base` affordance (on every `SlotCell`) and the whole `base-cook-sheet.tsx` modal. One unified dish picker now handles everything under the **"Cooking"** slot type:
+
+- **Type drives kind.** Picking a recipe whose `isBase` is true adds a `cook_ahead` item; a variation/standalone adds an `eat` item. No per-row toggle. The variation→base auto-suggestion ("Suggested: X — cook this?") was ported from the old modal into the editor.
+- **Type badge on the RHS** in three surfaces — the combobox dropdown, the editor dish rows, and the `SlotCell`. New shared `recipe-type-badge.tsx` (`recipeType()` classifier + `<RecipeTypeBadge>`). Chip labels: **Base / Variant / Standalone**.
+- **Combobox primitive** got an additive optional `renderOption` render-prop (default still renders `option.label`) so the badge can be right-aligned without forking FEAT-21.
+- **Base prep is now only under "Cooking".** A prep-only day = a Cooking slot holding just a base. Lost the old "prep a base on an eat-out night" affordance (was on every card). `Clear` now empties the whole slot (no cook_ahead to preserve).
+- **Live base balances.** The editor takes the full `slots` list and reruns `deriveBaseBalances` with its in-progress items spliced in (`useMemo`), so the shortfall warning **and** the `(N left in plan)` text recompute as you add a base/variant — previously they came from the saved plan and were stale.
+
+### Worth carrying
+
+- `itemConsumedBase` (`serving-variation-supply.ts`) was narrowed to a structural `{ isBase, recipeId, baseRecipeId }` shape so the editor's working item reuses it.
+- `SlotCell` tolerates legacy data: a non-`recipe` slot carrying old `cook_ahead` items still renders them; editing requires switching the slot to "Cooking".
+- Card a11y label intentionally omits per-item servings (keeps the existing anchored `getByRole` names in planner-page tests stable).
+
+### Verification
+
+`pnpm --filter frontend typecheck` + `lint` clean. Frontend **352** tests pass.
+
+---
+
 ## 2026-06-29 — Slot editor dish list polish
 
 **Status:** Shipped. Frontend-only (`slot-editor-sheet.tsx`); no schema, no shared Zod, no new DEC.

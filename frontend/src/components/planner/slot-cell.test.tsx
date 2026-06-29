@@ -133,59 +133,63 @@ describe('SlotCell', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders the base affordance and fires onBaseClick (not onClick)', async () => {
-    const user = userEvent.setup();
-    const onClick = vi.fn();
-    const onBaseClick = vi.fn();
-    render(
-      <SlotCell
-        slot={RECIPE_SLOT}
-        onClick={onClick}
-        onBaseClick={onBaseClick}
-      />,
-    );
-    await user.click(screen.getByTestId('slot-base-affordance'));
-    expect(onBaseClick).toHaveBeenCalledTimes(1);
-    expect(onClick).not.toHaveBeenCalled();
-  });
-
-  it('shows "+ base" when nothing is cooked yet', () => {
-    render(
-      <SlotCell
-        slot={RECIPE_SLOT}
-        onClick={() => undefined}
-        onBaseClick={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('slot-base-affordance')).toHaveTextContent(
-      '+ base',
-    );
-  });
-
-  it('shows the cooked base name and a shortfall indicator', () => {
+  it('no longer renders a separate base affordance', () => {
     render(
       <SlotCell
         slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
         onClick={() => undefined}
-        onBaseClick={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId('slot-base-affordance'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders cooked-ahead bases inline with a type badge', () => {
+    render(
+      <SlotCell
+        slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Curry Base')).toBeInTheDocument();
+    expect(screen.getByText('×8')).toBeInTheDocument();
+    const badges = screen.getAllByTestId('recipe-type-badge');
+    expect(badges.map((b) => b.textContent)).toEqual(['Standalone', 'Base']);
+  });
+
+  it('shows a shortfall indicator on the card', () => {
+    render(
+      <SlotCell
+        slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
+        onClick={() => undefined}
         shortBy={2}
       />,
     );
-    const affordance = screen.getByTestId('slot-base-affordance');
-    expect(affordance).toHaveTextContent('Curry Base');
-    expect(affordance).toHaveTextContent('short 2');
+    expect(screen.getByText(/short 2/)).toBeInTheDocument();
   });
 
-  it('shows the base affordance on an empty slot (prep-a-base day)', () => {
+  it('opens the editor when a card with a base is clicked', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
     render(
       <SlotCell
-        slot={BASE_SLOT}
-        onClick={() => undefined}
-        onBaseClick={vi.fn()}
+        slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
+        onClick={onClick}
       />,
     );
-    expect(screen.getByTestId('slot-base-affordance')).toHaveTextContent(
-      '+ base',
+    await user.click(screen.getByRole('button', { name: /Dinner on/ }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a prepped base on an otherwise-empty occasion', () => {
+    render(
+      <SlotCell
+        slot={{ ...BASE_SLOT, items: [cookItem()] }}
+        onClick={() => undefined}
+      />,
     );
+    expect(screen.getByText('Curry Base')).toBeInTheDocument();
+    expect(screen.getByTestId('recipe-type-badge')).toHaveTextContent('Base');
   });
 });

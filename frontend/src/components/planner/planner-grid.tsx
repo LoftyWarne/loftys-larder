@@ -21,7 +21,6 @@ export interface PlannerGridProps {
   dndEnabled?: boolean;
   onSlotClick: (slot: PlanSlot) => void;
   onSlotClear?: (slot: PlanSlot) => void;
-  onSlotBaseClick?: (slot: PlanSlot) => void;
 }
 
 interface OccasionColumn {
@@ -38,7 +37,6 @@ export function PlannerGrid({
   dndEnabled = false,
   onSlotClick,
   onSlotClear,
-  onSlotBaseClick,
 }: PlannerGridProps): React.ReactElement {
   const visibleDates = useMemo(
     () => eachDateInRange(rangeStart, rangeEnd),
@@ -129,13 +127,6 @@ export function PlannerGrid({
                         onSlotClear
                           ? () => {
                               onSlotClear(slot);
-                            }
-                          : undefined
-                      }
-                      onBaseClick={
-                        onSlotBaseClick
-                          ? () => {
-                              onSlotBaseClick(slot);
                             }
                           : undefined
                       }

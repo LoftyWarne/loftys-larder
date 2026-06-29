@@ -7,8 +7,10 @@ import type {
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { SLOT_COMMENT_MAX_LENGTH } from '@loftys-larder/shared';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
+import { ServingVariationWarning } from '@/components/planner/serving-variation-warning.tsx';
 import {
   SearchableCombobox,
   type SearchableComboboxHandle,
@@ -25,24 +27,44 @@ import {
 } from '@/components/ui/dialog.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { formatLongDayLabel } from '@/lib/date-utils.ts';
+import {
+  deriveBaseBalances,
+  itemConsumedBase,
+} from '@/lib/serving-variation-supply.ts';
 import { trpc } from '@/lib/trpc.ts';
 import { cn } from '@/lib/utils.ts';
 
 const SLOT_TYPE_OPTIONS: { value: SlotType; label: string }[] = [
-  { value: 'recipe', label: 'Cooking in' },
+  { value: 'recipe', label: 'Cooking' },
   { value: 'eat_out', label: 'Eat out' },
   { value: 'takeaway', label: 'Takeaway' },
   { value: 'leftovers', label: 'Leftovers' },
   { value: 'empty', label: 'Empty' },
 ];
 
+type SlotItemKind = PlanSlotItem['kind'];
+
 interface RecipeOption extends SearchableComboboxOption {
   recipe: RecipeListItem;
 }
 
-// One eaten dish being edited. Carries the recipe fields the card + save need;
-// `servings` is a string so the input round-trips what the user types.
-interface EditorEatItem {
+// The minimal recipe shape the editor needs to add a dish — satisfied by both
+// `RecipeListItem` (picker) and `Recipe` (the suggested-base fetch).
+interface AddableRecipe {
+  id: number;
+  name: string;
+  imageUrl: string | null;
+  isBase: boolean;
+  baseRecipeId: number | null;
+  isDeleted: boolean;
+  baseServings: number;
+}
+
+// One dish being edited. A base picked into the slot is a `cook_ahead` item; a
+// variation or standalone is an `eat` item (the kind is derived from the
+// recipe's type at pick time). `servings` is a string so the input round-trips
+// what the user types.
+interface EditorItem {
   recipeId: number;
   name: string;
   imageUrl: string | null;
@@ -50,13 +72,14 @@ interface EditorEatItem {
   baseRecipeId: number | null;
   isDeleted: boolean;
   servings: string;
+  kind: SlotItemKind;
 }
 
 interface EditorState {
   slotType: SlotType;
   chefUserId: string | null;
   comment: string;
-  eatItems: EditorEatItem[];
+  items: EditorItem[];
 }
 
 export interface SlotEditorSheetProps {
@@ -64,6 +87,9 @@ export interface SlotEditorSheetProps {
   slot: PlanSlot | null;
   members: readonly HouseholdMember[];
   isSaving: boolean;
+  // Every slot in the plan, so base balances (shortfall + "left in plan") can
+  // be recomputed live against this slot's in-progress edits.
+  slots: readonly PlanSlot[];
   onClose: () => void;
   onSave: (
     input: UpdateSlotInput,
@@ -71,11 +97,25 @@ export interface SlotEditorSheetProps {
   ) => void;
 }
 
+function toEditorItem(recipe: AddableRecipe, kind: SlotItemKind): EditorItem {
+  return {
+    recipeId: recipe.id,
+    name: recipe.name,
+    imageUrl: recipe.imageUrl,
+    isBase: recipe.isBase,
+    baseRecipeId: recipe.baseRecipeId,
+    isDeleted: recipe.isDeleted,
+    servings: String(recipe.baseServings),
+    kind,
+  };
+}
+
 export function SlotEditorSheet({
   open,
   slot,
   members,
   isSaving,
+  slots,
   onClose,
   onSave,
 }: SlotEditorSheetProps): React.ReactElement | null {
@@ -94,17 +134,16 @@ export function SlotEditorSheet({
       slotType: slot.slotType,
       chefUserId: slot.chefUserId,
       comment: slot.comment ?? '',
-      eatItems: slot.items
-        .filter((item) => item.kind === 'eat')
-        .map((item) => ({
-          recipeId: item.recipeId,
-          name: item.recipeName,
-          imageUrl: item.recipeImageUrl,
-          isBase: item.isBase,
-          baseRecipeId: item.baseRecipeId,
-          isDeleted: item.isDeleted,
-          servings: String(item.servings),
-        })),
+      items: slot.items.map((item) => ({
+        recipeId: item.recipeId,
+        name: item.recipeName,
+        imageUrl: item.recipeImageUrl,
+        isBase: item.isBase,
+        baseRecipeId: item.baseRecipeId,
+        isDeleted: item.isDeleted,
+        servings: String(item.servings),
+        kind: item.kind,
+      })),
     });
   }, [slot]);
 
@@ -116,7 +155,63 @@ export function SlotEditorSheet({
 
   const utils = trpc.useUtils();
 
+  // Suggest cooking the base behind an eaten variation when it isn't already a
+  // cook-ahead in this slot (carried over from the old base modal). Computed
+  // from the live editor items so it tracks what the user is adding.
+  const eatItems = state?.items.filter((it) => it.kind === 'eat') ?? [];
+  const cookItems = state?.items.filter((it) => it.kind === 'cook_ahead') ?? [];
+  const suggestedBaseRecipeId =
+    eatItems
+      .map(itemConsumedBase)
+      .find((id) => id !== null && !cookItems.some((c) => c.recipeId === id)) ??
+    null;
+  const showSuggestion = state !== null && suggestedBaseRecipeId !== null;
+  const suggestionQuery = trpc.recipes.get.useQuery(
+    { id: suggestedBaseRecipeId ?? 0 },
+    { enabled: showSuggestion },
+  );
+
+  // Recompute base balances against this slot's live edits — splice the
+  // in-progress items into the plan in place of the saved slot so the
+  // shortfall warning and "left in plan" track what the user is adding, not
+  // the last-saved state. Dishes only count on a "Cooking" slot.
+  const liveBalances = useMemo(() => {
+    if (!slot || !state) return null;
+    const liveItems: PlanSlotItem[] =
+      state.slotType === 'recipe'
+        ? state.items.map((item, index) => ({
+            id: index + 1,
+            recipeId: item.recipeId,
+            recipeName: item.name,
+            recipeImageUrl: item.imageUrl,
+            isBase: item.isBase,
+            baseRecipeId: item.baseRecipeId,
+            isDeleted: item.isDeleted,
+            servings: Number.parseInt(item.servings, 10) || 0,
+            kind: item.kind,
+            sortOrder: index,
+          }))
+        : [];
+    return deriveBaseBalances([
+      ...slots.filter((s) => s.id !== slot.id),
+      { ...slot, slotType: state.slotType, items: liveItems },
+    ]);
+  }, [slots, slot, state]);
+
   if (!slot || !state) return null;
+
+  const shortBy = liveBalances?.shortfallBySlot.get(slot.id);
+  const remainingByBase = liveBalances?.remainingByBase;
+
+  function addRecipe(recipe: AddableRecipe, kind: SlotItemKind): void {
+    setState((prev) => {
+      if (!prev) return prev;
+      // Guard against duplicates — the same recipe can't appear twice in one
+      // slot, in either role.
+      if (prev.items.some((it) => it.recipeId === recipe.id)) return prev;
+      return { ...prev, items: [...prev.items, toEditorItem(recipe, kind)] };
+    });
+  }
 
   function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -128,22 +223,22 @@ export function SlotEditorSheet({
 
   function handleClear(): void {
     if (!slot) return;
-    // Clears the eating side only — the slot's cook-ahead items (edited in the
-    // Base modal) are preserved, so a base-only "prep" slot survives.
-    const preserved = preservedCookAheadInput(slot);
+    // Empties the slot entirely — meal dishes and base cooks are both edited
+    // here now, so there's nothing to preserve.
     onSave(
       {
         slotId: slot.id,
         slotType: 'empty',
         chefUserId: null,
         comment: null,
-        items: preserved.input,
+        items: [],
       },
-      { optimisticItems: preserved.optimistic },
+      { optimisticItems: [] },
     );
   }
 
   const showDishes = state.slotType === 'recipe';
+  const showAdder = isAddingDish || state.items.length === 0;
 
   return (
     <Dialog
@@ -162,7 +257,7 @@ export function SlotEditorSheet({
             {slot.occasionName} · {formatLongDayLabel(slot.date)}
           </DialogTitle>
           <DialogDescription>
-            Set what you&apos;re eating in this slot.
+            Set what you&apos;re eating or prepping in this slot.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -203,7 +298,7 @@ export function SlotEditorSheet({
           {showDishes && (
             <fieldset className="flex flex-col gap-2">
               <legend className="text-sm font-medium">Dishes</legend>
-              {state.eatItems.length > 0 && (
+              {state.items.length > 0 && (
                 <div className="grid grid-cols-[minmax(0,1fr)_4rem_2rem] items-center gap-x-2 rounded-md border border-border">
                   <div className="col-span-full grid grid-cols-subgrid items-center border-b border-border px-3 py-2">
                     <span className="text-xs font-medium text-muted-foreground">
@@ -214,102 +309,97 @@ export function SlotEditorSheet({
                     </span>
                     <span aria-hidden="true" />
                   </div>
-                  {state.eatItems.map((item, index) => (
-                    <div
-                      key={`${String(item.recipeId)}:${String(index)}`}
-                      className="col-span-full grid grid-cols-subgrid items-center px-3 py-2 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border"
-                      data-testid="eat-item-row"
-                    >
-                      <span className="min-w-0 truncate text-sm">
-                        {item.name}
-                        {item.isDeleted && (
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            (deleted)
-                          </span>
-                        )}
-                      </span>
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        value={item.servings}
-                        aria-label={`Servings for ${item.name}`}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setState((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  eatItems: prev.eatItems.map((it, i) =>
-                                    i === index
-                                      ? { ...it, servings: value }
-                                      : it,
-                                  ),
-                                }
-                              : prev,
-                          );
-                        }}
-                        required
-                        className="w-full"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Remove ${item.name}`}
-                        className="w-8 shrink-0 px-0"
-                        onClick={() => {
-                          setState((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  eatItems: prev.eatItems.filter(
-                                    (_, i) => i !== index,
-                                  ),
-                                }
-                              : prev,
-                          );
-                        }}
+                  {state.items.map((item, index) => {
+                    const remaining =
+                      item.kind === 'cook_ahead'
+                        ? remainingByBase?.get(item.recipeId)
+                        : undefined;
+                    return (
+                      <div
+                        key={`${String(item.recipeId)}:${String(index)}`}
+                        className="col-span-full grid grid-cols-subgrid items-center px-3 py-2 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border"
+                        data-testid="dish-item-row"
                       >
-                        ×
-                      </Button>
-                    </div>
-                  ))}
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="min-w-0 truncate text-sm">
+                            {item.kind === 'cook_ahead' && '🍲 '}
+                            {item.name}
+                            {item.isDeleted && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                (deleted)
+                              </span>
+                            )}
+                            {remaining !== undefined && (
+                              <span
+                                className="ml-1 text-xs text-muted-foreground"
+                                data-testid="base-remaining"
+                              >
+                                ({String(remaining)} left in plan)
+                              </span>
+                            )}
+                          </span>
+                          <RecipeTypeBadge recipe={item} className="ml-auto" />
+                        </div>
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          value={item.servings}
+                          aria-label={`Servings for ${item.name}`}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setState((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    items: prev.items.map((it, i) =>
+                                      i === index
+                                        ? { ...it, servings: value }
+                                        : it,
+                                    ),
+                                  }
+                                : prev,
+                            );
+                          }}
+                          required
+                          className="w-full"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Remove ${item.name}`}
+                          className="w-8 shrink-0 px-0"
+                          onClick={() => {
+                            setState((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    items: prev.items.filter(
+                                      (_, i) => i !== index,
+                                    ),
+                                  }
+                                : prev,
+                            );
+                          }}
+                        >
+                          ×
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-              {isAddingDish || state.eatItems.length === 0 ? (
+              {showAdder ? (
                 <SearchableCombobox<RecipeOption>
                   ref={comboboxRef}
                   value={null}
                   onChange={(option) => {
                     if (!option) return;
-                    setState((prev) => {
-                      if (!prev) return prev;
-                      // Guard against duplicates — the same recipe can't be
-                      // eaten twice in one slot.
-                      if (
-                        prev.eatItems.some(
-                          (it) => it.recipeId === option.recipe.id,
-                        )
-                      ) {
-                        return prev;
-                      }
-                      return {
-                        ...prev,
-                        eatItems: [
-                          ...prev.eatItems,
-                          {
-                            recipeId: option.recipe.id,
-                            name: option.recipe.name,
-                            imageUrl: option.recipe.imageUrl,
-                            isBase: option.recipe.isBase,
-                            baseRecipeId: option.recipe.baseRecipeId,
-                            isDeleted: option.recipe.isDeleted,
-                            servings: String(option.recipe.baseServings),
-                          },
-                        ],
-                      };
-                    });
+                    addRecipe(
+                      option.recipe,
+                      option.recipe.isBase ? 'cook_ahead' : 'eat',
+                    );
                     // Collapse back to the "Add another dish" button, which
                     // also clears the search text by unmounting the input.
                     setIsAddingDish(false);
@@ -321,7 +411,7 @@ export function SlotEditorSheet({
                       limit: 20,
                     });
                     const chosen = new Set(
-                      state.eatItems.map((it) => it.recipeId),
+                      state.items.map((it) => it.recipeId),
                     );
                     return result.items
                       .filter((recipe) => !chosen.has(recipe.id))
@@ -331,6 +421,12 @@ export function SlotEditorSheet({
                         recipe,
                       }));
                   }}
+                  renderOption={(option) => (
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">{option.label}</span>
+                      <RecipeTypeBadge recipe={option.recipe} />
+                    </span>
+                  )}
                   ariaLabel="Add a dish"
                   placeholder="Add a dish"
                 />
@@ -346,6 +442,23 @@ export function SlotEditorSheet({
                 >
                   Add another dish
                 </Button>
+              )}
+
+              {showSuggestion && suggestionQuery.data && (
+                <button
+                  type="button"
+                  data-testid="base-suggestion-hint"
+                  onClick={() => {
+                    addRecipe(suggestionQuery.data, 'cook_ahead');
+                  }}
+                  className="self-start rounded-md border border-dashed border-primary px-2 py-1 text-xs text-primary hover:bg-accent"
+                >
+                  Suggested: {suggestionQuery.data.name} — cook this?
+                </button>
+              )}
+
+              {shortBy !== undefined && shortBy > 0 && (
+                <ServingVariationWarning shortBy={shortBy} />
               )}
             </fieldset>
           )}
@@ -429,16 +542,13 @@ function buildInputForSave(
   const trimmedComment = state.comment.trim();
   const commentValue = trimmedComment === '' ? null : trimmedComment;
 
-  // The meal editor owns the `eat` items; the slot's `cook_ahead` items are
-  // edited in the Base modal and preserved verbatim here.
-  const cookAhead = slot.items.filter((item) => item.kind === 'cook_ahead');
-
-  const eatItems = state.slotType === 'recipe' ? state.eatItems : [];
-  const parsedEat: { item: EditorEatItem; servings: number }[] = [];
-  for (const item of eatItems) {
+  // Dishes only belong to a "Cooking" slot; any other type clears them.
+  const items = state.slotType === 'recipe' ? state.items : [];
+  const parsed: { item: EditorItem; servings: number }[] = [];
+  for (const item of items) {
     const servings = Number.parseInt(item.servings, 10);
     if (!Number.isInteger(servings) || servings <= 0) return null;
-    parsedEat.push({ item, servings });
+    parsed.push({ item, servings });
   }
 
   const input: UpdateSlotInput = {
@@ -446,24 +556,16 @@ function buildInputForSave(
     slotType: state.slotType,
     chefUserId: state.chefUserId,
     comment: commentValue,
-    items: [
-      ...parsedEat.map(({ item, servings }, index) => ({
-        recipeId: item.recipeId,
-        servings,
-        kind: 'eat' as const,
-        sortOrder: index,
-      })),
-      ...cookAhead.map((item, index) => ({
-        recipeId: item.recipeId,
-        servings: item.servings,
-        kind: 'cook_ahead' as const,
-        sortOrder: parsedEat.length + index,
-      })),
-    ],
+    items: parsed.map(({ item, servings }, index) => ({
+      recipeId: item.recipeId,
+      servings,
+      kind: item.kind,
+      sortOrder: index,
+    })),
   };
 
-  const optimisticItems: PlanSlotItem[] = [
-    ...parsedEat.map(({ item, servings }, index) => ({
+  const optimisticItems: PlanSlotItem[] = parsed.map(
+    ({ item, servings }, index) => ({
       id: index + 1,
       recipeId: item.recipeId,
       recipeName: item.name,
@@ -472,37 +574,10 @@ function buildInputForSave(
       baseRecipeId: item.baseRecipeId,
       isDeleted: item.isDeleted,
       servings,
-      kind: 'eat' as const,
+      kind: item.kind,
       sortOrder: index,
-    })),
-    ...cookAhead.map((item, index) => ({
-      ...item,
-      id: parsedEat.length + index + 1,
-      sortOrder: parsedEat.length + index,
-    })),
-  ];
+    }),
+  );
 
   return { input, optimisticItems };
-}
-
-// The slot's cook-ahead items as save input + optimistic display, used when the
-// meal editor clears the eating side but must keep the prep.
-function preservedCookAheadInput(slot: PlanSlot): {
-  input: UpdateSlotInput['items'];
-  optimistic: PlanSlotItem[];
-} {
-  const cookAhead = slot.items.filter((item) => item.kind === 'cook_ahead');
-  return {
-    input: cookAhead.map((item, index) => ({
-      recipeId: item.recipeId,
-      servings: item.servings,
-      kind: 'cook_ahead' as const,
-      sortOrder: index,
-    })),
-    optimistic: cookAhead.map((item, index) => ({
-      ...item,
-      id: index + 1,
-      sortOrder: index,
-    })),
-  };
 }

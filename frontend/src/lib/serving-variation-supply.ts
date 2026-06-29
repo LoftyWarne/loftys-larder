@@ -1,8 +1,4 @@
-import {
-  OCCASION_ORDER,
-  type PlanSlot,
-  type PlanSlotItem,
-} from '@loftys-larder/shared';
+import { OCCASION_ORDER, type PlanSlot } from '@loftys-larder/shared';
 
 // Cooked base is a pool that meals draw down (DEC-88/DEC-89; 1:1 — one eaten
 // serving consumes one base serving). Walking the plan in cook-before-eat
@@ -53,8 +49,14 @@ export function deriveBaseBalances(slots: readonly PlanSlot[]): BaseBalances {
 }
 
 // The base an eat item draws on: the base itself when eating a base, or its
-// base when eating a serving variation; null for a standalone dish.
-export function itemConsumedBase(item: PlanSlotItem): number | null {
+// base when eating a serving variation; null for a standalone dish. Typed on
+// the minimal shape so both `PlanSlotItem` and the slot editor's working item
+// can reuse it.
+export function itemConsumedBase(item: {
+  isBase: boolean;
+  recipeId: number;
+  baseRecipeId: number | null;
+}): number | null {
   return item.isBase ? item.recipeId : item.baseRecipeId;
 }
 

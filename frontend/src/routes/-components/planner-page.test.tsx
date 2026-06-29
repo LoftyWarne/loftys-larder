@@ -311,18 +311,13 @@ describe('PlannerPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('opens the base modal when a slot base affordance is tapped', async () => {
-    const user = userEvent.setup();
+  it('no longer renders a separate base affordance', () => {
     setup();
     render(<PlannerPage />);
 
-    const [affordance] = screen.getAllByTestId('slot-base-affordance');
-    if (!affordance) throw new Error('expected a base affordance');
-    await user.click(affordance);
-
     expect(
-      screen.getByRole('heading', { name: /^cook a base$/i }),
-    ).toBeInTheDocument();
+      screen.queryByTestId('slot-base-affordance'),
+    ).not.toBeInTheDocument();
   });
 
   it('clear button on the editor sends slotType=empty', async () => {

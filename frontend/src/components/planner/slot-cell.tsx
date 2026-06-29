@@ -1,6 +1,6 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
-import { MessageSquare, Trash2 } from 'lucide-react';
+import { MessageSquare, Plus, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
@@ -63,7 +63,7 @@ export function SlotCell({
     <div
       ref={setDropRef}
       className={cn(
-        'relative flex h-full min-h-20 w-full flex-col rounded-md border border-input bg-card text-sm transition hover:border-primary',
+        'group relative flex h-full min-h-20 w-full flex-col rounded-md border border-input bg-card text-sm transition hover:border-primary',
         slot.slotType === 'empty' && 'border-dashed',
         isSelected && 'border-primary ring-2 ring-ring',
         isOver && 'border-primary ring-2 ring-primary',
@@ -156,6 +156,14 @@ function SlotBody({ slot }: { slot: PlanSlot }): React.ReactElement {
     // Defensive: a `recipe` slot with no items (concurrent edit + cache lag).
     // Render a hint so the user can still target the slot.
     return <span>Recipe</span>;
+  }
+  if (slot.slotType === 'empty') {
+    return (
+      <span className="flex flex-1 items-center justify-center gap-1 text-muted-foreground not-italic transition group-hover:text-primary">
+        <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="font-medium">Add meal</span>
+      </span>
+    );
   }
   return <span>{STATE_LABEL[slot.slotType]}</span>;
 }

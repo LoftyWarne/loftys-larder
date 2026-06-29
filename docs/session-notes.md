@@ -4,6 +4,24 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-29 — Empty-slot "Add meal" affordance
+
+**Status:** Shipped. Frontend-only (`slot-cell.tsx`); no schema, no shared Zod, no new DEC.
+
+### Change
+
+- **Empty slots now show a clear click-to-add affordance.** Previously an empty slot rendered a bare muted-italic "Empty" with no signal that the card was clickable. `SlotBody` now special-cases `slotType === 'empty'` to render a centred `Plus` icon + bold **"Add meal"** label. The wrapper gained a `group` class so the affordance brightens to `text-primary` on `group-hover` (the card border already highlighted on hover). The a11y label is unchanged — still "empty slot".
+
+### Worth carrying
+
+- Label wording went "Add recipe" → "Add meal" at the user's request, matching the composable-occasion framing (a slot holds a meal of one-or-more dishes, DEC-89), not a single recipe.
+
+### Verification
+
+Frontend **354** tests pass (no test asserted the old "Empty" string, so none changed).
+
+---
+
 ## 2026-06-29 — Slot comments on the planner + card polish
 
 **Status:** Shipped. Frontend-only (`slot-cell.tsx`, `slot-editor-sheet.tsx`); no schema, no shared Zod, no new DEC.

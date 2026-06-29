@@ -7,10 +7,11 @@ import type {
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { SLOT_COMMENT_MAX_LENGTH } from '@loftys-larder/shared';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import {
   SearchableCombobox,
+  type SearchableComboboxHandle,
   type SearchableComboboxOption,
 } from '@/components/searchable-combobox.tsx';
 import { Button } from '@/components/ui/button.tsx';
@@ -80,12 +81,15 @@ export function SlotEditorSheet({
 }: SlotEditorSheetProps): React.ReactElement | null {
   const formId = useId();
   const [state, setState] = useState<EditorState | null>(null);
+  const [isAddingDish, setIsAddingDish] = useState(false);
+  const comboboxRef = useRef<SearchableComboboxHandle>(null);
 
   useEffect(() => {
     if (!slot) {
       setState(null);
       return;
     }
+    setIsAddingDish(false);
     setState({
       slotType: slot.slotType,
       chefUserId: slot.chefUserId,
@@ -103,6 +107,12 @@ export function SlotEditorSheet({
         })),
     });
   }, [slot]);
+
+  // Focus the dish search as soon as it's revealed so the user can type
+  // straight away after pressing "Add another dish".
+  useEffect(() => {
+    if (isAddingDish) comboboxRef.current?.focus();
+  }, [isAddingDish]);
 
   const utils = trpc.useUtils();
 
@@ -193,106 +203,150 @@ export function SlotEditorSheet({
           {showDishes && (
             <fieldset className="flex flex-col gap-2">
               <legend className="text-sm font-medium">Dishes</legend>
-              {state.eatItems.map((item, index) => (
-                <div
-                  key={`${String(item.recipeId)}:${String(index)}`}
-                  className="flex items-end gap-2"
-                  data-testid="eat-item-row"
-                >
-                  <span className="flex-1 text-sm">
-                    {item.name}
-                    {item.isDeleted && (
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        (deleted)
+              {state.eatItems.length > 0 && (
+                <div className="grid grid-cols-[minmax(0,1fr)_4rem_2rem] items-center gap-x-2 rounded-md border border-border">
+                  <div className="col-span-full grid grid-cols-subgrid items-center border-b border-border px-3 py-2">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Dish
+                    </span>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Servings
+                    </span>
+                    <span aria-hidden="true" />
+                  </div>
+                  {state.eatItems.map((item, index) => (
+                    <div
+                      key={`${String(item.recipeId)}:${String(index)}`}
+                      className="col-span-full grid grid-cols-subgrid items-center px-3 py-2 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border"
+                      data-testid="eat-item-row"
+                    >
+                      <span className="min-w-0 truncate text-sm">
+                        {item.name}
+                        {item.isDeleted && (
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            (deleted)
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="font-medium">Servings</span>
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      value={item.servings}
-                      aria-label={`Servings for ${item.name}`}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                eatItems: prev.eatItems.map((it, i) =>
-                                  i === index ? { ...it, servings: value } : it,
-                                ),
-                              }
-                            : prev,
-                        );
-                      }}
-                      required
-                      className="w-20"
-                    />
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Remove ${item.name}`}
-                    onClick={() => {
-                      setState((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              eatItems: prev.eatItems.filter(
-                                (_, i) => i !== index,
-                              ),
-                            }
-                          : prev,
-                      );
-                    }}
-                  >
-                    ×
-                  </Button>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        value={item.servings}
+                        aria-label={`Servings for ${item.name}`}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  eatItems: prev.eatItems.map((it, i) =>
+                                    i === index
+                                      ? { ...it, servings: value }
+                                      : it,
+                                  ),
+                                }
+                              : prev,
+                          );
+                        }}
+                        required
+                        className="w-full"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Remove ${item.name}`}
+                        className="w-8 shrink-0 px-0"
+                        onClick={() => {
+                          setState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  eatItems: prev.eatItems.filter(
+                                    (_, i) => i !== index,
+                                  ),
+                                }
+                              : prev,
+                          );
+                        }}
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              <SearchableCombobox<RecipeOption>
-                value={null}
-                onChange={(option) => {
-                  if (!option) return;
-                  setState((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          eatItems: [
-                            ...prev.eatItems,
-                            {
-                              recipeId: option.recipe.id,
-                              name: option.recipe.name,
-                              imageUrl: option.recipe.imageUrl,
-                              isBase: option.recipe.isBase,
-                              baseRecipeId: option.recipe.baseRecipeId,
-                              isDeleted: option.recipe.isDeleted,
-                              servings: String(option.recipe.baseServings),
-                            },
-                          ],
-                        }
-                      : prev,
-                  );
-                }}
-                searchQuery={async (query) => {
-                  const result = await utils.recipes.list.fetch({
-                    search: query || undefined,
-                    includePickerHidden: true,
-                    limit: 20,
-                  });
-                  return result.items.map((recipe) => ({
-                    id: recipe.id,
-                    label: recipe.name,
-                    recipe,
-                  }));
-                }}
-                ariaLabel="Add a dish"
-                placeholder="Add a dish"
-              />
+              )}
+              {isAddingDish || state.eatItems.length === 0 ? (
+                <SearchableCombobox<RecipeOption>
+                  ref={comboboxRef}
+                  value={null}
+                  onChange={(option) => {
+                    if (!option) return;
+                    setState((prev) => {
+                      if (!prev) return prev;
+                      // Guard against duplicates — the same recipe can't be
+                      // eaten twice in one slot.
+                      if (
+                        prev.eatItems.some(
+                          (it) => it.recipeId === option.recipe.id,
+                        )
+                      ) {
+                        return prev;
+                      }
+                      return {
+                        ...prev,
+                        eatItems: [
+                          ...prev.eatItems,
+                          {
+                            recipeId: option.recipe.id,
+                            name: option.recipe.name,
+                            imageUrl: option.recipe.imageUrl,
+                            isBase: option.recipe.isBase,
+                            baseRecipeId: option.recipe.baseRecipeId,
+                            isDeleted: option.recipe.isDeleted,
+                            servings: String(option.recipe.baseServings),
+                          },
+                        ],
+                      };
+                    });
+                    // Collapse back to the "Add another dish" button, which
+                    // also clears the search text by unmounting the input.
+                    setIsAddingDish(false);
+                  }}
+                  searchQuery={async (query) => {
+                    const result = await utils.recipes.list.fetch({
+                      search: query || undefined,
+                      includePickerHidden: true,
+                      limit: 20,
+                    });
+                    const chosen = new Set(
+                      state.eatItems.map((it) => it.recipeId),
+                    );
+                    return result.items
+                      .filter((recipe) => !chosen.has(recipe.id))
+                      .map((recipe) => ({
+                        id: recipe.id,
+                        label: recipe.name,
+                        recipe,
+                      }));
+                  }}
+                  ariaLabel="Add a dish"
+                  placeholder="Add a dish"
+                />
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  onClick={() => {
+                    setIsAddingDish(true);
+                  }}
+                >
+                  Add another dish
+                </Button>
+              )}
             </fieldset>
           )}
 

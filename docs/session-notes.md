@@ -4,6 +4,25 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-29 — Slot editor dish list polish
+
+**Status:** Shipped. Frontend-only (`slot-editor-sheet.tsx`); no schema, no shared Zod, no new DEC.
+
+### Change
+
+Tidied how the `eat` dish list reads + behaves in `SlotEditorSheet`:
+
+- **Add flow.** The dish search combobox is no longer permanently mounted. After a dish is picked it collapses to an **"Add another dish"** button; clicking it re-mounts the combobox (auto-focused via `SearchableComboboxHandle.focus()`). Unmounting the input is also what clears the leftover search text — the combobox kept showing the committed label because the parent always passes `value={null}`, so the internal `value`-sync effect never fired. The search box still shows directly when the slot has zero dishes (so the first dish needs no extra click).
+- **No duplicates.** `searchQuery` filters out already-chosen `recipeId`s and `onChange` guards against re-adding one.
+- **Grid layout.** The list is a single CSS grid (`grid-cols-[minmax(0,1fr)_4rem_2rem]`); header + each row share the tracks via `grid-cols-subgrid` (`col-span-full`), so columns align regardless of name length (dish cell is `min-w-0 truncate`). Wrapped in a `rounded-md border` card with a `border-b` under the header and between rows (`[&:not(:last-child)]`).
+
+### Worth carrying
+
+- `grid-cols-subgrid` relies on CSS subgrid — fine for the evergreen/PWA target, flag if older browser support is ever needed.
+- Empty-state choice: the picker is shown directly (not behind a button) when there are no dishes, since "Add another dish" reads wrong with an empty list.
+
+---
+
 ## 2026-06-29 — Composable meal occasions: slot items (DEC-89)
 
 **Status:** Shipped on branch `remove-pairing-serving-variation`. Schema + migration (`0011`-equivalent `0010_complex_tempest`) + backend + frontend + tests + docs. New ADR **DEC-89** (supersedes DEC-24, amends DEC-25, generalises DEC-88).

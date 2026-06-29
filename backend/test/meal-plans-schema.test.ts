@@ -16,7 +16,11 @@ import * as schema from '../src/db/schema/index.ts';
 import { users } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
-import { mealPlanSlots, mealPlans } from '../src/db/schema/meal-plans.ts';
+import {
+  mealPlanSlotItems,
+  mealPlanSlots,
+  mealPlans,
+} from '../src/db/schema/meal-plans.ts';
 import { recipes } from '../src/db/schema/recipes.ts';
 import {
   ingredientCategories,
@@ -170,10 +174,38 @@ describe('meal plans and shopping list schema', () => {
       for (const expected of [
         'meal_plans',
         'meal_plan_slots',
+        'meal_plan_slot_items',
         'shopping_list_items',
       ]) {
         expect(names.has(expected), `missing table ${expected}`).toBe(true);
       }
+    });
+
+    it('drops the old per-slot recipe + base-cook columns from meal_plan_slots', async () => {
+      const result = await db.execute<{ column_name: string }>(sql`
+        select column_name from information_schema.columns
+        where table_schema = 'public' and table_name = 'meal_plan_slots'
+      `);
+      const names = new Set(result.rows.map((r) => r.column_name));
+      for (const gone of [
+        'recipe_id',
+        'number_of_servings',
+        'cooks_base_recipe_id',
+        'cooks_base_servings',
+      ]) {
+        expect(names.has(gone), `column ${gone} should be dropped`).toBe(false);
+      }
+    });
+
+    it('slot_item_kind enum has the two expected labels', async () => {
+      const result = await db.execute<{ label: string }>(sql`
+        select enumlabel as label
+        from pg_enum
+        join pg_type on pg_type.oid = pg_enum.enumtypid
+        where pg_type.typname = 'slot_item_kind'
+        order by pg_enum.enumsortorder
+      `);
+      expect(result.rows.map((r) => r.label)).toEqual(['eat', 'cook_ahead']);
     });
 
     it('slot_type enum has exactly the five expected labels', async () => {
@@ -247,16 +279,16 @@ describe('meal plans and shopping list schema', () => {
     });
   });
 
-  describe('meal_plan_slots CHECK and UNIQUE constraints', () => {
-    it('accepts each non-recipe slot_type with recipe_id NULL', async () => {
+  describe('meal_plan_slots constraints', () => {
+    it('accepts every slot_type (dishes live in items now)', async () => {
       const { occasionId } = await seedFixtures(db);
       const planId = await insertPlan(db);
-      // Distinct (date, occasion) per row to dodge the unique constraint.
       const rows = [
         { slotType: 'empty' as const, date: new Date('2026-06-01') },
-        { slotType: 'eat_out' as const, date: new Date('2026-06-02') },
-        { slotType: 'takeaway' as const, date: new Date('2026-06-03') },
-        { slotType: 'leftovers' as const, date: new Date('2026-06-04') },
+        { slotType: 'recipe' as const, date: new Date('2026-06-02') },
+        { slotType: 'eat_out' as const, date: new Date('2026-06-03') },
+        { slotType: 'takeaway' as const, date: new Date('2026-06-04') },
+        { slotType: 'leftovers' as const, date: new Date('2026-06-05') },
       ];
       for (const { slotType, date } of rows) {
         await db
@@ -267,89 +299,7 @@ describe('meal plans and shopping list schema', () => {
         .select({ slotType: mealPlanSlots.slotType })
         .from(mealPlanSlots)
         .where(eq(mealPlanSlots.planId, planId));
-      expect(inserted.map((r) => r.slotType).sort()).toEqual(
-        rows.map((r) => r.slotType).sort(),
-      );
-    });
-
-    it('accepts a recipe slot with recipe_id and number_of_servings set', async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const recipeId = await insertRecipe(db);
-      await expect(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'recipe',
-          recipeId,
-          numberOfServings: 2,
-        }),
-      ).resolves.toBeDefined();
-    });
-
-    it("rejects slot_type='recipe' with recipe_id NULL", async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      await expectConstraintViolation(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'recipe',
-          numberOfServings: 2,
-        }),
-        'meal_plan_slots_recipe_iff_type',
-      );
-    });
-
-    it("rejects slot_type='empty' with recipe_id NOT NULL", async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const recipeId = await insertRecipe(db);
-      await expectConstraintViolation(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'empty',
-          recipeId,
-        }),
-        'meal_plan_slots_recipe_iff_type',
-      );
-    });
-
-    it("rejects slot_type='recipe' with number_of_servings NULL", async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const recipeId = await insertRecipe(db);
-      await expectConstraintViolation(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'recipe',
-          recipeId,
-        }),
-        'meal_plan_slots_servings_when_recipe',
-      );
-    });
-
-    it("rejects slot_type='recipe' with number_of_servings = 0", async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const recipeId = await insertRecipe(db);
-      await expectConstraintViolation(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'recipe',
-          recipeId,
-          numberOfServings: 0,
-        }),
-        'meal_plan_slots_servings_when_recipe',
-      );
+      expect(inserted).toHaveLength(5);
     });
 
     it('rejects two slots with the same (plan_id, date, occasion_id)', async () => {
@@ -373,91 +323,88 @@ describe('meal plans and shopping list schema', () => {
     });
   });
 
-  describe('meal_plan_slots cooks_base joint-set CHECK', () => {
-    it('accepts both cooks_base_* NULL', async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      await expect(
-        db.insert(mealPlanSlots).values({
+  describe('meal_plan_slot_items', () => {
+    async function insertSlot(
+      planId: number,
+      occasionId: number,
+    ): Promise<number> {
+      const [slot] = await db
+        .insert(mealPlanSlots)
+        .values({
           planId,
           date: new Date('2026-06-01'),
           occasionId,
-          slotType: 'eat_out',
-        }),
+          slotType: 'recipe',
+        })
+        .returning({ id: mealPlanSlots.id });
+      if (!slot) throw new Error('slot insert returned no row');
+      return slot.id;
+    }
+
+    it('accepts eat and cook_ahead items with servings > 0', async () => {
+      const { occasionId } = await seedFixtures(db);
+      const planId = await insertPlan(db);
+      const slotId = await insertSlot(planId, occasionId);
+      const recipeId = await insertRecipe(db);
+      const baseId = await insertRecipe(db, { name: 'Base', isBase: true });
+      await expect(
+        db.insert(mealPlanSlotItems).values([
+          { slotId, recipeId, servings: 2, kind: 'eat', sortOrder: 0 },
+          {
+            slotId,
+            recipeId: baseId,
+            servings: 8,
+            kind: 'cook_ahead',
+            sortOrder: 1,
+          },
+        ]),
       ).resolves.toBeDefined();
     });
 
-    it('accepts both cooks_base_* set with servings > 0', async () => {
+    it('rejects servings = 0', async () => {
       const { occasionId } = await seedFixtures(db);
       const planId = await insertPlan(db);
-      const baseId = await insertRecipe(db, {
-        name: 'Lamb keema base',
-        isBase: true,
-      });
+      const slotId = await insertSlot(planId, occasionId);
+      const recipeId = await insertRecipe(db);
+      await expectConstraintViolation(
+        db.insert(mealPlanSlotItems).values({
+          slotId,
+          recipeId,
+          servings: 0,
+          kind: 'eat',
+          sortOrder: 0,
+        }),
+        'meal_plan_slot_items_servings_positive',
+      );
+    });
+
+    it('cascades items when the slot is deleted', async () => {
+      const { occasionId } = await seedFixtures(db);
+      const planId = await insertPlan(db);
+      const slotId = await insertSlot(planId, occasionId);
+      const recipeId = await insertRecipe(db);
+      await db
+        .insert(mealPlanSlotItems)
+        .values({ slotId, recipeId, servings: 2, kind: 'eat', sortOrder: 0 });
+      await db.delete(mealPlanSlots).where(eq(mealPlanSlots.id, slotId));
+      const rows = await db
+        .select()
+        .from(mealPlanSlotItems)
+        .where(eq(mealPlanSlotItems.slotId, slotId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('rejects deletion of a recipe referenced by an item (RESTRICT)', async () => {
+      const { occasionId } = await seedFixtures(db);
+      const planId = await insertPlan(db);
+      const slotId = await insertSlot(planId, occasionId);
+      const recipeId = await insertRecipe(db);
+      await db
+        .insert(mealPlanSlotItems)
+        .values({ slotId, recipeId, servings: 2, kind: 'eat', sortOrder: 0 });
       await expect(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'eat_out',
-          cooksBaseRecipeId: baseId,
-          cooksBaseServings: 8,
-        }),
-      ).resolves.toBeDefined();
-    });
-
-    it('rejects cooks_base_recipe_id set with cooks_base_servings NULL', async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const baseId = await insertRecipe(db, {
-        name: 'Lamb keema base',
-        isBase: true,
-      });
-      await expectConstraintViolation(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'eat_out',
-          cooksBaseRecipeId: baseId,
-        }),
-        'meal_plan_slots_cooks_base_joint',
-      );
-    });
-
-    it('rejects cooks_base_servings set with cooks_base_recipe_id NULL', async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      await expectConstraintViolation(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'eat_out',
-          cooksBaseServings: 8,
-        }),
-        'meal_plan_slots_cooks_base_joint',
-      );
-    });
-
-    it('rejects cooks_base_servings = 0', async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const baseId = await insertRecipe(db, {
-        name: 'Lamb keema base',
-        isBase: true,
-      });
-      await expectConstraintViolation(
-        db.insert(mealPlanSlots).values({
-          planId,
-          date: new Date('2026-06-01'),
-          occasionId,
-          slotType: 'eat_out',
-          cooksBaseRecipeId: baseId,
-          cooksBaseServings: 0,
-        }),
-        'meal_plan_slots_cooks_base_joint',
-      );
+        db.delete(recipes).where(eq(recipes.id, recipeId)),
+      ).rejects.toThrow();
     });
   });
 
@@ -499,43 +446,6 @@ describe('meal plans and shopping list schema', () => {
         .from(mealPlanSlots)
         .where(eq(mealPlanSlots.id, slot.id));
       expect(row?.chefUserId).toBeNull();
-    });
-
-    it('rejects deletion of a recipe referenced by cooks_base_recipe_id (RESTRICT)', async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const baseId = await insertRecipe(db, {
-        name: 'Lamb keema base',
-        isBase: true,
-      });
-      await db.insert(mealPlanSlots).values({
-        planId,
-        date: new Date('2026-06-01'),
-        occasionId,
-        slotType: 'eat_out',
-        cooksBaseRecipeId: baseId,
-        cooksBaseServings: 8,
-      });
-      await expect(
-        db.delete(recipes).where(eq(recipes.id, baseId)),
-      ).rejects.toThrow();
-    });
-
-    it('rejects deletion of a recipe referenced by recipe_id (RESTRICT)', async () => {
-      const { occasionId } = await seedFixtures(db);
-      const planId = await insertPlan(db);
-      const recipeId = await insertRecipe(db);
-      await db.insert(mealPlanSlots).values({
-        planId,
-        date: new Date('2026-06-01'),
-        occasionId,
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 2,
-      });
-      await expect(
-        db.delete(recipes).where(eq(recipes.id, recipeId)),
-      ).rejects.toThrow();
     });
   });
 

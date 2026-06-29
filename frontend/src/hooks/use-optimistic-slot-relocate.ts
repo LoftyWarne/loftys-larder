@@ -105,15 +105,9 @@ function withSlotPayload(target: PlanSlot, fromSlot: PlanSlot): PlanSlot {
   return {
     ...target,
     slotType: fromSlot.slotType,
-    recipeId: fromSlot.recipeId,
-    numberOfServings: fromSlot.numberOfServings,
     chefUserId: fromSlot.chefUserId,
-    cooksBaseRecipeId: fromSlot.cooksBaseRecipeId,
-    cooksBaseServings: fromSlot.cooksBaseServings,
     comment: fromSlot.comment,
-    recipe: fromSlot.recipe,
-    cooksBaseRecipe: fromSlot.cooksBaseRecipe,
-    pairedRecipe: fromSlot.pairedRecipe,
+    items: fromSlot.items,
   };
 }
 

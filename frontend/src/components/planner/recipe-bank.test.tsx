@@ -26,7 +26,6 @@ const TOMATO: RecipeListItem = {
   totalTimeMins: null,
   isBase: false,
   baseRecipeId: null,
-  pairedRecipeId: null,
   isDeleted: false,
   plantPointsCount: 0,
   averageRating: null,

@@ -28,7 +28,11 @@ import {
   verifications,
 } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
-import { mealPlans, mealPlanSlots } from '../src/db/schema/meal-plans.ts';
+import {
+  mealPlans,
+  mealPlanSlotItems,
+  mealPlanSlots,
+} from '../src/db/schema/meal-plans.ts';
 import { recipes } from '../src/db/schema/recipes.ts';
 import { mealOccasions } from '../src/db/schema/reference.ts';
 import { formatCivilDate, todayInLondon } from '../src/lib/date-utils.ts';
@@ -197,6 +201,37 @@ describe('plans procedures', () => {
     return row.id;
   }
 
+  // Turns an existing (empty) slot into a 'recipe' slot eating one dish:
+  // flips the status and inserts an `eat` item. Returns the slot id.
+  async function assignEatItem(
+    planId: number,
+    date: Date,
+    occasionId: number,
+    recipeId: number,
+    servings: number,
+  ): Promise<number> {
+    const [slot] = await db
+      .update(mealPlanSlots)
+      .set({ slotType: 'recipe' })
+      .where(
+        and(
+          eq(mealPlanSlots.planId, planId),
+          eq(mealPlanSlots.date, date),
+          eq(mealPlanSlots.occasionId, occasionId),
+        ),
+      )
+      .returning({ id: mealPlanSlots.id });
+    if (!slot) throw new Error('expected assignment');
+    await db.insert(mealPlanSlotItems).values({
+      slotId: slot.id,
+      recipeId,
+      servings,
+      kind: 'eat',
+      sortOrder: 0,
+    });
+    return slot.id;
+  }
+
   describe('create', () => {
     it('inserts a plan and generates one empty slot per (date × occasion)', async () => {
       const today = todayInLondon();
@@ -215,16 +250,12 @@ describe('plans procedures', () => {
       expect(result.slotCount).toBe(7 * occasionIds.length);
 
       const slots = await db
-        .select({
-          slotType: mealPlanSlots.slotType,
-          recipeId: mealPlanSlots.recipeId,
-        })
+        .select({ slotType: mealPlanSlots.slotType })
         .from(mealPlanSlots)
         .where(eq(mealPlanSlots.planId, result.plan.id));
       expect(slots).toHaveLength(7 * occasionIds.length);
       for (const slot of slots) {
         expect(slot.slotType).toBe('empty');
-        expect(slot.recipeId).toBeNull();
       }
     });
 
@@ -490,11 +521,11 @@ describe('plans procedures', () => {
       }
       for (const slot of result.slots) {
         expect(slot.slotType).toBe('empty');
-        expect(slot.recipe).toBeNull();
+        expect(slot.items).toHaveLength(0);
       }
     });
 
-    it('returns the recipe sub-shape on assigned slots, including soft-deleted recipes', async () => {
+    it('returns the dish items on assigned slots, including soft-deleted recipes', async () => {
       const today = todayInLondon();
       const recipeId = await insertRecipe('Tofu Stir Fry');
       const planId = await insertPlan({
@@ -503,35 +534,44 @@ describe('plans procedures', () => {
       });
       const occasionId = occasionIds[0];
       if (occasionId === undefined) throw new Error('expected occasion');
-      await db.insert(mealPlanSlots).values({
-        planId,
-        date: today,
-        occasionId,
-        slotType: 'recipe',
+      const [slotRow] = await db
+        .insert(mealPlanSlots)
+        .values({ planId, date: today, occasionId, slotType: 'recipe' })
+        .returning({ id: mealPlanSlots.id });
+      if (!slotRow) throw new Error('slot insert failed');
+      await db.insert(mealPlanSlotItems).values({
+        slotId: slotRow.id,
         recipeId,
-        numberOfServings: 2,
+        servings: 2,
+        kind: 'eat',
+        sortOrder: 0,
       });
 
       const caller = createCaller(makeContext());
       const before = await caller.plans.get({ id: planId });
-      const assigned = before.slots.find((s) => s.recipeId === recipeId);
-      expect(assigned?.recipe).toEqual({
-        id: recipeId,
-        name: 'Tofu Stir Fry',
-        imageUrl: null,
-        isBase: false,
-        baseRecipeId: null,
-        pairedRecipeId: null,
-        isDeleted: false,
-      });
+      const assigned = before.slots.find((s) => s.id === slotRow.id);
+      expect(assigned?.items).toEqual([
+        {
+          id: expect.any(Number) as number,
+          recipeId,
+          recipeName: 'Tofu Stir Fry',
+          recipeImageUrl: null,
+          isBase: false,
+          baseRecipeId: null,
+          isDeleted: false,
+          servings: 2,
+          kind: 'eat',
+          sortOrder: 0,
+        },
+      ]);
 
       await db
         .update(recipes)
         .set({ isDeleted: true })
         .where(eq(recipes.id, recipeId));
       const after = await caller.plans.get({ id: planId });
-      const stillThere = after.slots.find((s) => s.recipeId === recipeId);
-      expect(stillThere?.recipe?.isDeleted).toBe(true);
+      const stillThere = after.slots.find((s) => s.id === slotRow.id);
+      expect(stillThere?.items[0]?.isDeleted).toBe(true);
     });
 
     it('returns NOT_FOUND for a plan in another household', async () => {
@@ -611,8 +651,11 @@ describe('plans procedures', () => {
       occasionId: number;
       slotType: 'empty' | 'recipe' | 'eat_out' | 'takeaway' | 'leftovers';
       recipeId: number | null;
+      numberOfServings: number | null;
     }
 
+    // Joins the slot's (first) eat item so the legacy recipeId/servings
+    // assertions still read naturally over the items model.
     async function listSlots(planId: number): Promise<SlotRow[]> {
       return db
         .select({
@@ -620,9 +663,17 @@ describe('plans procedures', () => {
           date: mealPlanSlots.date,
           occasionId: mealPlanSlots.occasionId,
           slotType: mealPlanSlots.slotType,
-          recipeId: mealPlanSlots.recipeId,
+          recipeId: mealPlanSlotItems.recipeId,
+          numberOfServings: mealPlanSlotItems.servings,
         })
         .from(mealPlanSlots)
+        .leftJoin(
+          mealPlanSlotItems,
+          and(
+            eq(mealPlanSlotItems.slotId, mealPlanSlots.id),
+            eq(mealPlanSlotItems.kind, 'eat'),
+          ),
+        )
         .where(eq(mealPlanSlots.planId, planId));
     }
 
@@ -739,18 +790,13 @@ describe('plans procedures', () => {
       if (occasionId === undefined) throw new Error('expected occasion');
       // Assign a recipe to the slot at day+2 (which will remain in range).
       const assignedDate = addDays(today, 2);
-      const [assignedSlot] = await db
-        .update(mealPlanSlots)
-        .set({ slotType: 'recipe', recipeId, numberOfServings: 2 })
-        .where(
-          and(
-            eq(mealPlanSlots.planId, planId),
-            eq(mealPlanSlots.date, assignedDate),
-            eq(mealPlanSlots.occasionId, occasionId),
-          ),
-        )
-        .returning({ id: mealPlanSlots.id });
-      if (!assignedSlot) throw new Error('expected assignment');
+      const assignedSlotId = await assignEatItem(
+        planId,
+        assignedDate,
+        occasionId,
+        recipeId,
+        2,
+      );
 
       const caller = createCaller(makeContext());
       // Shift the window: drop day 0, drop day 3-4, keep days 1-2, add days 5-6.
@@ -761,11 +807,12 @@ describe('plans procedures', () => {
       });
 
       expect(result.slots).toHaveLength(6 * occasionIds.length);
-      const survivor = result.slots.find((s) => s.id === assignedSlot.id);
+      const survivor = result.slots.find((s) => s.id === assignedSlotId);
       expect(survivor).toBeDefined();
       expect(survivor?.slotType).toBe('recipe');
-      expect(survivor?.recipeId).toBe(recipeId);
-      expect(survivor?.numberOfServings).toBe(2);
+      expect(survivor?.items).toHaveLength(1);
+      expect(survivor?.items[0]?.recipeId).toBe(recipeId);
+      expect(survivor?.items[0]?.servings).toBe(2);
     });
 
     it('is a no-op when the range is unchanged', async () => {
@@ -794,18 +841,13 @@ describe('plans procedures', () => {
       const occasionId = occasionIds[0];
       if (occasionId === undefined) throw new Error('expected occasion');
       const lostDate = addDays(today, 5);
-      const [assigned] = await db
-        .update(mealPlanSlots)
-        .set({ slotType: 'recipe', recipeId, numberOfServings: 3 })
-        .where(
-          and(
-            eq(mealPlanSlots.planId, planId),
-            eq(mealPlanSlots.date, lostDate),
-            eq(mealPlanSlots.occasionId, occasionId),
-          ),
-        )
-        .returning({ id: mealPlanSlots.id });
-      if (!assigned) throw new Error('expected assignment');
+      const assignedId = await assignEatItem(
+        planId,
+        lostDate,
+        occasionId,
+        recipeId,
+        3,
+      );
 
       const caller = createCaller(makeContext());
       const error = await caller.plans
@@ -828,18 +870,18 @@ describe('plans procedures', () => {
               date: string;
               occasionId: number;
               slotType: string;
-              recipeId: number | null;
+              itemCount: number;
             }[];
           };
         }
       ).cause;
       expect(cause.slots).toHaveLength(1);
       expect(cause.slots[0]).toMatchObject({
-        id: assigned.id,
+        id: assignedId,
         date: formatCivilDate(lostDate),
         occasionId,
         slotType: 'recipe',
-        recipeId,
+        itemCount: 1,
       });
 
       const after = await listSlots(planId);
@@ -861,16 +903,7 @@ describe('plans procedures', () => {
       const occasionId = occasionIds[0];
       if (occasionId === undefined) throw new Error('expected occasion');
       const lostDate = addDays(today, 5);
-      await db
-        .update(mealPlanSlots)
-        .set({ slotType: 'recipe', recipeId, numberOfServings: 2 })
-        .where(
-          and(
-            eq(mealPlanSlots.planId, planId),
-            eq(mealPlanSlots.date, lostDate),
-            eq(mealPlanSlots.occasionId, occasionId),
-          ),
-        );
+      await assignEatItem(planId, lostDate, occasionId, recipeId, 2);
 
       const caller = createCaller(makeContext());
       const result = await caller.plans.updateRange({
@@ -1067,26 +1100,36 @@ describe('plans procedures', () => {
         throw new Error('expected two occasions');
       }
 
-      // One recipe slot (with chef), one eat_out, the rest empty. Add a
-      // base-cook annotation to the recipe slot so the cooks_base_* fields
-      // get copied too.
-      await db
+      // One recipe slot (with chef) that eats a dish and cooks a base, one
+      // eat_out, the rest empty — so item copying (both kinds) is exercised.
+      const [recipeSourceSlot] = await db
         .update(mealPlanSlots)
-        .set({
-          slotType: 'recipe',
-          recipeId,
-          numberOfServings: 3,
-          chefUserId: USER_ID,
-          cooksBaseRecipeId: baseRecipeId,
-          cooksBaseServings: 6,
-        })
+        .set({ slotType: 'recipe', chefUserId: USER_ID })
         .where(
           and(
             eq(mealPlanSlots.planId, sourceId),
             eq(mealPlanSlots.date, sourceStart),
             eq(mealPlanSlots.occasionId, dinnerId),
           ),
-        );
+        )
+        .returning({ id: mealPlanSlots.id });
+      if (!recipeSourceSlot) throw new Error('expected source slot');
+      await db.insert(mealPlanSlotItems).values([
+        {
+          slotId: recipeSourceSlot.id,
+          recipeId,
+          servings: 3,
+          kind: 'eat',
+          sortOrder: 0,
+        },
+        {
+          slotId: recipeSourceSlot.id,
+          recipeId: baseRecipeId,
+          servings: 6,
+          kind: 'cook_ahead',
+          sortOrder: 1,
+        },
+      ]);
       await db
         .update(mealPlanSlots)
         .set({ slotType: 'eat_out' })
@@ -1111,51 +1154,41 @@ describe('plans procedures', () => {
       expect(result.plan.createdByUserId).toBe(USER_ID);
       expect(result.slotCount).toBe(4 * occasionIds.length);
 
-      const newSlots = await db
-        .select({
-          date: mealPlanSlots.date,
-          occasionId: mealPlanSlots.occasionId,
-          slotType: mealPlanSlots.slotType,
-          recipeId: mealPlanSlots.recipeId,
-          numberOfServings: mealPlanSlots.numberOfServings,
-          chefUserId: mealPlanSlots.chefUserId,
-          cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
-          cooksBaseServings: mealPlanSlots.cooksBaseServings,
-        })
-        .from(mealPlanSlots)
-        .where(eq(mealPlanSlots.planId, result.plan.id));
+      const newPlan = await caller.plans.get({ id: result.plan.id });
+      expect(newPlan.slots).toHaveLength(4 * occasionIds.length);
 
-      expect(newSlots).toHaveLength(4 * occasionIds.length);
-
-      const recipeSlot = newSlots.find(
+      const recipeSlot = newPlan.slots.find(
         (s) =>
-          formatCivilDate(s.date) === formatCivilDate(newStart) &&
-          s.occasionId === dinnerId,
+          s.date === formatCivilDate(newStart) && s.occasionId === dinnerId,
       );
-      expect(recipeSlot).toMatchObject({
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 3,
-        chefUserId: USER_ID,
-        cooksBaseRecipeId: baseRecipeId,
-        cooksBaseServings: 6,
-      });
+      expect(recipeSlot?.slotType).toBe('recipe');
+      expect(recipeSlot?.chefUserId).toBe(USER_ID);
+      expect(recipeSlot?.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ recipeId, servings: 3, kind: 'eat' }),
+          expect.objectContaining({
+            recipeId: baseRecipeId,
+            servings: 6,
+            kind: 'cook_ahead',
+          }),
+        ]),
+      );
 
-      const eatOutSlot = newSlots.find(
+      const eatOutSlot = newPlan.slots.find(
         (s) =>
-          formatCivilDate(s.date) === formatCivilDate(addDays(newStart, 1)) &&
+          s.date === formatCivilDate(addDays(newStart, 1)) &&
           s.occasionId === lunchId,
       );
       expect(eatOutSlot?.slotType).toBe('eat_out');
-      expect(eatOutSlot?.recipeId).toBeNull();
+      expect(eatOutSlot?.items).toHaveLength(0);
 
       // Every other slot stays empty.
-      const nonAssigned = newSlots.filter(
+      const nonAssigned = newPlan.slots.filter(
         (s) => s !== recipeSlot && s !== eatOutSlot,
       );
       for (const slot of nonAssigned) {
         expect(slot.slotType).toBe('empty');
-        expect(slot.recipeId).toBeNull();
+        expect(slot.items).toHaveLength(0);
       }
 
       // Source plan is unchanged.

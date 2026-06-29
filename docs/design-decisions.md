@@ -159,7 +159,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 ### DEC-15 — `snake_case` columns in DB, `camelCase` in code
 
-- **Chosen:** Database columns are `snake_case` (`base_servings`, `is_deleted`, `paired_recipe_id`); TypeScript uses `camelCase` via Drizzle's name mapping.
+- **Chosen:** Database columns are `snake_case` (`base_servings`, `is_deleted`, `cooks_base_recipe_id`); TypeScript uses `camelCase` via Drizzle's name mapping.
 - **Alternatives:** `camelCase` columns (requires quoted identifiers), `snake_case` everywhere (verbose in TS).
 - **Why it won:** Postgres folds unquoted `camelCase` identifiers to lowercase. Either you quote every reference (`"basServings"`) and accept the noise forever, or you pick one convention per layer.
 - **Consequences (+):** Idiomatic in both layers. Raw psql queries are pleasant.
@@ -237,27 +237,49 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** Past-plan integrity is required for an external reason (regulatory, sharing, public archive) — none currently in scope.
 - **Cross-refs:** FEAT-11, FEAT-20, FEAT-36; non-goal: "Recipe snapshotting at slot assignment".
 
-### DEC-23 — Two-level batch-cooking model with explicit base / batch-version pairing
+### DEC-23 — Three-way recipe model: base / serving variation / standalone
 
-- **Chosen:** Recipes carry `is_base boolean`, `base_recipe_id` (self-FK, batch versions point to their base), and `paired_recipe_id` (full↔batch sibling link). CHECK constraint: a recipe is either a base or a batch version, not both — no nesting.
+> **Amended by DEC-87** — the original two-level model also carried a
+> `paired_recipe_id` full↔batch sibling link. Pairing has been removed; what
+> remains is the three-way classification below.
+
+- **Chosen:** Recipes carry `is_base boolean` and `base_recipe_id` (self-FK). A recipe is one of: a **base** (`is_base = true`), a **serving variation** (`is_base = false`, `base_recipe_id` set — depends on one base), or **standalone** (neither). CHECK constraint `recipes_base_xor_variation`: a recipe is either a base or a serving variation, never both — no nesting.
 - **Alternatives:** Nested base recipes (a stock that feeds a sauce that feeds a meal); a "prep step" abstraction distinct from recipes; no batch concept at all.
-- **Why it won:** Two levels cover every cooking pattern the household has surfaced (base → accompaniments). Nesting introduces cycle-detection, recursive plant-points traversal, and ambiguous aggregation paths for no observed use case. The pair link gives the slot editor a "switch to full / switch to batch" affordance without inferring it from data.
-- **Consequences (+):** Aggregator and plant-points traversal are bounded (one level deep). The editor pair-switch is a simple FK lookup.
-- **Consequences (−):** A recipe pattern needing three-deep composition would force a model change. `paired_recipe_id` symmetry has to be maintained at the application layer in the recipe-save transaction (DEC-26). The batch-version-of-soft-deleted-base case adds a picker rule.
+- **Why it won:** Two levels cover every cooking pattern the household has surfaced (base → accompaniments). Nesting introduces cycle-detection, recursive plant-points traversal, and ambiguous aggregation paths for no observed use case.
+- **Consequences (+):** Aggregator and plant-points traversal are bounded (one level deep). A serving variation auto-links to its base derivedly: when a slot in the same plan cooks that base, the supply is recognised with no stored link; otherwise a soft warning shows (the base may have been prepped in an earlier period). See DEC-24.
+- **Consequences (−):** A recipe pattern needing three-deep composition would force a model change. The serving-variation-of-soft-deleted-base case adds a picker rule.
 - **Revisit when:** A real meal pattern needs three-deep composition. Re-evaluation should weigh nesting vs. a separate "prep step" abstraction.
-- **Cross-refs:** FEAT-11, FEAT-23, FEAT-32, FEAT-33, FEAT-36, FEAT-41; non-goal: "Nested base recipes".
+- **Cross-refs:** FEAT-11, FEAT-23, FEAT-32, FEAT-36, FEAT-41; DEC-87; non-goal: "Nested base recipes".
 
 ### DEC-24 — Cooked-base contribution on slots, decoupled from the meal's referenced base
 
-- **Chosen:** A slot can cook a base via `cooks_base_recipe_id` and `cooks_base_servings`, independent of whichever recipe the slot is *eating*. Today's lunch can eat one batch-version recipe and cook a different base for tomorrow.
+> **Superseded by DEC-89.** The decoupling principle stands, but the per-slot
+> `cooks_base_recipe_id`/`cooks_base_servings` fields are gone — a base cook is
+> now a `cook_ahead` item in `meal_plan_slot_items`. Retained for history.
+
+> **Reaffirmed (2026-06-25):** "decoupled" means decoupled from *slot type* too —
+> the base-cook field is available on **any** slot (recipe, eat-out, takeaway,
+> leftovers, empty), not just recipe slots. An earlier app-layer guard (a Zod
+> refine restricting `cooks_base*` to `slot_type='recipe'`, plus a UI gate that
+> only showed the section for serving-variation meals) was removed because it
+> contradicted this decoupling and made "cook the base on a takeaway night,
+> eat the variation later" impossible to express — so a later variation falsely
+> warned of no supply. Supply for the warning stays keyed on the explicit
+> base-cook field only (it carries the servings the shopping list provisions).
+
+- **Chosen:** A slot can cook a base via `cooks_base_recipe_id` and `cooks_base_servings`, independent of whichever recipe the slot is *eating* — and independent of slot type. Today's lunch can eat one serving-variation recipe and cook a different base for tomorrow; a takeaway night can still prep a base.
 - **Alternatives:** Force the cooked base to match the eaten recipe's `base_recipe_id`; no per-slot base cook (force a separate slot for the base).
 - **Why it won:** Real cooking decouples "what we ate today" from "what I prepped for the week." A takeaway slot can still prep a base. The slot editor pre-suggests the meal's referenced base for ergonomics but doesn't force it.
 - **Consequences (+):** Plan flow matches kitchen reality. Plant-points traversal de-duplicates the common case where the eaten and cooked bases are the same recipe.
-- **Consequences (−):** Two recipe pickers on the slot editor instead of one. Aggregation has to add base contributions on top of meal-recipe contributions, and batch-version meals must not double-count.
+- **Consequences (−):** Two recipe pickers on the slot editor instead of one. Aggregation has to add base contributions on top of meal-recipe contributions, and serving-variation meals must not double-count.
 - **Revisit when:** Not anticipated.
 - **Cross-refs:** FEAT-12, FEAT-32, FEAT-36, FEAT-41.
 
 ### DEC-25 — Slot states modelled as an enum, not as dummy recipes
+
+> **Amended by DEC-89.** The `slot_type` enum stays as the slot's status, but
+> the `recipe_id`-iff-`slot_type='recipe'` CHECK is gone — dishes live in
+> `meal_plan_slot_items` and the status↔items coupling is enforced in the app.
 
 - **Chosen:** `slot_type enum('empty','recipe','eat_out','takeaway','leftovers')` with a CHECK ensuring `recipe_id IS NOT NULL` iff `slot_type = 'recipe'`.
 - **Alternatives:** Reserved "Eat Out" / "Takeaway" / "Leftovers" recipe rows; nullable `recipe_id` only.
@@ -268,6 +290,10 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Cross-refs:** FEAT-12, FEAT-30, FEAT-31, FEAT-36.
 
 ### DEC-26 — `paired_recipe_id` symmetry maintained at the application layer
+
+> **Superseded by DEC-87.** Recipe pairing (`paired_recipe_id`) has been removed
+> entirely; this decision and its symmetry transaction no longer apply. Retained
+> for history.
 
 - **Chosen:** Setting or clearing `paired_recipe_id` updates both sides of the pair within the recipe-save transaction. Not enforced as a database constraint.
 - **Alternatives:** Postgres trigger maintaining symmetry; a separate `recipe_pairs` table with composite PK and a CHECK (the `related_recipes` pattern).
@@ -280,7 +306,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 ### DEC-27 — `related_recipes` symmetric via composite PK with CHECK
 
 - **Chosen:** `related_recipes (recipe_one_id, recipe_two_id)` with composite PK and `CHECK (recipe_one_id < recipe_two_id)`. One row per pair, symmetry baked into ordering.
-- **Alternatives:** Two rows per pair (A→B and B→A); a `paired_recipe_id`-style FK on each recipe (used for the full↔batch pair instead — see DEC-26).
+- **Alternatives:** Two rows per pair (A→B and B→A); a single self-FK on each recipe (the shape the now-removed full↔batch pairing used — see DEC-26 / DEC-87).
 - **Why it won:** One row per pair, no duplication possible, no self-links (the CHECK prevents `recipe_one_id = recipe_two_id`). Symmetric reads are a UNION on either column.
 - **Consequences (+):** DB-enforced invariants. No application-layer symmetry maintenance.
 - **Consequences (−):** Queries on either side need a UNION or a view. Less convenient than two-row-per-pair for naive reads.
@@ -331,7 +357,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 - **Chosen:** Plant-points are computed as `COUNT(DISTINCT ingredient_id) WHERE is_plant = true` at three granularities (recipe, day, plan). No materialised column.
 - **Alternatives:** Stored on the recipe; materialised view per plan.
-- **Why it won:** A recipe's ingredient set changes; storing a derived count means another invalidation path. At household scale the query is cheap. Day/plan granularity adds batch-version traversal and base-cook unions; computing on read is simpler than maintaining the materialisation.
+- **Why it won:** A recipe's ingredient set changes; storing a derived count means another invalidation path. At household scale the query is cheap. Day/plan granularity adds serving-variation traversal and base-cook unions; computing on read is simpler than maintaining the materialisation.
 - **Consequences (+):** Always current. No invalidation logic.
 - **Consequences (−):** Every read does the count. At household scale, irrelevant.
 - **Revisit when:** Read volume on plant-points makes the cost visible. Not at household scale.
@@ -353,7 +379,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 ### DEC-34 — Drizzle transactions for all multi-statement writes
 
-- **Chosen:** Account deletion, plan shrink/extend, plan duplication, recipe save (when method or ingredient list is replaced alongside header fields), and pair-symmetry updates all run in Drizzle transactions.
+- **Chosen:** Account deletion, plan shrink/extend, plan duplication, recipe save (when method or ingredient list is replaced alongside header fields) all run in Drizzle transactions.
 - **Alternatives:** Per-statement writes with compensating actions on failure; explicit advisory locks.
 - **Why it won:** Postgres transactions are the simplest correct primitive for "all or nothing" semantics. Drizzle's `db.transaction()` API is straightforward.
 - **Consequences (+):** Failure modes are bounded — a partial recipe save can't leave the method updated but the ingredients half-replaced.
@@ -401,13 +427,13 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** Not anticipated.
 - **Cross-refs:** FEAT-27, FEAT-28.
 
-### DEC-39 — Soft warning (non-blocking) for batch-version slots with no upstream base supply
+### DEC-39 — Soft warning (non-blocking) for serving-variation slots with no upstream base supply
 
-- **Chosen:** When a batch-version meal has no base supply earlier in the plan or in the same slot, the planner shows a warning but doesn't block save.
+- **Chosen:** When a serving-variation meal has no base supply earlier in the plan or in the same slot, the planner shows a warning but doesn't block save.
 - **Alternatives:** Hard block on save; no warning.
 - **Why it won:** The cook may have base supply from a previous plan, a freezer stash, or an intent to cook outside the plan model. Blocking save would force workarounds (a "fake" base cook to silence the warning) that pollute the data.
 - **Consequences (+):** User retains autonomy. The model doesn't pretend to know about freezer contents.
-- **Consequences (−):** It is possible to plan a batch-version meal with literally no base supply anywhere and have the shopping list silently underprovision. The cook is presumed to know.
+- **Consequences (−):** It is possible to plan a serving-variation meal with literally no base supply anywhere and have the shopping list silently underprovision. The cook is presumed to know.
 - **Revisit when:** Real cooking shows underprovisioning becoming a recurring failure mode.
 - **Cross-refs:** FEAT-32.
 
@@ -617,7 +643,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 ### DEC-59 — Coverage is not a target; behaviour-focused tests on high-value surfaces
 
-- **Chosen:** No `--coverage` threshold enforced. Tests concentrate on aggregation math (including base-cook contributions and no-double-count for batch-version meals), plant-points traversal, shelf-life warnings, and date-overlap / date-edit migrations.
+- **Chosen:** No `--coverage` threshold enforced. Tests concentrate on aggregation math (including base-cook contributions and no-double-count for serving-variation meals), plant-points traversal, shelf-life warnings, and date-overlap / date-edit migrations.
 - **Alternatives:** Coverage threshold (75%, 80%, 90%); branch coverage requirement.
 - **Why it won:** Coverage as a metric rewards uniform test density regardless of risk profile. The plan names the high-value surfaces explicitly; pushing coverage past those creates ceremonial tests that slow iteration without finding bugs.
 - **Consequences (+):** Tests where they earn their keep. No ceremonial coverage for trivial code.
@@ -911,6 +937,37 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** A new dependency (`vite-plugin-pwa`, `workbox-window`) and one more thing to keep in sync if `httpBatchLink` is ever swapped (cross-cutting #16 already names this risk). `autoUpdate` installs new SW versions silently — a user mid-shop won't see a "new version available" banner; they get it on next full reload. The cache rule is hand-written, not derived from the tRPC client, so a procedure rename on the backend (`shopping.getForPlan` → something else) silently misses the cache until the regex is updated. The Workbox precache also stores every static asset emitted by Vite, growing the install footprint — acceptable today, worth re-checking if the frontend bundle grows past a few hundred KB. Icons are placeholder solid-colour PNGs; final brand art needs to land before production install.
 - **Revisit when:** A second offline-friendly read appears (introduce a second runtime cache rule or generalise the pattern); the offline mutation queue (FEAT-43) finds the LWW behaviour ships visible bugs (DEC-36 trigger); a procedure rename or `httpBatchLink` swap forces the cache rule into sync; users report stale data because a `NetworkFirst` cache served them after a write they expected to land — at which point evict on the toggle mutation or shorten `maxAgeSeconds`.
 - **Cross-refs:** FEAT-42 (the implementation), FEAT-43 (the offline mutation queue this unblocks), DEC-63 / DEC-64 (3 s timeout alignment), cross-cutting concern #16 (tRPC URL shape — the cache rule depends on this not changing), DEC-49 (plain-text user content; nothing about the manifest contradicts it), DEC-50 (Cloudinary direct uploads are unaffected — the SW does not intercept that origin).
+
+### DEC-87 — Remove full↔batch pairing; recipes are base / serving variation / standalone
+
+- **Chosen:** Drop `paired_recipe_id` entirely — the column, its FK, the `recipes_paired_not_self` CHECK, the application-layer symmetry transaction, and the slot "switch to full / switch to batch" affordance. The recipe model is now the three-way classification in DEC-23 (base / serving variation / standalone). "Batch version" is renamed "serving variation" throughout code, tests, and docs. A serving variation's link to its base stays **derived**: when a slot in the same plan cooks that base the supply is recognised with no stored link (DEC-24); when none does, placement is still allowed and the existing soft warning fires (DEC-39), since the base may have been prepped in an earlier period. A slot can both cook a base and eat a serving variation — unchanged (`cooks_base_recipe_id` + `recipe_id`).
+- **Supersedes:** DEC-26 (the `paired_recipe_id` symmetry transaction). **Amends:** DEC-23 (drops the pairing leg of the two-level model). **Removes:** FEAT-33 (Pair switch UI) and cross-cutting concern #12 (pair-symmetry transaction pattern).
+- **Alternatives:** (a) Keep pairing — but it was a second, overlapping way to express "two forms of the same dish" on top of `base_recipe_id`, and its symmetry write was the trickiest in the project for little observed value. (b) Auto-write the base cook onto the slot when a serving variation is placed — rejected as too eager and closer to the snapshotting the project avoids (DEC-22); the derived warning already conveys the optional supply. (c) Persist an explicit slot↔slot supply link — rejected as over-design and snapshot-like.
+- **Why it won:** One clear classification with the XOR CHECK (`recipes_base_xor_variation`) as the single source of truth; the derived supply scan already gave users the meaningful signal. Removing pairing deletes the project's most error-prone write path and a whole picker/affordance surface.
+- **Consequences (+):** Smaller schema and write surface; one fewer self-FK; the recipe editor and slot editor each lose a picker/affordance; the supply story is purely derived and easy to reason about.
+- **Consequences (−):** Users lose the one-tap "switch this slot between the full and batch recipe" affordance — they re-pick the recipe instead. Existing `paired_recipe_id` data is dropped by the migration (it fed no other table, so no historical-render impact).
+- **Revisit when:** A real need resurfaces for a first-class "two forms of one dish" link that `base_recipe_id` + the derived supply scan can't express.
+- **Cross-refs:** DEC-23, DEC-24, DEC-26 (superseded), DEC-39; FEAT-23, FEAT-32; non-goal: "Nested base recipes".
+
+### DEC-88 — Base consumption balance: 1 serving = 1 base serving, running cook-before-eat, planning-only
+
+- **Chosen:** Cooked base is a pool that meals draw down at **1 eaten serving = 1 base serving**. A per-base running balance is computed over the plan in cook-before-eat order (date, then occasion: Lunch < Dinner): each slot adds its `cooks_base_servings`, then subtracts `number_of_servings` for any meal that draws on a base — `consumedBase(slot) = recipe.is_base ? recipe.id : recipe.base_recipe_id` (so eating a *variation of B* and eating *B itself* both consume). A slot whose running balance goes negative is flagged as a **shortfall** (a soft, non-blocking warning, "short by N"); the end-of-plan leftover per base is surfaced as "remaining". This is **planning-only** — it does not affect the shopping list (which provisions from `cooks_base_servings`, DEC-24) or plant-points. Replaces the boolean presence check from DEC-39. Computed client-side over the cached plan (`frontend/src/lib/serving-variation-supply.ts`, `deriveBaseBalances`); no server-side twin (the prior unused backend predicate was deleted).
+- **Alternatives:** (a) Per-recipe consumption ratio (a variation declares base-per-serving) — more precise but needs a schema column for a precision the household hasn't asked for. (b) Plan-total shortfall ignoring order — simpler but wouldn't catch "ate it before cooking it." (c) Keep boolean presence (DEC-39) — coarse: it can't tell "some base, but not enough." (d) Count consumption toward the shopping list — wrong: you buy ingredients for what you *cook*, not what you eat from the batch.
+- **Why it won:** 1:1 needs no schema change and matches how the household reasons ("cooked 12, that's twelve meals"); the running balance respects "cook before you eat"; planning-only keeps it from perturbing the shopping math.
+- **Consequences (+):** Quantity-aware nudges replace a blunt presence flag; "cook 4, eat 4" on one slot self-balances; the base-cook modal shows leftover at a glance.
+- **Consequences (−):** A variation that genuinely uses more/less than one base serving is mis-counted until a ratio model lands. A base eaten as a meal consumes the pool, so eating a base you didn't batch-cook reads as a shortfall (the intended nudge, but a surprise if you think of it as a fresh standalone meal).
+- **Revisit when:** A real recipe needs a non-1:1 base ratio (introduce the per-recipe ratio from alternative (a)).
+- **Cross-refs:** DEC-24 (cooked base on slots, decoupled), DEC-39 (the soft warning this upgrades), FEAT-32; non-goal: "Nested base recipes".
+
+### DEC-89 — Composable meal occasions: a slot owns a list of dish items
+
+- **Chosen:** A slot no longer carries one eaten recipe + one base-cook pair. It owns a list of **items** in a `meal_plan_slot_items` table (`{ slot_id, recipe_id, servings, kind, sort_order }`, `kind ∈ {eat, cook_ahead}`). `eat` items are the dishes eaten at the occasion (a main, sides, dessert); `cook_ahead` items are bases produced in bulk for later meals. The slot keeps a status (`slot_type`) plus slot-level `chef_user_id` + `comment`. App-layer rules: `eat` items only when `slot_type='recipe'` (and `recipe` iff ≥1 eat item); `cook_ahead` items reference an `is_base` recipe and are allowed on any slot type. `slots.update` is full-replace over the items; `relocate` swaps items + meta; aggregation, plant-points, and the consumption balance (DEC-88) all read items (eat → meal contribution, cook_ahead → base contribution).
+- **Supersedes:** DEC-24 (the per-slot `cooks_base_recipe_id`/`cooks_base_servings` fields — a base cook is now a `cook_ahead` item). **Amends:** DEC-25 (the `slot_type` enum stays, but the `recipe_id`-iff-`slot_type` CHECK is replaced by the item rules above), and generalises DEC-88's balance to items.
+- **Alternatives:** (a) Keep one recipe per slot — can't express sides/desserts, the real driver. (b) Collapse `slot_type` into item kinds (no slot status) — bigger model change; loses the cheap "eat out / takeaway / leftovers" status and the prep-on-any-slot story. (c) Per-item chef/comment — more surface for no surfaced need; chef/comment stay slot-level.
+- **Consequences (+):** Occasions are composable (main + side + dessert); base cooking is one unified mechanism, not a bolted-on second field; the two-modal editor (meal vs base) maps onto the two item kinds.
+- **Consequences (−):** A schema migration with a data move (folding legacy `recipe_id`/`cooks_base_*` into items) that runs straight to `main` (DEC-40); every slot consumer (procedures, aggregation, plant-points, optimistic hooks, the planner UI) reads items now; the `recipe`-status-iff-items coupling is app-enforced, not a DB CHECK.
+- **Revisit when:** A need appears for per-item chef/comment, or for slot statuses to become item kinds.
+- **Cross-refs:** DEC-24 (superseded), DEC-25 (amended), DEC-88; FEAT-30, FEAT-31, FEAT-32, FEAT-36, FEAT-41.
 
 ---
 

@@ -115,7 +115,6 @@ const TOMATO: RecipeListItem = {
   totalTimeMins: null,
   isBase: false,
   baseRecipeId: null,
-  pairedRecipeId: null,
   isDeleted: false,
   plantPointsCount: 0,
   averageRating: null,
@@ -129,15 +128,9 @@ const EMPTY_SLOT: PlanSlot = {
   occasionId: 1,
   occasionName: 'Lunch',
   slotType: 'empty',
-  recipeId: null,
-  numberOfServings: null,
   chefUserId: null,
-  cooksBaseRecipeId: null,
-  cooksBaseServings: null,
   comment: null,
-  recipe: null,
-  cooksBaseRecipe: null,
-  pairedRecipe: null,
+  items: [],
 };
 
 const RECIPE_SLOT: PlanSlot = {
@@ -146,17 +139,20 @@ const RECIPE_SLOT: PlanSlot = {
   occasionId: 2,
   occasionName: 'Dinner',
   slotType: 'recipe',
-  recipeId: 10,
-  numberOfServings: 2,
-  recipe: {
-    id: 10,
-    name: 'Tomato pasta',
-    imageUrl: null,
-    isBase: false,
-    baseRecipeId: null,
-    pairedRecipeId: null,
-    isDeleted: false,
-  },
+  items: [
+    {
+      id: 500,
+      recipeId: 10,
+      recipeName: 'Tomato pasta',
+      recipeImageUrl: null,
+      isBase: false,
+      baseRecipeId: null,
+      isDeleted: false,
+      servings: 2,
+      kind: 'eat',
+      sortOrder: 0,
+    },
+  ],
 };
 
 const PLAN: GetPlanResult = {
@@ -269,12 +265,9 @@ describe('PlannerPage', () => {
     expect(payload).toEqual({
       slotId: 100,
       slotType: 'recipe',
-      recipeId: 10,
-      numberOfServings: 2,
       chefUserId: null,
-      cooksBaseRecipeId: null,
-      cooksBaseServings: null,
       comment: null,
+      items: [{ recipeId: 10, servings: 2, kind: 'eat', sortOrder: 0 }],
     });
   });
 
@@ -318,6 +311,20 @@ describe('PlannerPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens the base modal when a slot base affordance is tapped', async () => {
+    const user = userEvent.setup();
+    setup();
+    render(<PlannerPage />);
+
+    const [affordance] = screen.getAllByTestId('slot-base-affordance');
+    if (!affordance) throw new Error('expected a base affordance');
+    await user.click(affordance);
+
+    expect(
+      screen.getByRole('heading', { name: /^cook a base$/i }),
+    ).toBeInTheDocument();
+  });
+
   it('clear button on the editor sends slotType=empty', async () => {
     const user = userEvent.setup();
     setup();
@@ -335,12 +342,9 @@ describe('PlannerPage', () => {
     expect(payload).toEqual({
       slotId: 101,
       slotType: 'empty',
-      recipeId: null,
-      numberOfServings: null,
       chefUserId: null,
-      cooksBaseRecipeId: null,
-      cooksBaseServings: null,
       comment: null,
+      items: [],
     });
   });
 
@@ -363,12 +367,9 @@ describe('PlannerPage', () => {
     expect(payload).toEqual({
       slotId: 101,
       slotType: 'empty',
-      recipeId: null,
-      numberOfServings: null,
       chefUserId: null,
-      cooksBaseRecipeId: null,
-      cooksBaseServings: null,
       comment: null,
+      items: [],
     });
   });
 
@@ -390,8 +391,7 @@ describe('PlannerPage', () => {
     expect(payload).toMatchObject({
       slotId: 101,
       slotType: 'eat_out',
-      recipeId: null,
-      numberOfServings: null,
+      items: [],
     });
   });
 

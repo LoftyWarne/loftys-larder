@@ -1,7 +1,6 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { alias } from 'drizzle-orm/pg-core';
 
 import {
   relocateSlotInputSchema,
@@ -10,14 +9,20 @@ import {
   updateSlotResultSchema,
   type PlanSlot,
   type RelocateSlotResult,
+  type SlotItemInput,
   type UpdateSlotResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import { users } from '../../db/schema/auth.ts';
 import * as schema from '../../db/schema/index.ts';
-import { mealPlans, mealPlanSlots } from '../../db/schema/meal-plans.ts';
+import {
+  mealPlans,
+  mealPlanSlotItems,
+  mealPlanSlots,
+} from '../../db/schema/meal-plans.ts';
 import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
+import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import { formatCivilDate } from '../../lib/date-utils.ts';
 import { protectedProcedure, router } from '../init.ts';
@@ -32,27 +37,19 @@ export const slotsRouter = router({
     .mutation(async ({ ctx, input }): Promise<UpdateSlotResult> => {
       // Load the slot through its plan so household scope (DEC-17) is enforced
       // even though `meal_plan_slots` has no direct household_id column.
-      const existing = await loadHouseholdSlot(ctx.db, input.slotId);
+      const slot = await loadHouseholdSlotId(ctx.db, input.slotId);
 
-      // Recipe pickability is the one validation that depends on the input
-      // *changing* the slot's recipe: a slot already pointing at a soft-deleted
-      // recipe can keep its existing assignment when the caller is just
-      // editing servings/comment/etc. (DEC-21 historical-render coherence).
-      if (input.slotType === 'recipe' && input.recipeId !== null) {
-        const recipeChanged = input.recipeId !== existing.recipeId;
-        if (recipeChanged) {
-          await assertRecipeAssignable(ctx.db, input.recipeId);
-        }
-      }
-
-      // Same coherence rule for the base-cook FK: only re-validate when the
-      // caller is *changing* it, so a historical slot whose cooked base was
-      // later soft-deleted can still be edited (DEC-21).
-      if (input.cooksBaseRecipeId !== null) {
-        const baseChanged =
-          input.cooksBaseRecipeId !== existing.cooksBaseRecipeId;
-        if (baseChanged) {
-          await assertRecipeIsBase(ctx.db, input.cooksBaseRecipeId);
+      // Coherence rule (DEC-21): a recipe already on the slot can stay even if
+      // it was soft-deleted after assignment, so only validate recipes the
+      // caller is *adding*. New `eat` items must be pickable; new `cook_ahead`
+      // items must reference a non-deleted base.
+      const existingRecipeIds = await loadSlotItemRecipeIds(ctx.db, slot.id);
+      for (const item of input.items) {
+        if (existingRecipeIds.has(item.recipeId)) continue;
+        if (item.kind === 'cook_ahead') {
+          await assertRecipeIsBase(ctx.db, item.recipeId);
+        } else {
+          await assertRecipeAssignable(ctx.db, item.recipeId);
         }
       }
 
@@ -60,41 +57,28 @@ export const slotsRouter = router({
         await assertUserExists(ctx.db, input.chefUserId);
       }
 
-      // Joint-set CHECK on (recipe_id, number_of_servings) is enforced both
-      // here and by the DB; the schema refine on the input has already
-      // guaranteed the pairing, so the UPDATE writes a coherent row.
-      const updated = await ctx.db
-        .update(mealPlanSlots)
-        .set({
-          slotType: input.slotType,
-          recipeId: input.recipeId,
-          numberOfServings: input.numberOfServings,
-          chefUserId: input.chefUserId,
-          cooksBaseRecipeId: input.cooksBaseRecipeId,
-          cooksBaseServings: input.cooksBaseServings,
-          comment: input.comment,
-        })
-        .where(eq(mealPlanSlots.id, existing.id))
-        .returning({ id: mealPlanSlots.id });
+      const withTransaction = makeWithTransaction(ctx.db);
+      await withTransaction(async (tx) => {
+        await tx
+          .update(mealPlanSlots)
+          .set({
+            slotType: input.slotType,
+            chefUserId: input.chefUserId,
+            comment: input.comment,
+          })
+          .where(eq(mealPlanSlots.id, slot.id));
+        await replaceSlotItems(tx, slot.id, input.items);
+      });
 
-      if (!updated[0]) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Slot update returned no row',
-        });
-      }
-
-      const slot = await selectSlotById(ctx.db, existing.id);
-      return { slot };
+      const selected = await selectSlotById(ctx.db, slot.id);
+      return { slot: selected };
     }),
 
   // FEAT-40 — drag a slot onto another slot. Empty dest = move (source goes
   // empty). Populated dest = swap (contents exchange). Both writes happen
   // inside one transaction (cross-cutting #4) so the two slots are never
-  // observed mid-exchange. Same scope discipline as `update` — load both
-  // slots via the plan join so household_id stays load-bearing (DEC-17).
-  // Both slots must belong to the same plan; cross-plan drops fail with
-  // FORBIDDEN.
+  // observed mid-exchange. Same scope discipline as `update`. Both slots must
+  // belong to the same plan; cross-plan drops fail with FORBIDDEN.
   relocate: protectedProcedure
     .input(relocateSlotInputSchema)
     .output(relocateSlotResultSchema)
@@ -112,19 +96,31 @@ export const slotsRouter = router({
             cause: { code: 'SLOT_RELOCATE_CROSS_PLAN' },
           });
         }
-        // Destination receives source's content unconditionally; source
-        // either receives dest's content (swap) or is emptied (move).
-        const sourcePatch =
-          dest.slotType === 'empty' ? emptySlotPatch() : asSlotPatch(dest);
-        const destPatch = asSlotPatch(source);
+        const [sourceItems, destItems] = await Promise.all([
+          loadRawSlotItems(tx, source.id),
+          loadRawSlotItems(tx, dest.id),
+        ]);
+        const destPopulated = dest.slotType !== 'empty' || destItems.length > 0;
+
+        // Dest receives source's content unconditionally; source receives
+        // dest's content (swap) or is emptied (move).
         await tx
           .update(mealPlanSlots)
-          .set(destPatch)
+          .set(metaPatch(source))
           .where(eq(mealPlanSlots.id, dest.id));
         await tx
           .update(mealPlanSlots)
-          .set(sourcePatch)
+          .set(destPopulated ? metaPatch(dest) : emptyMetaPatch())
           .where(eq(mealPlanSlots.id, source.id));
+
+        await tx
+          .delete(mealPlanSlotItems)
+          .where(inArray(mealPlanSlotItems.slotId, [source.id, dest.id]));
+        await replaceSlotItems(tx, dest.id, sourceItems);
+        if (destPopulated) {
+          await replaceSlotItems(tx, source.id, destItems);
+        }
+
         return { sourceSlotId: source.id, destSlotId: dest.id };
       });
       const [sourceSlot, destSlot] = await Promise.all([
@@ -135,77 +131,91 @@ export const slotsRouter = router({
     }),
 });
 
-interface ExistingSlot {
-  id: number;
-  recipeId: number | null;
-  cooksBaseRecipeId: number | null;
-}
-
-// Full content of a slot, read inside a relocate transaction so the source ↔
-// dest swap derives from the same snapshot the transaction commits.
-interface SlotContent {
+interface SlotMeta {
   id: number;
   planId: number;
   slotType: typeof mealPlanSlots.$inferSelect.slotType;
-  recipeId: number | null;
-  numberOfServings: number | null;
   chefUserId: string | null;
-  cooksBaseRecipeId: number | null;
-  cooksBaseServings: number | null;
   comment: string | null;
 }
 
-type SlotPatch = Pick<
-  SlotContent,
-  | 'slotType'
-  | 'recipeId'
-  | 'numberOfServings'
-  | 'chefUserId'
-  | 'cooksBaseRecipeId'
-  | 'cooksBaseServings'
-  | 'comment'
->;
+type MetaPatch = Pick<SlotMeta, 'slotType' | 'chefUserId' | 'comment'>;
 
-function asSlotPatch(slot: SlotContent): SlotPatch {
+function metaPatch(slot: SlotMeta): MetaPatch {
   return {
     slotType: slot.slotType,
-    recipeId: slot.recipeId,
-    numberOfServings: slot.numberOfServings,
     chefUserId: slot.chefUserId,
-    cooksBaseRecipeId: slot.cooksBaseRecipeId,
-    cooksBaseServings: slot.cooksBaseServings,
     comment: slot.comment,
   };
 }
 
-function emptySlotPatch(): SlotPatch {
-  return {
-    slotType: 'empty',
-    recipeId: null,
-    numberOfServings: null,
-    chefUserId: null,
-    cooksBaseRecipeId: null,
-    cooksBaseServings: null,
-    comment: null,
-  };
+function emptyMetaPatch(): MetaPatch {
+  return { slotType: 'empty', chefUserId: null, comment: null };
 }
 
-async function loadHouseholdSlotContent(
+// Replace the slot's items with `items`, reinserting in the given order. The
+// caller is responsible for having deleted any prior rows (relocate batches the
+// delete across both slots; update relies on this helper's own delete).
+async function replaceSlotItems(
+  tx: Tx,
+  slotId: number,
+  items: readonly SlotItemInput[],
+): Promise<void> {
+  await tx
+    .delete(mealPlanSlotItems)
+    .where(eq(mealPlanSlotItems.slotId, slotId));
+  if (items.length === 0) return;
+  await tx.insert(mealPlanSlotItems).values(
+    items.map((item) => ({
+      slotId,
+      recipeId: item.recipeId,
+      servings: item.servings,
+      kind: item.kind,
+      sortOrder: item.sortOrder,
+    })),
+  );
+}
+
+interface RawSlotItem {
+  recipeId: number;
+  servings: number;
+  kind: typeof mealPlanSlotItems.$inferSelect.kind;
+  sortOrder: number;
+}
+
+async function loadRawSlotItems(
+  tx: Tx,
+  slotId: number,
+): Promise<RawSlotItem[]> {
+  return tx
+    .select({
+      recipeId: mealPlanSlotItems.recipeId,
+      servings: mealPlanSlotItems.servings,
+      kind: mealPlanSlotItems.kind,
+      sortOrder: mealPlanSlotItems.sortOrder,
+    })
+    .from(mealPlanSlotItems)
+    .where(eq(mealPlanSlotItems.slotId, slotId))
+    .orderBy(asc(mealPlanSlotItems.sortOrder), asc(mealPlanSlotItems.id));
+}
+
+async function loadSlotItemRecipeIds(
   db: DbHandle,
   slotId: number,
-): Promise<SlotContent> {
+): Promise<Set<number>> {
   const rows = await db
-    .select({
-      id: mealPlanSlots.id,
-      planId: mealPlanSlots.planId,
-      slotType: mealPlanSlots.slotType,
-      recipeId: mealPlanSlots.recipeId,
-      numberOfServings: mealPlanSlots.numberOfServings,
-      chefUserId: mealPlanSlots.chefUserId,
-      cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
-      cooksBaseServings: mealPlanSlots.cooksBaseServings,
-      comment: mealPlanSlots.comment,
-    })
+    .select({ recipeId: mealPlanSlotItems.recipeId })
+    .from(mealPlanSlotItems)
+    .where(eq(mealPlanSlotItems.slotId, slotId));
+  return new Set(rows.map((row) => row.recipeId));
+}
+
+async function loadHouseholdSlotId(
+  db: DbHandle,
+  slotId: number,
+): Promise<{ id: number }> {
+  const rows = await db
+    .select({ id: mealPlanSlots.id })
     .from(mealPlanSlots)
     .innerJoin(mealPlans, eq(mealPlanSlots.planId, mealPlans.id))
     .where(
@@ -226,15 +236,17 @@ async function loadHouseholdSlotContent(
   return row;
 }
 
-async function loadHouseholdSlot(
+async function loadHouseholdSlotContent(
   db: DbHandle,
   slotId: number,
-): Promise<ExistingSlot> {
+): Promise<SlotMeta> {
   const rows = await db
     .select({
       id: mealPlanSlots.id,
-      recipeId: mealPlanSlots.recipeId,
-      cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
+      planId: mealPlanSlots.planId,
+      slotType: mealPlanSlots.slotType,
+      chefUserId: mealPlanSlots.chefUserId,
+      comment: mealPlanSlots.comment,
     })
     .from(mealPlanSlots)
     .innerJoin(mealPlans, eq(mealPlanSlots.planId, mealPlans.id))
@@ -316,8 +328,8 @@ async function assertRecipeIsBase(
   if (!row.isBase) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message: 'cooksBaseRecipeId must reference a base recipe',
-      cause: { code: 'SLOT_BASE_NOT_BASE' },
+      message: 'A cook-ahead item must reference a base recipe',
+      cause: { code: 'SLOT_ITEM_COOK_AHEAD_NOT_BASE' },
     });
   }
 }
@@ -341,8 +353,6 @@ async function assertUserExists(db: DbHandle, userId: string): Promise<void> {
 // reads the same shape after a mutation, so the optimistic cache can swap in
 // the server-returned row without re-fetching the whole plan.
 async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
-  const cookedBase = alias(recipes, 'cooked_base_recipe');
-  const pairedRecipe = alias(recipes, 'paired_recipe');
   const rows = await db
     .select({
       id: mealPlanSlots.id,
@@ -351,35 +361,12 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
       occasionId: mealPlanSlots.occasionId,
       occasionName: mealOccasions.name,
       slotType: mealPlanSlots.slotType,
-      recipeId: mealPlanSlots.recipeId,
-      numberOfServings: mealPlanSlots.numberOfServings,
       chefUserId: mealPlanSlots.chefUserId,
-      cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
-      cooksBaseServings: mealPlanSlots.cooksBaseServings,
       comment: mealPlanSlots.comment,
-      recipeName: recipes.name,
-      recipeImageUrl: recipes.imageUrl,
-      recipeIsBase: recipes.isBase,
-      recipeBaseRecipeId: recipes.baseRecipeId,
-      recipePairedRecipeId: recipes.pairedRecipeId,
-      recipeIsDeleted: recipes.isDeleted,
-      cookedBaseName: cookedBase.name,
-      cookedBaseIsDeleted: cookedBase.isDeleted,
-      pairedRecipeId: pairedRecipe.id,
-      pairedRecipeName: pairedRecipe.name,
-      pairedRecipeImageUrl: pairedRecipe.imageUrl,
-      pairedRecipeIsBase: pairedRecipe.isBase,
-      pairedRecipeBaseRecipeId: pairedRecipe.baseRecipeId,
-      pairedRecipeBaseServings: pairedRecipe.baseServings,
-      pairedRecipeIsDeleted: pairedRecipe.isDeleted,
     })
     .from(mealPlanSlots)
     .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
-    .leftJoin(recipes, eq(mealPlanSlots.recipeId, recipes.id))
-    .leftJoin(cookedBase, eq(mealPlanSlots.cooksBaseRecipeId, cookedBase.id))
-    .leftJoin(pairedRecipe, eq(recipes.pairedRecipeId, pairedRecipe.id))
     .where(eq(mealPlanSlots.id, slotId))
-    .orderBy(asc(mealPlanSlots.id))
     .limit(1);
   const row = rows[0];
   if (!row) {
@@ -388,6 +375,7 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
       message: 'Updated slot not found on re-select',
     });
   }
+  const items = (await loadSlotItems(db, [slotId])).get(slotId) ?? [];
   return {
     id: row.id,
     planId: row.planId,
@@ -395,43 +383,8 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
     occasionId: row.occasionId,
     occasionName: row.occasionName,
     slotType: row.slotType,
-    recipeId: row.recipeId,
-    numberOfServings: row.numberOfServings,
     chefUserId: row.chefUserId,
-    cooksBaseRecipeId: row.cooksBaseRecipeId,
-    cooksBaseServings: row.cooksBaseServings,
     comment: row.comment,
-    recipe:
-      row.recipeId === null || row.recipeName === null
-        ? null
-        : {
-            id: row.recipeId,
-            name: row.recipeName,
-            imageUrl: row.recipeImageUrl,
-            isBase: row.recipeIsBase ?? false,
-            baseRecipeId: row.recipeBaseRecipeId ?? null,
-            pairedRecipeId: row.recipePairedRecipeId ?? null,
-            isDeleted: row.recipeIsDeleted ?? false,
-          },
-    cooksBaseRecipe:
-      row.cooksBaseRecipeId === null || row.cookedBaseName === null
-        ? null
-        : {
-            id: row.cooksBaseRecipeId,
-            name: row.cookedBaseName,
-            isDeleted: row.cookedBaseIsDeleted ?? false,
-          },
-    pairedRecipe:
-      row.pairedRecipeId === null || row.pairedRecipeName === null
-        ? null
-        : {
-            id: row.pairedRecipeId,
-            name: row.pairedRecipeName,
-            imageUrl: row.pairedRecipeImageUrl,
-            isBase: row.pairedRecipeIsBase ?? false,
-            baseRecipeId: row.pairedRecipeBaseRecipeId ?? null,
-            baseServings: row.pairedRecipeBaseServings ?? 1,
-            isDeleted: row.pairedRecipeIsDeleted ?? false,
-          },
+    items,
   };
 }

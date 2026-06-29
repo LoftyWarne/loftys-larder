@@ -20,7 +20,11 @@ import {
   verifications,
 } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
-import { mealPlans, mealPlanSlots } from '../src/db/schema/meal-plans.ts';
+import {
+  mealPlans,
+  mealPlanSlotItems,
+  mealPlanSlots,
+} from '../src/db/schema/meal-plans.ts';
 import { recipes } from '../src/db/schema/recipes.ts';
 import { mealOccasions } from '../src/db/schema/reference.ts';
 import { todayInLondon } from '../src/lib/date-utils.ts';
@@ -192,7 +196,11 @@ describe('slots procedures', () => {
 
   async function insertRecipe(
     name: string,
-    options: { isDeleted?: boolean; householdId?: string } = {},
+    options: {
+      isDeleted?: boolean;
+      householdId?: string;
+      isBase?: boolean;
+    } = {},
   ): Promise<number> {
     const inserted = await db
       .insert(recipes)
@@ -200,7 +208,7 @@ describe('slots procedures', () => {
         householdId: options.householdId ?? CURRENT_HOUSEHOLD_ID,
         name,
         baseServings: 2,
-        isBase: false,
+        isBase: options.isBase ?? false,
         isDeleted: options.isDeleted ?? false,
         addedByUserId: USER_ID,
       })
@@ -210,831 +218,348 @@ describe('slots procedures', () => {
     return row.id;
   }
 
-  async function readSlot(slotId: number) {
-    const rows = await db
-      .select()
-      .from(mealPlanSlots)
-      .where(eq(mealPlanSlots.id, slotId));
-    const row = rows[0];
-    if (!row) throw new Error('slot not found');
-    return row;
+  async function insertBaseRecipe(name: string): Promise<number> {
+    return insertRecipe(name, { isBase: true });
   }
 
-  describe('state transitions', () => {
-    it('assigns a recipe to an empty slot', async () => {
+  // Seed items directly onto a slot (bypasses the procedure) for arrange steps.
+  async function seedItems(
+    slotId: number,
+    items: {
+      recipeId: number;
+      servings: number;
+      kind: 'eat' | 'cook_ahead';
+      sortOrder?: number;
+    }[],
+  ): Promise<void> {
+    await db.insert(mealPlanSlotItems).values(
+      items.map((item, index) => ({
+        slotId,
+        recipeId: item.recipeId,
+        servings: item.servings,
+        kind: item.kind,
+        sortOrder: item.sortOrder ?? index,
+      })),
+    );
+  }
+
+  async function readItems(slotId: number) {
+    return db
+      .select({
+        recipeId: mealPlanSlotItems.recipeId,
+        servings: mealPlanSlotItems.servings,
+        kind: mealPlanSlotItems.kind,
+        sortOrder: mealPlanSlotItems.sortOrder,
+      })
+      .from(mealPlanSlotItems)
+      .where(eq(mealPlanSlotItems.slotId, slotId))
+      .orderBy(mealPlanSlotItems.sortOrder);
+  }
+
+  describe('update — meal items', () => {
+    it('assigns eat dishes to an empty slot', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);
-      const recipeId = await insertRecipe('Lentil Curry');
-
+      const main = await insertRecipe('Roast');
+      const side = await insertRecipe('Greens');
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
         slotType: 'recipe',
-        recipeId,
-        numberOfServings: 4,
-        chefUserId: USER_ID,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: 'extra coriander',
+        chefUserId: null,
+        comment: null,
+        items: [
+          { recipeId: main, servings: 4, kind: 'eat', sortOrder: 0 },
+          { recipeId: side, servings: 4, kind: 'eat', sortOrder: 1 },
+        ],
       });
-
       expect(result.slot.slotType).toBe('recipe');
-      expect(result.slot.recipeId).toBe(recipeId);
-      expect(result.slot.numberOfServings).toBe(4);
-      expect(result.slot.chefUserId).toBe(USER_ID);
-      expect(result.slot.comment).toBe('extra coriander');
-      expect(result.slot.recipe?.name).toBe('Lentil Curry');
+      expect(result.slot.items).toHaveLength(2);
+      expect(result.slot.items.map((i) => i.recipeId)).toEqual([main, side]);
 
-      const row = await readSlot(slotId);
-      expect(row.slotType).toBe('recipe');
-      expect(row.recipeId).toBe(recipeId);
-      expect(row.numberOfServings).toBe(4);
+      const persisted = await readItems(slotId);
+      expect(persisted).toHaveLength(2);
+      expect(persisted[0]).toMatchObject({ recipeId: main, kind: 'eat' });
     });
 
-    it('transitions recipe to eat_out, nulling recipe and servings', async () => {
+    it('full-replaces the item list on update', async () => {
       const planId = await insertPlan();
-      const recipeId = await insertRecipe('Tofu Stir Fry');
-      const slotId = await insertSlot(planId, {
+      const slotId = await insertSlot(planId, { slotType: 'recipe' });
+      const a = await insertRecipe('A');
+      const b = await insertRecipe('B');
+      await seedItems(slotId, [{ recipeId: a, servings: 2, kind: 'eat' }]);
+      const caller = createCaller(makeContext());
+      await caller.slots.update({
+        slotId,
         slotType: 'recipe',
-        recipeId,
-        numberOfServings: 2,
-        chefUserId: USER_ID,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: 'leftover marinade',
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId: b, servings: 3, kind: 'eat', sortOrder: 0 }],
       });
+      const persisted = await readItems(slotId);
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0]).toMatchObject({ recipeId: b, servings: 3 });
+    });
 
+    it('clears items when transitioning recipe → eat_out', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId, { slotType: 'recipe' });
+      const r = await insertRecipe('Curry');
+      await seedItems(slotId, [{ recipeId: r, servings: 2, kind: 'eat' }]);
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
         slotType: 'eat_out',
-        recipeId: null,
-        numberOfServings: null,
-        chefUserId: USER_ID,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: 'pizza place',
+        chefUserId: null,
+        comment: null,
+        items: [],
       });
-
       expect(result.slot.slotType).toBe('eat_out');
-      expect(result.slot.recipeId).toBeNull();
-      expect(result.slot.numberOfServings).toBeNull();
-      expect(result.slot.chefUserId).toBe(USER_ID);
-      expect(result.slot.comment).toBe('pizza place');
-
-      const row = await readSlot(slotId);
-      expect(row.recipeId).toBeNull();
-      expect(row.numberOfServings).toBeNull();
+      expect(result.slot.items).toHaveLength(0);
+      expect(await readItems(slotId)).toHaveLength(0);
     });
 
-    it('transitions recipe to takeaway', async () => {
+    it('persists chef and comment', async () => {
       const planId = await insertPlan();
-      const recipeId = await insertRecipe('Pad Thai');
-      const slotId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 2,
-      });
-
+      const slotId = await insertSlot(planId);
+      const r = await insertRecipe('Soup');
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
-        slotType: 'takeaway',
-        recipeId: null,
-        numberOfServings: null,
-        chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: null,
-      });
-
-      expect(result.slot.slotType).toBe('takeaway');
-      expect(result.slot.recipeId).toBeNull();
-      expect(result.slot.numberOfServings).toBeNull();
-    });
-
-    it('transitions recipe to leftovers', async () => {
-      const planId = await insertPlan();
-      const recipeId = await insertRecipe('Chilli');
-      const slotId = await insertSlot(planId, {
         slotType: 'recipe',
-        recipeId,
-        numberOfServings: 6,
-      });
-
-      const caller = createCaller(makeContext());
-      const result = await caller.slots.update({
-        slotId,
-        slotType: 'leftovers',
-        recipeId: null,
-        numberOfServings: null,
-        chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: null,
-      });
-
-      expect(result.slot.slotType).toBe('leftovers');
-      expect(result.slot.recipeId).toBeNull();
-      expect(result.slot.numberOfServings).toBeNull();
-    });
-
-    it('transitions recipe to empty, clearing recipe, servings, chef, and comment', async () => {
-      const planId = await insertPlan();
-      const recipeId = await insertRecipe('Bolognese');
-      const slotId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 3,
         chefUserId: USER_ID,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: 'use the big pan',
+        comment: 'extra spicy',
+        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
       });
-
-      const caller = createCaller(makeContext());
-      const result = await caller.slots.update({
-        slotId,
-        slotType: 'empty',
-        recipeId: null,
-        numberOfServings: null,
-        chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: null,
-      });
-
-      expect(result.slot.slotType).toBe('empty');
-      expect(result.slot.recipeId).toBeNull();
-      expect(result.slot.numberOfServings).toBeNull();
-      expect(result.slot.chefUserId).toBeNull();
-      expect(result.slot.comment).toBeNull();
+      expect(result.slot.chefUserId).toBe(USER_ID);
+      expect(result.slot.comment).toBe('extra spicy');
     });
 
-    it('transitions empty to eat_out without any recipe input', async () => {
+    it('rejects an unknown chef', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);
-
-      const caller = createCaller(makeContext());
-      const result = await caller.slots.update({
-        slotId,
-        slotType: 'eat_out',
-        recipeId: null,
-        numberOfServings: null,
-        chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: null,
-      });
-
-      expect(result.slot.slotType).toBe('eat_out');
-    });
-  });
-
-  describe('coherence validation', () => {
-    it('rejects slotType=recipe with null recipeId', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-
+      const r = await insertRecipe('Soup');
       const caller = createCaller(makeContext());
       await expect(
         caller.slots.update({
           slotId,
           slotType: 'recipe',
-          recipeId: null,
-          numberOfServings: 2,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
+          chefUserId: 'ghost-user',
           comment: null,
+          items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
         }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      ).rejects.toMatchObject({ cause: { code: 'SLOT_CHEF_NOT_FOUND' } });
     });
 
-    it('rejects slotType=recipe with null numberOfServings', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const recipeId = await insertRecipe('Risotto');
-
+    it('returns NOT_FOUND for a slot in another household', async () => {
+      const otherPlan = await insertPlan({ householdId: OTHER_HOUSEHOLD_ID });
+      const slotId = await insertSlot(otherPlan);
       const caller = createCaller(makeContext());
       await expect(
         caller.slots.update({
           slotId,
-          slotType: 'recipe',
-          recipeId,
-          numberOfServings: null,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    });
-
-    it('rejects slotType=recipe with zero servings', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const recipeId = await insertRecipe('Pasta');
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId,
-          numberOfServings: 0,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    });
-
-    it('rejects non-recipe slotType with a recipeId set', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const recipeId = await insertRecipe('Soup');
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'eat_out',
-          recipeId,
-          numberOfServings: null,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    });
-  });
-
-  describe('recipe pickability', () => {
-    it('rejects fresh assignment of a soft-deleted recipe', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const recipeId = await insertRecipe('Gone Recipe', { isDeleted: true });
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId,
-          numberOfServings: 2,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'SLOT_RECIPE_NOT_PICKABLE' },
-      });
-    });
-
-    it('rejects assigning a recipe from another household', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const foreignRecipeId = await insertRecipe('Foreign', {
-        householdId: OTHER_HOUSEHOLD_ID,
-      });
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId: foreignRecipeId,
-          numberOfServings: 2,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'SLOT_RECIPE_CROSS_HOUSEHOLD' },
-      });
-    });
-
-    it('allows editing servings on a slot whose recipe became soft-deleted', async () => {
-      const planId = await insertPlan();
-      const recipeId = await insertRecipe('Vanishing Pie');
-      const slotId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 2,
-      });
-      await db
-        .update(recipes)
-        .set({ isDeleted: true })
-        .where(eq(recipes.id, recipeId));
-
-      const caller = createCaller(makeContext());
-      const result = await caller.slots.update({
-        slotId,
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 5,
-        chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: 'adjusted portions',
-      });
-
-      expect(result.slot.numberOfServings).toBe(5);
-      expect(result.slot.recipeId).toBe(recipeId);
-      expect(result.slot.recipe?.isDeleted).toBe(true);
-    });
-
-    it('rejects switching from one deleted recipe to a different deleted recipe', async () => {
-      const planId = await insertPlan();
-      const recipeA = await insertRecipe('A', { isDeleted: true });
-      const recipeB = await insertRecipe('B', { isDeleted: true });
-      const slotId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId: recipeA,
-        numberOfServings: 2,
-      });
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId: recipeB,
-          numberOfServings: 2,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'SLOT_RECIPE_NOT_PICKABLE' },
-      });
-    });
-  });
-
-  describe('chef validation', () => {
-    it('rejects an unknown chef user', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'eat_out',
-          recipeId: null,
-          numberOfServings: null,
-          chefUserId: 'bogus-user-id',
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'SLOT_CHEF_NOT_FOUND' },
-      });
-    });
-
-    it('accepts a known chef user', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-
-      const caller = createCaller(makeContext());
-      const result = await caller.slots.update({
-        slotId,
-        slotType: 'eat_out',
-        recipeId: null,
-        numberOfServings: null,
-        chefUserId: OTHER_USER_ID,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: null,
-      });
-      expect(result.slot.chefUserId).toBe(OTHER_USER_ID);
-    });
-  });
-
-  describe('scope and auth', () => {
-    it('returns NOT_FOUND for a slot in another households plan', async () => {
-      const foreignPlanId = await insertPlan({
-        householdId: OTHER_HOUSEHOLD_ID,
-      });
-      const foreignSlotId = await insertSlot(foreignPlanId);
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId: foreignSlotId,
-          slotType: 'eat_out',
-          recipeId: null,
-          numberOfServings: null,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'NOT_FOUND',
-        cause: { code: 'SLOT_NOT_FOUND' },
-      });
-
-      const untouched = await readSlot(foreignSlotId);
-      expect(untouched.slotType).toBe('empty');
-    });
-
-    it('returns NOT_FOUND for a non-existent slot', async () => {
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId: 999_999,
           slotType: 'empty',
-          recipeId: null,
-          numberOfServings: null,
           chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
           comment: null,
+          items: [],
         }),
-      ).rejects.toMatchObject({
-        code: 'NOT_FOUND',
-        cause: { code: 'SLOT_NOT_FOUND' },
-      });
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('rejects unauthenticated callers', async () => {
+    it('rejects without a session', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);
-
       const caller = createCaller(makeContext({ authenticated: false }));
       await expect(
         caller.slots.update({
           slotId,
           slotType: 'empty',
-          recipeId: null,
-          numberOfServings: null,
           chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
           comment: null,
+          items: [],
         }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });
 
-  describe('base-cook fields', () => {
-    async function insertBaseRecipe(
-      name: string,
-      options: { isDeleted?: boolean; householdId?: string } = {},
-    ): Promise<number> {
-      const id = await insertRecipe(name, options);
-      await db.update(recipes).set({ isBase: true }).where(eq(recipes.id, id));
-      return id;
-    }
-
-    it('round-trips cooksBaseRecipeId and cooksBaseServings on a recipe slot', async () => {
+  describe('cook-ahead items', () => {
+    it('adds a cook-ahead base item alongside an eat dish', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);
-      const mealRecipeId = await insertRecipe('Tofu Bowl');
-      const baseRecipeId = await insertBaseRecipe('Curry Base');
-
+      const meal = await insertRecipe('Chilli');
+      const base = await insertBaseRecipe('Bean Base');
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
         slotType: 'recipe',
-        recipeId: mealRecipeId,
-        numberOfServings: 4,
         chefUserId: null,
-        cooksBaseRecipeId: baseRecipeId,
-        cooksBaseServings: 8,
         comment: null,
+        items: [
+          { recipeId: meal, servings: 4, kind: 'eat', sortOrder: 0 },
+          { recipeId: base, servings: 12, kind: 'cook_ahead', sortOrder: 1 },
+        ],
       });
-
-      expect(result.slot.cooksBaseRecipeId).toBe(baseRecipeId);
-      expect(result.slot.cooksBaseServings).toBe(8);
-
-      const row = await readSlot(slotId);
-      expect(row.cooksBaseRecipeId).toBe(baseRecipeId);
-      expect(row.cooksBaseServings).toBe(8);
+      expect(result.slot.items).toHaveLength(2);
+      const cook = result.slot.items.find((i) => i.kind === 'cook_ahead');
+      expect(cook).toMatchObject({ recipeId: base, servings: 12 });
     });
 
-    it('clears base-cook fields when both are set to null', async () => {
-      const planId = await insertPlan();
-      const mealRecipeId = await insertRecipe('Tofu Bowl');
-      const baseRecipeId = await insertBaseRecipe('Curry Base');
-      const slotId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId: mealRecipeId,
-        numberOfServings: 4,
-        cooksBaseRecipeId: baseRecipeId,
-        cooksBaseServings: 8,
-      });
-
-      const caller = createCaller(makeContext());
-      await caller.slots.update({
-        slotId,
-        slotType: 'recipe',
-        recipeId: mealRecipeId,
-        numberOfServings: 4,
-        chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: null,
-      });
-
-      const row = await readSlot(slotId);
-      expect(row.cooksBaseRecipeId).toBeNull();
-      expect(row.cooksBaseServings).toBeNull();
-    });
-
-    it('rejects setting one of cooksBaseRecipeId / cooksBaseServings without the other', async () => {
+    it('allows a cook-ahead base on an eat-out slot (decoupled)', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);
-      const mealRecipeId = await insertRecipe('Tofu Bowl');
-      const baseRecipeId = await insertBaseRecipe('Curry Base');
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId: mealRecipeId,
-          numberOfServings: 4,
-          chefUserId: null,
-          cooksBaseRecipeId: baseRecipeId,
-          cooksBaseServings: null,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    });
-
-    it('rejects cooksBaseRecipeId pointing at a non-base recipe', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const mealRecipeId = await insertRecipe('Tofu Bowl');
-      const notABaseId = await insertRecipe('Just A Meal');
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId: mealRecipeId,
-          numberOfServings: 4,
-          chefUserId: null,
-          cooksBaseRecipeId: notABaseId,
-          cooksBaseServings: 8,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'SLOT_BASE_NOT_BASE' },
-      });
-    });
-
-    it('rejects cooksBaseRecipeId from another household', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const mealRecipeId = await insertRecipe('Tofu Bowl');
-      const foreignBaseId = await insertBaseRecipe('Foreign Base', {
-        householdId: OTHER_HOUSEHOLD_ID,
-      });
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId: mealRecipeId,
-          numberOfServings: 4,
-          chefUserId: null,
-          cooksBaseRecipeId: foreignBaseId,
-          cooksBaseServings: 8,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'SLOT_BASE_CROSS_HOUSEHOLD' },
-      });
-    });
-
-    it('rejects cooksBaseRecipeId pointing at a soft-deleted base when changing it', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const mealRecipeId = await insertRecipe('Tofu Bowl');
-      const deletedBaseId = await insertBaseRecipe('Gone Base', {
-        isDeleted: true,
-      });
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          slotType: 'recipe',
-          recipeId: mealRecipeId,
-          numberOfServings: 4,
-          chefUserId: null,
-          cooksBaseRecipeId: deletedBaseId,
-          cooksBaseServings: 8,
-          comment: null,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'SLOT_BASE_NOT_PICKABLE' },
-      });
-    });
-
-    it('allows editing servings on a slot whose base recipe became soft-deleted', async () => {
-      const planId = await insertPlan();
-      const mealRecipeId = await insertRecipe('Tofu Bowl');
-      const baseRecipeId = await insertBaseRecipe('Vanishing Base');
-      const slotId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId: mealRecipeId,
-        numberOfServings: 4,
-        cooksBaseRecipeId: baseRecipeId,
-        cooksBaseServings: 8,
-      });
-      await db
-        .update(recipes)
-        .set({ isDeleted: true })
-        .where(eq(recipes.id, baseRecipeId));
-
+      const base = await insertBaseRecipe('Bean Base');
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
-        slotType: 'recipe',
-        recipeId: mealRecipeId,
-        numberOfServings: 4,
+        slotType: 'eat_out',
         chefUserId: null,
-        cooksBaseRecipeId: baseRecipeId,
-        cooksBaseServings: 12,
         comment: null,
+        items: [
+          { recipeId: base, servings: 8, kind: 'cook_ahead', sortOrder: 0 },
+        ],
       });
-
-      expect(result.slot.cooksBaseServings).toBe(12);
-      expect(result.slot.cooksBaseRecipeId).toBe(baseRecipeId);
+      expect(result.slot.slotType).toBe('eat_out');
+      expect(result.slot.items).toHaveLength(1);
     });
 
-    it('rejects setting cooksBaseRecipeId on a non-recipe slot', async () => {
+    it('rejects a cook-ahead item that references a non-base recipe', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);
-      const baseRecipeId = await insertBaseRecipe('Curry Base');
-
+      const notBase = await insertRecipe('Regular');
       const caller = createCaller(makeContext());
       await expect(
         caller.slots.update({
           slotId,
           slotType: 'eat_out',
-          recipeId: null,
-          numberOfServings: null,
           chefUserId: null,
-          cooksBaseRecipeId: baseRecipeId,
-          cooksBaseServings: 8,
           comment: null,
+          items: [
+            {
+              recipeId: notBase,
+              servings: 8,
+              kind: 'cook_ahead',
+              sortOrder: 0,
+            },
+          ],
         }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      ).rejects.toMatchObject({
+        cause: { code: 'SLOT_ITEM_COOK_AHEAD_NOT_BASE' },
+      });
+    });
+  });
+
+  describe('recipe pickability + coherence', () => {
+    it('rejects a newly added deleted recipe', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const gone = await insertRecipe('Gone', { isDeleted: true });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'recipe',
+          chefUserId: null,
+          comment: null,
+          items: [{ recipeId: gone, servings: 2, kind: 'eat', sortOrder: 0 }],
+        }),
+      ).rejects.toMatchObject({ cause: { code: 'SLOT_RECIPE_NOT_PICKABLE' } });
+    });
+
+    it('keeps an item whose recipe was soft-deleted after assignment', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId, { slotType: 'recipe' });
+      const r = await insertRecipe('Will be deleted');
+      await seedItems(slotId, [{ recipeId: r, servings: 2, kind: 'eat' }]);
+      await db
+        .update(recipes)
+        .set({ isDeleted: true })
+        .where(eq(recipes.id, r));
+      const caller = createCaller(makeContext());
+      // Re-saving the same item (servings edit) must not be rejected.
+      const result = await caller.slots.update({
+        slotId,
+        slotType: 'recipe',
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId: r, servings: 3, kind: 'eat', sortOrder: 0 }],
+      });
+      expect(result.slot.items[0]).toMatchObject({ recipeId: r, servings: 3 });
+    });
+
+    it('rejects a recipe from another household', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const foreign = await insertRecipe('Foreign', {
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.slots.update({
+          slotId,
+          slotType: 'recipe',
+          chefUserId: null,
+          comment: null,
+          items: [
+            { recipeId: foreign, servings: 2, kind: 'eat', sortOrder: 0 },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        cause: { code: 'SLOT_RECIPE_CROSS_HOUSEHOLD' },
+      });
     });
   });
 
   describe('relocate', () => {
     it('moves a populated source onto an empty dest (source becomes empty)', async () => {
       const planId = await insertPlan();
-      const recipeId = await insertRecipe('Lentil Curry');
-      const sourceId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 4,
-        chefUserId: USER_ID,
-        comment: 'source comment',
-      });
+      const sourceId = await insertSlot(planId, { slotType: 'recipe' });
       const destId = await insertSlot(planId, { occasionId: secondOccasionId });
+      const r = await insertRecipe('Lentils');
+      await seedItems(sourceId, [{ recipeId: r, servings: 4, kind: 'eat' }]);
 
       const caller = createCaller(makeContext());
       const result = await caller.slots.relocate({
         sourceSlotId: sourceId,
         destSlotId: destId,
       });
-
-      expect(result.sourceSlot.slotType).toBe('empty');
-      expect(result.sourceSlot.recipeId).toBeNull();
-      expect(result.sourceSlot.numberOfServings).toBeNull();
-      expect(result.sourceSlot.chefUserId).toBeNull();
-      expect(result.sourceSlot.comment).toBeNull();
       expect(result.destSlot.slotType).toBe('recipe');
-      expect(result.destSlot.recipeId).toBe(recipeId);
-      expect(result.destSlot.numberOfServings).toBe(4);
-      expect(result.destSlot.chefUserId).toBe(USER_ID);
-      expect(result.destSlot.comment).toBe('source comment');
-
-      const sourceRow = await readSlot(sourceId);
-      const destRow = await readSlot(destId);
-      expect(sourceRow.slotType).toBe('empty');
-      expect(destRow.slotType).toBe('recipe');
-      expect(destRow.recipeId).toBe(recipeId);
+      expect(result.destSlot.items).toHaveLength(1);
+      expect(result.sourceSlot.slotType).toBe('empty');
+      expect(result.sourceSlot.items).toHaveLength(0);
+      expect(await readItems(sourceId)).toHaveLength(0);
+      expect(await readItems(destId)).toHaveLength(1);
     });
 
-    it('swaps two populated slots, exchanging recipe / servings / chef / comment / cooksBase*', async () => {
+    it('swaps two populated slots', async () => {
       const planId = await insertPlan();
-      const sourceRecipe = await insertRecipe('Source Recipe');
-      const destRecipe = await insertRecipe('Dest Recipe');
-      const sourceId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId: sourceRecipe,
-        numberOfServings: 2,
-        chefUserId: USER_ID,
-        comment: 'src',
-      });
+      const sourceId = await insertSlot(planId, { slotType: 'recipe' });
       const destId = await insertSlot(planId, {
         occasionId: secondOccasionId,
         slotType: 'recipe',
-        recipeId: destRecipe,
-        numberOfServings: 5,
-        chefUserId: null,
-        comment: 'dst',
       });
+      const a = await insertRecipe('A');
+      const b = await insertRecipe('B');
+      await seedItems(sourceId, [{ recipeId: a, servings: 2, kind: 'eat' }]);
+      await seedItems(destId, [{ recipeId: b, servings: 5, kind: 'eat' }]);
 
       const caller = createCaller(makeContext());
       const result = await caller.slots.relocate({
         sourceSlotId: sourceId,
         destSlotId: destId,
       });
-
-      expect(result.sourceSlot.recipeId).toBe(destRecipe);
-      expect(result.sourceSlot.numberOfServings).toBe(5);
-      expect(result.sourceSlot.chefUserId).toBeNull();
-      expect(result.sourceSlot.comment).toBe('dst');
-      expect(result.destSlot.recipeId).toBe(sourceRecipe);
-      expect(result.destSlot.numberOfServings).toBe(2);
-      expect(result.destSlot.chefUserId).toBe(USER_ID);
-      expect(result.destSlot.comment).toBe('src');
+      expect(result.destSlot.items[0]).toMatchObject({ recipeId: a });
+      expect(result.sourceSlot.items[0]).toMatchObject({ recipeId: b });
     });
 
-    it('rejects a relocate across different plans with FORBIDDEN', async () => {
+    it('rejects relocating across plans', async () => {
       const planA = await insertPlan();
       const planB = await insertPlan();
-      const recipeId = await insertRecipe('A Recipe');
-      const sourceId = await insertSlot(planA, {
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 2,
-      });
+      const sourceId = await insertSlot(planA);
       const destId = await insertSlot(planB);
-
       const caller = createCaller(makeContext());
       await expect(
         caller.slots.relocate({ sourceSlotId: sourceId, destSlotId: destId }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-
-      const sourceRow = await readSlot(sourceId);
-      expect(sourceRow.slotType).toBe('recipe');
-      expect(sourceRow.recipeId).toBe(recipeId);
-    });
-
-    it("rejects a relocate where one slot is in another household's plan", async () => {
-      const planId = await insertPlan();
-      const otherPlanId = await insertPlan({ householdId: OTHER_HOUSEHOLD_ID });
-      const recipeId = await insertRecipe('Foreign Plan');
-      const sourceId = await insertSlot(planId, {
-        slotType: 'recipe',
-        recipeId,
-        numberOfServings: 2,
-      });
-      const destId = await insertSlot(otherPlanId);
-
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.relocate({ sourceSlotId: sourceId, destSlotId: destId }),
-      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-
-      const sourceRow = await readSlot(sourceId);
-      expect(sourceRow.slotType).toBe('recipe');
-    });
-
-    it('rejects sourceSlotId === destSlotId at the schema layer', async () => {
-      const planId = await insertPlan();
-      const slotId = await insertSlot(planId);
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.relocate({ sourceSlotId: slotId, destSlotId: slotId }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    });
-
-    it('rejects unauthenticated callers', async () => {
-      const planId = await insertPlan();
-      const sourceId = await insertSlot(planId);
-      const destId = await insertSlot(planId, { occasionId: secondOccasionId });
-      const caller = createCaller(makeContext({ authenticated: false }));
-      await expect(
-        caller.slots.relocate({ sourceSlotId: sourceId, destSlotId: destId }),
-      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });
 });

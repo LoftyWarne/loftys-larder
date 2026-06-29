@@ -1,7 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { alias } from 'drizzle-orm/pg-core';
 
 import {
   createPlanInputSchema,
@@ -32,9 +31,13 @@ import {
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import * as schema from '../../db/schema/index.ts';
-import { mealPlans, mealPlanSlots } from '../../db/schema/meal-plans.ts';
-import { recipes } from '../../db/schema/recipes.ts';
+import {
+  mealPlans,
+  mealPlanSlotItems,
+  mealPlanSlots,
+} from '../../db/schema/meal-plans.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
+import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import {
   addDays,
@@ -294,21 +297,35 @@ export const plansRouter = router({
       // separate read at household scale is cheap). Without confirmation,
       // surface the list so the UI (FEAT-31) can render a confirm dialog.
       if (datesToRemove.length > 0 && !input.confirmDestructive) {
+        // A slot is "lost content" if it has a non-empty status or any items
+        // (e.g. a cook-ahead base on an otherwise-empty prep day).
         const lostNonEmpty = await ctx.db
           .select({
             id: mealPlanSlots.id,
             date: mealPlanSlots.date,
             occasionId: mealPlanSlots.occasionId,
             slotType: mealPlanSlots.slotType,
-            recipeId: mealPlanSlots.recipeId,
+            itemCount: sql<number>`count(${mealPlanSlotItems.id})::int`,
           })
           .from(mealPlanSlots)
+          .leftJoin(
+            mealPlanSlotItems,
+            eq(mealPlanSlotItems.slotId, mealPlanSlots.id),
+          )
           .where(
             and(
               eq(mealPlanSlots.planId, planRow.id),
               inArray(mealPlanSlots.date, datesToRemove.map(parseCivilDate)),
-              ne(mealPlanSlots.slotType, 'empty'),
             ),
+          )
+          .groupBy(
+            mealPlanSlots.id,
+            mealPlanSlots.date,
+            mealPlanSlots.occasionId,
+            mealPlanSlots.slotType,
+          )
+          .having(
+            sql`${mealPlanSlots.slotType} <> 'empty' OR count(${mealPlanSlotItems.id}) > 0`,
           )
           .orderBy(asc(mealPlanSlots.date), asc(mealPlanSlots.occasionId));
 
@@ -318,7 +335,7 @@ export const plansRouter = router({
             date: formatCivilDate(row.date),
             occasionId: row.occasionId,
             slotType: row.slotType,
-            recipeId: row.recipeId,
+            itemCount: row.itemCount,
           }));
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -427,18 +444,39 @@ export const plansRouter = router({
       // date math inside `eachDateInRange` / `addDays`.
       const sourceSlots = await ctx.db
         .select({
+          id: mealPlanSlots.id,
           date: mealPlanSlots.date,
           occasionId: mealPlanSlots.occasionId,
           slotType: mealPlanSlots.slotType,
-          recipeId: mealPlanSlots.recipeId,
-          numberOfServings: mealPlanSlots.numberOfServings,
           chefUserId: mealPlanSlots.chefUserId,
-          cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
-          cooksBaseServings: mealPlanSlots.cooksBaseServings,
           comment: mealPlanSlots.comment,
         })
         .from(mealPlanSlots)
         .where(eq(mealPlanSlots.planId, sourceRow.id));
+
+      // Source dishes, grouped by source slot id, copied verbatim onto the new
+      // slots once their ids are known.
+      const sourceItemRows = await ctx.db
+        .select({
+          slotId: mealPlanSlotItems.slotId,
+          recipeId: mealPlanSlotItems.recipeId,
+          servings: mealPlanSlotItems.servings,
+          kind: mealPlanSlotItems.kind,
+          sortOrder: mealPlanSlotItems.sortOrder,
+        })
+        .from(mealPlanSlotItems)
+        .where(
+          inArray(
+            mealPlanSlotItems.slotId,
+            sourceSlots.map((slot) => slot.id),
+          ),
+        );
+      const itemsBySourceSlot = new Map<number, typeof sourceItemRows>();
+      for (const item of sourceItemRows) {
+        const list = itemsBySourceSlot.get(item.slotId);
+        if (list) list.push(item);
+        else itemsBySourceSlot.set(item.slotId, [item]);
+      }
 
       const sourceDates = eachDateInRange(
         sourceRow.startDate,
@@ -496,11 +534,7 @@ export const plansRouter = router({
             date: shifted,
             occasionId: slot.occasionId,
             slotType: slot.slotType,
-            recipeId: slot.recipeId,
-            numberOfServings: slot.numberOfServings,
             chefUserId: slot.chefUserId,
-            cooksBaseRecipeId: slot.cooksBaseRecipeId,
-            cooksBaseServings: slot.cooksBaseServings,
             comment: slot.comment,
           };
         });
@@ -508,7 +542,41 @@ export const plansRouter = router({
         const insertedSlots = await tx
           .insert(mealPlanSlots)
           .values(slotValues)
-          .returning({ id: mealPlanSlots.id });
+          .returning({
+            id: mealPlanSlots.id,
+            date: mealPlanSlots.date,
+            occasionId: mealPlanSlots.occasionId,
+          });
+
+        // Map (new date, occasion) → new slot id so each source slot's items
+        // land on the right copy, then bulk-insert the copied dishes.
+        const newSlotByKey = new Map<string, number>();
+        for (const newSlot of insertedSlots) {
+          newSlotByKey.set(
+            `${formatCivilDate(newSlot.date)}:${String(newSlot.occasionId)}`,
+            newSlot.id,
+          );
+        }
+        const itemValues = sourceSlots.flatMap((slot) => {
+          const items = itemsBySourceSlot.get(slot.id);
+          if (!items || items.length === 0) return [];
+          const shifted = dateMap.get(formatCivilDate(slot.date));
+          if (!shifted) return [];
+          const newSlotId = newSlotByKey.get(
+            `${formatCivilDate(shifted)}:${String(slot.occasionId)}`,
+          );
+          if (newSlotId === undefined) return [];
+          return items.map((item) => ({
+            slotId: newSlotId,
+            recipeId: item.recipeId,
+            servings: item.servings,
+            kind: item.kind,
+            sortOrder: item.sortOrder,
+          }));
+        });
+        if (itemValues.length > 0) {
+          await tx.insert(mealPlanSlotItems).values(itemValues);
+        }
 
         return { plan: toPlanDto(row), slotCount: insertedSlots.length };
       });
@@ -591,15 +659,13 @@ async function loadOccasionIds(db: DbHandle): Promise<number[]> {
   return rows.map((row) => row.id);
 }
 
-// LEFT JOIN recipes without an `is_deleted` filter so historical slots
-// referencing soft-deleted recipes still render (DEC-21). meal_occasions
-// join provides the occasion name for the UI to label columns.
+// The slot rows carry only meta (status + chef + comment); the dishes are
+// loaded as items (joined to recipes without an `is_deleted` filter so
+// historical slots still render, DEC-21) and grouped per slot.
 async function selectPlanSlots(
   db: DbHandle,
   planId: number,
 ): Promise<PlanSlot[]> {
-  const cookedBase = alias(recipes, 'cooked_base_recipe');
-  const pairedRecipe = alias(recipes, 'paired_recipe');
   const rows = await db
     .select({
       id: mealPlanSlots.id,
@@ -608,35 +674,18 @@ async function selectPlanSlots(
       occasionId: mealPlanSlots.occasionId,
       occasionName: mealOccasions.name,
       slotType: mealPlanSlots.slotType,
-      recipeId: mealPlanSlots.recipeId,
-      numberOfServings: mealPlanSlots.numberOfServings,
       chefUserId: mealPlanSlots.chefUserId,
-      cooksBaseRecipeId: mealPlanSlots.cooksBaseRecipeId,
-      cooksBaseServings: mealPlanSlots.cooksBaseServings,
       comment: mealPlanSlots.comment,
-      recipeName: recipes.name,
-      recipeImageUrl: recipes.imageUrl,
-      recipeIsBase: recipes.isBase,
-      recipeBaseRecipeId: recipes.baseRecipeId,
-      recipePairedRecipeId: recipes.pairedRecipeId,
-      recipeIsDeleted: recipes.isDeleted,
-      cookedBaseName: cookedBase.name,
-      cookedBaseIsDeleted: cookedBase.isDeleted,
-      pairedRecipeId: pairedRecipe.id,
-      pairedRecipeName: pairedRecipe.name,
-      pairedRecipeImageUrl: pairedRecipe.imageUrl,
-      pairedRecipeIsBase: pairedRecipe.isBase,
-      pairedRecipeBaseRecipeId: pairedRecipe.baseRecipeId,
-      pairedRecipeBaseServings: pairedRecipe.baseServings,
-      pairedRecipeIsDeleted: pairedRecipe.isDeleted,
     })
     .from(mealPlanSlots)
     .innerJoin(mealOccasions, eq(mealPlanSlots.occasionId, mealOccasions.id))
-    .leftJoin(recipes, eq(mealPlanSlots.recipeId, recipes.id))
-    .leftJoin(cookedBase, eq(mealPlanSlots.cooksBaseRecipeId, cookedBase.id))
-    .leftJoin(pairedRecipe, eq(recipes.pairedRecipeId, pairedRecipe.id))
     .where(eq(mealPlanSlots.planId, planId))
     .orderBy(asc(mealPlanSlots.date), asc(mealPlanSlots.occasionId));
+
+  const itemsBySlot = await loadSlotItems(
+    db,
+    rows.map((row) => row.id),
+  );
 
   return rows.map((row) => ({
     id: row.id,
@@ -645,43 +694,8 @@ async function selectPlanSlots(
     occasionId: row.occasionId,
     occasionName: row.occasionName,
     slotType: row.slotType,
-    recipeId: row.recipeId,
-    numberOfServings: row.numberOfServings,
     chefUserId: row.chefUserId,
-    cooksBaseRecipeId: row.cooksBaseRecipeId,
-    cooksBaseServings: row.cooksBaseServings,
     comment: row.comment,
-    recipe:
-      row.recipeId === null || row.recipeName === null
-        ? null
-        : {
-            id: row.recipeId,
-            name: row.recipeName,
-            imageUrl: row.recipeImageUrl,
-            isBase: row.recipeIsBase ?? false,
-            baseRecipeId: row.recipeBaseRecipeId ?? null,
-            pairedRecipeId: row.recipePairedRecipeId ?? null,
-            isDeleted: row.recipeIsDeleted ?? false,
-          },
-    cooksBaseRecipe:
-      row.cooksBaseRecipeId === null || row.cookedBaseName === null
-        ? null
-        : {
-            id: row.cooksBaseRecipeId,
-            name: row.cookedBaseName,
-            isDeleted: row.cookedBaseIsDeleted ?? false,
-          },
-    pairedRecipe:
-      row.pairedRecipeId === null || row.pairedRecipeName === null
-        ? null
-        : {
-            id: row.pairedRecipeId,
-            name: row.pairedRecipeName,
-            imageUrl: row.pairedRecipeImageUrl,
-            isBase: row.pairedRecipeIsBase ?? false,
-            baseRecipeId: row.pairedRecipeBaseRecipeId ?? null,
-            baseServings: row.pairedRecipeBaseServings ?? 1,
-            isDeleted: row.pairedRecipeIsDeleted ?? false,
-          },
+    items: itemsBySlot.get(row.id) ?? [],
   }));
 }

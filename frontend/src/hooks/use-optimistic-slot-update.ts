@@ -1,17 +1,16 @@
 import type {
   GetPlanResult,
   PlanSlot,
-  PlanSlotPairedRecipe,
-  PlanSlotRecipe,
+  PlanSlotItem,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { useRef } from 'react';
 
 import { trpc } from '@/lib/trpc.ts';
 
-// Canonical optimistic-update hook for slot mutations (cross-cutting #7). Other
-// slot-related mutations (FEAT-32 base-cook fields, FEAT-33 chef, etc.) compose
-// this rather than reimplementing the onMutate / onError / onSettled trio.
+// Canonical optimistic-update hook for slot mutations (cross-cutting #7). The
+// meal editor and base modal both compose this rather than reimplementing the
+// onMutate / onError / onSettled trio.
 //
 // Reconciliation uses `setQueryData` from the server response on settle, not a
 // refetch — last-write-wins (DEC-36) treats whatever the server returned as
@@ -30,19 +29,13 @@ export interface OptimisticSlotMutationOptions {
 export interface OptimisticUpdateArgs {
   input: UpdateSlotInput;
   /**
-   * Preview recipe — typically the row picked from the bank — used to render
-   * the assigned recipe's name/image immediately. The server response on
-   * settle replaces this with the canonical row from `plans.get`'s shape.
-   * Omit when the recipe isn't changing (servings/chef/comment edit).
+   * Display items to render immediately — the editors know each picked
+   * recipe's name/image, so they pass the full `PlanSlotItem[]` to preview the
+   * slot before the server responds. The settle response replaces them with
+   * the canonical rows. Omit for meta-only edits (status/chef/comment), which
+   * keep the slot's current items.
    */
-  optimisticRecipe?: PlanSlotRecipe;
-  /**
-   * Preview paired-recipe sub-object — used by the pair-switch flow to keep
-   * the switch affordance live during the optimistic window. After a switch,
-   * the destination recipe's pair points back at the original, so the caller
-   * knows this without an extra fetch. Omit when the recipe isn't changing.
-   */
-  optimisticPairedRecipe?: PlanSlotPairedRecipe | null;
+  optimisticItems?: PlanSlotItem[];
 }
 
 export interface UseOptimisticSlotUpdateResult {
@@ -55,18 +48,10 @@ export function useOptimisticSlotUpdate({
   onError,
 }: OptimisticSlotMutationOptions): UseOptimisticSlotUpdateResult {
   const utils = trpc.useUtils();
-  // Side channel: `mutate(input)` only forwards the input to `onMutate`, so
-  // the optimistic-recipe preview is dropped through a ref. Mutations are
-  // user-driven and sequential — no overlap between a `mutate` call and the
-  // adjacent `onMutate` runtime — so a ref is enough.
-  const pendingOptimisticRecipe = useRef<PlanSlotRecipe | undefined>(undefined);
-  // Same side-channel trick for the paired-recipe preview: callers pass the
-  // pair affordance's destination so the button stays in the right state
-  // until settle. `undefined` = "no opinion, reuse existing"; `null` = "no
-  // pair on this recipe".
-  const pendingOptimisticPaired = useRef<
-    PlanSlotPairedRecipe | null | undefined
-  >(undefined);
+  // Side channel: `mutate(input)` only forwards the input to `onMutate`, so the
+  // optimistic items ride along through a ref. Mutations are user-driven and
+  // sequential, so a ref is enough.
+  const pendingOptimisticItems = useRef<PlanSlotItem[] | undefined>(undefined);
 
   const mutation = trpc.slots.update.useMutation({
     onMutate: async (input) => {
@@ -75,21 +60,10 @@ export function useOptimisticSlotUpdate({
       if (!previous) {
         return { previous: undefined };
       }
-      const recipeForOptimistic =
-        pendingOptimisticRecipe.current ??
-        resolveExistingRecipe(previous, input);
-      const pairedForOptimistic =
-        pendingOptimisticPaired.current !== undefined
-          ? pendingOptimisticPaired.current
-          : resolveExistingPaired(previous, input);
-      pendingOptimisticRecipe.current = undefined;
-      pendingOptimisticPaired.current = undefined;
-      const patched = applySlotPatch(
-        previous,
-        input,
-        recipeForOptimistic,
-        pairedForOptimistic,
-      );
+      const itemsForOptimistic =
+        pendingOptimisticItems.current ?? resolveExistingItems(previous, input);
+      pendingOptimisticItems.current = undefined;
+      const patched = applySlotPatch(previous, input, itemsForOptimistic);
       utils.plans.get.setData({ id: planId }, patched);
       return { previous };
     },
@@ -117,9 +91,8 @@ export function useOptimisticSlotUpdate({
   });
 
   return {
-    update: ({ input, optimisticRecipe, optimisticPairedRecipe }) => {
-      pendingOptimisticRecipe.current = optimisticRecipe;
-      pendingOptimisticPaired.current = optimisticPairedRecipe;
+    update: ({ input, optimisticItems }) => {
+      pendingOptimisticItems.current = optimisticItems;
       mutation.mutate(input);
     },
     isPending: mutation.isPending,
@@ -129,36 +102,21 @@ export function useOptimisticSlotUpdate({
 function applySlotPatch(
   plan: GetPlanResult,
   input: UpdateSlotInput,
-  recipe: PlanSlotRecipe | null,
-  pairedRecipe: PlanSlotPairedRecipe | null,
+  items: PlanSlotItem[],
 ): GetPlanResult {
   return {
     ...plan,
-    slots: plan.slots.map((slot) => {
-      if (slot.id !== input.slotId) return slot;
-      // Preserve the existing cooked-base sub-object when the base FK is
-      // unchanged so the card keeps rendering its name during the optimistic
-      // window; otherwise null it and let the server fill in the name on
-      // settle.
-      const cooksBaseRecipe =
-        input.cooksBaseRecipeId !== null &&
-        input.cooksBaseRecipeId === slot.cooksBaseRecipeId
-          ? slot.cooksBaseRecipe
-          : null;
-      return {
-        ...slot,
-        slotType: input.slotType,
-        recipeId: input.recipeId,
-        numberOfServings: input.numberOfServings,
-        chefUserId: input.chefUserId,
-        cooksBaseRecipeId: input.cooksBaseRecipeId,
-        cooksBaseServings: input.cooksBaseServings,
-        comment: input.comment,
-        recipe,
-        cooksBaseRecipe,
-        pairedRecipe,
-      };
-    }),
+    slots: plan.slots.map((slot) =>
+      slot.id === input.slotId
+        ? {
+            ...slot,
+            slotType: input.slotType,
+            chefUserId: input.chefUserId,
+            comment: input.comment,
+            items,
+          }
+        : slot,
+    ),
   };
 }
 
@@ -171,36 +129,11 @@ function replaceSlot(plan: GetPlanResult, serverSlot: PlanSlot): GetPlanResult {
   };
 }
 
-// If the input keeps the existing recipe (servings/chef/comment edit), reuse
-// the stored sub-object so the card doesn't lose the recipe's name/image.
-function resolveExistingRecipe(
+// Meta-only edits (status/chef/comment) don't pass optimistic items — keep the
+// slot's current items so the card doesn't flicker empty until settle.
+function resolveExistingItems(
   plan: GetPlanResult,
   input: UpdateSlotInput,
-): PlanSlotRecipe | null {
-  if (input.slotType !== 'recipe' || input.recipeId === null) {
-    return null;
-  }
-  const existing = plan.slots.find((slot) => slot.id === input.slotId);
-  if (existing?.recipe?.id === input.recipeId) {
-    return existing.recipe;
-  }
-  return null;
-}
-
-// Sibling of `resolveExistingRecipe`: when the caller doesn't pass an
-// `optimisticPairedRecipe`, reuse the stored sub-object if the recipe FK is
-// unchanged so the pair-switch affordance doesn't blink off during a
-// servings/chef/comment edit.
-function resolveExistingPaired(
-  plan: GetPlanResult,
-  input: UpdateSlotInput,
-): PlanSlotPairedRecipe | null {
-  if (input.slotType !== 'recipe' || input.recipeId === null) {
-    return null;
-  }
-  const existing = plan.slots.find((slot) => slot.id === input.slotId);
-  if (existing?.recipe?.id === input.recipeId) {
-    return existing.pairedRecipe;
-  }
-  return null;
+): PlanSlotItem[] {
+  return plan.slots.find((slot) => slot.id === input.slotId)?.items ?? [];
 }

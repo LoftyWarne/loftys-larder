@@ -15,25 +15,33 @@ function greeting(name: string | undefined): string {
   return name ? `${timeOfDay}, ${name}` : "Lofty's Larder";
 }
 
-// A slot counts as "planned" when it carries any commitment — a (live) recipe
-// or an eat-out / takeaway / leftovers marker. Empty slots, and the rare
-// recipe slot whose recipe row vanished, are treated as unplanned.
+function eatItems(slot: PlanSlot): PlanSlot['items'] {
+  return slot.items.filter((item) => item.kind === 'eat');
+}
+
+// A slot counts as "planned" when it carries any commitment — at least one
+// eaten dish or an eat-out / takeaway / leftovers marker. Empty slots, and a
+// recipe slot whose dishes vanished, are treated as unplanned.
 function isPlanned(slot: PlanSlot): boolean {
   if (slot.slotType === 'empty') return false;
-  if (slot.slotType === 'recipe' && !slot.recipe) return false;
+  if (slot.slotType === 'recipe') return eatItems(slot).length > 0;
   return true;
 }
 
-// Label for a slot on the home lists. Recipe names stay plain text (DEC-49).
-// A recipe soft-deleted after assignment still renders, tagged "(deleted)"
-// for historical coherence (DEC-21).
+// Label for a slot on the home lists. Dish names stay plain text (DEC-49). A
+// recipe soft-deleted after assignment still renders, tagged "(deleted)" for
+// historical coherence (DEC-21).
 function slotSummaryLabel(slot: PlanSlot): string {
   switch (slot.slotType) {
-    case 'recipe':
-      if (!slot.recipe) return '— not planned —';
-      return slot.recipe.isDeleted
-        ? `${slot.recipe.name} (deleted)`
-        : slot.recipe.name;
+    case 'recipe': {
+      const items = eatItems(slot);
+      if (items.length === 0) return '— not planned —';
+      return items
+        .map((item) =>
+          item.isDeleted ? `${item.recipeName} (deleted)` : item.recipeName,
+        )
+        .join(', ');
+    }
     case 'eat_out':
       return 'Eat out';
     case 'takeaway':
@@ -46,21 +54,24 @@ function slotSummaryLabel(slot: PlanSlot): string {
   }
 }
 
-// One occasion row. A live recipe links through to its detail page; everything
-// else (markers, deleted recipes, empty occasions) is plain text.
+// One occasion row. A single live dish links through to its detail page;
+// multiple dishes, markers, deleted recipes, and empty occasions are plain
+// text.
 function MealRow({ slot }: { slot: PlanSlot }): React.ReactElement {
-  const recipe = slot.slotType === 'recipe' ? slot.recipe : null;
-  const linkable = recipe !== null && !recipe.isDeleted;
+  const items = slot.slotType === 'recipe' ? eatItems(slot) : [];
+  const first = items.length === 1 ? items[0] : undefined;
+  // Only a single, live dish links through to its recipe detail page.
+  const linkable = first && !first.isDeleted ? first : undefined;
   return (
     <li className="flex items-center justify-between gap-4 px-4 py-2">
       <span className="text-sm font-medium">{slot.occasionName}</span>
       {linkable ? (
         <Link
           to="/recipes/$recipeId"
-          params={{ recipeId: String(recipe.id) }}
+          params={{ recipeId: String(linkable.recipeId) }}
           className="text-sm text-primary hover:underline"
         >
-          {recipe.name}
+          {linkable.recipeName}
         </Link>
       ) : (
         <span

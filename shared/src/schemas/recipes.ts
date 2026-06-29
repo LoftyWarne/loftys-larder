@@ -49,7 +49,6 @@ export const recipeListItemSchema = z.object({
   totalTimeMins: z.number().int().nonnegative().nullable(),
   isBase: z.boolean(),
   baseRecipeId: recipeIdSchema.nullable(),
-  pairedRecipeId: recipeIdSchema.nullable(),
   isDeleted: z.boolean(),
   // Server-computed: COUNT(DISTINCT ingredient_id WHERE is_plant) (DEC-32).
   plantPointsCount: z.number().int().nonnegative(),
@@ -61,9 +60,10 @@ export const recipeListItemSchema = z.object({
 export type RecipeListItem = z.infer<typeof recipeListItemSchema>;
 
 // `recipes.get` detail. Soft-deleted recipes are still returned (DEC-21) so
-// historical plans render their reference. Partner-recipe names + their
-// `isDeleted` flag are denormalised onto the row so the batch-fields editor
-// can render the affordance + a "(deleted)" hint without a second round-trip.
+// historical plans render their reference. The base recipe's name + its
+// `isDeleted` flag are denormalised onto the row so the serving-variation
+// editor can render the affordance + a "(deleted)" hint without a second
+// round-trip.
 export const recipeSchema = recipeListItemSchema.extend({
   description: z.string().nullable(),
   sourceId: sourceIdSchema.nullable(),
@@ -82,8 +82,6 @@ export const recipeSchema = recipeListItemSchema.extend({
   addedByUserId: z.string().nullable(),
   baseRecipeName: z.string().nullable(),
   baseRecipeIsDeleted: z.boolean().nullable(),
-  pairedRecipeName: z.string().nullable(),
-  pairedRecipeIsDeleted: z.boolean().nullable(),
   ingredients: z.array(recipeIngredientLineSchema),
   method: z.array(recipeMethodStepSchema),
   yourRating: ratingSchema.nullable(),
@@ -98,9 +96,9 @@ export const listRecipesCursorSchema = z.object({
 
 export type ListRecipesCursor = z.infer<typeof listRecipesCursorSchema>;
 
-// `includePickerHidden` now excludes batch-versions whose base is
-// soft-deleted (the batch model's "new picker" rule); `isBase` lets the base
-// picker filter to bases only. Both forward to `pickableRecipesWhere`.
+// `includePickerHidden` now excludes serving variations whose base is
+// soft-deleted (the three-way model's "new picker" rule); `isBase` lets the
+// base picker filter to bases only. Both forward to `pickableRecipesWhere`.
 export const listRecipesInputSchema = z
   .object({
     search: z.string().trim().max(120).optional(),
@@ -180,11 +178,10 @@ const recipeInstructionSchema = z
   );
 
 // Fields editable on the recipe header via `create` and `updateHeader`.
-// Deliberately excludes `isBase`, `baseRecipeId`, and `pairedRecipeId` — those
-// belong to the batch model surface (FEAT-23), which owns the pair-symmetry
-// transaction and the XOR enforcement against `is_base`. `isBase` is allowed
-// at create time so a household can mark a recipe as a base from the start
-// without round-tripping through FEAT-23's editor.
+// Deliberately excludes `isBase` and `baseRecipeId` — those belong to the
+// serving-variation surface, which owns the XOR enforcement against `is_base`.
+// `isBase` is allowed at create time so a household can mark a recipe as a base
+// from the start without round-tripping through the serving-variation editor.
 const recipeHeaderWritableSchema = z.object({
   name: recipeNameSchema,
   description: recipeDescriptionSchema,
@@ -315,38 +312,33 @@ export type SetRecipeDeletionResult = z.infer<
   typeof setRecipeDeletionResultSchema
 >;
 
-// Batch-cooking edit surface. `updateHeader` deliberately refuses these
-// fields; the symmetry transaction for `pairedRecipeId` lives in its own
-// procedure (DEC-26). At least one field must be present so the procedure
-// always represents a real intent.
-export const setRecipeBatchFieldsInputSchema = z
+// Serving-variation edit surface. `updateHeader` deliberately refuses these
+// fields; this procedure owns the XOR enforcement against `is_base` (DEC-23).
+// At least one field must be present so the procedure always represents a real
+// intent.
+export const setRecipeServingVariationFieldsInputSchema = z
   .object({
     id: recipeIdSchema,
     isBase: z.boolean().optional(),
     baseRecipeId: recipeIdSchema.nullable().optional(),
-    pairedRecipeId: recipeIdSchema.nullable().optional(),
   })
   .refine(
-    (value) =>
-      value.isBase !== undefined ||
-      value.baseRecipeId !== undefined ||
-      value.pairedRecipeId !== undefined,
+    (value) => value.isBase !== undefined || value.baseRecipeId !== undefined,
     { message: 'Provide at least one field to update' },
   );
 
-export type SetRecipeBatchFieldsInput = z.infer<
-  typeof setRecipeBatchFieldsInputSchema
+export type SetRecipeServingVariationFieldsInput = z.infer<
+  typeof setRecipeServingVariationFieldsInputSchema
 >;
 
-export const setRecipeBatchFieldsResultSchema = z.object({
+export const setRecipeServingVariationFieldsResultSchema = z.object({
   id: recipeIdSchema,
   isBase: z.boolean(),
   baseRecipeId: recipeIdSchema.nullable(),
-  pairedRecipeId: recipeIdSchema.nullable(),
 });
 
-export type SetRecipeBatchFieldsResult = z.infer<
-  typeof setRecipeBatchFieldsResultSchema
+export type SetRecipeServingVariationFieldsResult = z.infer<
+  typeof setRecipeServingVariationFieldsResultSchema
 >;
 
 // Lookup data driving the recipe editor's unit / prep-type / source pickers.

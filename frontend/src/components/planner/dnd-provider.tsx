@@ -154,13 +154,15 @@ function DragPreview({ data }: { data: DragKind }): React.ReactElement {
   }
   return (
     <div className="pointer-events-none rounded-md border border-primary bg-card px-3 py-2 text-sm shadow-lg">
-      <span className="font-medium">
-        {data.slot.recipe?.name ?? describeSlot(data.slot)}
-      </span>
+      <span className="font-medium">{describeSlot(data.slot)}</span>
     </div>
   );
 }
 
 function describeSlot(slot: PlanSlot): string {
+  const eatNames = slot.items
+    .filter((item) => item.kind === 'eat')
+    .map((item) => item.recipeName);
+  if (eatNames.length > 0) return eatNames.join(', ');
   return `${slot.occasionName} on ${slot.date}`;
 }

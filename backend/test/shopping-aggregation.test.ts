@@ -126,7 +126,7 @@ describe('aggregateContributions', () => {
   });
 
   it('keeps separate entries when the same slot contributes via two recipes', () => {
-    // Slot 5 eats batch-version Recipe A (recipeId=10) and cooks base B
+    // Slot 5 eats serving-variation Recipe A (recipeId=10) and cooks base B
     // (recipeId=20); both contain ingredient onion. Two contributing slots,
     // one ingredient line, total summed.
     const result = aggregateContributions(

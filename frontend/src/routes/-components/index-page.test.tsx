@@ -210,14 +210,9 @@ function baseSlot(opts: SlotOpts): Record<string, unknown> {
     date: opts.date ?? TODAY,
     occasionId: opts.occasionId,
     occasionName: opts.occasionName,
-    recipeId: null,
-    numberOfServings: null,
     chefUserId: null,
-    cooksBaseRecipeId: null,
-    cooksBaseServings: null,
     comment: null,
-    cooksBaseRecipe: null,
-    pairedRecipe: null,
+    items: [],
   };
 }
 
@@ -229,21 +224,25 @@ function slot(
   return {
     ...baseSlot(opts),
     slotType: 'recipe',
-    recipeId: opts.id * 10,
-    recipe: {
-      id: opts.id * 10,
-      name: recipeName,
-      imageUrl: null,
-      isBase: false,
-      baseRecipeId: null,
-      pairedRecipeId: null,
-      isDeleted,
-    },
+    items: [
+      {
+        id: opts.id * 100,
+        recipeId: opts.id * 10,
+        recipeName,
+        recipeImageUrl: null,
+        isBase: false,
+        baseRecipeId: null,
+        isDeleted,
+        servings: 2,
+        kind: 'eat',
+        sortOrder: 0,
+      },
+    ],
   };
 }
 
 function emptySlot(opts: SlotOpts): Record<string, unknown> {
-  return { ...baseSlot(opts), slotType: 'empty', recipe: null };
+  return { ...baseSlot(opts), slotType: 'empty' };
 }
 
 // Advance a YYYY-MM-DD civil date by N days via UTC arithmetic.

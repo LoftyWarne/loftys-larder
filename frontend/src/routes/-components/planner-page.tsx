@@ -1,6 +1,6 @@
 import type {
   PlanSlot,
-  PlanSlotPairedRecipe,
+  PlanSlotItem,
   RecipeListItem,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { DndProvider } from '@/components/planner/dnd-provider.tsx';
 import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
+import { BaseCookSheet } from '@/components/planner/base-cook-sheet.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
 import { Button } from '@/components/ui/button.tsx';
@@ -17,7 +18,7 @@ import { useDayPlantPoints } from '@/hooks/use-day-plant-points.ts';
 import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { useOptimisticSlotRelocate } from '@/hooks/use-optimistic-slot-relocate.ts';
 import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
-import { deriveBatchSupplyWarnings } from '@/lib/batch-supply.ts';
+import { deriveBaseBalances } from '@/lib/serving-variation-supply.ts';
 import {
   clampRange,
   eachDateInRange,
@@ -46,6 +47,9 @@ export function PlannerPage(): React.ReactElement {
     null,
   );
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
+  const [baseEditingSlotId, setBaseEditingSlotId] = useState<number | null>(
+    null,
+  );
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   // When the viewport shrinks below `lg`, the bank disappears — drop any
@@ -82,14 +86,26 @@ export function PlannerPage(): React.ReactElement {
     );
   }, [editingSlotId, planQuery.data]);
 
-  // One pass per plan render — recomputed when the cache mutates. The set
-  // holds slot ids whose eating recipe is a batch-version (recipe.baseRecipeId
-  // !== null) with no earlier-or-same base cook in this plan.
-  const batchWarningSlots = useMemo(
+  const baseEditingSlot = useMemo<PlanSlot | null>(() => {
+    if (baseEditingSlotId === null) return null;
+    return (
+      planQuery.data?.slots.find((slot) => slot.id === baseEditingSlotId) ??
+      null
+    );
+  }, [baseEditingSlotId, planQuery.data]);
+
+  // One pass per plan render — recomputed when the cache mutates. Treats cooked
+  // base as a pool meals draw down (1:1) and walks the plan in cook-before-eat
+  // order: `shortfallBySlot` flags slots that ate more base than was cooked so
+  // far; `remainingByBase` is the end-of-plan leftover per base.
+  const baseBalances = useMemo(
     () =>
       planQuery.data
-        ? deriveBatchSupplyWarnings(planQuery.data.slots)
-        : new Set<number>(),
+        ? deriveBaseBalances(planQuery.data.slots)
+        : {
+            shortfallBySlot: new Map<number, number>(),
+            remainingByBase: new Map<number, number>(),
+          },
     [planQuery.data],
   );
 
@@ -148,28 +164,9 @@ export function PlannerPage(): React.ReactElement {
 
   function handleSlotClick(slot: PlanSlot): void {
     if (slot.slotType === 'empty' && selectedRecipe) {
-      // Two-tap assign — bank selection + empty slot tap.
-      update({
-        input: {
-          slotId: slot.id,
-          slotType: 'recipe',
-          recipeId: selectedRecipe.id,
-          numberOfServings: selectedRecipe.baseServings,
-          chefUserId: null,
-          cooksBaseRecipeId: null,
-          cooksBaseServings: null,
-          comment: null,
-        },
-        optimisticRecipe: {
-          id: selectedRecipe.id,
-          name: selectedRecipe.name,
-          imageUrl: selectedRecipe.imageUrl,
-          isBase: selectedRecipe.isBase,
-          baseRecipeId: selectedRecipe.baseRecipeId,
-          pairedRecipeId: selectedRecipe.pairedRecipeId,
-          isDeleted: selectedRecipe.isDeleted,
-        },
-      });
+      // Two-tap assign — bank selection + empty slot tap. The slot becomes a
+      // single-dish "cooking in" occasion.
+      update(assignSingleEat(slot.id, selectedRecipe));
       setSelectedRecipe(null);
       return;
     }
@@ -180,45 +177,37 @@ export function PlannerPage(): React.ReactElement {
 
   function handleSlotClear(slot: PlanSlot): void {
     setMutationError(null);
+    // Full clear (meal + base) — empties the slot's items entirely.
     update({
       input: {
         slotId: slot.id,
         slotType: 'empty',
-        recipeId: null,
-        numberOfServings: null,
         chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
         comment: null,
+        items: [],
       },
+      optimisticItems: [],
     });
   }
 
   function handleSave(
     input: UpdateSlotInput,
-    options?: {
-      optimisticRecipe?: RecipeListItem;
-      optimisticPairedRecipe?: PlanSlotPairedRecipe | null;
-    },
+    options?: { optimisticItems?: PlanSlotItem[] },
   ): void {
     setMutationError(null);
-    const optimisticRecipe = options?.optimisticRecipe;
-    update({
-      input,
-      optimisticRecipe: optimisticRecipe
-        ? {
-            id: optimisticRecipe.id,
-            name: optimisticRecipe.name,
-            imageUrl: optimisticRecipe.imageUrl,
-            isBase: optimisticRecipe.isBase,
-            baseRecipeId: optimisticRecipe.baseRecipeId,
-            pairedRecipeId: optimisticRecipe.pairedRecipeId,
-            isDeleted: optimisticRecipe.isDeleted,
-          }
-        : undefined,
-      optimisticPairedRecipe: options?.optimisticPairedRecipe,
-    });
+    update({ input, optimisticItems: options?.optimisticItems });
     setEditingSlotId(null);
+  }
+
+  // Save from the Base modal — the modal builds the full items list (preserved
+  // eat items + the cook-ahead items it manages).
+  function handleSaveBase(
+    input: UpdateSlotInput,
+    options?: { optimisticItems?: PlanSlotItem[] },
+  ): void {
+    setMutationError(null);
+    update({ input, optimisticItems: options?.optimisticItems });
+    setBaseEditingSlotId(null);
   }
 
   function handleDragAssign({
@@ -229,27 +218,7 @@ export function PlannerPage(): React.ReactElement {
     slot: PlanSlot;
   }): void {
     setMutationError(null);
-    update({
-      input: {
-        slotId: slot.id,
-        slotType: 'recipe',
-        recipeId: recipe.id,
-        numberOfServings: recipe.baseServings,
-        chefUserId: null,
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: null,
-      },
-      optimisticRecipe: {
-        id: recipe.id,
-        name: recipe.name,
-        imageUrl: recipe.imageUrl,
-        isBase: recipe.isBase,
-        baseRecipeId: recipe.baseRecipeId,
-        pairedRecipeId: recipe.pairedRecipeId,
-        isDeleted: recipe.isDeleted,
-      },
-    });
+    update(assignSingleEat(slot.id, recipe));
   }
 
   function handleDragRelocate({
@@ -317,7 +286,7 @@ export function PlannerPage(): React.ReactElement {
             slots={plan.slots}
             rangeStart={visible.start}
             rangeEnd={visible.end}
-            warningSlotIds={batchWarningSlots}
+            shortfallBySlot={baseBalances.shortfallBySlot}
             dayPlantCounts={dayPlantCounts}
             // Slot ↔ slot drag works at every viewport — touch-and-hold
             // (200 ms) lifts a populated slot, drops on another slot to
@@ -326,6 +295,9 @@ export function PlannerPage(): React.ReactElement {
             dndEnabled
             onSlotClick={handleSlotClick}
             onSlotClear={handleSlotClear}
+            onSlotBaseClick={(slot) => {
+              setBaseEditingSlotId(slot.id);
+            }}
           />
         ) : (
           <p className="text-sm text-muted-foreground" role="status">
@@ -338,13 +310,25 @@ export function PlannerPage(): React.ReactElement {
         slot={editingSlot}
         members={membersQuery.data?.members ?? []}
         isSaving={isPending}
-        hasBaseSupply={
-          editingSlot === null || !batchWarningSlots.has(editingSlot.id)
-        }
         onClose={() => {
           setEditingSlotId(null);
         }}
         onSave={handleSave}
+      />
+      <BaseCookSheet
+        open={baseEditingSlot !== null}
+        slot={baseEditingSlot}
+        remainingByBase={baseBalances.remainingByBase}
+        shortBy={
+          baseEditingSlot === null
+            ? undefined
+            : baseBalances.shortfallBySlot.get(baseEditingSlot.id)
+        }
+        isSaving={isPending}
+        onClose={() => {
+          setBaseEditingSlotId(null);
+        }}
+        onSave={handleSaveBase}
       />
     </section>
   );
@@ -361,4 +345,43 @@ export function PlannerPage(): React.ReactElement {
       {plannerSection}
     </DndProvider>
   );
+}
+
+// Assign a single eaten dish to a slot (bank click-to-assign + drag-drop): the
+// slot becomes a one-item "cooking in" occasion. The optimistic item previews
+// the dish name until the server row settles.
+function assignSingleEat(
+  slotId: number,
+  recipe: RecipeListItem,
+): { input: UpdateSlotInput; optimisticItems: PlanSlotItem[] } {
+  return {
+    input: {
+      slotId,
+      slotType: 'recipe',
+      chefUserId: null,
+      comment: null,
+      items: [
+        {
+          recipeId: recipe.id,
+          servings: recipe.baseServings,
+          kind: 'eat',
+          sortOrder: 0,
+        },
+      ],
+    },
+    optimisticItems: [
+      {
+        id: 1,
+        recipeId: recipe.id,
+        recipeName: recipe.name,
+        recipeImageUrl: recipe.imageUrl,
+        isBase: recipe.isBase,
+        baseRecipeId: recipe.baseRecipeId,
+        isDeleted: recipe.isDeleted,
+        servings: recipe.baseServings,
+        kind: 'eat',
+        sortOrder: 0,
+      },
+    ],
+  };
 }

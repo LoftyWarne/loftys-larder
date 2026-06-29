@@ -33,7 +33,7 @@ Why not: recipes in the wild are written "serves 4," not per-portion. Whole-reci
 Revisit: not anticipated; would be a foundational data-model change.
 
 ### Nested base recipes
-What it is: a batch-version recipe being itself the base for another batch recipe.
+What it is: a serving-variation recipe being itself the base for another serving variation.
 Why not: two levels covers every real-world cooking pattern the household has surfaced (base → accompaniments). Allowing nesting introduces cycle-detection, recursive plant-points traversal, and ambiguous shopping-list aggregation paths for no observed use case.
 Revisit: if a real meal pattern needs three-deep composition (a stock that feeds a sauce that feeds a meal). Re-evaluation should include whether the right answer is nesting vs. a "prep step" abstraction distinct from recipes.
 
@@ -117,7 +117,7 @@ Revisit: when storage cost or asset clutter becomes visible in the Cloudinary da
 ### Test coverage is not a target
 Where it's held: behaviour-focused tests on the highest-value surfaces (aggregation math, plant-points traversal, shelf-life warnings, date-overlap rules, base-cook contributions). No `--coverage` threshold enforced.
 Why not higher: coverage as a metric rewards uniform test density across code regardless of its risk profile. The plan names the high-value surfaces explicitly; pushing coverage past those creates ceremonial tests that slow iteration without finding bugs.
-Why not lower: the named surfaces would have insufficient cases to catch the real edge conditions (duplicate ingredient lines, batch-version no-double-count rule, soft-deleted-base hidden from picker).
+Why not lower: the named surfaces would have insufficient cases to catch the real edge conditions (duplicate ingredient lines, serving-variation no-double-count rule, soft-deleted-base hidden from picker).
 Revisit: only if a real regression sneaks through in a code path that "should have had a test" — at which point the question is whether to test that one path, not to globally lift coverage.
 
 ### WCAG 2.1 AA, spot-checked

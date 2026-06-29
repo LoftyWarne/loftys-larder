@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { planSlotSchema, slotTypeSchema } from './plans.ts';
+import { planSlotSchema, slotItemKindSchema, slotTypeSchema } from './plans.ts';
 
 const slotIdSchema = z.number().int().positive();
 const recipeIdSchema = z.number().int().positive();
@@ -17,59 +17,41 @@ const slotCommentSchema = z
     `Comment must be ${String(SLOT_COMMENT_MAX_LENGTH)} characters or fewer`,
   );
 
-// Full-replace semantics: every editable field on the slot is in the input,
-// and the caller declares the desired final state. The refines encode the
-// biconditionals already enforced in the DB CHECK constraints so the
-// procedure returns a clean domain error before the write hits the wire. The
-// base-cook pair is restricted to `slot_type='recipe'` slots at this layer
-// (defence in depth above the unconditional DB joint-set CHECK).
+// One dish in the desired slot state. `is_base` for `cook_ahead` and the
+// household scope of each recipe are checked in the procedure (they need a DB
+// read); the schema just shapes the input. `sortOrder` orders dishes within
+// the slot.
+export const slotItemInputSchema = z.object({
+  recipeId: recipeIdSchema,
+  servings: servingsSchema,
+  kind: slotItemKindSchema,
+  sortOrder: z.number().int().nonnegative(),
+});
+export type SlotItemInput = z.infer<typeof slotItemInputSchema>;
+
+// Full-replace semantics: the caller declares the slot's desired final state —
+// status + chef + comment + the complete `items` list. The procedure deletes
+// and reinserts the items. Composable occasions (DEC-89): `eat` items are the
+// dishes eaten (a main, sides, dessert); `cook_ahead` items are bases produced
+// in bulk. The refine encodes the slot-status coupling (`eat` items iff the
+// slot is `recipe`); `cook_ahead`-must-be-a-base is enforced in the procedure.
 export const updateSlotInputSchema = z
   .object({
     slotId: slotIdSchema,
     slotType: slotTypeSchema,
-    recipeId: recipeIdSchema.nullable(),
-    numberOfServings: servingsSchema.nullable(),
     chefUserId: z.string().min(1).nullable(),
-    cooksBaseRecipeId: recipeIdSchema.nullable(),
-    cooksBaseServings: servingsSchema.nullable(),
     comment: slotCommentSchema.nullable(),
+    items: z.array(slotItemInputSchema),
   })
   .refine(
-    (value) =>
-      value.slotType === 'recipe'
-        ? value.recipeId !== null
-        : value.recipeId === null,
-    {
-      path: ['recipeId'],
-      message:
-        'recipeId must be set when slotType is recipe, and null otherwise',
+    (value) => {
+      const hasEat = value.items.some((item) => item.kind === 'eat');
+      return value.slotType === 'recipe' ? hasEat : !hasEat;
     },
-  )
-  .refine(
-    (value) =>
-      value.slotType === 'recipe'
-        ? value.numberOfServings !== null
-        : value.numberOfServings === null,
     {
-      path: ['numberOfServings'],
+      path: ['items'],
       message:
-        'numberOfServings must be set when slotType is recipe, and null otherwise',
-    },
-  )
-  .refine(
-    (value) =>
-      (value.cooksBaseRecipeId === null) === (value.cooksBaseServings === null),
-    {
-      path: ['cooksBaseServings'],
-      message:
-        'cooksBaseRecipeId and cooksBaseServings must be set together or both null',
-    },
-  )
-  .refine(
-    (value) => value.slotType === 'recipe' || value.cooksBaseRecipeId === null,
-    {
-      path: ['cooksBaseRecipeId'],
-      message: 'Base-cook fields are only allowed on recipe slots',
+        'eat items are required when slotType is recipe, and not allowed otherwise',
     },
   );
 export type UpdateSlotInput = z.infer<typeof updateSlotInputSchema>;

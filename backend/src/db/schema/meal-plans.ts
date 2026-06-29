@@ -20,7 +20,8 @@ import { recipes } from './recipes.ts';
 
 // Slot states modelled as a Postgres enum, not as dummy recipes (DEC-25).
 // Extending the enum later requires a migration; if a new state is anticipated,
-// add it here before shipping.
+// add it here before shipping. `recipe` now means "home-cooked" — the dishes
+// themselves live in `meal_plan_slot_items`.
 export const slotType = pgEnum('slot_type', [
   'empty',
   'recipe',
@@ -28,6 +29,12 @@ export const slotType = pgEnum('slot_type', [
   'takeaway',
   'leftovers',
 ]);
+
+// A slot item is one dish on an occasion. `eat` = consumed here (a main, side,
+// or dessert); `cook_ahead` = a base produced here in bulk for later meals to
+// draw on (replaces the old per-slot `cooks_base_*` fields). Composable
+// occasions (DEC-89).
+export const slotItemKind = pgEnum('slot_item_kind', ['eat', 'cook_ahead']);
 
 // Household-scoped dated window (DEC-17). `created_by_user_id` is informational
 // and SET NULL on user delete (DEC-29). The (household_id, start_date) btree
@@ -64,15 +71,9 @@ export const mealPlans = pgTable(
   ],
 );
 
-// One row per (plan, date, occasion). Two independent recipe FKs:
-//   - `recipe_id`        — what the slot is *eating*. Required iff
-//                          `slot_type = 'recipe'` (biconditional CHECK).
-//   - `cooks_base_recipe_id` — an independently-prepped base (DEC-24), joint-set
-//                              with `cooks_base_servings`, RESTRICT-protected.
-//
-// `cooks_base_recipe_id` must reference a recipe with `is_base = true` —
-// enforced in FEAT-30's application code, deliberately not in a DB trigger
-// (spec implementation notes). `chef_user_id` is informational; SET NULL on
+// One row per (plan, date, occasion). The slot carries the occasion's *status*
+// (`slot_type`) plus slot-level `chef_user_id` + `comment`; the dishes live in
+// `meal_plan_slot_items` (DEC-89). `chef_user_id` is informational; SET NULL on
 // user delete (DEC-29).
 export const mealPlanSlots = pgTable(
   'meal_plan_slots',
@@ -86,13 +87,7 @@ export const mealPlanSlots = pgTable(
       .notNull()
       .references(() => mealOccasions.id, { onDelete: 'restrict' }),
     slotType: slotType().notNull(),
-    recipeId: integer().references(() => recipes.id, { onDelete: 'restrict' }),
-    numberOfServings: smallint(),
     chefUserId: text().references(() => users.id, { onDelete: 'set null' }),
-    cooksBaseRecipeId: integer().references(() => recipes.id, {
-      onDelete: 'restrict',
-    }),
-    cooksBaseServings: smallint(),
     comment: text(),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
@@ -108,17 +103,38 @@ export const mealPlanSlots = pgTable(
       table.date,
       table.occasionId,
     ),
-    check(
-      'meal_plan_slots_recipe_iff_type',
-      sql`(${table.slotType} = 'recipe') = (${table.recipeId} IS NOT NULL)`,
-    ),
-    check(
-      'meal_plan_slots_servings_when_recipe',
-      sql`${table.slotType} <> 'recipe' OR (${table.numberOfServings} IS NOT NULL AND ${table.numberOfServings} > 0)`,
-    ),
-    check(
-      'meal_plan_slots_cooks_base_joint',
-      sql`(${table.cooksBaseRecipeId} IS NULL) = (${table.cooksBaseServings} IS NULL) AND (${table.cooksBaseServings} IS NULL OR ${table.cooksBaseServings} > 0)`,
-    ),
+  ],
+);
+
+// Dishes on a slot. Application rules (defence-in-depth above the FK + CHECK):
+// `eat` items only when the slot's `slot_type = 'recipe'`, and `slot_type =
+// 'recipe'` iff the slot has ≥1 `eat` item; `cook_ahead` items must reference
+// an `is_base` recipe and are allowed on any slot_type. `servings` is the
+// number eaten (eat) or the batch size produced (cook_ahead); the shopping
+// list and consumption balance (DEC-88) scale by it.
+export const mealPlanSlotItems = pgTable(
+  'meal_plan_slot_items',
+  {
+    id: integer().generatedAlwaysAsIdentity().primaryKey(),
+    slotId: integer()
+      .notNull()
+      .references(() => mealPlanSlots.id, { onDelete: 'cascade' }),
+    recipeId: integer()
+      .notNull()
+      .references(() => recipes.id, { onDelete: 'restrict' }),
+    servings: smallint().notNull(),
+    kind: slotItemKind().notNull(),
+    sortOrder: smallint().notNull(),
+    createdAt: timestamp({ withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp({ withTimezone: true })
+      .notNull()
+      .default(sql`now()`)
+      .$onUpdate(() => sql`now()`),
+  },
+  (table) => [
+    check('meal_plan_slot_items_servings_positive', sql`${table.servings} > 0`),
+    index('meal_plan_slot_items_slot_id_idx').on(table.slotId),
   ],
 );

@@ -295,7 +295,7 @@ describe('recipes schema', () => {
           isBase: true,
           baseRecipeId: baseId,
         }),
-        'recipes_base_xor_batch',
+        'recipes_base_xor_variation',
       );
     });
 
@@ -307,17 +307,6 @@ describe('recipes schema', () => {
           update recipes set base_recipe_id = ${recipeId} where id = ${recipeId}
         `),
         'recipes_base_not_self',
-      );
-    });
-
-    it('rejects a self-referencing paired_recipe_id', async () => {
-      await seedFixtures(db);
-      const recipeId = await insertRecipe(db);
-      await expectConstraintViolation(
-        db.execute(sql`
-          update recipes set paired_recipe_id = ${recipeId} where id = ${recipeId}
-        `),
-        'recipes_paired_not_self',
       );
     });
   });
@@ -565,23 +554,6 @@ describe('recipes schema', () => {
       await expect(
         db.delete(recipes).where(eq(recipes.id, baseId)),
       ).rejects.toThrow();
-    });
-
-    it('nulls paired_recipe_id when the referenced recipe is deleted', async () => {
-      await seedFixtures(db);
-      const a = await insertRecipe(db, { name: 'A' });
-      const b = await insertRecipe(db, { name: 'B' });
-      // Recipe B points to A; deleting A should null B's pair.
-      await db
-        .update(recipes)
-        .set({ pairedRecipeId: a })
-        .where(eq(recipes.id, b));
-      await db.delete(recipes).where(eq(recipes.id, a));
-      const [row] = await db
-        .select({ pairedRecipeId: recipes.pairedRecipeId })
-        .from(recipes)
-        .where(eq(recipes.id, b));
-      expect(row?.pairedRecipeId).toBeNull();
     });
   });
 

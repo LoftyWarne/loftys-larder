@@ -64,6 +64,20 @@
       "when": 1782316180330,
       "tag": "0008_motionless_grey_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782375309856,
+      "tag": "0009_bent_multiple_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782733345292,
+      "tag": "0010_complex_tempest",
+      "breakpoints": true
     }
   ]
 }

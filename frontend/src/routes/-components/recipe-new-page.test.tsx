@@ -108,7 +108,7 @@ describe('RecipeNewPage', () => {
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/recipes/$recipeId/edit',
       params: { recipeId: '42' },
-      hash: 'recipe-batch-heading',
+      hash: 'recipe-serving-variation-heading',
     });
   });
 

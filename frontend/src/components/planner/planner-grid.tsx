@@ -1,7 +1,6 @@
 import type { PlanSlot } from '@loftys-larder/shared';
 import { useMemo } from 'react';
 
-import { BatchWarning } from '@/components/planner/batch-warning.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { SlotCell } from '@/components/planner/slot-cell.tsx';
 import { eachDateInRange, formatDayLabel } from '@/lib/date-utils.ts';
@@ -10,17 +9,19 @@ export interface PlannerGridProps {
   slots: readonly PlanSlot[];
   rangeStart: string;
   rangeEnd: string;
-  warningSlotIds?: ReadonlySet<number>;
+  // Base-consumption shortfall per slot id (how many base servings short),
+  // from `deriveBaseBalances`. Read-only, derived externally.
+  shortfallBySlot?: ReadonlyMap<number, number>;
   /**
    * Plant-point totals keyed by civil date (`YYYY-MM-DD`). `null` for a date
    * means the count is loading; an absent key means "no opinion" (badge
-   * hidden). Mirrors the shape of `warningSlotIds` — read-only, derived
-   * externally, no business logic in the grid.
+   * hidden). Read-only, derived externally, no business logic in the grid.
    */
   dayPlantCounts?: ReadonlyMap<string, number | null>;
   dndEnabled?: boolean;
   onSlotClick: (slot: PlanSlot) => void;
   onSlotClear?: (slot: PlanSlot) => void;
+  onSlotBaseClick?: (slot: PlanSlot) => void;
 }
 
 interface OccasionColumn {
@@ -32,11 +33,12 @@ export function PlannerGrid({
   slots,
   rangeStart,
   rangeEnd,
-  warningSlotIds,
+  shortfallBySlot,
   dayPlantCounts,
   dndEnabled = false,
   onSlotClick,
   onSlotClear,
+  onSlotBaseClick,
 }: PlannerGridProps): React.ReactElement {
   const visibleDates = useMemo(
     () => eachDateInRange(rangeStart, rangeEnd),
@@ -119,10 +121,7 @@ export function PlannerGrid({
                     <SlotCell
                       slot={slot}
                       dndEnabled={dndEnabled}
-                      baseCookLine={renderBaseCookLine(
-                        slot,
-                        warningSlotIds?.has(slot.id) ?? false,
-                      )}
+                      shortBy={shortfallBySlot?.get(slot.id)}
                       onClick={() => {
                         onSlotClick(slot);
                       }}
@@ -130,6 +129,13 @@ export function PlannerGrid({
                         onSlotClear
                           ? () => {
                               onSlotClear(slot);
+                            }
+                          : undefined
+                      }
+                      onBaseClick={
+                        onSlotBaseClick
+                          ? () => {
+                              onSlotBaseClick(slot);
                             }
                           : undefined
                       }
@@ -149,28 +155,4 @@ export function PlannerGrid({
 
 function slotKey(date: string, occasionId: number): string {
   return `${date}:${String(occasionId)}`;
-}
-
-function renderBaseCookLine(
-  slot: PlanSlot,
-  showWarning: boolean,
-): React.ReactNode {
-  const hasBaseCook =
-    slot.cooksBaseRecipeId !== null && slot.cooksBaseServings !== null;
-  if (!hasBaseCook && !showWarning) return null;
-  return (
-    <div className="flex flex-col gap-0.5">
-      {hasBaseCook && (
-        <span className="text-xs text-muted-foreground">
-          Cook base:{' '}
-          {slot.cooksBaseRecipe?.name ?? `#${String(slot.cooksBaseRecipeId)}`}
-          {slot.cooksBaseRecipe?.isDeleted && (
-            <span className="ml-1 text-muted-foreground/70">(deleted)</span>
-          )}{' '}
-          (×{String(slot.cooksBaseServings)})
-        </span>
-      )}
-      {showWarning && <BatchWarning />}
-    </div>
-  );
 }

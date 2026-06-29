@@ -443,8 +443,6 @@ describe('user procedures', () => {
           date: new Date('2026-06-01'),
           occasionId,
           slotType: 'recipe',
-          recipeId,
-          numberOfServings: 2,
           chefUserId: USER_ID,
         })
         .returning({ id: mealPlanSlots.id });

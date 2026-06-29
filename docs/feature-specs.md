@@ -438,7 +438,11 @@ Conventions:
 
 ### FEAT-11 — Schema: recipes domain
 
-**Goal:** Add `ingredients`, `recipes` (with `is_base`, `base_recipe_id`, `paired_recipe_id` and their CHECK constraints), `recipe_ingredients` (surrogate PK, no uniqueness), `recipe_method`, `recipe_drafts`, `recipe_sources`, `related_recipes`, `recipe_ratings`, `recipe_comments`. Include the trigram GIN indexes. `[DEC-TBD: surrogate key on recipe_ingredients, duplicates intentional]` `[DEC-TBD: paired_recipe_id symmetry maintained in app, not DB]` `[DEC-TBD: soft-delete recipes for historical plan rendering]` `[DEC-TBD: server-side draft persistence keyed by user+recipe]`
+> **Amended by DEC-87** — `paired_recipe_id` (and its CHECK) was later removed.
+> Migration `0009` drops the column; the recipe model is base / serving variation
+> / standalone. References to it below are retained as shipped history.
+
+**Goal:** Add `ingredients`, `recipes` (with `is_base`, `base_recipe_id` and their CHECK constraints), `recipe_ingredients` (surrogate PK, no uniqueness), `recipe_method`, `recipe_drafts`, `recipe_sources`, `related_recipes`, `recipe_ratings`, `recipe_comments`. Include the trigram GIN indexes. `[DEC-TBD: surrogate key on recipe_ingredients, duplicates intentional]` `[DEC-TBD: soft-delete recipes for historical plan rendering]` `[DEC-TBD: server-side draft persistence keyed by user+recipe]`
 
 **Estimate:** 3–4 hr. **Depends on:** FEAT-10. **Enables:** FEAT-17, 19, 20, 22, 24, 25, 26.
 
@@ -453,14 +457,14 @@ Conventions:
 - [ ] All listed tables created with columns, FKs, CHECKs, UNIQUEs, and `ON DELETE` actions matching `plan.md`'s data model
 - [ ] `pg_trgm` extension enabled in a migration before the GIN indexes
 - [ ] GIN indexes on `lower(name)` for `ingredients` and `recipes`
-- [ ] CHECK on `recipes`: `base_recipe_id != recipe_id`, `NOT (is_base AND base_recipe_id IS NOT NULL)`, `paired_recipe_id != recipe_id`
+- [ ] CHECK on `recipes`: `base_recipe_id != recipe_id`, `NOT (is_base AND base_recipe_id IS NOT NULL)` (the `recipes_base_xor_variation` constraint)
 - [ ] CHECK on `related_recipes`: `recipe_one_id < recipe_two_id`
 - [ ] `recipe_ingredients` has surrogate `recipe_ingredient_id`, no `(recipe_id, ingredient_id)` unique constraint
 - [ ] `recipe_drafts`: `UNIQUE (user_id, recipe_id)` (relying on Postgres NULL semantics for multiple new-recipe drafts); `user_id` FK `ON DELETE RESTRICT`
 - [ ] All tombstone-able FK columns set to `ON DELETE SET NULL` (per plan), the rest `ON DELETE RESTRICT`
 
 **Implementation notes:**
-- The `is_base`/`base_recipe_id` CHECK enforces the "base XOR batch-version" rule at the DB layer; symmetry of `paired_recipe_id` stays in application code.
+- The `is_base`/`base_recipe_id` CHECK enforces the "base XOR serving-variation" rule at the DB layer.
 - The trigram index migration must `CREATE EXTENSION IF NOT EXISTS pg_trgm` before index creation.
 - Self-referential FKs in Drizzle need a forward declaration pattern; verify the codegen handles it.
 
@@ -471,7 +475,6 @@ Conventions:
 
 **Common gotchas:**
 - A user trying to FK to `users.id` will fail if the column type doesn't exactly match Better Auth's user PK.
-- `paired_recipe_id` `ON DELETE SET NULL`: this nulls the other side of the pair via DB; the app-layer symmetry maintenance (FEAT-23) must handle the case where the other side is already null (no-op).
 
 **Definition of done:**
 - Tests cover: each CHECK constraint rejects bad inserts; FK `ON DELETE` actions behave as specified (e.g. deleting a user nulls `recipes.added_by_user_id` if RESTRICTed elsewhere isn't violated — actually `added_by_user_id` is SET NULL so user deletion paths get exercised in FEAT-35 tests).
@@ -839,7 +842,6 @@ Conventions:
 
 **Common gotchas:**
 - Forgetting the transaction wrapper on bulk replaces leaves partial state if the second statement fails.
-- The `paired_recipe_id` symmetry handling lives in FEAT-23; don't accept it as input here yet.
 
 **Definition of done:**
 - Tests cover: CRUD; partial header update only touches specified fields; bulk replace is transactional (failure rolls back); unit mismatch rejected; soft-delete/restore round-trip.
@@ -940,43 +942,45 @@ Conventions:
 
 ---
 
-### FEAT-23 — Batch cooking model + UI
+### FEAT-23 — Serving-variation model + UI
 
-**Goal:** Surface and enforce `is_base`, `base_recipe_id`, and `paired_recipe_id` in the recipe editor; maintain `paired_recipe_id` symmetry within the recipe-save transaction; filter the base picker to recipes with `is_base = true`; hide soft-deleted bases from new picker contexts. `[DEC-TBD: recipe pairing symmetry maintained in app, not DB]` `[DEC-TBD: batch-version cannot itself be a base (no nesting)]`
+> **Amended by DEC-87** — pairing (`paired_recipe_id`, its symmetry transaction,
+> and the `paired_recipe_id` picker) was removed; "batch version" is renamed
+> "serving variation". The surviving surface is `is_base` + `base_recipe_id`, the
+> base picker, and the `setServingVariationFields` procedure. Pairing-specific
+> criteria/notes below are struck-through history.
+
+**Goal:** Surface and enforce `is_base` and `base_recipe_id` in the recipe editor (via `setServingVariationFields`); filter the base picker to recipes with `is_base = true`; hide soft-deleted bases from new picker contexts. `[DEC-TBD: serving variation cannot itself be a base (no nesting)]`
 
 **Estimate:** 3–4 hr. **Depends on:** FEAT-19, 20, 21. **Enables:** FEAT-30, 31, 33, 36 (aggregation traversal), 41 (plant-points traversal).
 
 **Reuse note:** The "pickable recipes" filter helper from FEAT-19 gains an `isBase` parameter here. Keep one place that knows the rules of what's pickable; future picker contexts (recipe-bank, base picker, related picker) just pass different params.
 
 **Files:**
-- `backend/src/trpc/routers/recipes.ts` (extends with pair-symmetry transaction)
-- `frontend/src/components/recipe-editor/batch-fields.tsx`
+- `backend/src/trpc/procedures/recipes.ts` (the `setServingVariationFields` procedure)
+- `frontend/src/components/recipe-editor/serving-variation-fields.tsx`
 - `frontend/src/components/recipe-editor/header-fields.tsx` (integrate `is_base` toggle)
 
 **Acceptance criteria:**
-- [ ] Editor exposes: `is_base` checkbox; `base_recipe_id` picker (visible only when this recipe is a batch-version candidate — i.e. `is_base = false`; picker filtered to `is_base = true`); `paired_recipe_id` picker
-- [ ] Server-side: setting `paired_recipe_id` updates both sides in a single transaction; clearing one side clears the other; if A→B exists and the user saves A→C, the transaction sets A→C, clears B's pointer to A, and sets C→A
-- [ ] CHECK constraints from FEAT-11 enforce the XOR (`NOT (is_base AND base_recipe_id IS NOT NULL)`) and the self-reference bans
-- [ ] Base picker hides soft-deleted bases; existing batch recipes pointing to a now-deleted base are not surfaced in the recipe picker for new slot assignment (verified in FEAT-31)
-- [ ] Pair affordance hidden when the linked recipe is soft-deleted
+- [ ] Editor exposes: `is_base` checkbox; `base_recipe_id` picker (visible only when this recipe is a serving-variation candidate — i.e. `is_base = false`; picker filtered to `is_base = true`)
+- [ ] CHECK constraint from FEAT-11 enforces the XOR (`recipes_base_xor_variation`) and the self-reference ban
+- [ ] Base picker hides soft-deleted bases; existing serving variations pointing to a now-deleted base are not surfaced in the recipe picker for new slot assignment (verified in FEAT-31)
 
 **Implementation notes:**
-- The pair-symmetry transaction is the trickiest write in the project. Cover with explicit tests for: new pairing, repairing (A→B becomes A→C), clearing pair, deleting a paired recipe (the FK `ON DELETE SET NULL` handles the cascade on hard-delete; soft-delete needs app-layer handling — hide the affordance but don't clear the pointer, because un-restore should re-surface it).
-- The picker filter helper now takes `{ excludeDeleted?: boolean, onlyBases?: boolean, excludeBatchVersionsOfDeletedBases?: boolean }`.
+- The picker filter helper takes `{ includeDeleted?, includePickerHidden?, isBase? }`.
 
 **Manual verification:**
 1. Mark a recipe as base; save; another recipe's base picker now offers it.
-2. Pair two recipes; reload the other one — pair visible. Re-pair one side to a third recipe; original other side cleared.
-3. Soft-delete a base; the base picker no longer offers it; existing batch recipes pointing to it still render but are filtered from new-slot picker.
+2. Point a serving variation at a base; reload — the base partner shows.
+3. Soft-delete a base; the base picker no longer offers it; existing serving variations pointing to it still render but are filtered from new-slot picker.
 
 **Common gotchas:**
-- Soft-deleted base + active batch version is the source of subtle bugs. The rule is: keep historical references intact, hide from *new* selection contexts.
-- The pair-symmetry transaction must use `FOR UPDATE` on the three rows touched if running under any meaningful concurrency; at household scale, LWW per row is acceptable per the plan.
+- Soft-deleted base + active serving variation is the source of subtle bugs. The rule is: keep historical references intact, hide from *new* selection contexts.
 
 **Definition of done:**
-- Tests cover: setting/changing/clearing pair maintains symmetry round-trip; `is_base = true` with `base_recipe_id` set is rejected at the DB; soft-deleted base hidden from new-slot picker; soft-deleted base remains visible in the historical recipe view.
-- Commit: `feat(recipes): batch cooking model with paired-recipe symmetry`
-- Gate check: pair two recipes; soft-delete one; observe the pair affordance hides; restore — the affordance returns.
+- Tests cover: `is_base = true` with `base_recipe_id` set is rejected at the DB; soft-deleted base hidden from new-slot picker; soft-deleted base remains visible in the historical recipe view.
+- Commit: `feat(recipes): serving-variation model`
+- Gate check: point a serving variation at a base; soft-delete the base; the base affordance hides from new pickers; the historical view still renders it.
 
 ---
 
@@ -1213,6 +1217,11 @@ Conventions:
 
 ### FEAT-30 — Slot procedures (assign, set state, clear, edit) — recipe only
 
+> **Amended by DEC-89.** Slots no longer carry `recipe_id`/`number_of_servings`;
+> dishes live in `meal_plan_slot_items` and `slots.update` takes an `items` list
+> (full-replace). The status↔items coupling (`recipe` iff ≥1 eat item) is
+> app-enforced.
+
 **Goal:** `slots.update({ slotId, slot_type, recipe_id?, number_of_servings?, chef_user_id?, comment? })` covers all five states. Validates: `slot_type='recipe'` requires `recipe_id` + `number_of_servings > 0`; non-recipe states clear `recipe_id` and `number_of_servings`. Base-cook fields (`cooks_base_recipe_id`, `cooks_base_servings`) added in FEAT-32 — leave the columns null here.
 
 **Estimate:** 2 hr. **Depends on:** FEAT-12, 19, 27. **Enables:** FEAT-31, 32.
@@ -1270,7 +1279,7 @@ Conventions:
 - [ ] Click on an assigned slot → editor sheet opens (mobile-friendly bottom sheet)
 - [ ] Editor exposes: change recipe (combobox), number of servings (with default = recipe.baseServings), slot type (radio: recipe / eat_out / takeaway / leftovers / empty), chef (select from household users), comment (textarea)
 - [ ] Clear button on the editor returns the slot to empty
-- [ ] Recipe Bank filters out soft-deleted recipes and batch versions whose base is soft-deleted (the pickable helper)
+- [ ] Recipe Bank filters out soft-deleted recipes and serving variations whose base is soft-deleted (the pickable helper)
 - [ ] Touch-first: the slot editor works one-handed on a phone; the recipe bank is scrollable above the grid on small screens
 
 **Implementation notes:**
@@ -1289,7 +1298,7 @@ Conventions:
 - The bottom-sheet pattern on iOS Safari can fight with viewport height — test on a real device.
 
 **Definition of done:**
-- Tests cover: click-to-assign updates the slot; slot-editor saves servings/recipe/state/chef/comment; pickable filter excludes soft-deleted and batch-version-of-deleted-base; optimistic rollback on simulated error.
+- Tests cover: click-to-assign updates the slot; slot-editor saves servings/recipe/state/chef/comment; pickable filter excludes soft-deleted and serving-variation-of-deleted-base; optimistic rollback on simulated error.
 - Commit: `feat(planner): recipe bank, grid, and click-to-assign with optimistic updates`
 - Gate check: assign three recipes to three slots, edit one, clear one — DB rows reflect the UI state.
 
@@ -1297,25 +1306,39 @@ Conventions:
 
 ### FEAT-32 — Base cooking on slots: model fields, editor, card rendering, soft warning
 
-**Goal:** Surface `cooks_base_recipe_id` / `cooks_base_servings` in the slot editor and on the slot card; pre-suggest the meal's `base_recipe_id` when the meal is a batch-version; soft warning when a batch-version meal has no base supply earlier in the plan or in the same slot. `[DEC-TBD: cooked base decoupled from meal's referenced base, can be different]` `[DEC-TBD: soft warning only — doesn't block save]`
+> **Amended by DEC-88 (2026-06-28).** The base cook moved out of the slot editor
+> into its **own modal** (`base-cook-sheet.tsx`), reached from a **second
+> affordance on the slot card** (the base line / "+ base" chip) — separate from
+> the Meal editor (cross-cutting #14). The modal auto-offers the meal's relevant
+> base (variation → its base; a base eaten directly → itself). The soft "no base
+> supply" warning is upgraded to a **consumption balance**: cooked base is a pool
+> meals draw down 1:1, walked cook-before-eat; a slot warns when it runs the
+> balance negative ("short by N"), and the modal shows the remaining base.
+> Planning-only — no shopping / plant-points effect.
+
+> **Superseded by DEC-89.** `cooks_base_recipe_id`/`cooks_base_servings` are gone;
+> a base cook is a `cook_ahead` item in `meal_plan_slot_items` (the base modal
+> edits the list of `cook_ahead` items). The consumption balance now reads items.
+
+**Goal:** Surface `cooks_base_recipe_id` / `cooks_base_servings` in the slot editor and on the slot card; pre-suggest the meal's `base_recipe_id` when the meal is a serving-variation; soft warning when a serving-variation meal has no base supply earlier in the plan or in the same slot. `[DEC-TBD: cooked base decoupled from meal's referenced base, can be different]` `[DEC-TBD: soft warning only — doesn't block save]`
 
 **Estimate:** 3–4 hr. **Depends on:** FEAT-23, 30, 31. **Enables:** FEAT-36 (aggregation), FEAT-41 (plant-points).
 
-**Reuse note:** The base-supply check logic ("does this batch meal have a base cooked earlier or here?") will be reused by aggregation (FEAT-36) and plant-points (FEAT-41) — though for different purposes. Factor it as a query over the plan's slots, then consume it in the planner UI here.
+**Reuse note:** The base-supply check logic ("does this serving-variation meal have a base cooked earlier or here?") will be reused by aggregation (FEAT-36) and plant-points (FEAT-41) — though for different purposes. Factor it as a query over the plan's slots, then consume it in the planner UI here.
 
 **Files:**
 - `backend/src/trpc/routers/slots.ts` (extend `update` with base-cook fields + application-level `is_base = true` validation)
-- `backend/src/lib/batch-supply.ts` (`hasBaseSupply(planId, slotId, baseRecipeId)` → returns boolean + earliest-cook-slot reference)
+- `backend/src/lib/serving-variation-supply.ts` (`hasBaseSupply(planId, slotId, baseRecipeId)` → returns boolean + earliest-cook-slot reference)
 - `frontend/src/components/planner/slot-editor-sheet.tsx` (extend)
 - `frontend/src/components/planner/slot-cell.tsx` (extend: render two lines when base-cook present)
-- `frontend/src/components/planner/batch-warning.tsx`
+- `frontend/src/components/planner/serving-variation-warning.tsx`
 
 **Acceptance criteria:**
-- [ ] Slot editor: "What are you eating?" combobox (any pickable recipe); "Cooking a base for batch use?" combobox (optional; filtered to `is_base = true`); servings input for the base cook (required when base cook set)
-- [ ] If the eating recipe is a batch-version (has `base_recipe_id`), the base picker pre-suggests that base (user can override or clear)
+- [ ] Slot editor: "What are you eating?" combobox (any pickable recipe); "Cooking a base for batch use?" combobox (optional; filtered to `is_base = true`); servings input for the base cook (required when base cook set). The base-cook section is shown on **every slot type** — recipe, eat-out, takeaway, leftovers, empty — because cooking a base is decoupled from what the slot eats (DEC-24); only the pre-suggestion below is variation-specific.
+- [ ] If the eating recipe is a serving-variation (has `base_recipe_id`), the base picker pre-suggests that base (user can override or clear)
 - [ ] DB joint-set CHECK already enforces both fields set or both null; UI mirrors the constraint
 - [ ] Server-side procedure rejects `cooks_base_recipe_id` referring to a non-`is_base` recipe
-- [ ] Soft warning shown on the slot card and in the editor when a batch-version meal lacks base supply (no earlier slot or same slot cooking the meal's base)
+- [ ] Soft warning shown on the slot card and in the editor when a serving-variation meal lacks base supply (no earlier slot or same slot cooking the meal's base)
 - [ ] Soft warning is non-blocking — save proceeds
 - [ ] Slot card renders two lines: "Meal: X (×N)" and "Cook base: Y (×M)" when base-cook is set
 
@@ -1324,9 +1347,9 @@ Conventions:
 - "Earlier" is "any date strictly before this slot's date, or same date with the same or earlier occasion ordinal" — define an occasion ordering once (Lunch < Dinner).
 
 **Manual verification:**
-1. Open a slot whose meal is a batch-version; base picker pre-suggests the linked base; set servings → save.
+1. Open a slot whose meal is a serving-variation; base picker pre-suggests the linked base; set servings → save.
 2. Pick a non-`is_base` recipe in the base picker — disallowed (filtered out at the picker; procedure rejects defence-in-depth).
-3. Assign a batch-version meal without any earlier base cook → soft warning visible.
+3. Assign a serving-variation meal without any earlier base cook → soft warning visible.
 4. Add a base cook on an earlier slot → warning clears on re-render.
 
 **Common gotchas:**
@@ -1335,42 +1358,17 @@ Conventions:
 
 **Definition of done:**
 - Tests cover: base-cook fields round-trip; `is_base = true` constraint at procedure layer; pre-suggestion logic; soft-warning logic across plan boundaries.
-- Commit: `feat(planner): base cooking on slots with batch-supply warning`
-- Gate check: create a plan with a batch meal in one slot and the corresponding base cook in an earlier slot — slot cards render both lines; warning absent.
+- Commit: `feat(planner): base cooking on slots with serving-variation warning`
+- Gate check: create a plan with a serving-variation meal in one slot and the corresponding base cook in an earlier slot — slot cards render both lines; warning absent.
 
 ---
 
-### FEAT-33 — Pair switch UI (full ↔ batch toggle on slot)
+### FEAT-33 — Pair switch UI (full ↔ batch toggle on slot) — **REMOVED (DEC-87)**
 
-**Goal:** When a slot's meal recipe has a `paired_recipe_id`, the slot editor exposes a "switch to full / switch to batch" toggle that updates the slot's `recipe_id` to the paired recipe.
-
-**Estimate:** 1–2 hr. **Depends on:** FEAT-23, 31. **Enables:** none specifically.
-
-**Files:**
-- `frontend/src/components/planner/slot-editor-sheet.tsx` (extend)
-- `frontend/src/components/planner/pair-switch-button.tsx`
-
-**Acceptance criteria:**
-- [ ] Button visible only when the slot's recipe has `paired_recipe_id` set AND the paired recipe is not soft-deleted
-- [ ] Label reflects the switch direction (e.g. paired_recipe is_base = true → "Switch to full" if current is the full and paired is a base… or whichever is the meaningful framing — the button tells the user what they'll get)
-- [ ] Tap → mutation updates `recipe_id` to the paired one; optimistic update; servings may default to the new recipe's `baseServings` (decide and document)
-
-**Implementation notes:**
-- The button is small and trivial; the value is the clarity of the user mental model ("I want the batch version of this dish for tonight").
-- Don't auto-set the base picker on pair switch — let the user decide separately.
-
-**Manual verification:**
-1. Pair two recipes (FEAT-23).
-2. Assign one to a slot.
-3. Click the pair-switch — slot now shows the other.
-
-**Common gotchas:**
-- After a pair switch, the batch-supply warning may suddenly appear; that's the correct behaviour, not a bug.
-
-**Definition of done:**
-- Tests cover: button visibility logic; switch updates the slot recipe; switch hidden when paired recipe is soft-deleted.
-- Commit: `feat(planner): full↔batch pair switch on slot`
-- Gate check: pair two recipes, assign one, click the switch — slot shows the other.
+> **Removed by DEC-87.** This feature depended on `paired_recipe_id`, which has
+> been dropped. There is no full↔batch slot toggle; to change a slot's recipe the
+> user re-picks it in the slot editor. `pair-switch-button.tsx` is deleted.
+> Retained as a numbered placeholder so downstream FEAT numbering is stable.
 
 ---
 
@@ -1454,7 +1452,7 @@ Conventions:
 
 ### FEAT-36 — Shopping list aggregation procedure
 
-**Goal:** `shopping.getForPlan(planId)` returns ingredient lines grouped by category, with totals scaled by `qty × (slotServings / baseServings)`. Adds base-cook contributions from any slot with `cooks_base_recipe_id` set. Excludes non-recipe slot types from meal-recipe totals. Batch-version meals contribute only their accompaniment ingredients; the base ingredients come from the base-cook contribution. `[DEC-TBD: shopping list aggregation math, batch-no-double-count rule]`
+**Goal:** `shopping.getForPlan(planId)` returns ingredient lines grouped by category, with totals scaled by `qty × (slotServings / baseServings)`. Adds base-cook contributions from any slot with `cooks_base_recipe_id` set. Excludes non-recipe slot types from meal-recipe totals. Serving-variation meals contribute only their accompaniment ingredients; the base ingredients come from the base-cook contribution. `[DEC-TBD: shopping list aggregation math, serving-variation-no-double-count rule]`
 
 **Estimate:** 4 hr. **Depends on:** FEAT-19, 27, 30, 32. **Enables:** FEAT-37, 38, 39.
 
@@ -1470,7 +1468,7 @@ Conventions:
 - [ ] Scaling: each ingredient line contributes `recipe_ingredient.quantity × (slot.number_of_servings / recipe.base_servings)`
 - [ ] Non-recipe slot types contribute nothing from the meal recipe
 - [ ] Base-cook contribution: for each slot with `cooks_base_recipe_id` set, add the base recipe's ingredients scaled by `slot.cooks_base_servings / base_recipe.base_servings`
-- [ ] Batch-version meals (meal recipe's `base_recipe_id` is set): include only the meal recipe's own ingredients; the base is supplied via a `cooks_base_*` slot somewhere
+- [ ] Serving-variation meals (meal recipe's `base_recipe_id` is set): include only the meal recipe's own ingredients; the base is supplied via a `cooks_base_*` slot somewhere
 - [ ] Same ingredient appearing on multiple lines of the same recipe (e.g. "onion sliced" + "onion diced") aggregates as a single total
 - [ ] Output grouped by `ingredient_categories.name`, ordered by category then ingredient name
 - [ ] Output includes per-line `contributingSlots: [{ slotId, recipeName, date, scaledQuantity }]`
@@ -1481,9 +1479,9 @@ Conventions:
 - Watch for rounding: use Postgres `numeric(10,3)` arithmetic; the final UI may render at 2 decimals but the DB math stays at 3.
 
 **Manual verification:**
-1. Create a plan with: one full recipe, one batch-version recipe whose base is cooked in another slot, one eat-out slot.
+1. Create a plan with: one full recipe, one serving-variation recipe whose base is cooked in another slot, one eat-out slot.
 2. Generate the shopping list; verify totals manually for one ingredient.
-3. Confirm the batch-version meal contributes only its accompaniments; the base ingredients show up via the base-cook contribution; no double-count.
+3. Confirm the serving-variation meal contributes only its accompaniments; the base ingredients show up via the base-cook contribution; no double-count.
 
 **Common gotchas:**
 - A recipe with duplicate ingredient lines (onion sliced + onion diced) must sum into one ingredient line. The aggregation is by `ingredient_id`, not by `recipe_ingredient_id`.
@@ -1491,7 +1489,7 @@ Conventions:
 - Floating-point drift: keep Decimal/`numeric` arithmetic; avoid converting to JS `number` before final aggregation.
 
 **Definition of done:**
-- Tests cover: simple plan totals; mixed recipe and non-recipe slots; duplicate ingredient lines summed; batch-version meal contributing accompaniments only; base-cook contribution; combined "batch meal + base cook in same plan" with no double-count; many-recipes-one-ingredient aggregation.
+- Tests cover: simple plan totals; mixed recipe and non-recipe slots; duplicate ingredient lines summed; serving-variation meal contributing accompaniments only; base-cook contribution; combined "serving-variation meal + base cook in same plan" with no double-count; many-recipes-one-ingredient aggregation.
 - Commit: `feat(shopping): aggregation procedure with base-cook contributions`
 - Gate check: a hand-computed plan's totals match the procedure output line-for-line.
 
@@ -1673,9 +1671,9 @@ Conventions:
 
 ---
 
-### FEAT-41 — Plant points: day-level and plan-level (with batch traversal and base-cook union)
+### FEAT-41 — Plant points: day-level and plan-level (with serving-variation traversal and base-cook union)
 
-**Goal:** Procedures `plants.forDay(planId, date)` and `plants.forPlan(planId)`. Both compute distinct plant-ingredient counts. Day/plan logic traverses `recipe.base_recipe_id` for batch-version slots (so days running on leftovers don't appear plant-poor) and unions `slot.cooks_base_recipe_id` ingredients. Dedup handles the case where the meal's referenced base equals the cooked base. UI display on the planner. `[DEC-TBD: plant-points traversal rules for batch and base-cook slots]`
+**Goal:** Procedures `plants.forDay(planId, date)` and `plants.forPlan(planId)`. Both compute distinct plant-ingredient counts. Day/plan logic traverses `recipe.base_recipe_id` for serving-variation slots (so days running on leftovers don't appear plant-poor) and unions `slot.cooks_base_recipe_id` ingredients. Dedup handles the case where the meal's referenced base equals the cooked base. UI display on the planner. `[DEC-TBD: plant-points traversal rules for serving-variation and base-cook slots]`
 
 **Estimate:** 3 hr. **Depends on:** FEAT-19 (recipe-level), 23, 27, 32. **Enables:** none specifically; quality feature.
 
@@ -1688,7 +1686,7 @@ Conventions:
 - `frontend/src/components/planner/planner-grid.tsx` (extend)
 
 **Acceptance criteria:**
-- [ ] `forDay`: collect plant ingredients from each slot's eating recipe (traversing `base_recipe_id` for batch-version meals), union with the base-cook recipe's plant ingredients if `cooks_base_recipe_id` is set, then `COUNT(DISTINCT)`
+- [ ] `forDay`: collect plant ingredients from each slot's eating recipe (traversing `base_recipe_id` for serving-variation meals), union with the base-cook recipe's plant ingredients if `cooks_base_recipe_id` is set, then `COUNT(DISTINCT)`
 - [ ] `forPlan`: same logic aggregated across all days
 - [ ] Non-recipe slot types contribute zero unless they cook a base (a `cooks_base_recipe_id` set on a takeaway slot still counts)
 - [ ] Dedup: if meal's `base_recipe_id` = `cooks_base_recipe_id` on the same slot, plant ingredients counted once
@@ -1699,7 +1697,7 @@ Conventions:
 - Refresh the badges in response to slot mutations (TanStack Query invalidation).
 
 **Manual verification:**
-1. Build a day with: one full recipe (3 plants), one batch-version recipe whose base has 4 plants and accompaniments have 2 plants (some overlap). Expected total = distinct count.
+1. Build a day with: one full recipe (3 plants), one serving-variation recipe whose base has 4 plants and accompaniments have 2 plants (some overlap). Expected total = distinct count.
 2. Add a base-cook on a takeaway slot — day total updates.
 
 **Common gotchas:**
@@ -1707,8 +1705,8 @@ Conventions:
 - The traversal must skip soft-deleted base recipes? No — base is referenced via FK with `ON DELETE RESTRICT`, so it can be soft-deleted but not hard-deleted; the rows still exist, traverse normally.
 
 **Definition of done:**
-- Tests cover: simple day (full recipes only); day with batch-version meal traversing to base; day with base-cook union; dedup when meal base = cooked base; plan-level rollup.
-- Commit: `feat(plants): day and plan plant-point procedures with batch traversal`
+- Tests cover: simple day (full recipes only); day with serving-variation meal traversing to base; day with base-cook union; dedup when meal base = cooked base; plan-level rollup.
+- Commit: `feat(plants): day and plan plant-point procedures with serving-variation traversal`
 - Gate check: hand-compute a tricky day's plant count; UI badge matches.
 
 ---
@@ -2152,8 +2150,8 @@ Conventions:
 - [ ] `global-setup` performs one magic-link sign-in (with a special test path that returns the token directly when called with a known test header, OR by reading the most recent verification row from a test DB) and saves `storageState`
 - [ ] Test 1: sign-in via the storage state loads the authed home page
 - [ ] Test 2: create a recipe through the editor and see it on the browse page
-- [ ] Test 3: create a plan, assign a batch-version meal to one slot and the corresponding base cook on an earlier slot
-- [ ] Test 4: generate the shopping list and verify the line totals and the batch-no-double-count rule
+- [ ] Test 3: create a plan, assign a serving-variation meal to one slot and the corresponding base cook on an earlier slot
+- [ ] Test 4: generate the shopping list and verify the line totals and the serving-variation-no-double-count rule
 - [ ] Test 5: check off items; reload; check state persists
 - [ ] All five tests pass in CI within ~5 minutes total
 
@@ -2240,7 +2238,7 @@ There is no scope-threading machinery; the constant is the discipline. The risk 
 
 ### 4. `withTransaction` helper as the only sanctioned multi-write boundary
 
-**Threads through:** FEAT-09 (helper introduced), FEAT-20 (recipe save), FEAT-23 (pair symmetry), FEAT-27 (slot generation), FEAT-28 (range edits), FEAT-29 (duplication), FEAT-35 (account deletion), FEAT-38 (lazy-create + reset).
+**Threads through:** FEAT-09 (helper introduced), FEAT-20 (recipe save), FEAT-23 (serving variation), FEAT-27 (slot generation), FEAT-28 (range edits), FEAT-29 (duplication), FEAT-35 (account deletion), FEAT-38 (lazy-create + reset).
 
 The plan calls out the transaction surfaces explicitly. Making `withTransaction` the *only* place multi-statement work happens — i.e. no ad-hoc `db.transaction(...)` calls scattered through procedures — concentrates the risk and makes audits trivial. **Test it has a clear stack-trace on failure**, since transaction-rollback errors are notoriously opaque.
 
@@ -2248,7 +2246,7 @@ The plan calls out the transaction surfaces explicitly. Making `withTransaction`
 
 **Threads through:** FEAT-19 (helper introduced), FEAT-23 (extended for `is_base`), FEAT-26 (related-recipes picker), FEAT-31 (recipe-bank), FEAT-32 (base picker).
 
-There are multiple subtly-different "what recipes can I pick right now?" questions: any non-deleted recipe, only bases, only non-deleted-and-not-batch-version-of-deleted-base, etc. **Build it as one parameterised query helper in FEAT-19 rather than re-derived per feature.** When the rules change (e.g. "also exclude recipes the household has explicitly archived"), one site changes.
+There are multiple subtly-different "what recipes can I pick right now?" questions: any non-deleted recipe, only bases, only non-deleted-and-not-serving-variation-of-deleted-base, etc. **Build it as one parameterised query helper in FEAT-19 rather than re-derived per feature.** When the rules change (e.g. "also exclude recipes the household has explicitly archived"), one site changes.
 
 ### 6. The searchable combobox primitive
 
@@ -2258,7 +2256,7 @@ Five consumers, one mental model: a debounced typeahead over a search query, par
 
 ### 7. Optimistic-update pattern
 
-**Threads through:** FEAT-31 (first usage), FEAT-32 (base cooking), FEAT-33 (pair switch), FEAT-39 (check toggles), FEAT-43 (offline queue).
+**Threads through:** FEAT-31 (first usage), FEAT-32 (base cooking), FEAT-39 (check toggles), FEAT-43 (offline queue).
 
 TanStack Query's `onMutate`/`onError`/`onSettled` pattern is the right tool. Five features touching it means five chances to drift. **Encapsulate the pattern in a small hook (`useOptimisticSlotUpdate`, generalised) in FEAT-31** so the rollback logic lives in one place. The offline queue (FEAT-43) is a strict superset — it adds a persistence layer — so structuring FEAT-31's hook with an injectable mutation function makes FEAT-43 a small extension rather than a rewrite.
 
@@ -2270,7 +2268,7 @@ The plan calls out "Europe/London time, centralised so multi-timezone is a local
 
 ### 9. The recipe DTO and the shopping-list DTO
 
-**Threads through (recipe):** FEAT-19 (defined), FEAT-21 (editor), FEAT-23 (batch fields), FEAT-31 (planner sidebar), FEAT-26 (related), FEAT-36 (aggregation traverses base).
+**Threads through (recipe):** FEAT-19 (defined), FEAT-21 (editor), FEAT-23 (serving-variation fields), FEAT-31 (planner sidebar), FEAT-26 (related), FEAT-36 (aggregation traverses base).
 
 **Threads through (shopping):** FEAT-36 (defined), FEAT-37 (shelf-life adds to it), FEAT-39 (UI consumes), FEAT-43 (offline cache shape mirrors it).
 
@@ -2280,7 +2278,7 @@ Both DTOs are consumed by many features and changed by few. **Define them with e
 
 **Threads through:** FEAT-19 (recipe-level), FEAT-41 (day + plan level with traversal).
 
-The recipe-level computation in FEAT-19 is reused by FEAT-41, but the traversal logic (batch-version meals + base-cook union + dedup) is *new* in FEAT-41. **Keep the recipe-level helper pure and small** so the day/plan logic composes it without surprises. Resist optimising prematurely; the SQL approach (UNION + DISTINCT) is cleaner than client-side joining.
+The recipe-level computation in FEAT-19 is reused by FEAT-41, but the traversal logic (serving-variation meals + base-cook union + dedup) is *new* in FEAT-41. **Keep the recipe-level helper pure and small** so the day/plan logic composes it without surprises. Resist optimising prematurely; the SQL approach (UNION + DISTINCT) is cleaner than client-side joining.
 
 ### 11. Domain error codes via `TRPCError.cause`
 
@@ -2288,11 +2286,12 @@ The recipe-level computation in FEAT-19 is reused by FEAT-41, but the traversal 
 
 The pattern: standard tRPC error code on `code`, domain code on `cause`. The frontend's error link maps both into UI states. **Establish the cause shape (`{ code: string, ...metadata }`) in FEAT-17** and add to the error link a single mapper to a typed UI error.
 
-### 12. Pair-symmetry transaction pattern
+### 12. Pair-symmetry transaction pattern — **REMOVED (DEC-87)**
 
-**Threads through:** FEAT-23 (paired_recipe_id), and (in spirit) FEAT-26 (related_recipes — though DB-enforced).
-
-`paired_recipe_id` symmetry is one of the trickier writes in the project (three rows touched, one of them potentially needing a clear). **Cover with explicit tests** for the four state transitions (new pair, repair, clear, third-party transition) before relying on it. If a future schema gains another symmetric relation, this is the template.
+> Removed with `paired_recipe_id` (DEC-87). There is no longer a symmetric
+> self-relation on `recipes`. The only symmetric recipe relation left is
+> `related_recipes`, which is DB-enforced (DEC-27), not application-maintained.
+> The number is kept so later cross-cutting concerns don't renumber.
 
 ### 13. Lazy-create-on-read pattern for `shopping_list_items`
 
@@ -2302,9 +2301,9 @@ The plan's reasoning ("most plans never reach the shopping stage") makes lazy cr
 
 ### 14. Slot card rendering shape
 
-**Threads through:** FEAT-31 (recipe-only slot card), FEAT-32 (base-cook two-line card), FEAT-33 (pair-switch button on card).
+**Threads through:** FEAT-31 (recipe-only slot card), FEAT-32 (base-cook two-line card). _(FEAT-33's pair-switch button was removed — DEC-87.)_
 
-Three features touch the same component. **Build the slot card in FEAT-31 with explicit slots for future content** (e.g. a `secondaryLine` and an `actionButtons` array) so FEAT-32 and FEAT-33 add to it without rewriting.
+These features touch the same component. **Build the slot card in FEAT-31 with explicit slots for future content** (e.g. a `secondaryLine` and an `actionButtons` array) so FEAT-32 adds to it without rewriting.
 
 ### 15. Account deletion needs all the tables
 

@@ -32,8 +32,8 @@ import {
   replaceRecipeIngredientsResultSchema,
   replaceRecipeMethodInputSchema,
   replaceRecipeMethodResultSchema,
-  setRecipeBatchFieldsInputSchema,
-  setRecipeBatchFieldsResultSchema,
+  setRecipeServingVariationFieldsInputSchema,
+  setRecipeServingVariationFieldsResultSchema,
   setRecipeDeletionInputSchema,
   setRecipeDeletionResultSchema,
   unrateRecipeInputSchema,
@@ -56,7 +56,7 @@ import {
   type RemoveRelatedRecipeResult,
   type ReplaceRecipeIngredientsResult,
   type ReplaceRecipeMethodResult,
-  type SetRecipeBatchFieldsResult,
+  type SetRecipeServingVariationFieldsResult,
   type SetRecipeDeletionResult,
   type UnrateRecipeResult,
   type UpdateRecipeHeaderResult,
@@ -199,7 +199,6 @@ export const recipesRouter = router({
           totalTimeMins: recipes.totalTimeMins,
           isBase: recipes.isBase,
           baseRecipeId: recipes.baseRecipeId,
-          pairedRecipeId: recipes.pairedRecipeId,
           isDeleted: recipes.isDeleted,
           plantPointsCount: recipePlantPointsExpr(sql`recipes.id`),
           averageRating: sql<string | null>`(
@@ -236,7 +235,6 @@ export const recipesRouter = router({
           totalTimeMins: row.totalTimeMins,
           isBase: row.isBase,
           baseRecipeId: row.baseRecipeId,
-          pairedRecipeId: row.pairedRecipeId,
           isDeleted: row.isDeleted,
           plantPointsCount: row.plantPointsCount,
           averageRating:
@@ -256,11 +254,10 @@ export const recipesRouter = router({
 
       // Four parallel queries — header+source, ingredients (joined),
       // ordered method, ratings aggregate including the caller's own row.
-      // Soft-deleted recipes are returned (DEC-21). The base + pair partners
-      // are joined via aliased self-joins so the editor can render the
-      // pair/base affordance + a "(deleted)" hint without a second request.
+      // Soft-deleted recipes are returned (DEC-21). The base recipe is joined
+      // via an aliased self-join so the editor can render the base affordance
+      // + a "(deleted)" hint without a second request.
       const baseRecipe = alias(recipes, 'base_recipe');
-      const pairedRecipe = alias(recipes, 'paired_recipe');
       const [headerRows, ingredientRows, methodRows, ratingRow] =
         await Promise.all([
           ctx.db
@@ -288,18 +285,14 @@ export const recipesRouter = router({
               addedByUserId: recipes.addedByUserId,
               isBase: recipes.isBase,
               baseRecipeId: recipes.baseRecipeId,
-              pairedRecipeId: recipes.pairedRecipeId,
               baseRecipeName: baseRecipe.name,
               baseRecipeIsDeleted: baseRecipe.isDeleted,
-              pairedRecipeName: pairedRecipe.name,
-              pairedRecipeIsDeleted: pairedRecipe.isDeleted,
               isDeleted: recipes.isDeleted,
               plantPointsCount: recipePlantPointsExpr(sql`recipes.id`),
             })
             .from(recipes)
             .leftJoin(recipeSources, eq(recipes.sourceId, recipeSources.id))
             .leftJoin(baseRecipe, eq(recipes.baseRecipeId, baseRecipe.id))
-            .leftJoin(pairedRecipe, eq(recipes.pairedRecipeId, pairedRecipe.id))
             .where(
               and(
                 eq(recipes.id, recipeId),
@@ -352,11 +345,8 @@ export const recipesRouter = router({
         addedByUserId: header.addedByUserId,
         isBase: header.isBase,
         baseRecipeId: header.baseRecipeId,
-        pairedRecipeId: header.pairedRecipeId,
         baseRecipeName: header.baseRecipeName,
         baseRecipeIsDeleted: header.baseRecipeIsDeleted,
-        pairedRecipeName: header.pairedRecipeName,
-        pairedRecipeIsDeleted: header.pairedRecipeIsDeleted,
         isDeleted: header.isDeleted,
         plantPointsCount: header.plantPointsCount,
         ingredients: ingredientRows,
@@ -591,154 +581,67 @@ export const recipesRouter = router({
       return setRecipeDeletion(ctx.db, input.id, false);
     }),
 
-  // Owns the batch-cooking write surface (DEC-23): the XOR between `isBase`
-  // and `baseRecipeId`, and the application-side `pairedRecipeId` symmetry
-  // transaction (DEC-26). `updateHeader` deliberately refuses these fields.
-  setBatchFields: protectedProcedure
-    .input(setRecipeBatchFieldsInputSchema)
-    .output(setRecipeBatchFieldsResultSchema)
-    .mutation(async ({ ctx, input }): Promise<SetRecipeBatchFieldsResult> => {
-      const { id, isBase, baseRecipeId, pairedRecipeId } = input;
+  // Owns the serving-variation write surface (DEC-23): the XOR between `isBase`
+  // and `baseRecipeId`. `updateHeader` deliberately refuses these fields.
+  setServingVariationFields: protectedProcedure
+    .input(setRecipeServingVariationFieldsInputSchema)
+    .output(setRecipeServingVariationFieldsResultSchema)
+    .mutation(
+      async ({
+        ctx,
+        input,
+      }): Promise<SetRecipeServingVariationFieldsResult> => {
+        const { id, isBase, baseRecipeId } = input;
 
-      const selfRows = await ctx.db
-        .select({
-          id: recipes.id,
-          isBase: recipes.isBase,
-          baseRecipeId: recipes.baseRecipeId,
-          pairedRecipeId: recipes.pairedRecipeId,
-        })
-        .from(recipes)
-        .where(
-          and(
-            eq(recipes.id, id),
-            eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-          ),
-        )
-        .limit(1);
-      const self = selfRows[0];
-      if (!self) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Recipe not found',
-        });
-      }
+        const selfRows = await ctx.db
+          .select({
+            id: recipes.id,
+            isBase: recipes.isBase,
+            baseRecipeId: recipes.baseRecipeId,
+          })
+          .from(recipes)
+          .where(
+            and(
+              eq(recipes.id, id),
+              eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .limit(1);
+        const self = selfRows[0];
+        if (!self) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Recipe not found',
+          });
+        }
 
-      const nextIsBase = isBase ?? self.isBase;
-      const nextBaseRecipeId =
-        baseRecipeId === undefined ? self.baseRecipeId : baseRecipeId;
-      const nextPairedRecipeId =
-        pairedRecipeId === undefined ? self.pairedRecipeId : pairedRecipeId;
+        const nextIsBase = isBase ?? self.isBase;
+        const nextBaseRecipeId =
+          baseRecipeId === undefined ? self.baseRecipeId : baseRecipeId;
 
-      // Procedure-level XOR pre-check — the DB CHECK is the backstop, but we
-      // want a typed domain error before Postgres raises a generic violation
-      // so the editor surfaces a clean message.
-      if (nextIsBase && nextBaseRecipeId !== null) {
-        throw domainBadRequest(
-          'RECIPE_BATCH_XOR_VIOLATION',
-          'A recipe cannot be a base and point to another base',
-        );
-      }
+        // Procedure-level XOR pre-check — the DB CHECK is the backstop, but we
+        // want a typed domain error before Postgres raises a generic violation
+        // so the editor surfaces a clean message.
+        if (nextIsBase && nextBaseRecipeId !== null) {
+          throw domainBadRequest(
+            'RECIPE_BASE_XOR_VIOLATION',
+            'A recipe cannot be a base and point to another base',
+          );
+        }
 
-      if (nextPairedRecipeId !== null && nextPairedRecipeId === id) {
-        throw domainBadRequest(
-          'RECIPE_BATCH_PAIR_SELF',
-          'A recipe cannot be paired with itself',
-        );
-      }
-
-      if (
-        baseRecipeId !== undefined &&
-        baseRecipeId !== null &&
-        baseRecipeId !== self.baseRecipeId
-      ) {
-        await assertBaseRecipePickable(ctx.db, baseRecipeId);
-      }
-
-      if (
-        pairedRecipeId !== undefined &&
-        pairedRecipeId !== null &&
-        pairedRecipeId !== self.pairedRecipeId
-      ) {
-        await assertPairRecipeInHousehold(ctx.db, pairedRecipeId);
-      }
-
-      const withTransaction = makeWithTransaction(ctx.db);
-      await withTransaction(async (tx) => {
-        // Pair symmetry: when self.pairedRecipeId changes from A→B to A→C
-        // (or to null), B (and C's old partner, if any) must have their
-        // back-pointers cleared. LWW per row is acceptable per the project's
-        // concurrency model (DEC-36) — no FOR UPDATE.
         if (
-          pairedRecipeId !== undefined &&
-          pairedRecipeId !== self.pairedRecipeId
+          baseRecipeId !== undefined &&
+          baseRecipeId !== null &&
+          baseRecipeId !== self.baseRecipeId
         ) {
-          let oldPartnerOfNew: number | null = null;
-          if (pairedRecipeId !== null) {
-            const partnerRows = await tx
-              .select({ pairedRecipeId: recipes.pairedRecipeId })
-              .from(recipes)
-              .where(
-                and(
-                  eq(recipes.id, pairedRecipeId),
-                  eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-                ),
-              )
-              .limit(1);
-            oldPartnerOfNew = partnerRows[0]?.pairedRecipeId ?? null;
-          }
-
-          // Clear any row currently pointing back at self that is *not* the
-          // recipe we are about to pair with. Catches both the old partner
-          // and any orphaned back-pointer.
-          const idsToClear: number[] = [];
-          if (self.pairedRecipeId !== null && self.pairedRecipeId !== id) {
-            idsToClear.push(self.pairedRecipeId);
-          }
-          if (
-            oldPartnerOfNew !== null &&
-            oldPartnerOfNew !== id &&
-            !idsToClear.includes(oldPartnerOfNew)
-          ) {
-            idsToClear.push(oldPartnerOfNew);
-          }
-          if (pairedRecipeId !== null) {
-            const newIndex = idsToClear.indexOf(pairedRecipeId);
-            if (newIndex >= 0) idsToClear.splice(newIndex, 1);
-          }
-
-          if (idsToClear.length > 0) {
-            await tx
-              .update(recipes)
-              .set({ pairedRecipeId: null })
-              .where(
-                and(
-                  inArray(recipes.id, idsToClear),
-                  eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-                ),
-              );
-          }
-
-          if (pairedRecipeId !== null) {
-            await tx
-              .update(recipes)
-              .set({ pairedRecipeId: id })
-              .where(
-                and(
-                  eq(recipes.id, pairedRecipeId),
-                  eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-                ),
-              );
-          }
+          await assertBaseRecipePickable(ctx.db, baseRecipeId);
         }
 
         const patch: Partial<typeof recipes.$inferInsert> = {};
         if (isBase !== undefined) patch.isBase = isBase;
         if (baseRecipeId !== undefined) patch.baseRecipeId = baseRecipeId;
-        if (pairedRecipeId !== undefined) {
-          patch.pairedRecipeId = pairedRecipeId;
-        }
         if (Object.keys(patch).length > 0) {
-          await tx
+          await ctx.db
             .update(recipes)
             .set(patch)
             .where(
@@ -748,15 +651,14 @@ export const recipesRouter = router({
               ),
             );
         }
-      });
 
-      return {
-        id,
-        isBase: nextIsBase,
-        baseRecipeId: nextBaseRecipeId,
-        pairedRecipeId: nextPairedRecipeId,
-      };
-    }),
+        return {
+          id,
+          isBase: nextIsBase,
+          baseRecipeId: nextBaseRecipeId,
+        };
+      },
+    ),
 
   // Upsert keyed on `(recipe_id, user_id)` per the table's unique index. The
   // household gate is the recipe-side check (DEC-17); `recipe_ratings` itself
@@ -1196,37 +1098,12 @@ async function assertBaseRecipePickable(
     .limit(1);
   const row = rows[0];
   if (!row) {
-    throw domainBadRequest(
-      'RECIPE_BATCH_BASE_NOT_FOUND',
-      'Base recipe not found',
-    );
+    throw domainBadRequest('RECIPE_BASE_NOT_FOUND', 'Base recipe not found');
   }
   if (!row.isBase || row.isDeleted) {
     throw domainBadRequest(
-      'RECIPE_BATCH_BASE_NOT_PICKABLE',
+      'RECIPE_BASE_NOT_PICKABLE',
       'Base recipe is not pickable',
-    );
-  }
-}
-
-async function assertPairRecipeInHousehold(
-  db: Db,
-  pairedRecipeId: number,
-): Promise<void> {
-  const rows = await db
-    .select({ id: recipes.id })
-    .from(recipes)
-    .where(
-      and(
-        eq(recipes.id, pairedRecipeId),
-        eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-      ),
-    )
-    .limit(1);
-  if (rows.length === 0) {
-    throw domainBadRequest(
-      'RECIPE_BATCH_PAIR_NOT_FOUND',
-      'Paired recipe not found',
     );
   }
 }

@@ -11,13 +11,13 @@ import { recipes } from '../db/schema/recipes.ts';
 //
 // Scopes by household; hides soft-deleted by default. `includePickerHidden`
 // (so named because the call site asking for it is offering a *new* picker)
-// hides batch-versions whose base recipe is soft-deleted — past plans keep
+// hides serving variations whose base recipe is soft-deleted — past plans keep
 // rendering those rows via `recipes.get`, but the picker doesn't surface
 // them. `isBase` filters to bases (or non-bases) for the base picker.
 
 export interface PickableRecipesOptions {
   includeDeleted?: boolean;
-  // When true, hide batch-versions whose base recipe is soft-deleted from
+  // When true, hide serving variations whose base recipe is soft-deleted from
   // the result. Set on new pickers; left off for historical reads.
   includePickerHidden?: boolean;
   isBase?: boolean;
@@ -37,7 +37,7 @@ export function pickableRecipesWhere(
   }
 
   if (options.includePickerHidden) {
-    // Hide batch-versions whose base is soft-deleted. The correlated subquery
+    // Hide serving variations whose base is soft-deleted. The correlated subquery
     // reads the recipes table with the table name spelled out so it doesn't
     // collide with the outer reference; keeps the helper composable with any
     // outer FROM / JOIN shape the caller already has.

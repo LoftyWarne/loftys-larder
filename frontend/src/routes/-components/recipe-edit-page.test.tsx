@@ -13,11 +13,11 @@ const {
   updateHeaderMutateAsyncMock,
   replaceIngredientsMutateAsyncMock,
   replaceMethodMutateAsyncMock,
-  setBatchFieldsMutateAsyncMock,
+  setServingVariationFieldsMutateAsyncMock,
   updateHeaderUseMutationMock,
   replaceIngredientsUseMutationMock,
   replaceMethodUseMutationMock,
-  setBatchFieldsUseMutationMock,
+  setServingVariationFieldsUseMutationMock,
   draftGetForRecipeUseQueryMock,
   draftGetNewDraftsUseQueryMock,
   draftUpsertMutateMock,
@@ -37,11 +37,11 @@ const {
   updateHeaderMutateAsyncMock: vi.fn(),
   replaceIngredientsMutateAsyncMock: vi.fn(),
   replaceMethodMutateAsyncMock: vi.fn(),
-  setBatchFieldsMutateAsyncMock: vi.fn(),
+  setServingVariationFieldsMutateAsyncMock: vi.fn(),
   updateHeaderUseMutationMock: vi.fn(),
   replaceIngredientsUseMutationMock: vi.fn(),
   replaceMethodUseMutationMock: vi.fn(),
-  setBatchFieldsUseMutationMock: vi.fn(),
+  setServingVariationFieldsUseMutationMock: vi.fn(),
   draftGetForRecipeUseQueryMock: vi.fn(),
   draftGetNewDraftsUseQueryMock: vi.fn(),
   draftUpsertMutateMock: vi.fn(),
@@ -76,7 +76,9 @@ vi.mock('@/lib/trpc.ts', () => ({
       updateHeader: { useMutation: updateHeaderUseMutationMock },
       replaceIngredients: { useMutation: replaceIngredientsUseMutationMock },
       replaceMethod: { useMutation: replaceMethodUseMutationMock },
-      setBatchFields: { useMutation: setBatchFieldsUseMutationMock },
+      setServingVariationFields: {
+        useMutation: setServingVariationFieldsUseMutationMock,
+      },
     },
     ingredients: {
       references: { useQuery: () => ({ data: { categories: [], units: [] } }) },
@@ -175,11 +177,8 @@ const RECIPE: Recipe = {
   addedByUserId: null,
   isBase: false,
   baseRecipeId: null,
-  pairedRecipeId: null,
   baseRecipeName: null,
   baseRecipeIsDeleted: null,
-  pairedRecipeName: null,
-  pairedRecipeIsDeleted: null,
   isDeleted: false,
   plantPointsCount: 1,
   ingredients: [],
@@ -215,8 +214,8 @@ beforeEach(() => {
   replaceMethodUseMutationMock.mockReturnValue({
     mutateAsync: replaceMethodMutateAsyncMock,
   });
-  setBatchFieldsUseMutationMock.mockReturnValue({
-    mutateAsync: setBatchFieldsMutateAsyncMock,
+  setServingVariationFieldsUseMutationMock.mockReturnValue({
+    mutateAsync: setServingVariationFieldsMutateAsyncMock,
   });
   recipesListFetchMock.mockResolvedValue({ items: [], nextCursor: null });
   recipeGetInvalidateMock.mockResolvedValue(undefined);
@@ -252,7 +251,9 @@ describe('RecipeEditPage', () => {
   });
 
   it('scrolls the hash-targeted section into view once the recipe loads', async () => {
-    useLocationMock.mockReturnValue({ hash: 'recipe-batch-heading' });
+    useLocationMock.mockReturnValue({
+      hash: 'recipe-serving-variation-heading',
+    });
     const scrollIntoView = vi.fn();
     // jsdom does not implement scrollIntoView; stub it on the prototype. The
     // loose alias keeps the unbound-method rule off the captured reference.
@@ -264,7 +265,9 @@ describe('RecipeEditPage', () => {
       await waitFor(() => {
         expect(scrollIntoView).toHaveBeenCalledTimes(1);
       });
-      const target = document.getElementById('recipe-batch-heading');
+      const target = document.getElementById(
+        'recipe-serving-variation-heading',
+      );
       expect(scrollIntoView.mock.instances[0]).toBe(target);
     } finally {
       proto.scrollIntoView = original;
@@ -406,41 +409,40 @@ describe('RecipeEditPage', () => {
     );
   });
 
-  it('saves batch fields and invalidates the get query', async () => {
-    setBatchFieldsMutateAsyncMock.mockResolvedValue({
+  it('saves serving-variation fields and invalidates the get query', async () => {
+    setServingVariationFieldsMutateAsyncMock.mockResolvedValue({
       id: 7,
       isBase: true,
       baseRecipeId: null,
-      pairedRecipeId: null,
     });
     const user = userEvent.setup();
     render(<RecipeEditPage />);
 
     await user.click(screen.getByLabelText(/this is a base recipe/i));
-    await user.click(screen.getByRole('button', { name: 'Save batch fields' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Save serving variation' }),
+    );
 
     await waitFor(() => {
-      expect(setBatchFieldsMutateAsyncMock).toHaveBeenCalledTimes(1);
+      expect(setServingVariationFieldsMutateAsyncMock).toHaveBeenCalledTimes(1);
     });
-    expect(setBatchFieldsMutateAsyncMock.mock.calls[0]?.[0]).toEqual({
-      id: 7,
-      isBase: true,
-    });
+    expect(setServingVariationFieldsMutateAsyncMock.mock.calls[0]?.[0]).toEqual(
+      {
+        id: 7,
+        isBase: true,
+      },
+    );
     expect(recipeGetInvalidateMock).toHaveBeenCalledWith({ id: 7 });
   });
 
-  it('hides the base and pair pickers once the recipe is marked as a base', async () => {
+  it('hides the base picker once the recipe is marked as a base', async () => {
     const user = userEvent.setup();
     render(<RecipeEditPage />);
 
     expect(screen.getByLabelText('Search base recipes')).toBeInTheDocument();
-    expect(screen.getByLabelText('Search paired recipes')).toBeInTheDocument();
     await user.click(screen.getByLabelText(/this is a base recipe/i));
     expect(
       screen.queryByLabelText('Search base recipes'),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByLabelText('Search paired recipes'),
     ).not.toBeInTheDocument();
   });
 

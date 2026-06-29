@@ -39,13 +39,11 @@ export const recipeSources = pgTable(
   ],
 );
 
-// Recipes — household-scoped, soft-deleted (DEC-21), with two-level batch
-// model (DEC-23): a recipe is either a base (`is_base = true`) OR a
-// batch-version pointing at one base (`base_recipe_id`), enforced by the
-// XOR CHECK. `paired_recipe_id` links full↔batch siblings; symmetry is
-// maintained by the application (FEAT-23), not the DB. Eight per-serving
-// macros (deviates from `docs/plan.md` line 217's "six" — see session-notes
-// 2026-05-21).
+// Recipes — household-scoped, soft-deleted (DEC-21), with a three-way model
+// (DEC-23): a recipe is either a base (`is_base = true`), a serving variation
+// pointing at one base (`base_recipe_id`), or standalone (neither), enforced
+// by the XOR CHECK. Eight per-serving macros (deviates from `docs/plan.md`
+// line 217's "six" — see session-notes 2026-05-21).
 //
 // Self-referential FKs use the documented `(): AnyPgColumn => recipes.id`
 // pattern; the lazy arrow lets Drizzle resolve the back-reference at table
@@ -92,25 +90,18 @@ export const recipes = pgTable(
     baseRecipeId: integer().references((): AnyPgColumn => recipes.id, {
       onDelete: 'restrict',
     }),
-    pairedRecipeId: integer().references((): AnyPgColumn => recipes.id, {
-      onDelete: 'set null',
-    }),
   },
   (table) => [
     check(
       'recipes_base_not_self',
       sql`${table.baseRecipeId} IS NULL OR ${table.baseRecipeId} != ${table.id}`,
     ),
-    // A recipe is either a base or a batch-version, never both. Allowed:
+    // A recipe is either a base or a serving variation, never both. Allowed:
     // (is_base=true, base_recipe_id=NULL), (is_base=false, base_recipe_id=NULL),
     // (is_base=false, base_recipe_id=<id>). Rejected: (is_base=true, base_recipe_id=<id>).
     check(
-      'recipes_base_xor_batch',
+      'recipes_base_xor_variation',
       sql`NOT (${table.isBase} AND ${table.baseRecipeId} IS NOT NULL)`,
-    ),
-    check(
-      'recipes_paired_not_self',
-      sql`${table.pairedRecipeId} IS NULL OR ${table.pairedRecipeId} != ${table.id}`,
     ),
     index('recipes_household_id_idx').on(table.householdId),
     index('recipes_name_trgm_idx').using(

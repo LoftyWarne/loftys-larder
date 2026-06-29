@@ -1,17 +1,14 @@
 import type {
   HouseholdMember,
   PlanSlot,
-  PlanSlotCookedBase,
-  PlanSlotPairedRecipe,
+  PlanSlotItem,
   RecipeListItem,
   SlotType,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { SLOT_COMMENT_MAX_LENGTH } from '@loftys-larder/shared';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
-import { BatchWarning } from '@/components/planner/batch-warning.tsx';
-import { PairSwitchButton } from '@/components/planner/pair-switch-button.tsx';
 import {
   SearchableCombobox,
   type SearchableComboboxOption,
@@ -31,7 +28,7 @@ import { trpc } from '@/lib/trpc.ts';
 import { cn } from '@/lib/utils.ts';
 
 const SLOT_TYPE_OPTIONS: { value: SlotType; label: string }[] = [
-  { value: 'recipe', label: 'Recipe' },
+  { value: 'recipe', label: 'Cooking in' },
   { value: 'eat_out', label: 'Eat out' },
   { value: 'takeaway', label: 'Takeaway' },
   { value: 'leftovers', label: 'Leftovers' },
@@ -42,22 +39,23 @@ interface RecipeOption extends SearchableComboboxOption {
   recipe: RecipeListItem;
 }
 
-// `baseRecipe` carries only what the picker needs (id + name) — the editor
-// never persists a full RecipeListItem for the cooked base, only the id +
-// servings via UpdateSlotInput.
-interface EditorBaseRecipe {
-  id: number;
+// One eaten dish being edited. Carries the recipe fields the card + save need;
+// `servings` is a string so the input round-trips what the user types.
+interface EditorEatItem {
+  recipeId: number;
   name: string;
+  imageUrl: string | null;
+  isBase: boolean;
+  baseRecipeId: number | null;
+  isDeleted: boolean;
+  servings: string;
 }
 
 interface EditorState {
   slotType: SlotType;
-  recipe: RecipeListItem | null;
-  numberOfServings: string;
   chefUserId: string | null;
-  baseRecipe: EditorBaseRecipe | null;
-  baseServings: string;
   comment: string;
+  eatItems: EditorEatItem[];
 }
 
 export interface SlotEditorSheetProps {
@@ -65,14 +63,10 @@ export interface SlotEditorSheetProps {
   slot: PlanSlot | null;
   members: readonly HouseholdMember[];
   isSaving: boolean;
-  hasBaseSupply: boolean;
   onClose: () => void;
   onSave: (
     input: UpdateSlotInput,
-    options?: {
-      optimisticRecipe?: RecipeListItem;
-      optimisticPairedRecipe?: PlanSlotPairedRecipe | null;
-    },
+    options?: { optimisticItems?: PlanSlotItem[] },
   ) => void;
 }
 
@@ -81,7 +75,6 @@ export function SlotEditorSheet({
   slot,
   members,
   isSaving,
-  hasBaseSupply,
   onClose,
   onSave,
 }: SlotEditorSheetProps): React.ReactElement | null {
@@ -95,185 +88,52 @@ export function SlotEditorSheet({
     }
     setState({
       slotType: slot.slotType,
-      // The bank's RecipeListItem isn't loaded here; the slot only carries the
-      // minimal `PlanSlotRecipe`. Reuse via the combobox: when the user picks
-      // a different recipe the picker hands us the full RecipeListItem.
-      recipe: null,
-      numberOfServings:
-        slot.numberOfServings === null ? '' : String(slot.numberOfServings),
       chefUserId: slot.chefUserId,
-      baseRecipe: cookedBaseToEditor(slot.cooksBaseRecipe),
-      baseServings:
-        slot.cooksBaseServings === null ? '' : String(slot.cooksBaseServings),
       comment: slot.comment ?? '',
+      eatItems: slot.items
+        .filter((item) => item.kind === 'eat')
+        .map((item) => ({
+          recipeId: item.recipeId,
+          name: item.recipeName,
+          imageUrl: item.recipeImageUrl,
+          isBase: item.isBase,
+          baseRecipeId: item.baseRecipeId,
+          isDeleted: item.isDeleted,
+          servings: String(item.servings),
+        })),
     });
   }, [slot]);
 
   const utils = trpc.useUtils();
-
-  // The meal-recipe header that informs the suggestion: prefer the freshly
-  // picked recipe (full RecipeListItem in editor state) so a brand-new
-  // batch-version pick can suggest its base on the same render; fall back to
-  // the slot's current recipe if the user hasn't changed it.
-  const mealRecipe = state?.recipe ?? null;
-  const slotRecipe = slot?.recipe ?? null;
-  const suggestedBaseRecipeId =
-    mealRecipe?.baseRecipeId ??
-    (slotRecipe && state?.recipe === null ? slotRecipe.baseRecipeId : null);
-
-  // Only fetch the suggested base when the user has space to act on it.
-  const showSuggestion =
-    state !== null &&
-    state.slotType === 'recipe' &&
-    state.baseRecipe === null &&
-    suggestedBaseRecipeId !== null;
-
-  const suggestionQuery = trpc.recipes.get.useQuery(
-    suggestedBaseRecipeId === null ? { id: 0 } : { id: suggestedBaseRecipeId },
-    { enabled: showSuggestion },
-  );
-
-  const mealIsBatchVersion =
-    state !== null && isBatchVersion(mealRecipe, slotRecipe, state.recipe);
-
-  const showBatchWarning =
-    state !== null &&
-    state.slotType === 'recipe' &&
-    mealIsBatchVersion &&
-    state.baseRecipe === null &&
-    !hasBaseSupply;
-
-  // "Cooking a base for batch use?" only makes sense when the eating recipe is
-  // a batch-version of a base. A recipe with no base defined has nothing to
-  // batch-cook, so hide the section unconditionally.
-  const showCookedBaseSection =
-    state !== null && state.slotType === 'recipe' && mealIsBatchVersion;
-
-  // Pair-switch destination — the slot's pairedRecipe sub-object joined by the
-  // server. Surfaces only when the saved recipe has a pair AND the sibling is
-  // not soft-deleted. If the user freshly picked a different recipe via the
-  // combobox (state.recipe set), its sibling hasn't been loaded yet — the
-  // affordance waits for save → re-select.
-  const pairedForRender =
-    state !== null &&
-    state.slotType === 'recipe' &&
-    state.recipe === null &&
-    slot?.recipe?.pairedRecipeId != null &&
-    slot.pairedRecipe !== null &&
-    !slot.pairedRecipe.isDeleted
-      ? slot.pairedRecipe
-      : null;
-  const currentIsBatchVersion =
-    pairedForRender !== null && (slot?.recipe?.baseRecipeId ?? null) !== null;
-
-  const baseSearchQuery = useMemo(() => {
-    return async (query: string): Promise<readonly RecipeOption[]> => {
-      const result = await utils.recipes.list.fetch({
-        search: query || undefined,
-        isBase: true,
-        includePickerHidden: true,
-        limit: 20,
-      });
-      return result.items.map((recipe) => ({
-        id: recipe.id,
-        label: recipe.name,
-        recipe,
-      }));
-    };
-  }, [utils]);
 
   if (!slot || !state) return null;
 
   function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (!slot || !state) return;
-    const input = buildInputForSave(slot, state);
-    if (!input) return;
-    onSave(input, { optimisticRecipe: state.recipe ?? undefined });
+    const built = buildInputForSave(slot, state);
+    if (!built) return;
+    onSave(built.input, { optimisticItems: built.optimisticItems });
   }
 
   function handleClear(): void {
     if (!slot) return;
-    onSave({
-      slotId: slot.id,
-      slotType: 'empty',
-      recipeId: null,
-      numberOfServings: null,
-      chefUserId: null,
-      cooksBaseRecipeId: null,
-      cooksBaseServings: null,
-      comment: null,
-    });
-  }
-
-  function handlePairSwitch(): void {
-    if (!slot) return;
-    const paired = slot.pairedRecipe;
-    const current = state?.recipe ?? slot.recipe;
-    if (!paired || paired.isDeleted || !current) return;
-    // The destination of the switch is `paired`; its sibling is the recipe
-    // we're leaving (`current`). That's the optimistic-paired side until the
-    // server re-selects.
-    const optimisticRecipe: RecipeListItem = {
-      id: paired.id,
-      name: paired.name,
-      imageUrl: paired.imageUrl,
-      baseServings: paired.baseServings,
-      activeTimeMins: null,
-      totalTimeMins: null,
-      isBase: paired.isBase,
-      baseRecipeId: paired.baseRecipeId,
-      pairedRecipeId: current.id,
-      isDeleted: paired.isDeleted,
-      plantPointsCount: 0,
-      averageRating: null,
-      ratingCount: 0,
-    };
-    const optimisticPairedRecipe: PlanSlotPairedRecipe = {
-      id: current.id,
-      name: current.name,
-      imageUrl: current.imageUrl,
-      isBase: current.isBase,
-      baseRecipeId: current.baseRecipeId,
-      // The current slot's PlanSlotRecipe doesn't carry baseServings; we don't
-      // need it for the surviving (former) pair side because the next switch
-      // would re-read the freshly-settled row. Default 1 keeps the type whole.
-      baseServings: 1,
-      isDeleted: current.isDeleted,
-    };
-    const trimmedComment = state ? state.comment.trim() : (slot.comment ?? '');
+    // Clears the eating side only — the slot's cook-ahead items (edited in the
+    // Base modal) are preserved, so a base-only "prep" slot survives.
+    const preserved = preservedCookAheadInput(slot);
     onSave(
       {
         slotId: slot.id,
-        slotType: 'recipe',
-        recipeId: paired.id,
-        numberOfServings: paired.baseServings,
-        chefUserId: state?.chefUserId ?? slot.chefUserId,
-        // Clear base-cook fields on pair switch — the suggestion hint
-        // re-appears for the new recipe and the user picks fresh.
-        cooksBaseRecipeId: null,
-        cooksBaseServings: null,
-        comment: trimmedComment === '' ? null : trimmedComment,
+        slotType: 'empty',
+        chefUserId: null,
+        comment: null,
+        items: preserved.input,
       },
-      { optimisticRecipe, optimisticPairedRecipe },
+      { optimisticItems: preserved.optimistic },
     );
   }
 
-  function handleApplySuggestion(): void {
-    const suggested = suggestionQuery.data;
-    if (!suggested) return;
-    setState((prev) => {
-      if (!prev) return prev;
-      const next: EditorState = {
-        ...prev,
-        baseRecipe: { id: suggested.id, name: suggested.name },
-      };
-      if (prev.baseServings === '') {
-        next.baseServings = String(suggested.baseServings);
-      }
-      return next;
-    });
-  }
+  const showDishes = state.slotType === 'recipe';
 
   return (
     <Dialog
@@ -330,166 +190,110 @@ export function SlotEditorSheet({
             </div>
           </fieldset>
 
-          {state.slotType === 'recipe' && (
-            <>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium">Recipe</span>
-                <SearchableCombobox<RecipeOption>
-                  value={
-                    state.recipe
-                      ? {
-                          id: state.recipe.id,
-                          label: state.recipe.name,
-                          recipe: state.recipe,
-                        }
-                      : slot.recipe
-                        ? {
-                            id: slot.recipe.id,
-                            label: slot.recipe.name,
-                            recipe: minimalRecipeListItem(
-                              slot.recipe.id,
-                              slot.recipe.name,
-                              slot.recipe.baseRecipeId,
-                            ),
-                          }
-                        : null
-                  }
-                  onChange={(option) => {
-                    setState((prev) => {
-                      if (!prev) return prev;
-                      const recipe = option?.recipe ?? null;
-                      const next = { ...prev, recipe };
-                      if (recipe && prev.numberOfServings === '') {
-                        next.numberOfServings = String(recipe.baseServings);
-                      }
-                      return next;
-                    });
-                  }}
-                  searchQuery={async (query) => {
-                    const result = await utils.recipes.list.fetch({
-                      search: query || undefined,
-                      includePickerHidden: true,
-                      limit: 20,
-                    });
-                    return result.items.map((recipe) => ({
-                      id: recipe.id,
-                      label: recipe.name,
-                      recipe,
-                    }));
-                  }}
-                  ariaLabel="Search recipe"
-                  placeholder="Search recipe"
-                />
-              </label>
-
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium">Servings</span>
-                <Input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  value={state.numberOfServings}
-                  onChange={(event) => {
-                    setState((prev) =>
-                      prev
-                        ? { ...prev, numberOfServings: event.target.value }
-                        : prev,
-                    );
-                  }}
-                  required
-                />
-              </label>
-
-              {pairedForRender && (
-                <PairSwitchButton
-                  currentIsBatchVersion={currentIsBatchVersion}
-                  pairedRecipeName={pairedForRender.name}
-                  disabled={isSaving}
-                  onClick={handlePairSwitch}
-                />
-              )}
-
-              {showCookedBaseSection && (
-                <fieldset className="flex flex-col gap-2 rounded-md border border-input bg-muted/30 p-2">
-                  <legend className="text-sm font-medium">
-                    Cooking a base for batch use?
-                  </legend>
-                  <SearchableCombobox<RecipeOption>
-                    value={
-                      state.baseRecipe
-                        ? {
-                            id: state.baseRecipe.id,
-                            label: state.baseRecipe.name,
-                            recipe: minimalRecipeListItem(
-                              state.baseRecipe.id,
-                              state.baseRecipe.name,
-                              null,
-                            ),
-                          }
-                        : null
-                    }
-                    onChange={(option) => {
-                      setState((prev) => {
-                        if (!prev) return prev;
-                        if (!option) {
-                          return {
-                            ...prev,
-                            baseRecipe: null,
-                            baseServings: '',
-                          };
-                        }
-                        const next: EditorState = {
-                          ...prev,
-                          baseRecipe: {
-                            id: option.recipe.id,
-                            name: option.recipe.name,
-                          },
-                        };
-                        if (prev.baseServings === '') {
-                          next.baseServings = String(
-                            option.recipe.baseServings,
-                          );
-                        }
-                        return next;
-                      });
+          {showDishes && (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-sm font-medium">Dishes</legend>
+              {state.eatItems.map((item, index) => (
+                <div
+                  key={`${String(item.recipeId)}:${String(index)}`}
+                  className="flex items-end gap-2"
+                  data-testid="eat-item-row"
+                >
+                  <span className="flex-1 text-sm">
+                    {item.name}
+                    {item.isDeleted && (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        (deleted)
+                      </span>
+                    )}
+                  </span>
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="font-medium">Servings</span>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={item.servings}
+                      aria-label={`Servings for ${item.name}`}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setState((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                eatItems: prev.eatItems.map((it, i) =>
+                                  i === index ? { ...it, servings: value } : it,
+                                ),
+                              }
+                            : prev,
+                        );
+                      }}
+                      required
+                      className="w-20"
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Remove ${item.name}`}
+                    onClick={() => {
+                      setState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              eatItems: prev.eatItems.filter(
+                                (_, i) => i !== index,
+                              ),
+                            }
+                          : prev,
+                      );
                     }}
-                    searchQuery={baseSearchQuery}
-                    ariaLabel="Search base recipe"
-                    placeholder="Search base recipe"
-                  />
-                  {showSuggestion && suggestionQuery.data && (
-                    <button
-                      type="button"
-                      onClick={handleApplySuggestion}
-                      data-testid="base-suggestion-hint"
-                      className="self-start rounded-md border border-dashed border-primary px-2 py-1 text-xs text-primary hover:bg-accent"
-                    >
-                      Suggested: {suggestionQuery.data.name} — use this?
-                    </button>
-                  )}
-                  {state.baseRecipe !== null && (
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="font-medium">Base servings</span>
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        value={state.baseServings}
-                        onChange={(event) => {
-                          setState((prev) =>
-                            prev
-                              ? { ...prev, baseServings: event.target.value }
-                              : prev,
-                          );
-                        }}
-                        required
-                      />
-                    </label>
-                  )}
-                  {showBatchWarning && <BatchWarning />}
-                </fieldset>
-              )}
-            </>
+                  >
+                    ×
+                  </Button>
+                </div>
+              ))}
+              <SearchableCombobox<RecipeOption>
+                value={null}
+                onChange={(option) => {
+                  if (!option) return;
+                  setState((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          eatItems: [
+                            ...prev.eatItems,
+                            {
+                              recipeId: option.recipe.id,
+                              name: option.recipe.name,
+                              imageUrl: option.recipe.imageUrl,
+                              isBase: option.recipe.isBase,
+                              baseRecipeId: option.recipe.baseRecipeId,
+                              isDeleted: option.recipe.isDeleted,
+                              servings: String(option.recipe.baseServings),
+                            },
+                          ],
+                        }
+                      : prev,
+                  );
+                }}
+                searchQuery={async (query) => {
+                  const result = await utils.recipes.list.fetch({
+                    search: query || undefined,
+                    includePickerHidden: true,
+                    limit: 20,
+                  });
+                  return result.items.map((recipe) => ({
+                    id: recipe.id,
+                    label: recipe.name,
+                    recipe,
+                  }));
+                }}
+                ariaLabel="Add a dish"
+                placeholder="Add a dish"
+              />
+            </fieldset>
           )}
 
           <label className="flex flex-col gap-1 text-sm">
@@ -559,92 +363,92 @@ export function SlotEditorSheet({
   );
 }
 
+interface BuiltSave {
+  input: UpdateSlotInput;
+  optimisticItems: PlanSlotItem[];
+}
+
 function buildInputForSave(
   slot: PlanSlot,
   state: EditorState,
-): UpdateSlotInput | null {
+): BuiltSave | null {
   const trimmedComment = state.comment.trim();
   const commentValue = trimmedComment === '' ? null : trimmedComment;
-  if (state.slotType === 'recipe') {
-    const recipeId = state.recipe?.id ?? slot.recipeId;
-    const servings = Number.parseInt(state.numberOfServings, 10);
-    if (recipeId === null || !Number.isInteger(servings) || servings <= 0) {
-      return null;
-    }
-    let cooksBaseRecipeId: number | null = null;
-    let cooksBaseServings: number | null = null;
-    if (state.baseRecipe !== null) {
-      const baseServings = Number.parseInt(state.baseServings, 10);
-      if (!Number.isInteger(baseServings) || baseServings <= 0) {
-        return null;
-      }
-      cooksBaseRecipeId = state.baseRecipe.id;
-      cooksBaseServings = baseServings;
-    }
-    return {
-      slotId: slot.id,
-      slotType: 'recipe',
-      recipeId,
-      numberOfServings: servings,
-      chefUserId: state.chefUserId,
-      cooksBaseRecipeId,
-      cooksBaseServings,
-      comment: commentValue,
-    };
+
+  // The meal editor owns the `eat` items; the slot's `cook_ahead` items are
+  // edited in the Base modal and preserved verbatim here.
+  const cookAhead = slot.items.filter((item) => item.kind === 'cook_ahead');
+
+  const eatItems = state.slotType === 'recipe' ? state.eatItems : [];
+  const parsedEat: { item: EditorEatItem; servings: number }[] = [];
+  for (const item of eatItems) {
+    const servings = Number.parseInt(item.servings, 10);
+    if (!Number.isInteger(servings) || servings <= 0) return null;
+    parsedEat.push({ item, servings });
   }
-  return {
+
+  const input: UpdateSlotInput = {
     slotId: slot.id,
     slotType: state.slotType,
-    recipeId: null,
-    numberOfServings: null,
     chefUserId: state.chefUserId,
-    cooksBaseRecipeId: null,
-    cooksBaseServings: null,
     comment: commentValue,
+    items: [
+      ...parsedEat.map(({ item, servings }, index) => ({
+        recipeId: item.recipeId,
+        servings,
+        kind: 'eat' as const,
+        sortOrder: index,
+      })),
+      ...cookAhead.map((item, index) => ({
+        recipeId: item.recipeId,
+        servings: item.servings,
+        kind: 'cook_ahead' as const,
+        sortOrder: parsedEat.length + index,
+      })),
+    ],
   };
+
+  const optimisticItems: PlanSlotItem[] = [
+    ...parsedEat.map(({ item, servings }, index) => ({
+      id: index + 1,
+      recipeId: item.recipeId,
+      recipeName: item.name,
+      recipeImageUrl: item.imageUrl,
+      isBase: item.isBase,
+      baseRecipeId: item.baseRecipeId,
+      isDeleted: item.isDeleted,
+      servings,
+      kind: 'eat' as const,
+      sortOrder: index,
+    })),
+    ...cookAhead.map((item, index) => ({
+      ...item,
+      id: parsedEat.length + index + 1,
+      sortOrder: parsedEat.length + index,
+    })),
+  ];
+
+  return { input, optimisticItems };
 }
 
-function cookedBaseToEditor(
-  cooked: PlanSlotCookedBase | null,
-): EditorBaseRecipe | null {
-  if (!cooked) return null;
-  return { id: cooked.id, name: cooked.name };
-}
-
-function isBatchVersion(
-  mealRecipe: RecipeListItem | null,
-  slotRecipe: PlanSlot['recipe'],
-  editorRecipe: RecipeListItem | null,
-): boolean {
-  if (mealRecipe) return mealRecipe.baseRecipeId !== null;
-  if (editorRecipe === null && slotRecipe) {
-    return slotRecipe.baseRecipeId !== null;
-  }
-  return false;
-}
-
-// Cheap stand-in when only the slot's PlanSlotRecipe is known. The combobox
-// only reads `id` + `label`; if the user keeps the existing recipe we pass the
-// existing slot's recipeId at save time, so the placeholder values are never
-// persisted.
-function minimalRecipeListItem(
-  id: number,
-  name: string,
-  baseRecipeId: number | null,
-): RecipeListItem {
+// The slot's cook-ahead items as save input + optimistic display, used when the
+// meal editor clears the eating side but must keep the prep.
+function preservedCookAheadInput(slot: PlanSlot): {
+  input: UpdateSlotInput['items'];
+  optimistic: PlanSlotItem[];
+} {
+  const cookAhead = slot.items.filter((item) => item.kind === 'cook_ahead');
   return {
-    id,
-    name,
-    imageUrl: null,
-    baseServings: 1,
-    activeTimeMins: null,
-    totalTimeMins: null,
-    isBase: false,
-    baseRecipeId,
-    pairedRecipeId: null,
-    isDeleted: false,
-    plantPointsCount: 0,
-    averageRating: null,
-    ratingCount: 0,
+    input: cookAhead.map((item, index) => ({
+      recipeId: item.recipeId,
+      servings: item.servings,
+      kind: 'cook_ahead' as const,
+      sortOrder: index,
+    })),
+    optimistic: cookAhead.map((item, index) => ({
+      ...item,
+      id: index + 1,
+      sortOrder: index,
+    })),
   };
 }

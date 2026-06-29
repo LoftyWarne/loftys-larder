@@ -4,7 +4,110 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-06-25 — Slot editor: hide the base-cook section unless the meal is a batch-version
+## 2026-06-29 — Composable meal occasions: slot items (DEC-89)
+
+**Status:** Shipped on branch `remove-pairing-serving-variation`. Schema + migration (`0011`-equivalent `0010_complex_tempest`) + backend + frontend + tests + docs. New ADR **DEC-89** (supersedes DEC-24, amends DEC-25, generalises DEC-88).
+
+### Change
+
+A slot now owns a list of dishes in **`meal_plan_slot_items`** (`{ slot_id, recipe_id, servings, kind: eat|cook_ahead, sort_order }`). The slot keeps `slot_type` (status) + `chef_user_id` + `comment`; `recipe_id`/`number_of_servings`/`cooks_base_*` were dropped. Sides/desserts = multiple `eat` items; a base cook = a `cook_ahead` item. Migration `0010` folds legacy data into items (eat from `recipe_id`, cook_ahead from `cooks_base_*`) **before** dropping the columns.
+
+### Implementation notes
+
+- `loadSlotItems` (`backend/src/lib/slot-items.ts`) is the shared item loader for `selectSlotById` + `selectPlanSlots`. `slots.update` is full-replace (delete + reinsert items in a txn, validating new recipes only for the deleted-coherence rule); `relocate` swaps items + meta. `duplicate` copies items via a (date, occasion) → new-slot-id map. `updateRange` loss-list is now `itemCount`-based.
+- Shopping + plant-points join `meal_plan_slot_items` (eat → meal contribution, cook_ahead → base); both scale by `item.servings`.
+- Frontend: `slot-editor-sheet` edits an `eat` dish list (preserves cook_ahead); `base-cook-sheet` edits a `cook_ahead` list (preserves eat); both build the full `items[]` and pass `optimisticItems`. The optimistic hooks patch `items[]`.
+- App rule: `slot_type='recipe'` ⟺ ≥1 `eat` item (Zod refine + procedure); `cook_ahead` allowed on any slot type.
+
+### Verification
+
+`pnpm -r typecheck` + `pnpm -r lint` clean. Backend **498** tests pass (migration applied via Testcontainers, incl. items schema/cascade tests). Frontend **348** pass.
+
+### Decisions worth carrying
+
+- Chef + comment stay **slot-level** (not per-item) — revisit if per-dish chef is ever needed.
+- A base **eaten as a meal** consumes the pool (DEC-88's `consumedBase`); only the explicit `cook_ahead` items + the eaten dishes drive the balance.
+- The status↔items coupling is **app-enforced** (no DB CHECK across tables).
+
+---
+
+## 2026-06-28 — Base cook in its own modal + 1:1 consumption balance (DEC-88)
+
+**Status:** Shipped on branch `remove-pairing-serving-variation`. Frontend + shared Zod (none this time) + tests + docs. No schema migration. New ADR DEC-88.
+
+### Change
+
+Two threads:
+
+1. **Modal split (two entry points on the slot card).** The base cook moved out of the slot editor into a dedicated `BaseCookSheet` (`base-cook-sheet.tsx`). The card now has two affordances: tap the body → Meal editor (`SlotEditorSheet`, slimmed to meal-only); tap the base row / "+ base" chip → Base modal. The Base modal auto-offers the meal's **relevant base** (`recipe.isBase ? recipe.id : recipe.baseRecipeId`) so cooking it is one tap whether you eat a variation or the base itself.
+2. **Consumption balance.** Cooked base is a pool meals draw down, **1 eaten serving = 1 base serving**. `deriveBaseBalances` (frontend `serving-variation-supply.ts`) walks the plan in cook-before-eat order (date, Lunch<Dinner), adds `cooksBaseServings`, subtracts `numberOfServings` for any base-derived meal; a slot whose running balance goes negative is a **shortfall** ("short by N" on the card + warning in the modal). `remainingByBase` shows leftover base.
+
+### Implementation notes
+
+- `SlotEditorSheet.buildInputForSave` / `handleClear` now **preserve** the slot's existing `cooksBase*` (the meal editor never edits the base). The card trash still does a full clear (meal + base); the Base modal has its own "Remove base".
+- `SlotCell` restructured: the card container is the droppable + visual frame; the **meal `<button>` is the drag handle** (dnd-kit `attributes`/`listeners` must sit on a real button — putting them on the wrapper `div` makes it `role="button"` and breaks `getByRole`/`cursor-grab` queries). The base affordance is a non-draggable sibling button.
+- Base-only save reuses `slots.update`; `recipeId` is unchanged so `useOptimisticSlotUpdate` preserves the meal recipe (no `optimisticRecipe`).
+
+### Decisions worth carrying
+
+- **Consumption counts both** eating a variation of B **and** eating B itself; covered by `consumedBase(slot)`. So "cook 4, eat 4" on one slot nets to zero (cook processed before consume).
+- **Planning aid only** — consumption does **not** touch the shopping list (you buy for what you *cook*, `cooks_base_servings`) or plant-points.
+- **Deviation from plan:** deleted the unused backend `serving-variation-supply.ts` + its Testcontainers test rather than refactoring a parallel balance impl — it had no server consumer and the balance is frontend-only.
+- Base affordance shows on **every** wired card, including empty ones — an otherwise-empty occasion can be a "prep a base" day (DEC-24 decoupling). (Initially gated off empty cards; opened up on request.)
+
+---
+
+## 2026-06-25 — Cook-a-base available on any slot type (decoupled); fixes false supply warning
+
+**Status:** Shipped on branch `remove-pairing-serving-variation`. Frontend + shared Zod + tests + docs. No schema migration. Reaffirms DEC-24.
+
+### Problem
+
+"Cook the base Tuesday, eat the variation Thursday" warned "no base cook in this plan." Two over-narrow gates blocked recording the Tuesday cook: the slot editor only showed the "Cooking a base for batch use?" section for serving-variation meals (commit `ce737e1`, the note below), and the shared `updateSlotInputSchema` refused `cooksBase*` on non-recipe slots. So you couldn't prep a base on a slot that wasn't itself eating that base's variation.
+
+### Change
+
+Cooking a base is decoupled from what the slot eats **and from slot type** (DEC-24). The base-cook section now renders on every slot type (recipe / eat-out / takeaway / leftovers / empty), and the Zod "recipe slots only" refine is gone (the DB CHECK was already slot-type-independent; shopping aggregation and plant-points already provision `cooks_base` from any slot, and the supply scan never filtered by slot type — so a non-recipe cook already supplies a later variation).
+
+- `slot-editor-sheet.tsx`: `showCookedBaseSection = state !== null`; the base `<fieldset>` moved out of the `slotType==='recipe'` JSX block; `buildInputForSave` resolves `cooksBase*` for every slot type. `mealIsServingVariation` now only drives the warning + the pre-suggestion.
+- `shared/src/schemas/slots.ts`: removed the "Base-cook fields are only allowed on recipe slots" refine.
+
+### Decisions worth carrying
+
+- **Supply stays keyed on the explicit cook-a-base field only** (quantity-aware — it carries the servings the shopping list provisions). A base merely *eaten* as a meal does not auto-supply.
+- **Base prepped before the plan** remains an accepted limitation — the soft warning is the signal.
+- The base section shows on `empty` slots too (a prep-only occasion). Adjustable if that proves noisy.
+
+---
+
+## 2026-06-25 — Remove pairing; recipes are base / serving variation / standalone (DEC-87)
+
+**Status:** Shipped on branch `remove-pairing-serving-variation`. Schema + backend + frontend + tests + docs. New migration `0009`. New ADR **DEC-87** (supersedes DEC-26, amends DEC-23, removes FEAT-33 + cross-cutting concern #12).
+
+### Change
+
+`paired_recipe_id` is gone — column, FK, `recipes_paired_not_self` CHECK, the application-layer symmetry transaction, the recipe-editor pair picker, and the slot "switch to full / switch to batch" toggle (`pair-switch-button.tsx`, deleted). The recipe model is now the three-way classification: **base** (`is_base`), **serving variation** (`base_recipe_id` set), **standalone** (neither), enforced by the renamed `recipes_base_xor_variation` CHECK.
+
+"Batch version" → "serving variation" everywhere (code symbols, files, tests, docs). Renames of note: `batch-supply.ts` → `serving-variation-supply.ts` (both workspaces); `batch-warning.tsx`/`BatchWarning` → `serving-variation-warning.tsx`/`ServingVariationWarning`; `batch-fields.tsx`/`BatchFields` → `serving-variation-fields.tsx`/`ServingVariationFields`; `recipes.setBatchFields` → `recipes.setServingVariationFields`; `deriveBatchSupplyWarnings` → `deriveServingVariationWarnings`; domain error codes `RECIPE_BATCH_*` → `RECIPE_BASE_*`.
+
+### Decisions worth carrying
+
+- **Auto-link to base stays derived (chosen by the user).** When a serving variation is placed, supply is recognised by the existing plan-scan (`deriveServingVariationWarnings` + the `hasBaseSupply` backend predicate) — no stored slot↔slot link, consistent with DEC-22/DEC-24. If no slot in the plan cooks the base, placement is still allowed (it may have been prepped earlier) and the soft warning fires. Warning copy updated to say so.
+- **DB column names were untouched** — none contained "batch" (`base_recipe_id`, `cooks_base_*`, `is_base` all stay). Only the `recipes_base_xor_batch` CHECK was renamed to `recipes_base_xor_variation`, which the migration drops + re-adds.
+- **The `recipes.setServingVariationFields` procedure rename has no PWA-cache impact** — `pwa-config.ts` only names `shopping.getForPlan` (cross-cutting #16). Verified before renaming.
+- Supersedes the prior note below about gating the base-cook section: `mealIsBatchVersion` is now `mealIsServingVariation`; the gating behaviour is unchanged.
+
+### Verification
+
+`pnpm -r typecheck` + `pnpm -r lint` clean. Frontend 338 tests pass; backend 528 tests pass (migration `0009` applied via Testcontainers, including the renamed constraint). e2e has no pairing references.
+
+---
+
+## 2026-06-25 — Slot editor: hide the base-cook section unless the meal is a batch-version — **SUPERSEDED**
+
+> **Superseded the same day** by "Cook-a-base available on any slot type" (above). The
+> gating described here was reverted: cooking a base is decoupled from slot type
+> (DEC-24), so the section now shows on every slot. Retained for history.
 
 **Status:** UX tweak + tests added. Frontend-only. No schema / backend / DTO / dependency change. Refines FEAT-32's slot editor; no new DEC minted.
 

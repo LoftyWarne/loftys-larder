@@ -17,10 +17,10 @@ import { TRPCClientError } from '@trpc/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
-  BatchFields,
-  type BatchFieldsValues,
+  ServingVariationFields,
+  type ServingVariationFieldsValues,
   type RecipePickerOption,
-} from '@/components/recipe-editor/batch-fields.tsx';
+} from '@/components/recipe-editor/serving-variation-fields.tsx';
 import {
   HeaderFields,
   type HeaderFormValues,
@@ -73,7 +73,8 @@ export function RecipeEditPage(): React.ReactElement {
   const updateHeader = trpc.recipes.updateHeader.useMutation();
   const replaceIngredients = trpc.recipes.replaceIngredients.useMutation();
   const replaceMethod = trpc.recipes.replaceMethod.useMutation();
-  const setBatchFields = trpc.recipes.setBatchFields.useMutation();
+  const setServingVariationFields =
+    trpc.recipes.setServingVariationFields.useMutation();
 
   const [headerSavedKey, setHeaderSavedKey] = useState<number | undefined>();
   const [ingredientsSavedKey, setIngredientsSavedKey] = useState<
@@ -81,8 +82,12 @@ export function RecipeEditPage(): React.ReactElement {
   >();
   const [methodSavedKey, setMethodSavedKey] = useState<number | undefined>();
   const [imageSavedKey, setImageSavedKey] = useState<number | undefined>();
-  const [batchSavedKey, setBatchSavedKey] = useState<number | undefined>();
-  const [batchError, setBatchError] = useState<string | null>(null);
+  const [servingVariationSavedKey, setServingVariationSavedKey] = useState<
+    number | undefined
+  >();
+  const [servingVariationError, setServingVariationError] = useState<
+    string | null
+  >(null);
   const [ingredientErrors, setIngredientErrors] = useState<ServerLineError[]>(
     [],
   );
@@ -90,7 +95,7 @@ export function RecipeEditPage(): React.ReactElement {
   const [finishing, setFinishing] = useState(false);
 
   const headerRef = useRef<RecipeSectionHandle>(null);
-  const batchRef = useRef<RecipeSectionHandle>(null);
+  const servingVariationRef = useRef<RecipeSectionHandle>(null);
   const ingredientsRef = useRef<RecipeSectionHandle>(null);
   const methodRef = useRef<RecipeSectionHandle>(null);
 
@@ -179,20 +184,6 @@ export function RecipeEditPage(): React.ReactElement {
       const result = await utils.recipes.list.fetch({
         search: trimmed || undefined,
         isBase: true,
-        includePickerHidden: true,
-      });
-      return result.items
-        .filter((row) => row.id !== recipeId)
-        .map((row) => ({ id: row.id, label: row.name }));
-    },
-    [utils.recipes.list, recipeId],
-  );
-
-  const searchPairs = useCallback(
-    async (query: string): Promise<readonly RecipePickerOption[]> => {
-      const trimmed = query.trim();
-      const result = await utils.recipes.list.fetch({
-        search: trimmed || undefined,
         includePickerHidden: true,
       });
       return result.items
@@ -312,17 +303,17 @@ export function RecipeEditPage(): React.ReactElement {
     }
   }
 
-  async function handleBatchSubmit(
-    changes: Partial<BatchFieldsValues>,
+  async function handleServingVariationSubmit(
+    changes: Partial<ServingVariationFieldsValues>,
   ): Promise<boolean> {
-    setBatchError(null);
+    setServingVariationError(null);
     try {
-      await setBatchFields.mutateAsync({ id: recipeId, ...changes });
+      await setServingVariationFields.mutateAsync({ id: recipeId, ...changes });
       await invalidate();
-      setBatchSavedKey(Date.now());
+      setServingVariationSavedKey(Date.now());
       return true;
     } catch (err) {
-      setBatchError(mapBatchError(err));
+      setServingVariationError(mapServingVariationError(err));
       return false;
     }
   }
@@ -335,7 +326,12 @@ export function RecipeEditPage(): React.ReactElement {
   async function handleSaveAndFinish(): Promise<void> {
     setFinishing(true);
     try {
-      const sections = [headerRef, batchRef, ingredientsRef, methodRef];
+      const sections = [
+        headerRef,
+        servingVariationRef,
+        ingredientsRef,
+        methodRef,
+      ];
       for (const section of sections) {
         const saved = (await section.current?.submit()) ?? false;
         if (!saved) return;
@@ -407,12 +403,11 @@ export function RecipeEditPage(): React.ReactElement {
         savedNoticeKey={headerSavedKey}
       />
 
-      <BatchFields
-        ref={batchRef}
+      <ServingVariationFields
+        ref={servingVariationRef}
         initial={{
           isBase: recipe.isBase,
           baseRecipeId: recipe.baseRecipeId,
-          pairedRecipeId: recipe.pairedRecipeId,
         }}
         baseRecipePartner={
           recipe.baseRecipeId !== null && recipe.baseRecipeName !== null
@@ -423,20 +418,10 @@ export function RecipeEditPage(): React.ReactElement {
               }
             : null
         }
-        pairedRecipePartner={
-          recipe.pairedRecipeId !== null && recipe.pairedRecipeName !== null
-            ? {
-                id: recipe.pairedRecipeId,
-                name: recipe.pairedRecipeName,
-                isDeleted: recipe.pairedRecipeIsDeleted ?? false,
-              }
-            : null
-        }
         searchBases={searchBases}
-        searchPairs={searchPairs}
-        onSubmit={handleBatchSubmit}
-        savedNoticeKey={batchSavedKey}
-        errorMessage={batchError}
+        onSubmit={handleServingVariationSubmit}
+        savedNoticeKey={servingVariationSavedKey}
+        errorMessage={servingVariationError}
       />
 
       <IngredientList
@@ -597,19 +582,15 @@ function isNotFoundError(error: unknown): boolean {
   return data?.code === 'NOT_FOUND';
 }
 
-function mapBatchError(err: unknown): string {
+function mapServingVariationError(err: unknown): string {
   const code = getDomainErrorCode(err);
   switch (code) {
-    case 'RECIPE_BATCH_XOR_VIOLATION':
+    case 'RECIPE_BASE_XOR_VIOLATION':
       return 'A recipe cannot be a base and point to another base at the same time.';
-    case 'RECIPE_BATCH_BASE_NOT_FOUND':
+    case 'RECIPE_BASE_NOT_FOUND':
       return 'The chosen base recipe could not be found.';
-    case 'RECIPE_BATCH_BASE_NOT_PICKABLE':
+    case 'RECIPE_BASE_NOT_PICKABLE':
       return 'The chosen base recipe is no longer available.';
-    case 'RECIPE_BATCH_PAIR_NOT_FOUND':
-      return 'The chosen paired recipe could not be found.';
-    case 'RECIPE_BATCH_PAIR_SELF':
-      return 'A recipe cannot be paired with itself.';
     default:
       return extractMessage(err);
   }

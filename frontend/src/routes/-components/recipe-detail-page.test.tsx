@@ -106,11 +106,8 @@ const FULL_RECIPE: Recipe = {
   addedByUserId: null,
   isBase: false,
   baseRecipeId: null,
-  pairedRecipeId: null,
   baseRecipeName: null,
   baseRecipeIsDeleted: null,
-  pairedRecipeName: null,
-  pairedRecipeIsDeleted: null,
   isDeleted: false,
   plantPointsCount: 1,
   ingredients: [

@@ -1,4 +1,4 @@
-import type { PlanSlot } from '@loftys-larder/shared';
+import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -12,60 +12,77 @@ const BASE_SLOT: PlanSlot = {
   occasionId: 1,
   occasionName: 'Dinner',
   slotType: 'empty',
-  recipeId: null,
-  numberOfServings: null,
   chefUserId: null,
-  cooksBaseRecipeId: null,
-  cooksBaseServings: null,
   comment: null,
-  recipe: null,
-  cooksBaseRecipe: null,
-  pairedRecipe: null,
+  items: [],
+};
+
+function eatItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
+  return {
+    id: 1,
+    recipeId: 10,
+    recipeName: 'Tomato pasta',
+    recipeImageUrl: null,
+    isBase: false,
+    baseRecipeId: null,
+    isDeleted: false,
+    servings: 2,
+    kind: 'eat',
+    sortOrder: 0,
+    ...overrides,
+  };
+}
+
+function cookItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
+  return {
+    id: 2,
+    recipeId: 22,
+    recipeName: 'Curry Base',
+    recipeImageUrl: null,
+    isBase: true,
+    baseRecipeId: null,
+    isDeleted: false,
+    servings: 8,
+    kind: 'cook_ahead',
+    sortOrder: 1,
+    ...overrides,
+  };
+}
+
+const RECIPE_SLOT: PlanSlot = {
+  ...BASE_SLOT,
+  slotType: 'recipe',
+  items: [eatItem()],
 };
 
 describe('SlotCell', () => {
-  it('renders the recipe name and servings for an assigned slot', () => {
+  it('renders each eaten dish with its servings', () => {
     render(
       <SlotCell
         slot={{
           ...BASE_SLOT,
           slotType: 'recipe',
-          recipeId: 10,
-          numberOfServings: 2,
-          recipe: {
-            id: 10,
-            name: 'Tomato pasta',
-            imageUrl: null,
-            isBase: false,
-            baseRecipeId: null,
-            pairedRecipeId: null,
-            isDeleted: false,
-          },
+          items: [
+            eatItem({ id: 1, recipeName: 'Tomato pasta', servings: 2 }),
+            eatItem({ id: 2, recipeId: 11, recipeName: 'Salad', servings: 4 }),
+          ],
         }}
         onClick={() => undefined}
       />,
     );
     expect(screen.getByText('Tomato pasta')).toBeInTheDocument();
-    expect(screen.getByText('2 servings')).toBeInTheDocument();
+    expect(screen.getByText('Salad')).toBeInTheDocument();
+    expect(screen.getByText('×2')).toBeInTheDocument();
+    expect(screen.getByText('×4')).toBeInTheDocument();
   });
 
-  it('renders a "(deleted)" hint when the slot still points at a soft-deleted recipe', () => {
+  it('renders a "(deleted)" hint when a dish recipe was soft-deleted', () => {
     render(
       <SlotCell
         slot={{
           ...BASE_SLOT,
           slotType: 'recipe',
-          recipeId: 10,
-          numberOfServings: 2,
-          recipe: {
-            id: 10,
-            name: 'Old recipe',
-            imageUrl: null,
-            isBase: false,
-            baseRecipeId: null,
-            pairedRecipeId: null,
-            isDeleted: true,
-          },
+          items: [eatItem({ recipeName: 'Old recipe', isDeleted: true })],
         }}
         onClick={() => undefined}
       />,
@@ -102,8 +119,7 @@ describe('SlotCell', () => {
         onClear={onClear}
       />,
     );
-    const clearButton = screen.getByRole('button', { name: /^clear/i });
-    await user.click(clearButton);
+    await user.click(screen.getByRole('button', { name: /^clear/i }));
     expect(onClear).toHaveBeenCalledTimes(1);
     expect(onClick).not.toHaveBeenCalled();
   });
@@ -117,39 +133,59 @@ describe('SlotCell', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders the baseCookLine prop when the parent provides one', () => {
+  it('renders the base affordance and fires onBaseClick (not onClick)', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    const onBaseClick = vi.fn();
     render(
       <SlotCell
-        slot={{
-          ...BASE_SLOT,
-          slotType: 'recipe',
-          recipeId: 10,
-          numberOfServings: 2,
-          cooksBaseRecipeId: 22,
-          cooksBaseServings: 8,
-          recipe: {
-            id: 10,
-            name: 'Curry',
-            imageUrl: null,
-            isBase: false,
-            baseRecipeId: 22,
-            pairedRecipeId: null,
-            isDeleted: false,
-          },
-          cooksBaseRecipe: {
-            id: 22,
-            name: 'Curry Base',
-            isDeleted: false,
-          },
-        }}
-        baseCookLine={
-          <span data-testid="cook-line">Cook base: Curry Base (×8)</span>
-        }
-        onClick={() => undefined}
+        slot={RECIPE_SLOT}
+        onClick={onClick}
+        onBaseClick={onBaseClick}
       />,
     );
-    expect(screen.getByTestId('cook-line')).toHaveTextContent(
-      'Cook base: Curry Base (×8)',
+    await user.click(screen.getByTestId('slot-base-affordance'));
+    expect(onBaseClick).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('shows "+ base" when nothing is cooked yet', () => {
+    render(
+      <SlotCell
+        slot={RECIPE_SLOT}
+        onClick={() => undefined}
+        onBaseClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('slot-base-affordance')).toHaveTextContent(
+      '+ base',
+    );
+  });
+
+  it('shows the cooked base name and a shortfall indicator', () => {
+    render(
+      <SlotCell
+        slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
+        onClick={() => undefined}
+        onBaseClick={vi.fn()}
+        shortBy={2}
+      />,
+    );
+    const affordance = screen.getByTestId('slot-base-affordance');
+    expect(affordance).toHaveTextContent('Curry Base');
+    expect(affordance).toHaveTextContent('short 2');
+  });
+
+  it('shows the base affordance on an empty slot (prep-a-base day)', () => {
+    render(
+      <SlotCell
+        slot={BASE_SLOT}
+        onClick={() => undefined}
+        onBaseClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('slot-base-affordance')).toHaveTextContent(
+      '+ base',
     );
   });
 });

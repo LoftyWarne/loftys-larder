@@ -125,7 +125,6 @@ function makeListResult(
       totalTimeMins: null,
       isBase: false,
       baseRecipeId: null,
-      pairedRecipeId: null,
       isDeleted: false,
       plantPointsCount: 0,
       averageRating: null,

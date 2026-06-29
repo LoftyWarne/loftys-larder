@@ -222,7 +222,6 @@ describe('recipes procedures', () => {
     sourceDetail?: string;
     imageUrl?: string;
     baseRecipeId?: number;
-    pairedRecipeId?: number;
   }
   async function insertRecipe(options: InsertRecipeOptions): Promise<number> {
     const inserted = await db
@@ -239,7 +238,6 @@ describe('recipes procedures', () => {
         sourceDetail: options.sourceDetail,
         imageUrl: options.imageUrl,
         baseRecipeId: options.baseRecipeId,
-        pairedRecipeId: options.pairedRecipeId,
         addedByUserId: USER_ID,
       })
       .returning({ id: recipes.id });
@@ -841,7 +839,7 @@ describe('recipes procedures', () => {
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('rejects unknown header fields (isBase, baseRecipeId, pairedRecipeId)', async () => {
+    it('rejects unknown header fields (isBase, baseRecipeId)', async () => {
       const recipeId = await insertRecipe({ name: 'Strict' });
       const caller = createCaller(makeContext());
       await expect(
@@ -1190,19 +1188,11 @@ describe('recipes procedures', () => {
     });
   });
 
-  describe('setBatchFields', () => {
-    async function readPair(recipeId: number): Promise<number | null> {
-      const rows = await db
-        .select({ pairedRecipeId: recipes.pairedRecipeId })
-        .from(recipes)
-        .where(eq(recipes.id, recipeId));
-      return rows[0]?.pairedRecipeId ?? null;
-    }
-
+  describe('setServingVariationFields', () => {
     it('marks a recipe as a base', async () => {
       const recipeId = await insertRecipe({ name: 'Stock' });
       const caller = createCaller(makeContext());
-      const result = await caller.recipes.setBatchFields({
+      const result = await caller.recipes.setServingVariationFields({
         id: recipeId,
         isBase: true,
       });
@@ -1222,10 +1212,10 @@ describe('recipes procedures', () => {
       });
       const caller = createCaller(makeContext());
       await expect(
-        caller.recipes.setBatchFields({ id: child, isBase: true }),
+        caller.recipes.setServingVariationFields({ id: child, isBase: true }),
       ).rejects.toMatchObject({
         code: 'BAD_REQUEST',
-        cause: { code: 'RECIPE_BATCH_XOR_VIOLATION' },
+        cause: { code: 'RECIPE_BASE_XOR_VIOLATION' },
       });
     });
 
@@ -1233,7 +1223,7 @@ describe('recipes procedures', () => {
       const base = await insertRecipe({ name: 'Beans', isBase: true });
       const child = await insertRecipe({ name: 'Chilli' });
       const caller = createCaller(makeContext());
-      const result = await caller.recipes.setBatchFields({
+      const result = await caller.recipes.setServingVariationFields({
         id: child,
         baseRecipeId: base,
       });
@@ -1245,10 +1235,13 @@ describe('recipes procedures', () => {
       const child = await insertRecipe({ name: 'Child' });
       const caller = createCaller(makeContext());
       await expect(
-        caller.recipes.setBatchFields({ id: child, baseRecipeId: notBase }),
+        caller.recipes.setServingVariationFields({
+          id: child,
+          baseRecipeId: notBase,
+        }),
       ).rejects.toMatchObject({
         code: 'BAD_REQUEST',
-        cause: { code: 'RECIPE_BATCH_BASE_NOT_PICKABLE' },
+        cause: { code: 'RECIPE_BASE_NOT_PICKABLE' },
       });
     });
 
@@ -1261,10 +1254,13 @@ describe('recipes procedures', () => {
       const child = await insertRecipe({ name: 'Child' });
       const caller = createCaller(makeContext());
       await expect(
-        caller.recipes.setBatchFields({ id: child, baseRecipeId: base }),
+        caller.recipes.setServingVariationFields({
+          id: child,
+          baseRecipeId: base,
+        }),
       ).rejects.toMatchObject({
         code: 'BAD_REQUEST',
-        cause: { code: 'RECIPE_BATCH_BASE_NOT_PICKABLE' },
+        cause: { code: 'RECIPE_BASE_NOT_PICKABLE' },
       });
     });
 
@@ -1277,88 +1273,13 @@ describe('recipes procedures', () => {
       const child = await insertRecipe({ name: 'Child' });
       const caller = createCaller(makeContext());
       await expect(
-        caller.recipes.setBatchFields({
+        caller.recipes.setServingVariationFields({
           id: child,
           baseRecipeId: foreignBase,
         }),
       ).rejects.toMatchObject({
         code: 'BAD_REQUEST',
-        cause: { code: 'RECIPE_BATCH_BASE_NOT_FOUND' },
-      });
-    });
-
-    it('pairs two recipes symmetrically', async () => {
-      const a = await insertRecipe({ name: 'A' });
-      const b = await insertRecipe({ name: 'B' });
-      const caller = createCaller(makeContext());
-      await caller.recipes.setBatchFields({ id: a, pairedRecipeId: b });
-      expect(await readPair(a)).toBe(b);
-      expect(await readPair(b)).toBe(a);
-    });
-
-    it('re-pairing A→C clears B and pairs C', async () => {
-      const a = await insertRecipe({ name: 'A' });
-      const b = await insertRecipe({ name: 'B' });
-      const c = await insertRecipe({ name: 'C' });
-      const caller = createCaller(makeContext());
-      await caller.recipes.setBatchFields({ id: a, pairedRecipeId: b });
-      await caller.recipes.setBatchFields({ id: a, pairedRecipeId: c });
-      expect(await readPair(a)).toBe(c);
-      expect(await readPair(b)).toBeNull();
-      expect(await readPair(c)).toBe(a);
-    });
-
-    it("re-pairing A→C clears C's prior partner D", async () => {
-      const a = await insertRecipe({ name: 'A' });
-      const c = await insertRecipe({ name: 'C' });
-      const d = await insertRecipe({ name: 'D' });
-      const caller = createCaller(makeContext());
-      await caller.recipes.setBatchFields({ id: c, pairedRecipeId: d });
-      await caller.recipes.setBatchFields({ id: a, pairedRecipeId: c });
-      expect(await readPair(a)).toBe(c);
-      expect(await readPair(c)).toBe(a);
-      expect(await readPair(d)).toBeNull();
-    });
-
-    it('clearing a pair clears both sides', async () => {
-      const a = await insertRecipe({ name: 'A' });
-      const b = await insertRecipe({ name: 'B' });
-      const caller = createCaller(makeContext());
-      await caller.recipes.setBatchFields({ id: a, pairedRecipeId: b });
-      await caller.recipes.setBatchFields({ id: a, pairedRecipeId: null });
-      expect(await readPair(a)).toBeNull();
-      expect(await readPair(b)).toBeNull();
-    });
-
-    it('rejects pairing with self', async () => {
-      const recipeId = await insertRecipe({ name: 'Solo' });
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.recipes.setBatchFields({
-          id: recipeId,
-          pairedRecipeId: recipeId,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'RECIPE_BATCH_PAIR_SELF' },
-      });
-    });
-
-    it('rejects pairing with a recipe from another household', async () => {
-      const recipeId = await insertRecipe({ name: 'Mine' });
-      const foreign = await insertRecipe({
-        name: 'Foreign',
-        householdId: OTHER_HOUSEHOLD_ID,
-      });
-      const caller = createCaller(makeContext());
-      await expect(
-        caller.recipes.setBatchFields({
-          id: recipeId,
-          pairedRecipeId: foreign,
-        }),
-      ).rejects.toMatchObject({
-        code: 'BAD_REQUEST',
-        cause: { code: 'RECIPE_BATCH_PAIR_NOT_FOUND' },
+        cause: { code: 'RECIPE_BASE_NOT_FOUND' },
       });
     });
 
@@ -1369,7 +1290,10 @@ describe('recipes procedures', () => {
       });
       const caller = createCaller(makeContext());
       await expect(
-        caller.recipes.setBatchFields({ id: foreign, isBase: true }),
+        caller.recipes.setServingVariationFields({
+          id: foreign,
+          isBase: true,
+        }),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
@@ -1377,7 +1301,7 @@ describe('recipes procedures', () => {
       const recipeId = await insertRecipe({ name: 'X' });
       const caller = createCaller(makeContext());
       await expect(
-        caller.recipes.setBatchFields({ id: recipeId }),
+        caller.recipes.setServingVariationFields({ id: recipeId }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });
 
@@ -1385,12 +1309,15 @@ describe('recipes procedures', () => {
       const recipeId = await insertRecipe({ name: 'X' });
       const caller = createCaller(makeContext({ authenticated: false }));
       await expect(
-        caller.recipes.setBatchFields({ id: recipeId, isBase: true }),
+        caller.recipes.setServingVariationFields({
+          id: recipeId,
+          isBase: true,
+        }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });
 
-  describe('list with batch picker rules', () => {
+  describe('list with serving-variation picker rules', () => {
     it('filters to bases only when isBase=true', async () => {
       await insertRecipe({ name: 'Beans Base', isBase: true });
       await insertRecipe({ name: 'Regular' });
@@ -1399,7 +1326,7 @@ describe('recipes procedures', () => {
       expect(result.items.map((r) => r.name)).toEqual(['Beans Base']);
     });
 
-    it('hides batch-versions of soft-deleted bases when includePickerHidden', async () => {
+    it('hides serving variations of soft-deleted bases when includePickerHidden', async () => {
       const liveBase = await insertRecipe({
         name: 'Live Base',
         isBase: true,
@@ -1425,7 +1352,7 @@ describe('recipes procedures', () => {
       expect(names).not.toContain('Child Of Dead');
     });
 
-    it('historical reads (no flag) still include batch-versions of deleted bases', async () => {
+    it('historical reads (no flag) still include serving variations of deleted bases', async () => {
       const deadBase = await insertRecipe({
         name: 'Dead Base',
         isBase: true,
@@ -1443,47 +1370,42 @@ describe('recipes procedures', () => {
     });
   });
 
-  describe('get with batch partners', () => {
-    it('returns base + pair names and isDeleted flags', async () => {
+  describe('get with base partner', () => {
+    it('returns the base name and isDeleted flag', async () => {
       const base = await insertRecipe({ name: 'Bean Base', isBase: true });
-      const partner = await insertRecipe({ name: 'Partner Recipe' });
       const child = await insertRecipe({
         name: 'Child Recipe',
         baseRecipeId: base,
-        pairedRecipeId: partner,
       });
 
       const caller = createCaller(makeContext());
       const result = await caller.recipes.get({ id: child });
       expect(result.baseRecipeName).toBe('Bean Base');
       expect(result.baseRecipeIsDeleted).toBe(false);
-      expect(result.pairedRecipeName).toBe('Partner Recipe');
-      expect(result.pairedRecipeIsDeleted).toBe(false);
     });
 
-    it('returns null partner names when there is no link', async () => {
+    it('returns null base name when there is no link', async () => {
       const recipeId = await insertRecipe({ name: 'Lonely' });
       const caller = createCaller(makeContext());
       const result = await caller.recipes.get({ id: recipeId });
       expect(result.baseRecipeName).toBeNull();
       expect(result.baseRecipeIsDeleted).toBeNull();
-      expect(result.pairedRecipeName).toBeNull();
-      expect(result.pairedRecipeIsDeleted).toBeNull();
     });
 
-    it('marks a soft-deleted pair partner as deleted', async () => {
-      const partner = await insertRecipe({
-        name: 'Gone Partner',
+    it('marks a soft-deleted base as deleted', async () => {
+      const base = await insertRecipe({
+        name: 'Gone Base',
+        isBase: true,
         isDeleted: true,
       });
       const recipeId = await insertRecipe({
         name: 'Self',
-        pairedRecipeId: partner,
+        baseRecipeId: base,
       });
       const caller = createCaller(makeContext());
       const result = await caller.recipes.get({ id: recipeId });
-      expect(result.pairedRecipeName).toBe('Gone Partner');
-      expect(result.pairedRecipeIsDeleted).toBe(true);
+      expect(result.baseRecipeName).toBe('Gone Base');
+      expect(result.baseRecipeIsDeleted).toBe(true);
     });
   });
 

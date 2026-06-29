@@ -21,7 +21,11 @@ import {
 } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
-import { mealPlans, mealPlanSlots } from '../src/db/schema/meal-plans.ts';
+import {
+  mealPlans,
+  mealPlanSlotItems,
+  mealPlanSlots,
+} from '../src/db/schema/meal-plans.ts';
 import {
   ingredientCategories,
   mealOccasions,
@@ -239,14 +243,32 @@ describe('day + plan plant points', () => {
         date: options.date,
         occasionId: options.occasionId,
         slotType,
-        recipeId: options.recipeId ?? null,
-        numberOfServings: options.numberOfServings ?? null,
-        cooksBaseRecipeId: options.cooksBaseRecipeId ?? null,
-        cooksBaseServings: options.cooksBaseServings ?? null,
       })
       .returning({ id: mealPlanSlots.id });
     const row = inserted[0];
     if (!row) throw new Error('slot insert failed');
+    // Translate the legacy options into items: the eaten recipe → an `eat`
+    // item, the cooked base → a `cook_ahead` item.
+    const items: (typeof mealPlanSlotItems.$inferInsert)[] = [];
+    if (options.recipeId !== undefined) {
+      items.push({
+        slotId: row.id,
+        recipeId: options.recipeId,
+        servings: options.numberOfServings ?? 1,
+        kind: 'eat',
+        sortOrder: 0,
+      });
+    }
+    if (options.cooksBaseRecipeId !== undefined) {
+      items.push({
+        slotId: row.id,
+        recipeId: options.cooksBaseRecipeId,
+        servings: options.cooksBaseServings ?? 1,
+        kind: 'cook_ahead',
+        sortOrder: 1,
+      });
+    }
+    if (items.length > 0) await db.insert(mealPlanSlotItems).values(items);
     return row.id;
   }
 
@@ -333,7 +355,7 @@ describe('day + plan plant points', () => {
       expect(await selectForDay(planId, day)).toBe(1);
     });
 
-    it('traverses base_recipe_id for batch-version meals', async () => {
+    it('traverses base_recipe_id for serving-variation meals', async () => {
       const planId = await insertPlan({ start: day, end: day });
       const baseId = await insertRecipe('Tomato base', { isBase: true });
       const versionId = await insertRecipe('Tomato pasta', {

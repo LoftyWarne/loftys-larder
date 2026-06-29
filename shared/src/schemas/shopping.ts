@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Shopping list DTOs. Read-side aggregation for a plan (DEC-19 scaling,
-// DEC-26 cooks-base contributions, DEC-23 batch-version no-double-count).
+// DEC-24 cooks-base contributions, DEC-23 serving-variation no-double-count).
 // Numeric quantities round-trip as decimal strings to avoid float drift;
 // the same precedent as `recipeIngredientLineSchema.quantity`.
 //

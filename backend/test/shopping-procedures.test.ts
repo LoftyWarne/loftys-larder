@@ -5,7 +5,7 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
@@ -21,7 +21,11 @@ import {
 } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
-import { mealPlans, mealPlanSlots } from '../src/db/schema/meal-plans.ts';
+import {
+  mealPlans,
+  mealPlanSlotItems,
+  mealPlanSlots,
+} from '../src/db/schema/meal-plans.ts';
 import {
   ingredientCategories,
   mealOccasions,
@@ -287,14 +291,32 @@ describe('shopping procedures', () => {
         date: options.date,
         occasionId: options.occasionId,
         slotType: options.slotType,
-        recipeId: options.recipeId ?? null,
-        numberOfServings: options.numberOfServings ?? null,
-        cooksBaseRecipeId: options.cooksBaseRecipeId ?? null,
-        cooksBaseServings: options.cooksBaseServings ?? null,
       })
       .returning({ id: mealPlanSlots.id });
     const row = inserted[0];
     if (!row) throw new Error('slot insert failed');
+    // Translate the legacy options into items: eaten recipe → `eat` item,
+    // cooked base → `cook_ahead` item.
+    const items: (typeof mealPlanSlotItems.$inferInsert)[] = [];
+    if (options.recipeId !== undefined) {
+      items.push({
+        slotId: row.id,
+        recipeId: options.recipeId,
+        servings: options.numberOfServings ?? 1,
+        kind: 'eat',
+        sortOrder: 0,
+      });
+    }
+    if (options.cooksBaseRecipeId !== undefined) {
+      items.push({
+        slotId: row.id,
+        recipeId: options.cooksBaseRecipeId,
+        servings: options.cooksBaseServings ?? 1,
+        kind: 'cook_ahead',
+        sortOrder: 1,
+      });
+    }
+    if (items.length > 0) await db.insert(mealPlanSlotItems).values(items);
     return row.id;
   }
 
@@ -501,7 +523,7 @@ describe('shopping procedures', () => {
       expect(line?.contributingSlots).toHaveLength(1);
     });
 
-    it('batch-version meal alone contributes only its own ingredients', async () => {
+    it('serving-variation meal alone contributes only its own ingredients', async () => {
       const onionId = await insertIngredient('Onion');
       const chickpeaId = await insertIngredient('Chickpea', {
         categoryId: pantryCategoryId,
@@ -545,7 +567,7 @@ describe('shopping procedures', () => {
       expect(allIngredientNames).toEqual(['Onion']);
     });
 
-    it('batch-version + base-cook on different slots adds without double-counting', async () => {
+    it('serving-variation + base-cook on different slots adds without double-counting', async () => {
       const onionId = await insertIngredient('Onion');
       const chickpeaId = await insertIngredient('Chickpea', {
         categoryId: pantryCategoryId,
@@ -875,11 +897,22 @@ describe('shopping procedures', () => {
         .update(shoppingListItems)
         .set({ isChecked: true, lastCheckedQuantity: '2.000' })
         .where(eq(shoppingListItems.ingredientId, onionId));
-      // Bump the slot to 8 servings → 4.000 total.
+      // Bump the eat item to 8 servings → 4.000 total.
       await db
-        .update(mealPlanSlots)
-        .set({ numberOfServings: 8 })
-        .where(eq(mealPlanSlots.planId, planId));
+        .update(mealPlanSlotItems)
+        .set({ servings: 8 })
+        .where(
+          and(
+            eq(mealPlanSlotItems.kind, 'eat'),
+            inArray(
+              mealPlanSlotItems.slotId,
+              db
+                .select({ id: mealPlanSlots.id })
+                .from(mealPlanSlots)
+                .where(eq(mealPlanSlots.planId, planId)),
+            ),
+          ),
+        );
 
       const result = await createCaller(makeContext()).shopping.getForPlan({
         planId,
@@ -904,9 +937,20 @@ describe('shopping procedures', () => {
         .set({ isChecked: true, lastCheckedQuantity: '2.000' })
         .where(eq(shoppingListItems.ingredientId, onionId));
       await db
-        .update(mealPlanSlots)
-        .set({ numberOfServings: 2 })
-        .where(eq(mealPlanSlots.planId, planId));
+        .update(mealPlanSlotItems)
+        .set({ servings: 2 })
+        .where(
+          and(
+            eq(mealPlanSlotItems.kind, 'eat'),
+            inArray(
+              mealPlanSlotItems.slotId,
+              db
+                .select({ id: mealPlanSlots.id })
+                .from(mealPlanSlots)
+                .where(eq(mealPlanSlots.planId, planId)),
+            ),
+          ),
+        );
 
       const result = await createCaller(makeContext()).shopping.getForPlan({
         planId,
@@ -948,9 +992,14 @@ describe('shopping procedures', () => {
       const onionOnlyId = await insertRecipe('Onion soup', { baseServings: 2 });
       await insertRecipeIngredient(onionOnlyId, onionId, '1.000');
       await db
-        .update(mealPlanSlots)
-        .set({ numberOfServings: 4 })
-        .where(eq(mealPlanSlots.id, slotId));
+        .update(mealPlanSlotItems)
+        .set({ servings: 4 })
+        .where(
+          and(
+            eq(mealPlanSlotItems.kind, 'eat'),
+            eq(mealPlanSlotItems.slotId, slotId),
+          ),
+        );
       await insertSlot({
         planId,
         date: civilDate(2026, 1, 1),

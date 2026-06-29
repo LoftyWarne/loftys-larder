@@ -29,49 +29,27 @@ export const slotTypeSchema = z.enum([
 ]);
 export type SlotType = z.infer<typeof slotTypeSchema>;
 
-// Minimal recipe sub-shape attached to assigned slots. Includes `isDeleted` so
-// the planner UI can render a "(deleted)" hint on historical slots whose
-// recipe was soft-deleted after assignment (DEC-21).
-export const planSlotRecipeSchema = z.object({
-  id: recipeIdSchema,
-  name: z.string(),
-  imageUrl: z.string().nullable(),
-  isBase: z.boolean(),
-  // Lets the planner UI recognise a batch-version meal (linked to a base) and
-  // surface the base-supply warning without a second fetch.
-  baseRecipeId: recipeIdSchema.nullable(),
-  // Mirror of `baseRecipeId` for the full↔batch sibling link. Lets the slot
-  // editor gate the pair-switch affordance without a second fetch.
-  pairedRecipeId: recipeIdSchema.nullable(),
-  isDeleted: z.boolean(),
-});
-export type PlanSlotRecipe = z.infer<typeof planSlotRecipeSchema>;
+// A dish on a slot (DEC-89). `eat` = consumed here; `cook_ahead` = a base
+// produced here in bulk for later meals.
+export const slotItemKindSchema = z.enum(['eat', 'cook_ahead']);
+export type SlotItemKind = z.infer<typeof slotItemKindSchema>;
 
-// The slot's paired-recipe sibling, joined alongside `recipe`. Carries
-// `baseServings` so the editor can default servings to the destination
-// recipe's yield on switch, and `isDeleted` to hide the affordance when the
-// sibling is soft-deleted (DEC-21 historical-render coherence).
-export const planSlotPairedRecipeSchema = z.object({
-  id: recipeIdSchema,
-  name: z.string(),
-  imageUrl: z.string().nullable(),
+// Slot item with the recipe fields denormalised for rendering (name/image,
+// plus `isBase`/`baseRecipeId` for the consumption balance and `isDeleted` for
+// the "(deleted)" hint on historical slots — DEC-21).
+export const planSlotItemSchema = z.object({
+  id: z.number().int().positive(),
+  recipeId: recipeIdSchema,
+  recipeName: z.string(),
+  recipeImageUrl: z.string().nullable(),
   isBase: z.boolean(),
   baseRecipeId: recipeIdSchema.nullable(),
-  baseServings: z.number().int().positive(),
   isDeleted: z.boolean(),
+  servings: z.number().int().positive(),
+  kind: slotItemKindSchema,
+  sortOrder: z.number().int().nonnegative(),
 });
-export type PlanSlotPairedRecipe = z.infer<typeof planSlotPairedRecipeSchema>;
-
-// Even smaller sub-shape for the slot's cooked base reference. Only `name` +
-// `isDeleted` are surfaced — the card renders "Cook base: <name> (×N)" and an
-// optional "(deleted)" suffix if the base recipe was soft-deleted after the
-// slot was set (DEC-21 historical-render coherence).
-export const planSlotCookedBaseSchema = z.object({
-  id: recipeIdSchema,
-  name: z.string(),
-  isDeleted: z.boolean(),
-});
-export type PlanSlotCookedBase = z.infer<typeof planSlotCookedBaseSchema>;
+export type PlanSlotItem = z.infer<typeof planSlotItemSchema>;
 
 export const planSlotSchema = z.object({
   id: slotIdSchema,
@@ -80,15 +58,9 @@ export const planSlotSchema = z.object({
   occasionId: occasionIdSchema,
   occasionName: z.string(),
   slotType: slotTypeSchema,
-  recipeId: recipeIdSchema.nullable(),
-  numberOfServings: z.number().int().positive().nullable(),
   chefUserId: z.string().nullable(),
-  cooksBaseRecipeId: recipeIdSchema.nullable(),
-  cooksBaseServings: z.number().int().positive().nullable(),
   comment: z.string().nullable(),
-  recipe: planSlotRecipeSchema.nullable(),
-  cooksBaseRecipe: planSlotCookedBaseSchema.nullable(),
-  pairedRecipe: planSlotPairedRecipeSchema.nullable(),
+  items: z.array(planSlotItemSchema),
 });
 export type PlanSlot = z.infer<typeof planSlotSchema>;
 
@@ -199,6 +171,9 @@ export const planSlotLossSchema = z.object({
   date: civilDateSchema,
   occasionId: occasionIdSchema,
   slotType: slotTypeSchema,
-  recipeId: recipeIdSchema.nullable(),
+  // How many dishes the slot holds — drives the "these slots will be lost"
+  // confirm dialog (a slot is "lost" if it has content: items or a non-empty
+  // status).
+  itemCount: z.number().int().nonnegative(),
 });
 export type PlanSlotLoss = z.infer<typeof planSlotLossSchema>;

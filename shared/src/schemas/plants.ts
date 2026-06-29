@@ -3,7 +3,7 @@ import { z } from 'zod';
 // Plant points are a computed COUNT(DISTINCT ingredient_id) over plant
 // ingredients (DEC-32). Day and plan procedures compose the recipe-level
 // primitive by unioning three contribution sources per slot: the eating
-// recipe, the eating recipe's base (for batch-version meals), and the
+// recipe, the eating recipe's base (for serving-variation meals), and the
 // independently-cooked base. DISTINCT handles the dedup, including the
 // case where a slot's referenced base equals the cooked base.
 

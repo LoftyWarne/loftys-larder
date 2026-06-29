@@ -2,7 +2,11 @@ import { type AnyColumn, type SQL, sql } from 'drizzle-orm';
 
 import type { Db } from '../db/index.ts';
 import { ingredients } from '../db/schema/ingredients.ts';
-import { mealPlans, mealPlanSlots } from '../db/schema/meal-plans.ts';
+import {
+  mealPlans,
+  mealPlanSlotItems,
+  mealPlanSlots,
+} from '../db/schema/meal-plans.ts';
 import { recipeIngredients, recipes } from '../db/schema/recipes.ts';
 import type { Tx } from '../db/withTransaction.ts';
 
@@ -135,42 +139,48 @@ async function countDistinctPlants(
   const rows = await db.execute<{ count: number }>(sql`
     select count(distinct contributions.ingredient_id)::int as count
     from (
-      -- 1. eating-recipe ingredients
+      -- 1. eat-item ingredients
       select recipe_ingredients.ingredient_id
       from ${mealPlanSlots}
       inner join ${mealPlans}
         on meal_plans.id = meal_plan_slots.plan_id
+      inner join ${mealPlanSlotItems}
+        on meal_plan_slot_items.slot_id = meal_plan_slots.id
+        and meal_plan_slot_items.kind = 'eat'
       inner join ${recipeIngredients}
-        on recipe_ingredients.recipe_id = meal_plan_slots.recipe_id
+        on recipe_ingredients.recipe_id = meal_plan_slot_items.recipe_id
       where ${planFilter}
-        and meal_plan_slots.slot_type = 'recipe'
         ${dateFilter}
 
       union all
-      -- 2. batch-version traversal: eating recipe's base
+      -- 2. serving-variation traversal: an eat item's base
       select recipe_ingredients.ingredient_id
       from ${mealPlanSlots}
       inner join ${mealPlans}
         on meal_plans.id = meal_plan_slots.plan_id
+      inner join ${mealPlanSlotItems}
+        on meal_plan_slot_items.slot_id = meal_plan_slots.id
+        and meal_plan_slot_items.kind = 'eat'
       inner join ${recipes}
-        on recipes.id = meal_plan_slots.recipe_id
+        on recipes.id = meal_plan_slot_items.recipe_id
       inner join ${recipeIngredients}
         on recipe_ingredients.recipe_id = recipes.base_recipe_id
       where ${planFilter}
-        and meal_plan_slots.slot_type = 'recipe'
         and recipes.base_recipe_id is not null
         ${dateFilter}
 
       union all
-      -- 3. cooks-base union (independent of slot_type)
+      -- 3. cook-ahead items (the base produced in bulk)
       select recipe_ingredients.ingredient_id
       from ${mealPlanSlots}
       inner join ${mealPlans}
         on meal_plans.id = meal_plan_slots.plan_id
+      inner join ${mealPlanSlotItems}
+        on meal_plan_slot_items.slot_id = meal_plan_slots.id
+        and meal_plan_slot_items.kind = 'cook_ahead'
       inner join ${recipeIngredients}
-        on recipe_ingredients.recipe_id = meal_plan_slots.cooks_base_recipe_id
+        on recipe_ingredients.recipe_id = meal_plan_slot_items.recipe_id
       where ${planFilter}
-        and meal_plan_slots.cooks_base_recipe_id is not null
         ${dateFilter}
     ) as contributions
     inner join ${ingredients}

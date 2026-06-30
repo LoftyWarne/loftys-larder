@@ -6,7 +6,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ## 2026-06-30 — Leftovers "Which meal?" picker
 
-**Status:** Shipped. Schema change (new enum + column + CHECK + migration `0012`), new shared Zod field, backend + frontend. No new DEC yet — see the flag below.
+**Status:** Shipped. Schema change (new enum + column + CHECK + migration `0012`), new shared Zod field, backend + frontend. Recorded as `DEC-90`.
 
 ### Change
 
@@ -22,7 +22,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 - **Migration `0012` was hand-edited** to backfill any pre-existing bare `leftovers` rows to `'other'` *before* the CHECK is added — otherwise the no-staging `release_command` deploy (DEC-40) would fail validating old rows. Don't regenerate it without re-adding that `UPDATE`.
 - **Plant points deliberately left double-counting.** `countDistinctPlants` still counts leftover eat items as plants eaten that day — correct (you did eat them); plan-level uses COUNT DISTINCT so no inflation.
-- **No new DEC yet (open flag):** the leftovers-source model + the shopping `slot_type='recipe'` exclusion is a real design decision worth an ADR (proposed `DEC-90`). Draft it before this is considered closed.
+- **DEC-90 written:** the leftovers-source model + the shopping `slot_type='recipe'` exclusion is recorded as `DEC-90` (amends DEC-25 + DEC-89, builds on DEC-88).
 
 ### Verification
 

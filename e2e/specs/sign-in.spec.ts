@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { resetHouseholdData } from '../fixtures/db.ts';
+import { E2E_USER_NAME, resetHouseholdData } from '../fixtures/db.ts';
 
 // Confirms global-setup left a usable storageState behind: the storage state
 // loaded via playwright.config carries the Better Auth session cookie, so
@@ -16,10 +16,11 @@ test.describe('storageState authenticates the session', () => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/$/);
     // The authed root is `/`; the public sign-in route would have us at
-    // `/sign-in`. Asserting via the root URL is enough — but the heading on
-    // the home view makes the failure mode easier to read.
+    // `/sign-in`, and a nameless user would be bounced to `/welcome`. The
+    // greeting heading (which carries the set name) confirms we landed on the
+    // real home view rather than either gate.
     await expect(
-      page.getByRole('heading', { name: "Lofty's Larder" }),
+      page.getByRole('heading', { name: new RegExp(E2E_USER_NAME) }),
     ).toBeVisible();
   });
 });

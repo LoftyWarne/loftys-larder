@@ -22,8 +22,9 @@ test.describe('recipe creation flows through to browse', () => {
     ).toBeVisible();
 
     await page.getByLabel('Name').fill(recipeName);
-    // baseServings defaults to 2 — leave it. No other required fields.
-    await page.getByRole('button', { name: 'Create recipe' }).click();
+    // baseServings defaults to 2 — leave it. No other required fields. Step 1
+    // of the editor saves the header and continues to the full editor.
+    await page.getByRole('button', { name: 'Save & continue →' }).click();
 
     // The editor navigates to /recipes/<id>/edit on success.
     await expect(page).toHaveURL(/\/recipes\/\d+\/edit/);

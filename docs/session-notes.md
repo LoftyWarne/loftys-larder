@@ -4,6 +4,31 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-30 — Fix failing e2e suite (welcome gate + composable-slot drift)
+
+**Status:** Shipped. e2e workspace only — no app code touched. Full suite (23 tests, incl. axe) green against a freshly rebuilt bundle.
+
+### Why it was failing
+
+The suite passed only because the dev server it reused was a stale bundle. Rebuilding `backend`/`frontend` and running fresh exposed two regressions the e2e harness had drifted away from:
+
+1. **The `/welcome` name gate** (`51e1dad`, recorded in the 2026-06-24 onboarding note) lands *after* these specs were written. The magic-link e2e user is created with a blank `name`, so `authed-layout` bounced every authed route to `/welcome` — 19 failures. `home`/sign-in only *looked* green because `getByRole('heading', { name: "Lofty's Larder" })` substring-matches the gate's "Welcome to Lofty's Larder".
+2. **The composable-slot refactor (DEC-89/DEC-90)** moved `recipe_id` / `number_of_servings` / `cooks_base_*` off the `meal_plan_slots` row into `meal_plan_slot_items` (`kind ∈ {eat, cook_ahead}`) and added `chef_user_id` / `comment` / `guest_count` / `leftovers_source`. The e2e DB fixtures still wrote the deleted columns, so planner/shopping queries threw. Plus the recipe editor is now a 2-step flow.
+
+### Change
+
+- **`fixtures/db.ts`:** new `setUserName()` + exported `E2E_USER_NAME` ('E2E Tester'); `assignRecipeToSlot` now flips the slot to `recipe` and inserts an `eat` item; `setCooksBaseOnSlot` inserts a `cook_ahead` item with the slot left `empty`; shared `insertSlotItem` computes `sort_order`. `resetHouseholdData` truncates the new `meal_plan_slot_items` / `meal_plan_slot_diners` tables.
+- **`global-setup.ts`:** stamps the user name (via `setUserName`) after the magic-link sign-in so specs land on the app, not `/welcome`. `getSession` reads `name` live from the DB, so stamping after `storageState` is saved still takes effect.
+- **Specs:** `sign-in` + `a11y` (home) assert the time-of-day greeting (carries the set name) instead of the no-name brand fallback. `planner` asserts the prep slot renders its `cook_ahead` dish (`Curry base ×8`, `data-slot-type="empty"`) rather than the old "Cook base:" line. `recipes` clicks `Save & continue →` (step 1 of 2) instead of the gone `Create recipe`.
+
+### Worth carrying
+
+- **The `home` greeting is `${timeOfDay}, ${name}` and only falls back to "Lofty's Larder" when `name` is blank.** Any spec asserting the home heading must key off the set name (or it'll go stale at midnight / when the gate changes), not the brand string.
+- **`setUserName` survives `resetHouseholdData`** — auth tables are deliberately left untouched, so one call in global-setup holds for the whole run.
+- **Local `lofty_e2e` needed `pnpm prepare-db`** to pick up the recent migrations; CI runs that step already, so the schema drift was environmental, not a code defect. The fixture/spec changes are the real fix.
+
+---
+
 ## 2026-06-30 — Leftovers "Which meal?" picker
 
 **Status:** Shipped. Schema change (new enum + column + CHECK + migration `0012`), new shared Zod field, backend + frontend. Recorded as `DEC-90`.

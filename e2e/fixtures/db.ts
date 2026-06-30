@@ -20,6 +20,22 @@ export async function closePool(): Promise<void> {
   }
 }
 
+// The display name stamped onto the e2e user (see setUserName). Specs assert
+// the home greeting against it, so it lives next to the writer to stay in sync.
+export const E2E_USER_NAME = 'E2E Tester';
+
+// Better Auth creates the magic-link user with an empty `name`. The authed
+// gate (authed-layout) bounces every authed route to /welcome until a name is
+// set, so specs that expect to land on the app need one stamped in. Auth
+// tables survive resetHouseholdData, so a single call in global-setup holds
+// for the whole run.
+export async function setUserName(email: string, name: string): Promise<void> {
+  await getPool().query(`update users set name = $2 where email = $1`, [
+    email,
+    name,
+  ]);
+}
+
 // Single-household constant from backend/src/config.ts. Duplicated rather than
 // imported so the e2e workspace stays independent of backend source paths.
 export const HOUSEHOLD_ID = '00000000-0000-4000-8000-000000000001';
@@ -33,6 +49,8 @@ export async function resetHouseholdData(): Promise<void> {
     await client.query(`
       truncate table
         shopping_list_items,
+        meal_plan_slot_diners,
+        meal_plan_slot_items,
         meal_plan_slots,
         meal_plans,
         recipe_method,
@@ -222,48 +240,74 @@ export interface AssignRecipeSpec {
   slotId: number;
   recipeId: number;
   numberOfServings: number;
-  cooksBaseRecipeId?: number;
-  cooksBaseServings?: number;
 }
 
+// Mark a slot as a `recipe` meal and add the recipe as its eaten dish. In the
+// composable-slot model (DEC-89) the dish lives in meal_plan_slot_items with
+// kind='eat' rather than on the slot row.
 export async function assignRecipeToSlot(
   spec: AssignRecipeSpec,
 ): Promise<void> {
-  await getPool().query(
-    `update meal_plan_slots
-     set slot_type = 'recipe',
-         recipe_id = $2,
-         number_of_servings = $3,
-         cooks_base_recipe_id = $4,
-         cooks_base_servings = $5
-     where id = $1`,
-    [
-      spec.slotId,
-      spec.recipeId,
-      spec.numberOfServings,
-      spec.cooksBaseRecipeId ?? null,
-      spec.cooksBaseServings ?? null,
-    ],
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query('begin');
+    await client.query(
+      `update meal_plan_slots set slot_type = 'recipe' where id = $1`,
+      [spec.slotId],
+    );
+    await insertSlotItem(client, {
+      slotId: spec.slotId,
+      recipeId: spec.recipeId,
+      servings: spec.numberOfServings,
+      kind: 'eat',
+    });
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-// Set just cooks-base on a slot (slot stays type='empty' since cooks-base is
-// orthogonal to slot_type — a slot can be 'empty' but still have a cooks-base
-// recipe assigned, contributing to the shopping list without being a meal).
-// NOTE: in practice the planner UI populates cooks-base alongside a recipe;
-// this helper covers the case where the base cook lives on its own slot. To
-// satisfy meal_plan_slots_recipe_iff_type the slot has to remain non-recipe.
+// Add a base cooked ahead in this slot. The slot stays type='empty' — a
+// cook_ahead dish contributes to the shopping list and balance without the
+// slot itself being an eaten meal (DEC-89). The schema couples `eat` items to
+// the `recipe` status, but `cook_ahead` items are orthogonal to slot_type.
 export async function setCooksBaseOnSlot(spec: {
   slotId: number;
   cooksBaseRecipeId: number;
   cooksBaseServings: number;
 }): Promise<void> {
-  await getPool().query(
-    `update meal_plan_slots
-     set cooks_base_recipe_id = $2,
-         cooks_base_servings = $3
-     where id = $1`,
-    [spec.slotId, spec.cooksBaseRecipeId, spec.cooksBaseServings],
+  await insertSlotItem(getPool(), {
+    slotId: spec.slotId,
+    recipeId: spec.cooksBaseRecipeId,
+    servings: spec.cooksBaseServings,
+    kind: 'cook_ahead',
+  });
+}
+
+// Append a dish to a slot, computing the next sort_order so repeated calls on
+// one slot stay ordered.
+async function insertSlotItem(
+  db: pg.Pool | pg.PoolClient,
+  item: {
+    slotId: number;
+    recipeId: number;
+    servings: number;
+    kind: 'eat' | 'cook_ahead';
+  },
+): Promise<void> {
+  await db.query(
+    `insert into meal_plan_slot_items (slot_id, recipe_id, servings, kind, sort_order)
+     values (
+       $1, $2, $3, $4,
+       coalesce(
+         (select max(sort_order) + 1 from meal_plan_slot_items where slot_id = $1),
+         0
+       )
+     )`,
+    [item.slotId, item.recipeId, item.servings, item.kind],
   );
 }
 

@@ -6,8 +6,10 @@ import { chromium, request, type FullConfig } from '@playwright/test';
 
 import {
   closePool,
+  E2E_USER_NAME,
   getLatestVerificationFor,
   resetHouseholdData,
+  setUserName,
 } from './fixtures/db.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -67,6 +69,12 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     }
     await apiContext.storageState({ path: STORAGE_STATE_PATH });
     await apiContext.dispose();
+
+    // The magic-link sign-up leaves `name` blank; without this the authed
+    // gate redirects every spec to /welcome. getSession reads the name live
+    // from the DB, so stamping it after storageState is saved still takes
+    // effect for every spec.
+    await setUserName(E2E_EMAIL, E2E_USER_NAME);
   } finally {
     await context.close();
     await browser.close();

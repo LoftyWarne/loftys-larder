@@ -68,8 +68,8 @@ test.describe('planner with base + batch-version recipes', () => {
     const end = formatYmd(addDays(today, 1));
     const plan = await createPlan(start, end);
 
-    // Earlier slot: base cook only — slot stays empty (no meal), but
-    // contributes ingredients via cooks-base.
+    // Earlier slot: base cook only — slot stays empty (no eaten meal), but
+    // carries a cook_ahead dish that contributes ingredients.
     const baseSlotId = plan.slotsByDateAndOccasion.get(`${start}|Lunch`);
     if (baseSlotId === undefined) throw new Error('missing base slot');
     await setCooksBaseOnSlot({
@@ -89,11 +89,12 @@ test.describe('planner with base + batch-version recipes', () => {
 
     await page.goto(`/plans/${String(plan.id)}`);
 
-    // The earlier slot renders the "Cook base: …" line because cooks-base is
-    // set even though the slot itself is empty.
+    // The earlier slot stays `empty` (nothing eaten) but renders its
+    // cook_ahead dish — the base name and its batch servings.
     const baseSlot = page.locator(`[data-slot-id="${String(baseSlotId)}"]`);
     await expect(baseSlot).toBeVisible();
-    await expect(baseSlot).toContainText('Cook base: Curry base');
+    await expect(baseSlot).toHaveAttribute('data-slot-type', 'empty');
+    await expect(baseSlot).toContainText('Curry base');
     await expect(baseSlot).toContainText('×8');
 
     // The later slot shows the batch-version meal name.

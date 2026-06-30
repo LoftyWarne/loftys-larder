@@ -5,6 +5,7 @@ import {
   assignRecipeToSlot,
   createPlan,
   createRecipe,
+  E2E_USER_NAME,
   resetHouseholdData,
   setCooksBaseOnSlot,
   type CreatedPlan,
@@ -150,8 +151,10 @@ test.describe('a11y — authed views', () => {
   for (const theme of THEMES) {
     test(`home passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto('/');
+      // A named user lands on the time-of-day greeting, not the brand
+      // fallback heading. Match on the name to stay clock-agnostic.
       await expect(
-        page.getByRole('heading', { name: "Lofty's Larder" }),
+        page.getByRole('heading', { name: new RegExp(E2E_USER_NAME) }),
       ).toBeVisible();
       await runAxe(page, theme);
     });

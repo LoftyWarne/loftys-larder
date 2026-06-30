@@ -4,6 +4,32 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-30 — Leftovers "Which meal?" picker
+
+**Status:** Shipped. Schema change (new enum + column + CHECK + migration `0012`), new shared Zod field, backend + frontend. No new DEC yet — see the flag below.
+
+### Change
+
+- **A `leftovers` slot now records *what* is being eaten.** New `leftovers_source` enum (`plan_meal | takeaway | other`) + nullable `meal_plan_slots.leftovers_source` column. A CHECK constraint couples them: `slot_type = 'leftovers'` **iff** `leftovers_source IS NOT NULL`.
+  - **`plan_meal`** reuses the existing `eat`-item machinery — the leftover is a single `eat` item FK'd to the source recipe, so it draws the base pool down via `deriveBaseBalances` for free (DEC-88). Shows the dish name and ties into consumption.
+  - **`takeaway` / `other`** are bare markers (no items).
+- **Shared Zod:** `leftoversSourceSchema` + `LeftoversSource` in `schemas/plans.ts`; `planSlotSchema` + `updateSlotInputSchema` gained `leftoversSource` (nullable, required). Two refines: source/slot-type coupling, and item rules (recipe ⇒ ≥1 eat; leftovers+plan_meal ⇒ exactly one eat; everything else ⇒ none).
+- **Backend:** `slots.update` persists it; meta projections/patches, `selectSlotById`, `loadHouseholdSlotContent`, `plans.selectPlanSlots`, and `plans.duplicate` all carry it. **Shopping correctness fix:** `selectMealRecipeContributions` and the eat branch of `selectIngredientContributions` now scope to `slot_type = 'recipe'`, so a plan-meal leftover draws the base pool down **without** re-adding its ingredients to the buy list.
+- **Frontend:** slot editor gained a "Which meal?" `<select>` on leftovers slots — an optgroup of earlier *Cooking*-slot dishes (deduped by recipe, `(date, occasion)`-ordered to match the consumption walk) + Takeaway + Other; plan-meal choice builds the single eat item with a servings input + live shortfall warning. Save is blocked until a source is chosen. Slot cell + a11y label render the leftovers state.
+- **Shortfall wording (follow-up):** `ServingVariationWarning` gained `variant?: 'base' | 'meal'`. A leftover of a non-base meal (a serving-variation) now reads **"Not enough of this meal prepared — short by N"** instead of the base-pool phrasing; a leftover of an actual base keeps "Not enough base cooked yet". Picker passes `variant={state.items[0]?.isBase ? 'base' : 'meal'}`.
+
+### Worth carrying
+
+- **Migration `0012` was hand-edited** to backfill any pre-existing bare `leftovers` rows to `'other'` *before* the CHECK is added — otherwise the no-staging `release_command` deploy (DEC-40) would fail validating old rows. Don't regenerate it without re-adding that `UPDATE`.
+- **Plant points deliberately left double-counting.** `countDistinctPlants` still counts leftover eat items as plants eaten that day — correct (you did eat them); plan-level uses COUNT DISTINCT so no inflation.
+- **No new DEC yet (open flag):** the leftovers-source model + the shopping `slot_type='recipe'` exclusion is a real design decision worth an ADR (proposed `DEC-90`). Draft it before this is considered closed.
+
+### Verification
+
+`pnpm -r typecheck` + `lint` clean. Backend Testcontainers **509** pass (3 new: coupling rejects leftovers-without-source / rejects non-leftovers-with-source / accepts leftovers-with-source). Frontend **373** pass (leftovers picker options/ordering/save paths, takeaway marker, save-blocked-until-chosen, both shortfall wordings, slot-cell render). Definition-of-done boxes left unticked (human action).
+
+---
+
 ## 2026-06-29 — "Who's eating & how many" on planner slots
 
 **Status:** Shipped. Schema change (new table + column + migration `0011_slot_diners`), new shared Zod fields, backend + frontend. No new DEC yet — see the DEC-29 flag below.

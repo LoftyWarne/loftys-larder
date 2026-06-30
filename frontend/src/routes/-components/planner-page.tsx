@@ -170,6 +170,7 @@ export function PlannerPage(): React.ReactElement {
       input: {
         slotId: slot.id,
         slotType: 'empty',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [],
@@ -321,6 +322,7 @@ function assignSingleEat(
     input: {
       slotId,
       slotType: 'recipe',
+      leftoversSource: null,
       chefUserId: null,
       comment: null,
       items: [

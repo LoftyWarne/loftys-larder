@@ -31,6 +31,18 @@ export const slotType = pgEnum('slot_type', [
   'leftovers',
 ]);
 
+// What a `leftovers` slot is eating. `plan_meal` = leftovers of a dish prepared
+// earlier in the plan — the dish lives as the slot's single `eat`
+// `meal_plan_slot_items` row (FK to the recipe), so it draws the cooked-base
+// pool down (DEC-88) but is excluded from the shopping list (the meal was
+// already bought when it was cooked). `takeaway` / `other` carry no recipe —
+// they're bare markers. Non-null iff `slot_type = 'leftovers'` (CHECK below).
+export const leftoversSource = pgEnum('leftovers_source', [
+  'plan_meal',
+  'takeaway',
+  'other',
+]);
+
 // A slot item is one dish on an occasion. `eat` = consumed here (a main, side,
 // or dessert); `cook_ahead` = a base produced here in bulk for later meals to
 // draw on (replaces the old per-slot `cooks_base_*` fields). Composable
@@ -88,6 +100,9 @@ export const mealPlanSlots = pgTable(
       .notNull()
       .references(() => mealOccasions.id, { onDelete: 'restrict' }),
     slotType: slotType().notNull(),
+    // Set only on `leftovers` slots (CHECK below). For `plan_meal` the eaten
+    // dish is the slot's single `eat` item; `takeaway` / `other` are markers.
+    leftoversSource: leftoversSource(),
     chefUserId: text().references(() => users.id, { onDelete: 'set null' }),
     comment: text(),
     // Extra diners with no app account (kids, guests). The named household
@@ -111,6 +126,10 @@ export const mealPlanSlots = pgTable(
     check(
       'meal_plan_slots_guest_count_non_negative',
       sql`${table.guestCount} >= 0`,
+    ),
+    check(
+      'meal_plan_slots_leftovers_source_coupling',
+      sql`(${table.slotType} = 'leftovers') = (${table.leftoversSource} is not null)`,
     ),
   ],
 );

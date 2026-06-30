@@ -125,7 +125,31 @@ export function SlotCell({
   );
 }
 
+const LEFTOVERS_SOURCE_LABEL: Record<
+  Exclude<NonNullable<PlanSlot['leftoversSource']>, 'plan_meal'>,
+  string
+> = {
+  takeaway: 'Takeaway',
+  other: 'Other',
+};
+
 function SlotBody({ slot }: { slot: PlanSlot }): React.ReactElement {
+  if (slot.slotType === 'leftovers') {
+    const dish = slot.items[0];
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs text-muted-foreground">Leftovers</span>
+        <span className="min-w-0 truncate font-medium">
+          {dish
+            ? `${dish.recipeName} ×${String(dish.servings)}`
+            : slot.leftoversSource !== null &&
+                slot.leftoversSource !== 'plan_meal'
+              ? LEFTOVERS_SOURCE_LABEL[slot.leftoversSource]
+              : '—'}
+        </span>
+      </div>
+    );
+  }
   if (slot.items.length > 0) {
     return (
       <div className="flex flex-col gap-0.5">
@@ -178,6 +202,15 @@ function describeSlotForA11y(slot: PlanSlot, shortBy?: number): string {
   const headcount = slot.dinerUserIds.length + slot.guestCount;
   const eating = headcount > 0 ? `, ${String(headcount)} eating` : '';
   const base = `${slot.occasionName} on ${slot.date}`;
+  if (slot.slotType === 'leftovers') {
+    const dish = slot.items[0];
+    const what = dish
+      ? `${dish.recipeName} ×${String(dish.servings)}`
+      : slot.leftoversSource !== null && slot.leftoversSource !== 'plan_meal'
+        ? LEFTOVERS_SOURCE_LABEL[slot.leftoversSource]
+        : 'unset';
+    return `${base}: leftovers, ${what}${short}${eating}${note}`;
+  }
   if (slot.items.length > 0) {
     const names = slot.items
       .map((item) => describeItemForA11y(item))

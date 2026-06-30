@@ -159,6 +159,8 @@ async function loadHouseholdPlan(tx: Tx, id: number): Promise<PlanRow> {
 // without an `is_deleted` filter — historical plans still aggregate (DEC-21/22).
 // A serving-variation `eat` item contributes only its own ingredient rows; the
 // base flows through the cook-ahead path — the no-double-count invariant.
+// Scoped to `recipe` slots: a `leftovers` slot's `eat` item is food already
+// cooked (and bought) earlier in the plan, so it must not re-enter the list.
 async function selectMealRecipeContributions(
   tx: Tx,
   planId: number,
@@ -166,6 +168,7 @@ async function selectMealRecipeContributions(
   const rows = await itemContributionQuery(tx).where(
     and(
       eq(mealPlanSlotItems.kind, 'eat'),
+      eq(mealPlanSlots.slotType, 'recipe'),
       eq(mealPlans.id, planId),
       eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
     ),
@@ -200,6 +203,7 @@ async function selectIngredientContributions(
     itemContributionQuery(tx).where(
       and(
         eq(mealPlanSlotItems.kind, 'eat'),
+        eq(mealPlanSlots.slotType, 'recipe'),
         eq(mealPlans.id, planId),
         eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
         eq(ingredients.id, ingredientId),

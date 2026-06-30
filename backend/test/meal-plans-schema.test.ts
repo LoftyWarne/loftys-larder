@@ -291,9 +291,13 @@ describe('meal plans and shopping list schema', () => {
         { slotType: 'leftovers' as const, date: new Date('2026-06-05') },
       ];
       for (const { slotType, date } of rows) {
-        await db
-          .insert(mealPlanSlots)
-          .values({ planId, date, occasionId, slotType });
+        await db.insert(mealPlanSlots).values({
+          planId,
+          date,
+          occasionId,
+          slotType,
+          leftoversSource: slotType === 'leftovers' ? 'other' : null,
+        });
       }
       const inserted = await db
         .select({ slotType: mealPlanSlots.slotType })
@@ -320,6 +324,49 @@ describe('meal plans and shopping list schema', () => {
         }),
         'meal_plan_slots_plan_date_occasion_unique',
       );
+    });
+
+    it('rejects a leftovers slot without a leftovers_source', async () => {
+      const { occasionId } = await seedFixtures(db);
+      const planId = await insertPlan(db);
+      await expectConstraintViolation(
+        db.insert(mealPlanSlots).values({
+          planId,
+          date: new Date('2026-06-01'),
+          occasionId,
+          slotType: 'leftovers',
+        }),
+        'meal_plan_slots_leftovers_source_coupling',
+      );
+    });
+
+    it('rejects a non-leftovers slot that carries a leftovers_source', async () => {
+      const { occasionId } = await seedFixtures(db);
+      const planId = await insertPlan(db);
+      await expectConstraintViolation(
+        db.insert(mealPlanSlots).values({
+          planId,
+          date: new Date('2026-06-01'),
+          occasionId,
+          slotType: 'recipe',
+          leftoversSource: 'other',
+        }),
+        'meal_plan_slots_leftovers_source_coupling',
+      );
+    });
+
+    it('accepts a leftovers slot with a leftovers_source', async () => {
+      const { occasionId } = await seedFixtures(db);
+      const planId = await insertPlan(db);
+      await expect(
+        db.insert(mealPlanSlots).values({
+          planId,
+          date: new Date('2026-06-01'),
+          occasionId,
+          slotType: 'leftovers',
+          leftoversSource: 'plan_meal',
+        }),
+      ).resolves.toBeDefined();
     });
   });
 

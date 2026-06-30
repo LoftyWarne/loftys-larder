@@ -12,6 +12,7 @@ const BASE_SLOT: PlanSlot = {
   occasionId: 1,
   occasionName: 'Dinner',
   slotType: 'empty',
+  leftoversSource: null,
   chefUserId: null,
   comment: null,
   items: [],
@@ -210,5 +211,36 @@ describe('SlotCell', () => {
     );
     expect(screen.getByText('Curry Base')).toBeInTheDocument();
     expect(screen.getByTestId('recipe-type-badge')).toHaveTextContent('Base');
+  });
+
+  it('renders a plan-meal leftover with the source dish and servings', () => {
+    render(
+      <SlotCell
+        slot={{
+          ...BASE_SLOT,
+          slotType: 'leftovers',
+          leftoversSource: 'plan_meal',
+          items: [eatItem({ recipeName: 'Tomato pasta', servings: 2 })],
+        }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Leftovers')).toBeInTheDocument();
+    expect(screen.getByText('Tomato pasta ×2')).toBeInTheDocument();
+  });
+
+  it('renders a takeaway leftover with the source label', () => {
+    render(
+      <SlotCell
+        slot={{
+          ...BASE_SLOT,
+          slotType: 'leftovers',
+          leftoversSource: 'takeaway',
+        }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Leftovers')).toBeInTheDocument();
+    expect(screen.getByText('Takeaway')).toBeInTheDocument();
   });
 });

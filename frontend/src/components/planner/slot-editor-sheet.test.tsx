@@ -68,6 +68,7 @@ const RECIPE_SLOT: PlanSlot = {
   occasionId: 2,
   occasionName: 'Dinner',
   slotType: 'recipe',
+  leftoversSource: null,
   chefUserId: null,
   comment: null,
   items: [eat()],
@@ -473,5 +474,197 @@ describe("SlotEditorSheet — who's eating", () => {
     expect(input.items).toEqual([
       expect.objectContaining({ recipeId: 50, kind: 'eat', servings: 4 }),
     ]);
+  });
+});
+
+describe('SlotEditorSheet — leftovers', () => {
+  const EMPTY_SLOT: PlanSlot = {
+    id: 9,
+    planId: 1,
+    date: '2026-06-17',
+    occasionId: 2,
+    occasionName: 'Dinner',
+    slotType: 'empty',
+    leftoversSource: null,
+    chefUserId: null,
+    comment: null,
+    items: [],
+    dinerUserIds: [],
+    guestCount: 0,
+  };
+
+  // A Cooking slot dated before EMPTY_SLOT — its dish is a plan-meal option.
+  const EARLIER_COOKING: PlanSlot = {
+    id: 3,
+    planId: 1,
+    date: '2026-06-15',
+    occasionId: 2,
+    occasionName: 'Dinner',
+    slotType: 'recipe',
+    leftoversSource: null,
+    chefUserId: null,
+    comment: null,
+    items: [eat({ recipeId: 10, recipeName: 'Tomato Pasta', servings: 6 })],
+    dinerUserIds: [],
+    guestCount: 0,
+  };
+
+  function renderLeftovers(onSave = vi.fn()): typeof onSave {
+    render(
+      <SlotEditorSheet
+        open
+        slot={EMPTY_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[EARLIER_COOKING, EMPTY_SLOT]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+    return onSave;
+  }
+
+  it('lists earlier cooking meals plus Takeaway and Other once Leftovers is picked', async () => {
+    const user = userEvent.setup();
+    renderLeftovers();
+    await user.click(screen.getByText('Leftovers'));
+    const select = screen.getByLabelText('Leftovers of which meal');
+    const options = Array.from(
+      select.querySelectorAll('option'),
+      (o) => o.textContent,
+    );
+    expect(options).toEqual(
+      expect.arrayContaining(['Tomato Pasta', 'Takeaway', 'Other']),
+    );
+  });
+
+  it('does not offer the current or later slots as plan meals', async () => {
+    const user = userEvent.setup();
+    render(
+      <SlotEditorSheet
+        open
+        slot={EARLIER_COOKING}
+        members={[]}
+        isSaving={false}
+        // EARLIER_COOKING is the first slot — nothing is before it.
+        slots={[EARLIER_COOKING, EMPTY_SLOT]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    await user.click(screen.getByText('Leftovers'));
+    const select = screen.getByLabelText('Leftovers of which meal');
+    expect(Array.from(select.querySelectorAll('optgroup'))).toHaveLength(0);
+  });
+
+  it('saves a plan-meal leftover as one eat item linked to the source recipe', async () => {
+    const user = userEvent.setup();
+    const onSave = renderLeftovers();
+    await user.click(screen.getByText('Leftovers'));
+    await user.selectOptions(
+      screen.getByLabelText('Leftovers of which meal'),
+      'recipe:10',
+    );
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.slotType).toBe('leftovers');
+    expect(input.leftoversSource).toBe('plan_meal');
+    expect(input.items).toEqual([
+      expect.objectContaining({ recipeId: 10, kind: 'eat' }),
+    ]);
+  });
+
+  it('saves a takeaway leftover as a bare marker with no items', async () => {
+    const user = userEvent.setup();
+    const onSave = renderLeftovers();
+    await user.click(screen.getByText('Leftovers'));
+    await user.selectOptions(
+      screen.getByLabelText('Leftovers of which meal'),
+      'takeaway',
+    );
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.slotType).toBe('leftovers');
+    expect(input.leftoversSource).toBe('takeaway');
+    expect(input.items).toEqual([]);
+  });
+
+  it('does not save while no leftovers source is chosen', async () => {
+    const user = userEvent.setup();
+    const onSave = renderLeftovers();
+    await user.click(screen.getByText('Leftovers'));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  // A variation of base 22 eaten earlier, with no base 22 cooked anywhere — so
+  // eating its leftovers runs the (empty) base pool short.
+  const EARLIER_VARIATION: PlanSlot = {
+    ...EARLIER_COOKING,
+    items: [
+      eat({ recipeId: 10, recipeName: 'Pasta', baseRecipeId: 22, servings: 4 }),
+    ],
+  };
+
+  it('frames a non-base leftover shortfall around the meal, not the base', async () => {
+    const user = userEvent.setup();
+    render(
+      <SlotEditorSheet
+        open
+        slot={EMPTY_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[EARLIER_VARIATION, EMPTY_SLOT]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    await user.click(screen.getByText('Leftovers'));
+    await user.selectOptions(
+      screen.getByLabelText('Leftovers of which meal'),
+      'recipe:10',
+    );
+    expect(screen.getByTestId('serving-variation-warning')).toHaveTextContent(
+      'Not enough of this meal prepared',
+    );
+  });
+
+  // A base eaten earlier with nothing cooked ahead — its leftover is a true
+  // base-pool deficit, so it keeps the base wording.
+  const EARLIER_BASE: PlanSlot = {
+    ...EARLIER_COOKING,
+    items: [
+      cook({ recipeId: 22, recipeName: 'Base', servings: 2 }),
+      eat({ recipeId: 22, recipeName: 'Base', isBase: true, servings: 2 }),
+    ],
+  };
+
+  it('keeps the base wording for a leftover of a base', async () => {
+    const user = userEvent.setup();
+    render(
+      <SlotEditorSheet
+        open
+        slot={EMPTY_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[EARLIER_BASE, EMPTY_SLOT]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    await user.click(screen.getByText('Leftovers'));
+    await user.selectOptions(
+      screen.getByLabelText('Leftovers of which meal'),
+      'recipe:22',
+    );
+    expect(screen.getByTestId('serving-variation-warning')).toHaveTextContent(
+      'Not enough base cooked yet',
+    );
   });
 });

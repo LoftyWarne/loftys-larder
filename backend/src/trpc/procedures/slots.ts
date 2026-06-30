@@ -68,6 +68,7 @@ export const slotsRouter = router({
           .update(mealPlanSlots)
           .set({
             slotType: input.slotType,
+            leftoversSource: input.leftoversSource,
             chefUserId: input.chefUserId,
             comment: input.comment,
             guestCount: input.guestCount,
@@ -154,6 +155,7 @@ interface SlotMeta {
   id: number;
   planId: number;
   slotType: typeof mealPlanSlots.$inferSelect.slotType;
+  leftoversSource: typeof mealPlanSlots.$inferSelect.leftoversSource;
   chefUserId: string | null;
   comment: string | null;
   guestCount: number;
@@ -161,12 +163,13 @@ interface SlotMeta {
 
 type MetaPatch = Pick<
   SlotMeta,
-  'slotType' | 'chefUserId' | 'comment' | 'guestCount'
+  'slotType' | 'leftoversSource' | 'chefUserId' | 'comment' | 'guestCount'
 >;
 
 function metaPatch(slot: SlotMeta): MetaPatch {
   return {
     slotType: slot.slotType,
+    leftoversSource: slot.leftoversSource,
     chefUserId: slot.chefUserId,
     comment: slot.comment,
     guestCount: slot.guestCount,
@@ -174,7 +177,13 @@ function metaPatch(slot: SlotMeta): MetaPatch {
 }
 
 function emptyMetaPatch(): MetaPatch {
-  return { slotType: 'empty', chefUserId: null, comment: null, guestCount: 0 };
+  return {
+    slotType: 'empty',
+    leftoversSource: null,
+    chefUserId: null,
+    comment: null,
+    guestCount: 0,
+  };
 }
 
 // Replace the slot's items with `items`, reinserting in the given order. The
@@ -295,6 +304,7 @@ async function loadHouseholdSlotContent(
       id: mealPlanSlots.id,
       planId: mealPlanSlots.planId,
       slotType: mealPlanSlots.slotType,
+      leftoversSource: mealPlanSlots.leftoversSource,
       chefUserId: mealPlanSlots.chefUserId,
       comment: mealPlanSlots.comment,
       guestCount: mealPlanSlots.guestCount,
@@ -419,6 +429,7 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
       occasionId: mealPlanSlots.occasionId,
       occasionName: mealOccasions.name,
       slotType: mealPlanSlots.slotType,
+      leftoversSource: mealPlanSlots.leftoversSource,
       chefUserId: mealPlanSlots.chefUserId,
       comment: mealPlanSlots.comment,
       guestCount: mealPlanSlots.guestCount,
@@ -443,6 +454,7 @@ async function selectSlotById(db: DbHandle, slotId: number): Promise<PlanSlot> {
     occasionId: row.occasionId,
     occasionName: row.occasionName,
     slotType: row.slotType,
+    leftoversSource: row.leftoversSource,
     chefUserId: row.chefUserId,
     comment: row.comment,
     items,

@@ -29,6 +29,13 @@ export const slotTypeSchema = z.enum([
 ]);
 export type SlotType = z.infer<typeof slotTypeSchema>;
 
+// What a `leftovers` slot is eating (mirrors the Postgres `leftovers_source`
+// enum). `plan_meal` carries the eaten dish as the slot's single `eat` item
+// (FK to the recipe); `takeaway` / `other` are bare markers. Present iff the
+// slot is `leftovers`.
+export const leftoversSourceSchema = z.enum(['plan_meal', 'takeaway', 'other']);
+export type LeftoversSource = z.infer<typeof leftoversSourceSchema>;
+
 // A dish on a slot (DEC-89). `eat` = consumed here; `cook_ahead` = a base
 // produced here in bulk for later meals.
 export const slotItemKindSchema = z.enum(['eat', 'cook_ahead']);
@@ -58,6 +65,9 @@ export const planSlotSchema = z.object({
   occasionId: occasionIdSchema,
   occasionName: z.string(),
   slotType: slotTypeSchema,
+  // Set only on `leftovers` slots; `null` otherwise. `plan_meal` slots also
+  // carry the eaten dish in `items` (one `eat` row).
+  leftoversSource: leftoversSourceSchema.nullable(),
   chefUserId: z.string().nullable(),
   comment: z.string().nullable(),
   items: z.array(planSlotItemSchema),

@@ -46,6 +46,7 @@ function slot(spec: SlotSpec): PlanSlot {
     occasionId: occasionName === 'Lunch' ? 1 : 2,
     occasionName,
     slotType: items.some((i) => i.kind === 'eat') ? 'recipe' : 'empty',
+    leftoversSource: null,
     chefUserId: null,
     comment: null,
     items: items.map(item),

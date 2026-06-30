@@ -187,6 +187,7 @@ describe('slots procedures', () => {
         date: today,
         occasionId,
         slotType: 'empty',
+        leftoversSource: null,
         ...overrides,
       })
       .returning({ id: mealPlanSlots.id });
@@ -278,6 +279,7 @@ describe('slots procedures', () => {
         dinerUserIds: [],
         guestCount: 0,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [
@@ -306,6 +308,7 @@ describe('slots procedures', () => {
         dinerUserIds: [],
         guestCount: 0,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [{ recipeId: b, servings: 3, kind: 'eat', sortOrder: 0 }],
@@ -326,6 +329,7 @@ describe('slots procedures', () => {
         dinerUserIds: [],
         guestCount: 0,
         slotType: 'eat_out',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [],
@@ -345,6 +349,7 @@ describe('slots procedures', () => {
         dinerUserIds: [],
         guestCount: 0,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: USER_ID,
         comment: 'extra spicy',
         items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
@@ -364,6 +369,7 @@ describe('slots procedures', () => {
           dinerUserIds: [],
           guestCount: 0,
           slotType: 'recipe',
+          leftoversSource: null,
           chefUserId: 'ghost-user',
           comment: null,
           items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
@@ -381,6 +387,7 @@ describe('slots procedures', () => {
           dinerUserIds: [],
           guestCount: 0,
           slotType: 'empty',
+          leftoversSource: null,
           chefUserId: null,
           comment: null,
           items: [],
@@ -398,6 +405,7 @@ describe('slots procedures', () => {
           dinerUserIds: [],
           guestCount: 0,
           slotType: 'empty',
+          leftoversSource: null,
           chefUserId: null,
           comment: null,
           items: [],
@@ -418,6 +426,7 @@ describe('slots procedures', () => {
         dinerUserIds: [],
         guestCount: 0,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [
@@ -440,6 +449,7 @@ describe('slots procedures', () => {
         dinerUserIds: [],
         guestCount: 0,
         slotType: 'eat_out',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [
@@ -461,6 +471,7 @@ describe('slots procedures', () => {
           dinerUserIds: [],
           guestCount: 0,
           slotType: 'eat_out',
+          leftoversSource: null,
           chefUserId: null,
           comment: null,
           items: [
@@ -490,6 +501,7 @@ describe('slots procedures', () => {
           dinerUserIds: [],
           guestCount: 0,
           slotType: 'recipe',
+          leftoversSource: null,
           chefUserId: null,
           comment: null,
           items: [{ recipeId: gone, servings: 2, kind: 'eat', sortOrder: 0 }],
@@ -513,6 +525,7 @@ describe('slots procedures', () => {
         dinerUserIds: [],
         guestCount: 0,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [{ recipeId: r, servings: 3, kind: 'eat', sortOrder: 0 }],
@@ -533,6 +546,7 @@ describe('slots procedures', () => {
           dinerUserIds: [],
           guestCount: 0,
           slotType: 'recipe',
+          leftoversSource: null,
           chefUserId: null,
           comment: null,
           items: [
@@ -572,6 +586,7 @@ describe('slots procedures', () => {
       const destId = await insertSlot(planId, {
         occasionId: secondOccasionId,
         slotType: 'recipe',
+        leftoversSource: null,
       });
       const a = await insertRecipe('A');
       const b = await insertRecipe('B');
@@ -628,6 +643,7 @@ describe('slots procedures', () => {
       await caller.slots.update({
         slotId,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [{ recipeId, servings: 4, kind: 'eat', sortOrder: 0 }],
@@ -646,6 +662,7 @@ describe('slots procedures', () => {
       const result = await caller.slots.update({
         slotId,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [{ recipeId: r, servings: 4, kind: 'eat', sortOrder: 0 }],
@@ -665,6 +682,7 @@ describe('slots procedures', () => {
       await caller.slots.update({
         slotId,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
@@ -674,6 +692,7 @@ describe('slots procedures', () => {
       const result = await caller.slots.update({
         slotId,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
@@ -693,6 +712,7 @@ describe('slots procedures', () => {
       await caller.slots.update({
         slotId,
         slotType: 'recipe',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
@@ -702,6 +722,7 @@ describe('slots procedures', () => {
       const result = await caller.slots.update({
         slotId,
         slotType: 'empty',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [],
@@ -722,6 +743,7 @@ describe('slots procedures', () => {
         caller.slots.update({
           slotId,
           slotType: 'recipe',
+          leftoversSource: null,
           chefUserId: null,
           comment: null,
           items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],

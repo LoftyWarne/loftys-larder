@@ -128,6 +128,7 @@ const EMPTY_SLOT: PlanSlot = {
   occasionId: 1,
   occasionName: 'Lunch',
   slotType: 'empty',
+  leftoversSource: null,
   chefUserId: null,
   comment: null,
   items: [],
@@ -267,6 +268,7 @@ describe('PlannerPage', () => {
     expect(payload).toEqual({
       slotId: 100,
       slotType: 'recipe',
+      leftoversSource: null,
       chefUserId: null,
       comment: null,
       items: [{ recipeId: 10, servings: 2, kind: 'eat', sortOrder: 0 }],
@@ -360,6 +362,7 @@ describe('PlannerPage', () => {
     expect(payload).toEqual({
       slotId: 101,
       slotType: 'empty',
+      leftoversSource: null,
       chefUserId: null,
       comment: null,
       items: [],
@@ -387,6 +390,7 @@ describe('PlannerPage', () => {
     expect(payload).toEqual({
       slotId: 101,
       slotType: 'empty',
+      leftoversSource: null,
       chefUserId: null,
       comment: null,
       items: [],

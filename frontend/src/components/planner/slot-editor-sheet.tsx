@@ -1,12 +1,16 @@
 import type {
   HouseholdMember,
+  LeftoversSource,
   PlanSlot,
   PlanSlotItem,
   RecipeListItem,
   SlotType,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
-import { SLOT_COMMENT_MAX_LENGTH } from '@loftys-larder/shared';
+import {
+  compareOccasionByName,
+  SLOT_COMMENT_MAX_LENGTH,
+} from '@loftys-larder/shared';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
@@ -77,6 +81,9 @@ interface EditorItem {
 
 interface EditorState {
   slotType: SlotType;
+  // Set only when slotType is `leftovers`. `plan_meal` pairs with a single
+  // `eat` item in `items` (the dish being eaten); `takeaway` / `other` clear it.
+  leftoversSource: LeftoversSource | null;
   chefUserId: string | null;
   comment: string;
   items: EditorItem[];
@@ -141,6 +148,7 @@ export function SlotEditorSheet({
     setIsAddingDish(false);
     setState({
       slotType: slot.slotType,
+      leftoversSource: slot.leftoversSource,
       chefUserId: slot.chefUserId,
       comment: slot.comment ?? '',
       items: slot.items.map((item) => ({
@@ -186,23 +194,43 @@ export function SlotEditorSheet({
   // in-progress items into the plan in place of the saved slot so the
   // shortfall warning and "left in plan" track what the user is adding, not
   // the last-saved state. Dishes only count on a "Cooking" slot.
+  // Meals prepared on earlier "Cooking" slots in this plan — the leftovers
+  // picker's plan-meal options. Deduped by recipe so a dish that recurs lists
+  // once. "Earlier" is (date, occasion) order, matching the consumption walk.
+  const earlierMeals = useMemo(() => {
+    if (!slot) return [];
+    const byRecipe = new Map<number, PlanSlotItem>();
+    for (const candidate of slots) {
+      if (candidate.slotType !== 'recipe') continue;
+      if (!isSlotBefore(candidate, slot)) continue;
+      for (const item of candidate.items) {
+        if (!byRecipe.has(item.recipeId)) byRecipe.set(item.recipeId, item);
+      }
+    }
+    return [...byRecipe.values()];
+  }, [slots, slot]);
+
   const liveBalances = useMemo(() => {
     if (!slot || !state) return null;
-    const liveItems: PlanSlotItem[] =
-      state.slotType === 'recipe'
-        ? state.items.map((item, index) => ({
-            id: index + 1,
-            recipeId: item.recipeId,
-            recipeName: item.name,
-            recipeImageUrl: item.imageUrl,
-            isBase: item.isBase,
-            baseRecipeId: item.baseRecipeId,
-            isDeleted: item.isDeleted,
-            servings: Number.parseInt(item.servings, 10) || 0,
-            kind: item.kind,
-            sortOrder: index,
-          }))
-        : [];
+    // A leftovers-of-a-plan-meal slot draws the base pool down too, so its one
+    // eat item counts here exactly like a Cooking slot's dishes.
+    const itemsCount =
+      state.slotType === 'recipe' ||
+      (state.slotType === 'leftovers' && state.leftoversSource === 'plan_meal');
+    const liveItems: PlanSlotItem[] = itemsCount
+      ? state.items.map((item, index) => ({
+          id: index + 1,
+          recipeId: item.recipeId,
+          recipeName: item.name,
+          recipeImageUrl: item.imageUrl,
+          isBase: item.isBase,
+          baseRecipeId: item.baseRecipeId,
+          isDeleted: item.isDeleted,
+          servings: Number.parseInt(item.servings, 10) || 0,
+          kind: item.kind,
+          sortOrder: index,
+        }))
+      : [];
     return deriveBaseBalances([
       ...slots.filter((s) => s.id !== slot.id),
       { ...slot, slotType: state.slotType, items: liveItems },
@@ -249,6 +277,7 @@ export function SlotEditorSheet({
       {
         slotId: slot.id,
         slotType: 'empty',
+        leftoversSource: null,
         chefUserId: null,
         comment: null,
         items: [],
@@ -305,9 +334,20 @@ export function SlotEditorSheet({
                     value={option.value}
                     checked={state.slotType === option.value}
                     onChange={() => {
-                      setState((prev) =>
-                        prev ? { ...prev, slotType: option.value } : prev,
-                      );
+                      setState((prev) => {
+                        // No-op when re-selecting the current type, so a
+                        // leftovers slot doesn't lose its picked meal.
+                        if (!prev || prev.slotType === option.value)
+                          return prev;
+                        return {
+                          ...prev,
+                          slotType: option.value,
+                          // Leftovers starts unpicked; any other type has no
+                          // source. Dishes only survive on a Cooking slot.
+                          leftoversSource: null,
+                          items: option.value === 'recipe' ? prev.items : [],
+                        };
+                      });
                     }}
                     className="sr-only"
                   />
@@ -514,6 +554,81 @@ export function SlotEditorSheet({
             </label>
           )}
 
+          {state.slotType === 'leftovers' && (
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">Which meal?</legend>
+              <select
+                value={leftoversSelectValue(state)}
+                aria-label="Leftovers of which meal"
+                onChange={(event) => {
+                  setState((prev) =>
+                    prev
+                      ? applyLeftoversChoice(
+                          prev,
+                          event.target.value,
+                          earlierMeals,
+                        )
+                      : prev,
+                  );
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">Select a meal…</option>
+                {earlierMeals.length > 0 && (
+                  <optgroup label="Prepared earlier in this plan">
+                    {earlierMeals.map((meal) => (
+                      <option
+                        key={meal.recipeId}
+                        value={`recipe:${String(meal.recipeId)}`}
+                      >
+                        {meal.recipeName}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value="takeaway">Takeaway</option>
+                <option value="other">Other</option>
+              </select>
+
+              {state.leftoversSource === 'plan_meal' && state.items[0] && (
+                <label className="flex items-center gap-2 text-sm">
+                  <span>Servings</span>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={state.items[0].servings}
+                    aria-label={`Servings for ${state.items[0].name}`}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              items: prev.items.map((it, i) =>
+                                i === 0 ? { ...it, servings: value } : it,
+                              ),
+                            }
+                          : prev,
+                      );
+                    }}
+                    required
+                    className="w-20"
+                  />
+                </label>
+              )}
+
+              {shortBy !== undefined && shortBy > 0 && (
+                <ServingVariationWarning
+                  shortBy={shortBy}
+                  // Eating a base's leftovers is a base-pool deficit; eating a
+                  // non-base meal's leftovers is "the meal didn't make enough".
+                  variant={state.items[0]?.isBase ? 'base' : 'meal'}
+                />
+              )}
+            </fieldset>
+          )}
+
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">
               Who&apos;s eating{' '}
@@ -635,6 +750,60 @@ function headcountOf(state: EditorState): number {
   );
 }
 
+// (date, occasion) ordering — is `a` strictly before `b`? Mirrors the
+// consumption walk's order so "prepared earlier" lines up with what draws the
+// base pool down.
+function isSlotBefore(a: PlanSlot, b: PlanSlot): boolean {
+  if (a.date !== b.date) return a.date < b.date;
+  return compareOccasionByName(a.occasionName, b.occasionName) < 0;
+}
+
+// The `<select>` value mirroring the editor's leftovers state: a `recipe:<id>`
+// token for a plan meal, the bare source for takeaway/other, else empty.
+function leftoversSelectValue(state: EditorState): string {
+  if (state.leftoversSource === 'plan_meal') {
+    const item = state.items[0];
+    return item ? `recipe:${String(item.recipeId)}` : '';
+  }
+  return state.leftoversSource ?? '';
+}
+
+// Fold a leftovers-picker choice back into editor state. A plan meal becomes
+// the slot's single `eat` item (servings default to the headcount, falling back
+// to the original serving count); takeaway/other clear the items.
+function applyLeftoversChoice(
+  state: EditorState,
+  value: string,
+  earlierMeals: readonly PlanSlotItem[],
+): EditorState {
+  if (value === 'takeaway' || value === 'other') {
+    return { ...state, leftoversSource: value, items: [] };
+  }
+  const recipeId = value.startsWith('recipe:')
+    ? Number.parseInt(value.slice('recipe:'.length), 10)
+    : NaN;
+  const meal = earlierMeals.find((item) => item.recipeId === recipeId);
+  if (!meal) return { ...state, leftoversSource: null, items: [] };
+  const headcount = headcountOf(state);
+  const servings = headcount > 0 ? headcount : meal.servings;
+  return {
+    ...state,
+    leftoversSource: 'plan_meal',
+    items: [
+      {
+        recipeId: meal.recipeId,
+        name: meal.recipeName,
+        imageUrl: meal.recipeImageUrl,
+        isBase: meal.isBase,
+        baseRecipeId: meal.baseRecipeId,
+        isDeleted: meal.isDeleted,
+        servings: String(servings),
+        kind: 'eat',
+      },
+    ],
+  };
+}
+
 interface BuiltSave {
   input: UpdateSlotInput;
   optimisticItems: PlanSlotItem[];
@@ -647,10 +816,20 @@ function buildInputForSave(
   const trimmedComment = state.comment.trim();
   const commentValue = trimmedComment === '' ? null : trimmedComment;
 
-  // Dishes and a chef only belong to a "Cooking" slot; any other type clears
-  // them (the Chef field is hidden off the recipe slot too).
-  const items = state.slotType === 'recipe' ? state.items : [];
-  const chefUserId = state.slotType === 'recipe' ? state.chefUserId : null;
+  const isRecipe = state.slotType === 'recipe';
+  const isLeftovers = state.slotType === 'leftovers';
+  const leftoversSource = isLeftovers ? state.leftoversSource : null;
+
+  // A leftovers slot can't save until a meal/takeaway/other is chosen.
+  if (isLeftovers && leftoversSource === null) return null;
+
+  // Dishes live on a "Cooking" slot, or as the single eaten dish of a
+  // leftovers-of-a-plan-meal slot; every other state clears them. A chef only
+  // belongs to a Cooking slot (the field is hidden elsewhere).
+  const keepsItems = isRecipe || leftoversSource === 'plan_meal';
+  const items = keepsItems ? state.items : [];
+  if (leftoversSource === 'plan_meal' && items.length !== 1) return null;
+  const chefUserId = isRecipe ? state.chefUserId : null;
   const parsed: { item: EditorItem; servings: number }[] = [];
   for (const item of items) {
     const servings = Number.parseInt(item.servings, 10);
@@ -667,6 +846,7 @@ function buildInputForSave(
   const input: UpdateSlotInput = {
     slotId: slot.id,
     slotType: state.slotType,
+    leftoversSource,
     chefUserId,
     comment: commentValue,
     items: parsed.map(({ item, servings }, index) => ({

@@ -291,6 +291,7 @@ describe('shopping procedures', () => {
         date: options.date,
         occasionId: options.occasionId,
         slotType: options.slotType,
+        leftoversSource: options.slotType === 'leftovers' ? 'other' : null,
       })
       .returning({ id: mealPlanSlots.id });
     const row = inserted[0];

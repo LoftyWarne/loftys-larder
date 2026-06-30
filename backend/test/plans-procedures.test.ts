@@ -488,7 +488,7 @@ describe('plans procedures', () => {
         .where(eq(mealPlanSlots.id, secondSlot.id));
       await db
         .update(mealPlanSlots)
-        .set({ slotType: 'leftovers' })
+        .set({ slotType: 'leftovers', leftoversSource: 'other' })
         .where(eq(mealPlanSlots.id, thirdSlot.id));
 
       const result = await caller.plans.list({ status: 'active' });

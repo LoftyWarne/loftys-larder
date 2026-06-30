@@ -60,6 +60,7 @@ const SLOT_EMPTY: PlanSlot = {
   occasionId: 2,
   occasionName: 'Dinner',
   slotType: 'empty',
+  leftoversSource: null,
   chefUserId: null,
   comment: null,
   items: [],
@@ -91,6 +92,7 @@ const ITEM_PREVIEW: PlanSlotItem = {
 const ASSIGN_INPUT: UpdateSlotInput = {
   slotId: 5,
   slotType: 'recipe',
+  leftoversSource: null,
   chefUserId: null,
   comment: null,
   items: [{ recipeId: 10, servings: 2, kind: 'eat', sortOrder: 0 }],

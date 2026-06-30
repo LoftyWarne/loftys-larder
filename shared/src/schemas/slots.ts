@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { planSlotSchema, slotItemKindSchema, slotTypeSchema } from './plans.ts';
+import {
+  leftoversSourceSchema,
+  planSlotSchema,
+  slotItemKindSchema,
+  slotTypeSchema,
+} from './plans.ts';
 
 const slotIdSchema = z.number().int().positive();
 const recipeIdSchema = z.number().int().positive();
@@ -39,6 +44,10 @@ export const updateSlotInputSchema = z
   .object({
     slotId: slotIdSchema,
     slotType: slotTypeSchema,
+    // Required (and only allowed) when slotType is `leftovers`. `plan_meal`
+    // pairs with exactly one `eat` item (the dish being eaten as leftovers);
+    // `takeaway` / `other` carry no items.
+    leftoversSource: leftoversSourceSchema.nullable(),
     chefUserId: z.string().min(1).nullable(),
     comment: slotCommentSchema.nullable(),
     items: z.array(slotItemInputSchema),
@@ -51,14 +60,32 @@ export const updateSlotInputSchema = z
     guestCount: z.number().int().nonnegative(),
   })
   .refine(
+    (value) =>
+      (value.slotType === 'leftovers') === (value.leftoversSource !== null),
+    {
+      path: ['leftoversSource'],
+      message:
+        'leftoversSource is required when slotType is leftovers, and not allowed otherwise',
+    },
+  )
+  .refine(
     (value) => {
-      const hasEat = value.items.some((item) => item.kind === 'eat');
-      return value.slotType === 'recipe' ? hasEat : !hasEat;
+      const eatCount = value.items.filter((item) => item.kind === 'eat').length;
+      // A `recipe` slot is the eaten meal: at least one `eat` dish.
+      if (value.slotType === 'recipe') return eatCount >= 1;
+      // `leftovers` of a planned meal: exactly the one eaten dish, no cooks.
+      if (value.slotType === 'leftovers') {
+        return value.leftoversSource === 'plan_meal'
+          ? value.items.length === 1 && value.items[0]?.kind === 'eat'
+          : value.items.length === 0;
+      }
+      // empty / eat_out / takeaway: nothing eaten here.
+      return eatCount === 0;
     },
     {
       path: ['items'],
       message:
-        'eat items are required when slotType is recipe, and not allowed otherwise',
+        'eat items are required when slotType is recipe, are exactly one for leftovers of a planned meal, and not allowed otherwise',
     },
   )
   .refine(

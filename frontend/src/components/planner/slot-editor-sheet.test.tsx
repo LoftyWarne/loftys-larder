@@ -189,6 +189,23 @@ describe('SlotEditorSheet — meal items', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('opens a base-only empty slot in the Cooking tab with the base shown', () => {
+    render(
+      <SlotEditorSheet
+        open
+        slot={{ ...RECIPE_SLOT, slotType: 'empty', items: [cook()] }}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('radio', { name: 'Cooking' })).toBeChecked();
+    expect(screen.getByText('Dishes')).toBeInTheDocument();
+    expect(screen.getByText('Tomato Base')).toBeInTheDocument();
+  });
+
   it('saves eaten dishes and cooked-ahead bases as one items list', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
@@ -316,6 +333,36 @@ describe('SlotEditorSheet — meal items', () => {
         servings: 6,
       }),
     ]);
+    // DEC-89: no eat item means this isn't a `recipe` occasion. A base-only
+    // slot saves as `empty` while keeping its cook_ahead item (the schema
+    // refine forbids `recipe` with zero eat items).
+    expect(input.slotType).toBe('empty');
+  });
+
+  it('keeps a base alongside an eaten dish as a recipe slot', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      <SlotEditorSheet
+        open
+        slot={SLOT_WITH_BASE}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    // An eat item is present, so the occasion stays `recipe` and the base rides
+    // along as a cook_ahead item.
+    expect(input.slotType).toBe('recipe');
+    expect(input.items.filter((i) => i.kind === 'eat')).toHaveLength(1);
+    expect(input.items.filter((i) => i.kind === 'cook_ahead')).toHaveLength(1);
   });
 
   it('offers to cook the base behind an eaten variation', async () => {

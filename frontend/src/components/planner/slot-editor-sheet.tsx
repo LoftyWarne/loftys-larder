@@ -146,8 +146,17 @@ export function SlotEditorSheet({
       return;
     }
     setIsAddingDish(false);
+    // A base-only occasion is saved as an `empty`-status slot still carrying
+    // its `cook_ahead` items (DEC-89: `recipe` iff ≥1 eat item). The dish list
+    // only renders under "Cooking", so open such a slot in Cooking to surface
+    // the base for editing. An `empty` slot never holds `eat` items, so any
+    // items here are bases.
+    const initialSlotType =
+      slot.slotType === 'empty' && slot.items.length > 0
+        ? 'recipe'
+        : slot.slotType;
     setState({
-      slotType: slot.slotType,
+      slotType: initialSlotType,
       leftoversSource: slot.leftoversSource,
       chefUserId: slot.chefUserId,
       comment: slot.comment ?? '',
@@ -824,12 +833,20 @@ function buildInputForSave(
   if (isLeftovers && leftoversSource === null) return null;
 
   // Dishes live on a "Cooking" slot, or as the single eaten dish of a
-  // leftovers-of-a-plan-meal slot; every other state clears them. A chef only
-  // belongs to a Cooking slot (the field is hidden elsewhere).
+  // leftovers-of-a-plan-meal slot; every other state clears them.
   const keepsItems = isRecipe || leftoversSource === 'plan_meal';
   const items = keepsItems ? state.items : [];
   if (leftoversSource === 'plan_meal' && items.length !== 1) return null;
-  const chefUserId = isRecipe ? state.chefUserId : null;
+
+  // DEC-89: `slot_type='recipe'` iff ≥1 `eat` item; `cook_ahead` bases are
+  // allowed on any slot type. A "Cooking" slot the user filled with only bases
+  // (a batch-prep-only occasion) saves as an `empty`-status slot still carrying
+  // its `cook_ahead` items — the base pool reads items regardless of slot type.
+  const hasEatItem = items.some((item) => item.kind === 'eat');
+  const slotType = isRecipe && !hasEatItem ? 'empty' : state.slotType;
+
+  // A chef only belongs to a Cooking slot (the field is hidden elsewhere).
+  const chefUserId = slotType === 'recipe' ? state.chefUserId : null;
   const parsed: { item: EditorItem; servings: number }[] = [];
   for (const item of items) {
     const servings = Number.parseInt(item.servings, 10);
@@ -843,7 +860,7 @@ function buildInputForSave(
 
   const input: UpdateSlotInput = {
     slotId: slot.id,
-    slotType: state.slotType,
+    slotType,
     leftoversSource,
     chefUserId,
     comment: commentValue,

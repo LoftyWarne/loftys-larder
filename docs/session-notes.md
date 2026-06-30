@@ -4,6 +4,30 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-30 — Base-only occasion saves as an `empty` slot and reopens in Cooking
+
+**Status:** Shipped. Frontend-only (slot editor). No schema, table, or migration change — aligns the save path with DEC-89 as already enforced everywhere else.
+
+### Bug
+
+Saving a "Cooking" slot that held **only a base** (a `cook_ahead` item, no `eat` dish) threw the Zod refine `eat items are required when slotType is recipe…`. The editor sent the literal UI radio value `slotType: 'recipe'`, but DEC-89 is **`slot_type='recipe'` ⟺ ≥1 `eat` item** (`cook_ahead` bases allowed on any slot type). The rest of the system already models a batch-prep-only occasion as an `empty`-status slot carrying a `cook_ahead` item — the base-pool/shopping query (`shopping.ts` `selectCooksBaseContributions`) keys purely on `kind='cook_ahead'` with **no** slot-type filter, the grid renders items regardless of status (`slot-cell.tsx`, before the `empty` branch), and the e2e fixtures/tests assert `data-slot-type="empty"` rendering `Curry base ×8`. Only `buildInputForSave` hadn't adopted the rule.
+
+### Change (`slot-editor-sheet.tsx`)
+
+- **Save:** `buildInputForSave` coerces the saved `slotType` to `'empty'` when the slot is `recipe` but has no `eat` item, keeping the `cook_ahead` items. Chef is derived from the *effective* type, so a coerced-empty slot drops its chef (chef is Cooking-only).
+- **Open:** the init effect opens an `empty` slot that carries items in the **Cooking** tab, so the base is visible and editable (the dish list only renders under "Cooking"). An `empty` slot never holds `eat` items, so any items there are bases. This also auto-handles the legacy "edit requires switching to Cooking" wart from the 2026-06-29 unified-picker note.
+
+### Worth carrying
+
+- **Round-trip:** pick Cooking → add only a base → save (stored `empty` + `cook_ahead`) → reopen lands in Cooking with the base shown → re-save stays `empty`. No eat item ever rides an `empty` slot.
+- **Why the bug escaped tests:** the editor unit tests pass a mocked `onSave`, so the shared Zod refine never ran against the built input. The base-only case existed (`adds a picked base recipe…`) but only asserted `items`, not `slotType`. It now asserts `slotType:'empty'`.
+
+### Verification
+
+`pnpm -r typecheck`, `lint`, `format:check` clean. Frontend **376** pass (2 net-new: base-only save coerces to `empty`; a base-only `empty` slot opens with the Cooking radio checked + base listed; plus the extended `slotType` assertion on the existing pick-a-base case). Definition-of-done boxes left unticked (human action).
+
+---
+
 ## 2026-06-30 — Who's eating persists on every slot type (incl. empty)
 
 **Status:** Shipped. Relaxes a Zod refine + frontend payload; no table/migration change. Reverses the "empty slots carry no attendance" choice flagged as un-DEC'd in the 2026-06-29 who's-eating note.

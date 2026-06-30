@@ -4,6 +4,30 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-06-30 — Who's eating persists on every slot type (incl. empty)
+
+**Status:** Shipped. Relaxes a Zod refine + frontend payload; no table/migration change. Reverses the "empty slots carry no attendance" choice flagged as un-DEC'd in the 2026-06-29 who's-eating note.
+
+### Change
+
+- **Attendance (named diners + guest count) is now orthogonal to the meal — it survives any slot-type selection, including `empty`.** You can record who's eating before deciding what to eat.
+- **Shared Zod (`schemas/slots.ts`):** removed the refine `'an empty slot cannot have diners or guests'`. The `dinerUserIds` field comment now states attendance persists on every type.
+- **Frontend (`slot-editor-sheet.tsx`):** `buildInputForSave` no longer zeroes `dinerUserIds`/`guestCount` when `slotType === 'empty'` — it always sends the live values. (The in-editor slot-type change handler already preserved them via `...prev`; the silent drop was only at save.)
+- **Frontend (`planner-page.tsx`):** `assignSingleEat` now takes the whole `slot` (was just `slotId`) and carries its `dinerUserIds`/`guestCount` through, so bank click-/drag-assigning a recipe onto a slot that already has diners keeps them.
+- **Frontend (`slot-cell.tsx`):** the empty-slot a11y label now appends the "N eating" count. The grid chip needed no change — `SlotDinersChip` returns null at headcount 0 and is already passed to every slot type.
+
+### Worth carrying
+
+- **"Empty" (the radio) ≠ "Clear" (the button).** Choosing the Empty type keeps attendance; the explicit **Clear** button — and the relocate "empty the source" path (`emptyMetaPatch`) — still wipe it. That distinction is the whole model: Empty = "no meal decided, but track who's eating"; Clear = "reset the slot". Don't collapse them.
+- **No backend logic change was needed.** `slots.update` full-replaces diners/guests from the validated input with no slot_type coupling, and `meal_plan_slot_diners` / `guest_count` have no DB-level coupling to slot type. Removing the shared refine was sufficient.
+- **Consider a DEC.** This supersedes the un-DEC'd attendance-on-empty choice; the 2026-06-29 note's open "DEC-29 flag" plus this reversal are both still un-recorded in `design-decisions.md`.
+
+### Verification
+
+`pnpm -r typecheck`, `lint`, `format:check` clean. Frontend **374** pass (new: set diners → switch to Empty → save preserves `dinerUserIds`/`guestCount`/`slotType:'empty'`). Backend Testcontainers **507** pass (new: an empty slot persists provided diners/guests; the existing "drops…when cleared to empty" Clear test still holds). Definition-of-done boxes left unticked (human action).
+
+---
+
 ## 2026-06-30 — Fix failing e2e suite (welcome gate + composable-slot drift)
 
 **Status:** Shipped. e2e workspace only — no app code touched. Full suite (23 tests, incl. axe) green against a freshly rebuilt bundle.

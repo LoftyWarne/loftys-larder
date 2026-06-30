@@ -221,7 +221,7 @@ function describeSlotForA11y(slot: PlanSlot, shortBy?: number): string {
     return `${base}: recipe${short}${eating}${note}`;
   }
   if (slot.slotType === 'empty') {
-    return `${base}: empty slot${note}`;
+    return `${base}: empty slot${eating}${note}`;
   }
   return `${base}: ${STATE_LABEL[slot.slotType]}${short}${eating}${note}`;
 }

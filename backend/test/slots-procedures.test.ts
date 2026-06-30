@@ -734,6 +734,28 @@ describe('slots procedures', () => {
       expect(await readDiners(slotId)).toEqual([]);
     });
 
+    it('keeps diners and guests on an empty slot when provided', async () => {
+      const planId = await insertPlan();
+      const slotId = await insertSlot(planId);
+      const caller = createCaller(makeContext());
+      // Attendance is independent of the meal: an empty slot can record who's
+      // eating before any dish is chosen.
+      const result = await caller.slots.update({
+        slotId,
+        slotType: 'empty',
+        leftoversSource: null,
+        chefUserId: null,
+        comment: null,
+        items: [],
+        dinerUserIds: [USER_ID],
+        guestCount: 2,
+      });
+      expect(result.slot.slotType).toBe('empty');
+      expect(result.slot.dinerUserIds).toEqual([USER_ID]);
+      expect(result.slot.guestCount).toBe(2);
+      expect(await readDiners(slotId)).toEqual([USER_ID]);
+    });
+
     it('rejects an unknown diner', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);

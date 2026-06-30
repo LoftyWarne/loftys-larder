@@ -837,11 +837,9 @@ function buildInputForSave(
     parsed.push({ item, servings });
   }
 
-  // An empty slot carries no attendance (the schema refine enforces this too).
-  const isEmpty = state.slotType === 'empty';
-  const guestCount = isEmpty
-    ? 0
-    : Math.max(0, parseGuestCount(state.guestCount));
+  // Attendance is independent of the slot type — who's eating persists even on
+  // an empty slot. Only the explicit Clear action wipes it.
+  const guestCount = Math.max(0, parseGuestCount(state.guestCount));
 
   const input: UpdateSlotInput = {
     slotId: slot.id,
@@ -855,7 +853,7 @@ function buildInputForSave(
       kind: item.kind,
       sortOrder: index,
     })),
-    dinerUserIds: isEmpty ? [] : state.dinerUserIds,
+    dinerUserIds: state.dinerUserIds,
     guestCount,
   };
 

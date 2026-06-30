@@ -154,7 +154,7 @@ export function PlannerPage(): React.ReactElement {
     if (slot.slotType === 'empty' && selectedRecipe) {
       // Two-tap assign — bank selection + empty slot tap. The slot becomes a
       // single-dish "cooking in" occasion.
-      update(assignSingleEat(slot.id, selectedRecipe));
+      update(assignSingleEat(slot, selectedRecipe));
       setSelectedRecipe(null);
       return;
     }
@@ -198,7 +198,7 @@ export function PlannerPage(): React.ReactElement {
     slot: PlanSlot;
   }): void {
     setMutationError(null);
-    update(assignSingleEat(slot.id, recipe));
+    update(assignSingleEat(slot, recipe));
   }
 
   function handleDragRelocate({
@@ -312,15 +312,16 @@ export function PlannerPage(): React.ReactElement {
 }
 
 // Assign a single eaten dish to a slot (bank click-to-assign + drag-drop): the
-// slot becomes a one-item "cooking in" occasion. The optimistic item previews
-// the dish name until the server row settles.
+// slot becomes a one-item "cooking in" occasion. Attendance already on the slot
+// is preserved — assigning a dish doesn't change who's eating. The optimistic
+// item previews the dish name until the server row settles.
 function assignSingleEat(
-  slotId: number,
+  slot: PlanSlot,
   recipe: RecipeListItem,
 ): { input: UpdateSlotInput; optimisticItems: PlanSlotItem[] } {
   return {
     input: {
-      slotId,
+      slotId: slot.id,
       slotType: 'recipe',
       leftoversSource: null,
       chefUserId: null,
@@ -333,8 +334,8 @@ function assignSingleEat(
           sortOrder: 0,
         },
       ],
-      dinerUserIds: [],
-      guestCount: 0,
+      dinerUserIds: slot.dinerUserIds,
+      guestCount: slot.guestCount,
     },
     optimisticItems: [
       {

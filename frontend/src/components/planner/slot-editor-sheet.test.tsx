@@ -442,6 +442,38 @@ describe("SlotEditorSheet — who's eating", () => {
     expect(input.guestCount).toBe(2);
   });
 
+  it('keeps who is eating when the slot type changes to empty', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      <SlotEditorSheet
+        open
+        slot={RECIPE_SLOT}
+        members={MEMBERS}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Conor' }));
+    await user.clear(screen.getByLabelText('Number of guests'));
+    await user.type(screen.getByLabelText('Number of guests'), '2');
+
+    await user.click(screen.getByRole('radio', { name: 'Empty' }));
+    // Attendance stays on screen through the type change.
+    expect(screen.getByText('(3 eating)')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.slotType).toBe('empty');
+    expect(input.dinerUserIds).toEqual(['u1']);
+    expect(input.guestCount).toBe(2);
+  });
+
   it('prefills a newly added dish with the headcount', async () => {
     const user = userEvent.setup();
     // A standalone recipe whose own baseServings (2) differs from the headcount.

@@ -70,16 +70,18 @@ export async function selectRecipePlantPoints(
   return row ? row.count : 0;
 }
 
-// Day / plan plant points compose the recipe-level primitive over three
-// contribution sources per slot, unioned then DISTINCT-counted at the
-// ingredient_id level:
+// Day / plan plant points count what's *eaten* (DEC-91), composing the
+// recipe-level primitive over two contribution sources per slot, unioned then
+// DISTINCT-counted at the ingredient_id level:
 //
-//   1. eating recipe                       — slot.recipe_id, when slot_type='recipe'
-//   2. batch traversal: eating recipe.base — when recipes.base_recipe_id IS NOT NULL
-//   3. cooks-base union                    — slot.cooks_base_recipe_id, any slot_type
+//   1. eaten recipe                        — items with eaten > 0
+//   2. base traversal: an eaten variation  — its base, when base_recipe_id IS NOT NULL
 //
-// COUNT(DISTINCT ingredient_id) at the outer query gives the spec's dedup
-// for free, including the "meal's base = cooked base" case (DEC-32, FEAT-41).
+// A dish is only counted once it's eaten (eaten > 0). A batch cooked purely for
+// later contributes nothing on the cooking day; its plants land on the day/slot
+// it is actually eaten (a later meal or leftovers slot). COUNT(DISTINCT
+// ingredient_id) gives the spec's dedup for free, including the "eaten meal's
+// base = a base cooked the same day" case (DEC-32, FEAT-41).
 //
 // The household-scoped plan join keeps the helpers safe even if a caller
 // forgets the procedure-layer guard (DEC-17 / cross-cutting #3).
@@ -139,48 +141,34 @@ async function countDistinctPlants(
   const rows = await db.execute<{ count: number }>(sql`
     select count(distinct contributions.ingredient_id)::int as count
     from (
-      -- 1. eat-item ingredients
+      -- 1. eaten-item ingredients
       select recipe_ingredients.ingredient_id
       from ${mealPlanSlots}
       inner join ${mealPlans}
         on meal_plans.id = meal_plan_slots.plan_id
       inner join ${mealPlanSlotItems}
         on meal_plan_slot_items.slot_id = meal_plan_slots.id
-        and meal_plan_slot_items.kind = 'eat'
+        and meal_plan_slot_items.eaten > 0
       inner join ${recipeIngredients}
         on recipe_ingredients.recipe_id = meal_plan_slot_items.recipe_id
       where ${planFilter}
         ${dateFilter}
 
       union all
-      -- 2. serving-variation traversal: an eat item's base
+      -- 2. serving-variation traversal: an eaten item's base
       select recipe_ingredients.ingredient_id
       from ${mealPlanSlots}
       inner join ${mealPlans}
         on meal_plans.id = meal_plan_slots.plan_id
       inner join ${mealPlanSlotItems}
         on meal_plan_slot_items.slot_id = meal_plan_slots.id
-        and meal_plan_slot_items.kind = 'eat'
+        and meal_plan_slot_items.eaten > 0
       inner join ${recipes}
         on recipes.id = meal_plan_slot_items.recipe_id
       inner join ${recipeIngredients}
         on recipe_ingredients.recipe_id = recipes.base_recipe_id
       where ${planFilter}
         and recipes.base_recipe_id is not null
-        ${dateFilter}
-
-      union all
-      -- 3. cook-ahead items (the base produced in bulk)
-      select recipe_ingredients.ingredient_id
-      from ${mealPlanSlots}
-      inner join ${mealPlans}
-        on meal_plans.id = meal_plan_slots.plan_id
-      inner join ${mealPlanSlotItems}
-        on meal_plan_slot_items.slot_id = meal_plan_slots.id
-        and meal_plan_slot_items.kind = 'cook_ahead'
-      inner join ${recipeIngredients}
-        on recipe_ingredients.recipe_id = meal_plan_slot_items.recipe_id
-      where ${planFilter}
         ${dateFilter}
     ) as contributions
     inner join ${ingredients}

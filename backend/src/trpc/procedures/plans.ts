@@ -464,8 +464,8 @@ export const plansRouter = router({
         .select({
           slotId: mealPlanSlotItems.slotId,
           recipeId: mealPlanSlotItems.recipeId,
-          servings: mealPlanSlotItems.servings,
-          kind: mealPlanSlotItems.kind,
+          prepared: mealPlanSlotItems.prepared,
+          eaten: mealPlanSlotItems.eaten,
           sortOrder: mealPlanSlotItems.sortOrder,
         })
         .from(mealPlanSlotItems)
@@ -581,8 +581,8 @@ export const plansRouter = router({
           return items.map((item) => ({
             slotId: newSlotId,
             recipeId: item.recipeId,
-            servings: item.servings,
-            kind: item.kind,
+            prepared: item.prepared,
+            eaten: item.eaten,
             sortOrder: item.sortOrder,
           }));
         });

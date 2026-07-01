@@ -16,7 +16,7 @@ function greeting(name: string | undefined): string {
 }
 
 function eatItems(slot: PlanSlot): PlanSlot['items'] {
-  return slot.items.filter((item) => item.kind === 'eat');
+  return slot.items.filter((item) => item.eaten > 0);
 }
 
 // A slot counts as "planned" when it carries any commitment — at least one

@@ -163,8 +163,6 @@ export {
   type SlotType,
   leftoversSourceSchema,
   type LeftoversSource,
-  slotItemKindSchema,
-  type SlotItemKind,
   planSlotItemSchema,
   type PlanSlotItem,
   planSlotSchema,

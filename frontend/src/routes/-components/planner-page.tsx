@@ -92,6 +92,7 @@ export function PlannerPage(): React.ReactElement {
         ? deriveBaseBalances(planQuery.data.slots)
         : {
             shortfallBySlot: new Map<number, number>(),
+            shortfallByItem: new Map<number, number>(),
             remainingByBase: new Map<number, number>(),
           },
     [planQuery.data],
@@ -268,6 +269,7 @@ export function PlannerPage(): React.ReactElement {
             rangeStart={visible.start}
             rangeEnd={visible.end}
             shortfallBySlot={baseBalances.shortfallBySlot}
+            shortfallByItem={baseBalances.shortfallByItem}
             dayPlantCounts={dayPlantCounts}
             // Slot ↔ slot drag works at every viewport — touch-and-hold
             // (200 ms) lifts a populated slot, drops on another slot to
@@ -319,6 +321,12 @@ function assignSingleEat(
   slot: PlanSlot,
   recipe: RecipeListItem,
 ): { input: UpdateSlotInput; optimisticItems: PlanSlotItem[] } {
+  // Default quantities like the editor (DEC-91): `eaten` follows the slot
+  // headcount, falling back to the recipe's base servings; a base cooks its
+  // batch size, everything else cooks what it eats.
+  const headcount = slot.dinerUserIds.length + slot.guestCount;
+  const eaten = headcount > 0 ? headcount : recipe.baseServings;
+  const prepared = recipe.isBase ? recipe.baseServings : eaten;
   return {
     input: {
       slotId: slot.id,
@@ -329,8 +337,8 @@ function assignSingleEat(
       items: [
         {
           recipeId: recipe.id,
-          servings: recipe.baseServings,
-          kind: 'eat',
+          prepared,
+          eaten,
           sortOrder: 0,
         },
       ],
@@ -346,8 +354,8 @@ function assignSingleEat(
         isBase: recipe.isBase,
         baseRecipeId: recipe.baseRecipeId,
         isDeleted: recipe.isDeleted,
-        servings: recipe.baseServings,
-        kind: 'eat',
+        prepared,
+        eaten,
         sortOrder: 0,
       },
     ],

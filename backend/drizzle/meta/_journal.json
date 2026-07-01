@@ -92,6 +92,13 @@
       "when": 1782801928912,
       "tag": "0012_flowery_cobalt_man",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1782898288097,
+      "tag": "0013_cultured_medusa",
+      "breakpoints": true
     }
   ]
 }

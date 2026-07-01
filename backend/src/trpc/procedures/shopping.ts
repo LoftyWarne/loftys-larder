@@ -46,15 +46,11 @@ export const shoppingRouter = router({
       return await withTransaction(async (tx) => {
         const planRow = await loadHouseholdPlan(tx, input.planId);
 
-        const [mealContribs, baseContribs] = await Promise.all([
-          selectMealRecipeContributions(tx, planRow.id),
-          selectCooksBaseContributions(tx, planRow.id),
-        ]);
+        const contribs = await selectPreparedContributions(tx, planRow.id);
 
-        const aggregated = aggregateContributions(
-          [...mealContribs, ...baseContribs],
-          { planStart: planRow.startDate },
-        );
+        const aggregated = aggregateContributions(contribs, {
+          planStart: planRow.startDate,
+        });
 
         const lineTotals = collectIngredientTotals(aggregated);
         const checkStates = await reconcileCheckState(
@@ -154,21 +150,21 @@ async function loadHouseholdPlan(tx: Tx, id: number): Promise<PlanRow> {
   return row;
 }
 
-// Contribution rows for `eat` items (DEC-89): one row per (eat item,
-// recipe_ingredients line), scaled by the item's servings. Recipes are joined
-// without an `is_deleted` filter — historical plans still aggregate (DEC-21/22).
-// A serving-variation `eat` item contributes only its own ingredient rows; the
-// base flows through the cook-ahead path — the no-double-count invariant.
-// Scoped to `recipe` slots: a `leftovers` slot's `eat` item is food already
-// cooked (and bought) earlier in the plan, so it must not re-enter the list.
-async function selectMealRecipeContributions(
+// Contribution rows for the buy list (DEC-91): one row per (prepared item,
+// recipe_ingredients line), scaled by the item's `prepared` (portions cooked —
+// you buy for what you cook, not what you eat). Filtered to `prepared > 0`, so a
+// leftovers / eat-out / takeaway consumption row (`prepared = 0`) contributes
+// nothing without any slot-type guard. Each recipe contributes only its own
+// ingredient rows — a serving variation's base flows in via the base dish's own
+// prepared row, so no double-count. Recipes are joined without an `is_deleted`
+// filter — historical plans still aggregate (DEC-21/22).
+async function selectPreparedContributions(
   tx: Tx,
   planId: number,
 ): Promise<ShoppingContribution[]> {
   const rows = await itemContributionQuery(tx).where(
     and(
-      eq(mealPlanSlotItems.kind, 'eat'),
-      eq(mealPlanSlots.slotType, 'recipe'),
+      sql`${mealPlanSlotItems.prepared} > 0`,
       eq(mealPlans.id, planId),
       eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
     ),
@@ -176,55 +172,28 @@ async function selectMealRecipeContributions(
   return rows.map(toContribution);
 }
 
-// Contribution rows for `cook_ahead` items: the base produced in bulk, scaled
-// by the batch servings. Joined without an `is_deleted` filter (DEC-21/22).
-async function selectCooksBaseContributions(
-  tx: Tx,
-  planId: number,
-): Promise<ShoppingContribution[]> {
-  const rows = await itemContributionQuery(tx).where(
-    and(
-      eq(mealPlanSlotItems.kind, 'cook_ahead'),
-      eq(mealPlans.id, planId),
-      eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
-    ),
-  );
-  return rows.map(toContribution);
-}
-
-// Both contribution paths scoped to one ingredient. Used by `toggleChecked` to
-// (a) prove the ingredient contributes and (b) compute the authoritative total.
+// The prepared contributions scoped to one ingredient. Used by `toggleChecked`
+// to (a) prove the ingredient contributes and (b) compute the authoritative
+// total.
 async function selectIngredientContributions(
   tx: Tx,
   planId: number,
   ingredientId: number,
 ): Promise<ShoppingContribution[]> {
-  const [meal, base] = await Promise.all([
-    itemContributionQuery(tx).where(
-      and(
-        eq(mealPlanSlotItems.kind, 'eat'),
-        eq(mealPlanSlots.slotType, 'recipe'),
-        eq(mealPlans.id, planId),
-        eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
-        eq(ingredients.id, ingredientId),
-      ),
+  const rows = await itemContributionQuery(tx).where(
+    and(
+      sql`${mealPlanSlotItems.prepared} > 0`,
+      eq(mealPlans.id, planId),
+      eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+      eq(ingredients.id, ingredientId),
     ),
-    itemContributionQuery(tx).where(
-      and(
-        eq(mealPlanSlotItems.kind, 'cook_ahead'),
-        eq(mealPlans.id, planId),
-        eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
-        eq(ingredients.id, ingredientId),
-      ),
-    ),
-  ]);
-
-  return [...meal.map(toContribution), ...base.map(toContribution)];
+  );
+  return rows.map(toContribution);
 }
 
 // Shared join skeleton: slot items → recipe → ingredient lines, scaled by the
-// item's servings. The caller appends the full `WHERE` (kind + scope) — drizzle
-// `.where()` replaces rather than ANDs, so the kind filter lives there too.
+// item's `prepared`. The caller appends the full `WHERE` — drizzle `.where()`
+// replaces rather than ANDs, so every predicate lives there.
 function itemContributionQuery(tx: Tx) {
   return tx
     .select(contributionProjection)
@@ -259,7 +228,7 @@ const contributionProjection = {
   averageShelfLifeDays: ingredients.averageShelfLifeDays,
   // numeric arithmetic preserves precision; round to the column's
   // numeric(10,3) scale so the helper's integer-milli math is exact.
-  scaledQuantity: sql<string>`round(${recipeIngredients.quantity} * ${mealPlanSlotItems.servings}::numeric / ${recipes.baseServings}::numeric, 3)`,
+  scaledQuantity: sql<string>`round(${recipeIngredients.quantity} * ${mealPlanSlotItems.prepared}::numeric / ${recipes.baseServings}::numeric, 3)`,
 } as const;
 
 interface ContributionRow {

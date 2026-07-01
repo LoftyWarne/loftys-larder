@@ -15,6 +15,9 @@ export interface PlannerGridProps {
   // Base-consumption shortfall per slot id (how many base servings short),
   // from `deriveBaseBalances`. Read-only, derived externally.
   shortfallBySlot?: ReadonlyMap<number, number>;
+  // The same shortfall attributed to the specific dish (slot-item id), so the
+  // card can show the nudge under the dish in question.
+  shortfallByItem?: ReadonlyMap<number, number>;
   /**
    * Plant-point totals keyed by civil date (`YYYY-MM-DD`). `null` for a date
    * means the count is loading; an absent key means "no opinion" (badge
@@ -37,6 +40,7 @@ export function PlannerGrid({
   rangeStart,
   rangeEnd,
   shortfallBySlot,
+  shortfallByItem,
   dayPlantCounts,
   dndEnabled = false,
   onSlotClick,
@@ -130,6 +134,7 @@ export function PlannerGrid({
                       slot={slot}
                       dndEnabled={dndEnabled}
                       shortBy={shortfallBySlot?.get(slot.id)}
+                      shortfallByItem={shortfallByItem}
                       chefChip={
                         <SlotDinersChip
                           dinerNames={slot.dinerUserIds.map(

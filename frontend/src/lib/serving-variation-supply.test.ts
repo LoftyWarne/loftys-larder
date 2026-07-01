@@ -7,8 +7,8 @@ let nextId = 1;
 
 interface ItemSpec {
   recipeId: number;
-  servings: number;
-  kind: 'eat' | 'cook_ahead';
+  prepared: number;
+  eaten: number;
   isBase?: boolean;
   baseRecipeId?: number | null;
 }
@@ -29,8 +29,8 @@ function item(spec: ItemSpec): PlanSlotItem {
     isBase: spec.isBase ?? false,
     baseRecipeId: spec.baseRecipeId ?? null,
     isDeleted: false,
-    servings: spec.servings,
-    kind: spec.kind,
+    prepared: spec.prepared,
+    eaten: spec.eaten,
     sortOrder: 0,
   };
 }
@@ -45,7 +45,7 @@ function slot(spec: SlotSpec): PlanSlot {
     date: spec.date,
     occasionId: occasionName === 'Lunch' ? 1 : 2,
     occasionName,
-    slotType: items.some((i) => i.kind === 'eat') ? 'recipe' : 'empty',
+    slotType: items.some((i) => i.eaten > 0) ? 'recipe' : 'empty',
     leftoversSource: null,
     chefUserId: null,
     comment: null,
@@ -55,21 +55,35 @@ function slot(spec: SlotSpec): PlanSlot {
   };
 }
 
-// Eat a serving variation of base B.
+// Cook a base batch (prepared only, none eaten here).
+function cook(baseId: number, servings: number): ItemSpec {
+  return { recipeId: baseId, prepared: servings, eaten: 0, isBase: true };
+}
+// Eat a serving variation of base B, cooked fresh from the base pool: making N
+// variation portions draws N base portions.
 function eatVariation(baseId: number, servings: number): ItemSpec {
   return {
     recipeId: 900 + baseId,
-    servings,
-    kind: 'eat',
+    prepared: servings,
+    eaten: servings,
     baseRecipeId: baseId,
   };
 }
-// Eat the base B itself.
+// Eat the base B itself from a batch cooked elsewhere (pure consume).
 function eatBase(baseId: number, servings: number): ItemSpec {
-  return { recipeId: baseId, servings, kind: 'eat', isBase: true };
+  return { recipeId: baseId, prepared: 0, eaten: servings, isBase: true };
 }
-function cook(baseId: number, servings: number): ItemSpec {
-  return { recipeId: baseId, servings, kind: 'cook_ahead', isBase: true };
+// A standalone meal cooked and (partly) eaten in one slot.
+function cookEatStandalone(
+  recipeId: number,
+  prepared: number,
+  eaten: number,
+): ItemSpec {
+  return { recipeId, prepared, eaten };
+}
+// Eat leftovers of a recipe from a batch cooked elsewhere (pure consume).
+function eatLeftover(recipeId: number, servings: number): ItemSpec {
+  return { recipeId, prepared: 0, eaten: servings };
 }
 
 describe('deriveBaseBalances', () => {
@@ -93,6 +107,15 @@ describe('deriveBaseBalances', () => {
     ]);
     expect(shortfallBySlot.get(eatSlot.id)).toBe(4);
     expect(remainingByBase.get(22)).toBe(-4);
+  });
+
+  it('attributes the shortfall to the specific dish that ran short', () => {
+    const cookSlot = slot({ date: '2026-06-15', items: [cook(22, 8)] });
+    const eatSlot = slot({ date: '2026-06-16', items: [eatVariation(22, 12)] });
+    const { shortfallByItem } = deriveBaseBalances([cookSlot, eatSlot]);
+    const shortItemId = eatSlot.items[0]?.id ?? 0;
+    expect(shortfallByItem.get(shortItemId)).toBe(4);
+    expect(shortfallByItem.size).toBe(1);
   });
 
   it('self-supplies when one slot cooks and eats the same base', () => {
@@ -141,5 +164,61 @@ describe('deriveBaseBalances', () => {
     });
     const { shortfallBySlot } = deriveBaseBalances([dinnerEat, lunchCook]);
     expect(shortfallBySlot.size).toBe(0);
+  });
+
+  it('over-cooks a standalone meal and eats the surplus as leftovers', () => {
+    const cookSlot = slot({
+      date: '2026-06-15',
+      items: [cookEatStandalone(40, 8, 4)],
+    });
+    const leftoverSlot = slot({
+      date: '2026-06-16',
+      items: [eatLeftover(40, 4)],
+    });
+    const { shortfallBySlot, remainingByBase } = deriveBaseBalances([
+      cookSlot,
+      leftoverSlot,
+    ]);
+    expect(shortfallBySlot.size).toBe(0);
+    expect(remainingByBase.get(40)).toBe(0);
+  });
+
+  it('flags a shortfall when standalone leftovers outrun the surplus', () => {
+    const cookSlot = slot({
+      date: '2026-06-15',
+      items: [cookEatStandalone(40, 8, 4)],
+    });
+    const leftoverSlot = slot({
+      date: '2026-06-16',
+      items: [eatLeftover(40, 6)],
+    });
+    const { shortfallBySlot, remainingByBase } = deriveBaseBalances([
+      cookSlot,
+      leftoverSlot,
+    ]);
+    // 4 surplus, eating 6 → short by 2.
+    expect(shortfallBySlot.get(leftoverSlot.id)).toBe(2);
+    expect(remainingByBase.get(40)).toBe(-2);
+  });
+
+  it('pools a variation surplus under the variation, drawing the base by what was prepared', () => {
+    const cookSlot = slot({ date: '2026-06-15', items: [cook(22, 12)] });
+    // Prepare 6 variation portions (drawing 6 base), eat 4 → 2 variation left.
+    const eatSlot = slot({
+      date: '2026-06-16',
+      items: [{ recipeId: 922, prepared: 6, eaten: 4, baseRecipeId: 22 }],
+    });
+    const leftoverSlot = slot({
+      date: '2026-06-17',
+      items: [eatLeftover(922, 2)],
+    });
+    const { shortfallBySlot, remainingByBase } = deriveBaseBalances([
+      cookSlot,
+      eatSlot,
+      leftoverSlot,
+    ]);
+    expect(shortfallBySlot.size).toBe(0);
+    expect(remainingByBase.get(22)).toBe(6); // 12 cooked − 6 into the variation
+    expect(remainingByBase.get(922)).toBe(0); // 6 made − 4 eaten − 2 leftover
   });
 });

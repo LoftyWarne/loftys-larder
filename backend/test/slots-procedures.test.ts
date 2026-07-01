@@ -229,8 +229,8 @@ describe('slots procedures', () => {
     slotId: number,
     items: {
       recipeId: number;
-      servings: number;
-      kind: 'eat' | 'cook_ahead';
+      prepared: number;
+      eaten: number;
       sortOrder?: number;
     }[],
   ): Promise<void> {
@@ -238,8 +238,8 @@ describe('slots procedures', () => {
       items.map((item, index) => ({
         slotId,
         recipeId: item.recipeId,
-        servings: item.servings,
-        kind: item.kind,
+        prepared: item.prepared,
+        eaten: item.eaten,
         sortOrder: item.sortOrder ?? index,
       })),
     );
@@ -249,8 +249,8 @@ describe('slots procedures', () => {
     return db
       .select({
         recipeId: mealPlanSlotItems.recipeId,
-        servings: mealPlanSlotItems.servings,
-        kind: mealPlanSlotItems.kind,
+        prepared: mealPlanSlotItems.prepared,
+        eaten: mealPlanSlotItems.eaten,
         sortOrder: mealPlanSlotItems.sortOrder,
       })
       .from(mealPlanSlotItems)
@@ -283,8 +283,8 @@ describe('slots procedures', () => {
         chefUserId: null,
         comment: null,
         items: [
-          { recipeId: main, servings: 4, kind: 'eat', sortOrder: 0 },
-          { recipeId: side, servings: 4, kind: 'eat', sortOrder: 1 },
+          { recipeId: main, prepared: 4, eaten: 4, sortOrder: 0 },
+          { recipeId: side, prepared: 4, eaten: 4, sortOrder: 1 },
         ],
       });
       expect(result.slot.slotType).toBe('recipe');
@@ -293,7 +293,7 @@ describe('slots procedures', () => {
 
       const persisted = await readItems(slotId);
       expect(persisted).toHaveLength(2);
-      expect(persisted[0]).toMatchObject({ recipeId: main, kind: 'eat' });
+      expect(persisted[0]).toMatchObject({ recipeId: main, eaten: 4 });
     });
 
     it('full-replaces the item list on update', async () => {
@@ -301,7 +301,7 @@ describe('slots procedures', () => {
       const slotId = await insertSlot(planId, { slotType: 'recipe' });
       const a = await insertRecipe('A');
       const b = await insertRecipe('B');
-      await seedItems(slotId, [{ recipeId: a, servings: 2, kind: 'eat' }]);
+      await seedItems(slotId, [{ recipeId: a, prepared: 2, eaten: 2 }]);
       const caller = createCaller(makeContext());
       await caller.slots.update({
         slotId,
@@ -311,18 +311,22 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [{ recipeId: b, servings: 3, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId: b, prepared: 3, eaten: 3, sortOrder: 0 }],
       });
       const persisted = await readItems(slotId);
       expect(persisted).toHaveLength(1);
-      expect(persisted[0]).toMatchObject({ recipeId: b, servings: 3 });
+      expect(persisted[0]).toMatchObject({
+        recipeId: b,
+        prepared: 3,
+        eaten: 3,
+      });
     });
 
     it('clears items when transitioning recipe → eat_out', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId, { slotType: 'recipe' });
       const r = await insertRecipe('Curry');
-      await seedItems(slotId, [{ recipeId: r, servings: 2, kind: 'eat' }]);
+      await seedItems(slotId, [{ recipeId: r, prepared: 2, eaten: 2 }]);
       const caller = createCaller(makeContext());
       const result = await caller.slots.update({
         slotId,
@@ -352,7 +356,7 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: USER_ID,
         comment: 'extra spicy',
-        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId: r, prepared: 2, eaten: 2, sortOrder: 0 }],
       });
       expect(result.slot.chefUserId).toBe(USER_ID);
       expect(result.slot.comment).toBe('extra spicy');
@@ -372,7 +376,7 @@ describe('slots procedures', () => {
           leftoversSource: null,
           chefUserId: 'ghost-user',
           comment: null,
-          items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+          items: [{ recipeId: r, prepared: 2, eaten: 2, sortOrder: 0 }],
         }),
       ).rejects.toMatchObject({ cause: { code: 'SLOT_CHEF_NOT_FOUND' } });
     });
@@ -430,13 +434,15 @@ describe('slots procedures', () => {
         chefUserId: null,
         comment: null,
         items: [
-          { recipeId: meal, servings: 4, kind: 'eat', sortOrder: 0 },
-          { recipeId: base, servings: 12, kind: 'cook_ahead', sortOrder: 1 },
+          { recipeId: meal, prepared: 4, eaten: 4, sortOrder: 0 },
+          { recipeId: base, prepared: 12, eaten: 0, sortOrder: 1 },
         ],
       });
       expect(result.slot.items).toHaveLength(2);
-      const cook = result.slot.items.find((i) => i.kind === 'cook_ahead');
-      expect(cook).toMatchObject({ recipeId: base, servings: 12 });
+      const cook = result.slot.items.find(
+        (i) => i.eaten === 0 && i.prepared > 0,
+      );
+      expect(cook).toMatchObject({ recipeId: base, prepared: 12, eaten: 0 });
     });
 
     it('allows a cook-ahead base on an eat-out slot (decoupled)', async () => {
@@ -452,39 +458,35 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [
-          { recipeId: base, servings: 8, kind: 'cook_ahead', sortOrder: 0 },
-        ],
+        items: [{ recipeId: base, prepared: 8, eaten: 0, sortOrder: 0 }],
       });
       expect(result.slot.slotType).toBe('eat_out');
       expect(result.slot.items).toHaveLength(1);
     });
 
-    it('rejects a cook-ahead item that references a non-base recipe', async () => {
+    it('accepts a prepared-only cook-ahead item on a non-base recipe (DEC-91)', async () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId);
       const notBase = await insertRecipe('Regular');
       const caller = createCaller(makeContext());
-      await expect(
-        caller.slots.update({
-          slotId,
-          dinerUserIds: [],
-          guestCount: 0,
-          slotType: 'eat_out',
-          leftoversSource: null,
-          chefUserId: null,
-          comment: null,
-          items: [
-            {
-              recipeId: notBase,
-              servings: 8,
-              kind: 'cook_ahead',
-              sortOrder: 0,
-            },
-          ],
-        }),
-      ).rejects.toMatchObject({
-        cause: { code: 'SLOT_ITEM_COOK_AHEAD_NOT_BASE' },
+      // DEC-91 dropped the cook-ahead-must-be-a-base rule: any recipe can be
+      // over-cooked. A prepared-only item (nothing eaten) is allowed on an
+      // eat-out slot.
+      const result = await caller.slots.update({
+        slotId,
+        dinerUserIds: [],
+        guestCount: 0,
+        slotType: 'eat_out',
+        leftoversSource: null,
+        chefUserId: null,
+        comment: null,
+        items: [{ recipeId: notBase, prepared: 8, eaten: 0, sortOrder: 0 }],
+      });
+      expect(result.slot.items).toHaveLength(1);
+      expect(result.slot.items[0]).toMatchObject({
+        recipeId: notBase,
+        prepared: 8,
+        eaten: 0,
       });
     });
   });
@@ -504,7 +506,7 @@ describe('slots procedures', () => {
           leftoversSource: null,
           chefUserId: null,
           comment: null,
-          items: [{ recipeId: gone, servings: 2, kind: 'eat', sortOrder: 0 }],
+          items: [{ recipeId: gone, prepared: 2, eaten: 2, sortOrder: 0 }],
         }),
       ).rejects.toMatchObject({ cause: { code: 'SLOT_RECIPE_NOT_PICKABLE' } });
     });
@@ -513,7 +515,7 @@ describe('slots procedures', () => {
       const planId = await insertPlan();
       const slotId = await insertSlot(planId, { slotType: 'recipe' });
       const r = await insertRecipe('Will be deleted');
-      await seedItems(slotId, [{ recipeId: r, servings: 2, kind: 'eat' }]);
+      await seedItems(slotId, [{ recipeId: r, prepared: 2, eaten: 2 }]);
       await db
         .update(recipes)
         .set({ isDeleted: true })
@@ -528,9 +530,13 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [{ recipeId: r, servings: 3, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId: r, prepared: 3, eaten: 3, sortOrder: 0 }],
       });
-      expect(result.slot.items[0]).toMatchObject({ recipeId: r, servings: 3 });
+      expect(result.slot.items[0]).toMatchObject({
+        recipeId: r,
+        prepared: 3,
+        eaten: 3,
+      });
     });
 
     it('rejects a recipe from another household', async () => {
@@ -549,9 +555,7 @@ describe('slots procedures', () => {
           leftoversSource: null,
           chefUserId: null,
           comment: null,
-          items: [
-            { recipeId: foreign, servings: 2, kind: 'eat', sortOrder: 0 },
-          ],
+          items: [{ recipeId: foreign, prepared: 2, eaten: 2, sortOrder: 0 }],
         }),
       ).rejects.toMatchObject({
         cause: { code: 'SLOT_RECIPE_CROSS_HOUSEHOLD' },
@@ -565,7 +569,7 @@ describe('slots procedures', () => {
       const sourceId = await insertSlot(planId, { slotType: 'recipe' });
       const destId = await insertSlot(planId, { occasionId: secondOccasionId });
       const r = await insertRecipe('Lentils');
-      await seedItems(sourceId, [{ recipeId: r, servings: 4, kind: 'eat' }]);
+      await seedItems(sourceId, [{ recipeId: r, prepared: 4, eaten: 4 }]);
 
       const caller = createCaller(makeContext());
       const result = await caller.slots.relocate({
@@ -590,8 +594,8 @@ describe('slots procedures', () => {
       });
       const a = await insertRecipe('A');
       const b = await insertRecipe('B');
-      await seedItems(sourceId, [{ recipeId: a, servings: 2, kind: 'eat' }]);
-      await seedItems(destId, [{ recipeId: b, servings: 5, kind: 'eat' }]);
+      await seedItems(sourceId, [{ recipeId: a, prepared: 2, eaten: 2 }]);
+      await seedItems(destId, [{ recipeId: b, prepared: 5, eaten: 5 }]);
 
       const caller = createCaller(makeContext());
       const result = await caller.slots.relocate({
@@ -646,7 +650,7 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [{ recipeId, servings: 4, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId, prepared: 4, eaten: 4, sortOrder: 0 }],
         dinerUserIds: [USER_ID],
         guestCount: 2,
       });
@@ -665,7 +669,7 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [{ recipeId: r, servings: 4, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId: r, prepared: 4, eaten: 4, sortOrder: 0 }],
         dinerUserIds: [USER_ID, OTHER_USER_ID],
         guestCount: 3,
       });
@@ -685,7 +689,7 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId: r, prepared: 2, eaten: 2, sortOrder: 0 }],
         dinerUserIds: [USER_ID, OTHER_USER_ID],
         guestCount: 1,
       });
@@ -695,7 +699,7 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId: r, prepared: 2, eaten: 2, sortOrder: 0 }],
         dinerUserIds: [OTHER_USER_ID],
         guestCount: 0,
       });
@@ -715,7 +719,7 @@ describe('slots procedures', () => {
         leftoversSource: null,
         chefUserId: null,
         comment: null,
-        items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+        items: [{ recipeId: r, prepared: 2, eaten: 2, sortOrder: 0 }],
         dinerUserIds: [USER_ID],
         guestCount: 2,
       });
@@ -768,7 +772,7 @@ describe('slots procedures', () => {
           leftoversSource: null,
           chefUserId: null,
           comment: null,
-          items: [{ recipeId: r, servings: 2, kind: 'eat', sortOrder: 0 }],
+          items: [{ recipeId: r, prepared: 2, eaten: 2, sortOrder: 0 }],
           dinerUserIds: ['ghost-user'],
           guestCount: 0,
         }),

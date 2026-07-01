@@ -29,8 +29,8 @@ function eatItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isBase: false,
     baseRecipeId: null,
     isDeleted: false,
-    servings: 2,
-    kind: 'eat',
+    prepared: 2,
+    eaten: 2,
     sortOrder: 0,
     ...overrides,
   };
@@ -45,8 +45,8 @@ function cookItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isBase: true,
     baseRecipeId: null,
     isDeleted: false,
-    servings: 8,
-    kind: 'cook_ahead',
+    prepared: 8,
+    eaten: 0,
     sortOrder: 1,
     ...overrides,
   };
@@ -66,8 +66,19 @@ describe('SlotCell', () => {
           ...BASE_SLOT,
           slotType: 'recipe',
           items: [
-            eatItem({ id: 1, recipeName: 'Tomato pasta', servings: 2 }),
-            eatItem({ id: 2, recipeId: 11, recipeName: 'Salad', servings: 4 }),
+            eatItem({
+              id: 1,
+              recipeName: 'Tomato pasta',
+              prepared: 2,
+              eaten: 2,
+            }),
+            eatItem({
+              id: 2,
+              recipeId: 11,
+              recipeName: 'Salad',
+              prepared: 4,
+              eaten: 4,
+            }),
           ],
         }}
         onClick={() => undefined}
@@ -156,20 +167,40 @@ describe('SlotCell', () => {
       />,
     );
     expect(screen.getByText('Curry Base')).toBeInTheDocument();
-    expect(screen.getByText('×8')).toBeInTheDocument();
+    expect(screen.getByText('prep ×8')).toBeInTheDocument();
     const badges = screen.getAllByTestId('recipe-type-badge');
     expect(badges.map((b) => b.textContent)).toEqual(['Standalone', 'Base']);
   });
 
-  it('shows a shortfall indicator on the card', () => {
+  it('shows a shortfall nudge under the dish in question', () => {
+    render(
+      <SlotCell
+        // eatItem() has id 1; attribute the shortfall to it.
+        slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
+        onClick={() => undefined}
+        shortfallByItem={new Map([[1, 2]])}
+      />,
+    );
+    const nudges = screen.getAllByTestId('slot-item-shortfall');
+    expect(nudges).toHaveLength(1);
+    expect(nudges[0]).toHaveTextContent(
+      'Short 2 servings — not enough cooked yet',
+    );
+    // The nudge sits in the same dish container as the short dish (id 1).
+    expect(nudges[0]?.parentElement).toHaveTextContent('Tomato pasta');
+  });
+
+  it('uses the singular "serving" when short by one', () => {
     render(
       <SlotCell
         slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
         onClick={() => undefined}
-        shortBy={2}
+        shortfallByItem={new Map([[1, 1]])}
       />,
     );
-    expect(screen.getByText(/short 2/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Short 1 serving — not enough cooked yet/),
+    ).toBeInTheDocument();
   });
 
   it('opens the editor when a card with a base is clicked', async () => {
@@ -220,7 +251,9 @@ describe('SlotCell', () => {
           ...BASE_SLOT,
           slotType: 'leftovers',
           leftoversSource: 'plan_meal',
-          items: [eatItem({ recipeName: 'Tomato pasta', servings: 2 })],
+          items: [
+            eatItem({ recipeName: 'Tomato pasta', prepared: 0, eaten: 2 }),
+          ],
         }}
         onClick={() => undefined}
       />,

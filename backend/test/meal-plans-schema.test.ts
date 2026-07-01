@@ -197,15 +197,14 @@ describe('meal plans and shopping list schema', () => {
       }
     });
 
-    it('slot_item_kind enum has the two expected labels', async () => {
+    it('drops the slot_item_kind enum (superseded by prepared/eaten, DEC-91)', async () => {
       const result = await db.execute<{ label: string }>(sql`
         select enumlabel as label
         from pg_enum
         join pg_type on pg_type.oid = pg_enum.enumtypid
         where pg_type.typname = 'slot_item_kind'
-        order by pg_enum.enumsortorder
       `);
-      expect(result.rows.map((r) => r.label)).toEqual(['eat', 'cook_ahead']);
+      expect(result.rows).toHaveLength(0);
     });
 
     it('slot_type enum has exactly the five expected labels', async () => {
@@ -388,7 +387,7 @@ describe('meal plans and shopping list schema', () => {
       return slot.id;
     }
 
-    it('accepts eat and cook_ahead items with servings > 0', async () => {
+    it('accepts eaten and prepared-only items', async () => {
       const { occasionId } = await seedFixtures(db);
       const planId = await insertPlan(db);
       const slotId = await insertSlot(planId, occasionId);
@@ -396,19 +395,19 @@ describe('meal plans and shopping list schema', () => {
       const baseId = await insertRecipe(db, { name: 'Base', isBase: true });
       await expect(
         db.insert(mealPlanSlotItems).values([
-          { slotId, recipeId, servings: 2, kind: 'eat', sortOrder: 0 },
+          { slotId, recipeId, prepared: 2, eaten: 2, sortOrder: 0 },
           {
             slotId,
             recipeId: baseId,
-            servings: 8,
-            kind: 'cook_ahead',
+            prepared: 8,
+            eaten: 0,
             sortOrder: 1,
           },
         ]),
       ).resolves.toBeDefined();
     });
 
-    it('rejects servings = 0', async () => {
+    it('rejects prepared = 0 and eaten = 0', async () => {
       const { occasionId } = await seedFixtures(db);
       const planId = await insertPlan(db);
       const slotId = await insertSlot(planId, occasionId);
@@ -417,11 +416,11 @@ describe('meal plans and shopping list schema', () => {
         db.insert(mealPlanSlotItems).values({
           slotId,
           recipeId,
-          servings: 0,
-          kind: 'eat',
+          prepared: 0,
+          eaten: 0,
           sortOrder: 0,
         }),
-        'meal_plan_slot_items_servings_positive',
+        'meal_plan_slot_items_prepared_or_eaten',
       );
     });
 
@@ -432,7 +431,7 @@ describe('meal plans and shopping list schema', () => {
       const recipeId = await insertRecipe(db);
       await db
         .insert(mealPlanSlotItems)
-        .values({ slotId, recipeId, servings: 2, kind: 'eat', sortOrder: 0 });
+        .values({ slotId, recipeId, prepared: 2, eaten: 2, sortOrder: 0 });
       await db.delete(mealPlanSlots).where(eq(mealPlanSlots.id, slotId));
       const rows = await db
         .select()
@@ -448,7 +447,7 @@ describe('meal plans and shopping list schema', () => {
       const recipeId = await insertRecipe(db);
       await db
         .insert(mealPlanSlotItems)
-        .values({ slotId, recipeId, servings: 2, kind: 'eat', sortOrder: 0 });
+        .values({ slotId, recipeId, prepared: 2, eaten: 2, sortOrder: 0 });
       await expect(
         db.delete(recipes).where(eq(recipes.id, recipeId)),
       ).rejects.toThrow();

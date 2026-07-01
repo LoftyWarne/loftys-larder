@@ -161,7 +161,7 @@ function DragPreview({ data }: { data: DragKind }): React.ReactElement {
 
 function describeSlot(slot: PlanSlot): string {
   const eatNames = slot.items
-    .filter((item) => item.kind === 'eat')
+    .filter((item) => item.eaten > 0)
     .map((item) => item.recipeName);
   if (eatNames.length > 0) return eatNames.join(', ');
   return `${slot.occasionName} on ${slot.date}`;

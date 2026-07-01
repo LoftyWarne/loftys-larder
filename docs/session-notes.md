@@ -4,6 +4,34 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-01 — Per-dish `prepared` / `eaten` quantities (DEC-91) + shortfall UX
+
+**Status:** Shipped. Schema change + data migration (`0013`), ran forward on Testcontainers. New **DEC-91** supersedes/amends DEC-88/89/90. Backend **507** + frontend **386** pass; typecheck / lint / format clean. DoD boxes left unticked (human action).
+
+### The redesign (DEC-91)
+
+Every `meal_plan_slot_items` row now carries **`prepared`** (portions cooked) + **`eaten`** (portions consumed here), both `smallint ≥ 0` with `prepared + eaten > 0`. This **retires the `slot_item_kind` enum** (`eat | cook_ahead`) — a dish's role is derived from the two quantities, not stored. Motivation: the old single `servings` + `kind` couldn't express (a) eating some of a cook-ahead base on the day without a duplicate row, or (b) over-cooking a **standalone / variation** and eating the surplus later (the cook-ahead pool was base-only).
+
+- **Consumption balance** (`serving-variation-supply.ts` `deriveBaseBalances`) generalised to a per-recipe pool: produce `prepared` into each recipe's pool, then consume — a variation draws its **base** pool by its own `prepared`, every item draws its **own** pool by `eaten`. Standalone/variation surplus now seeds leftovers. Returns `remainingByBase` (per recipe now), `shortfallBySlot`, and **`shortfallByItem`** (per slot-item id).
+- **Shopping** (`shopping.ts`) collapsed from two paths (eat + cook_ahead) to **one scan over `prepared > 0`, scaled by `prepared`**. A leftovers/eat-out/takeaway consumption row has `prepared = 0`, so DEC-90's `slot_type='recipe'` exclusion is now redundant and gone.
+- **Plant points** (`plant-points.ts`) count **only what's eaten** (`eaten > 0`) + an eaten variation's base traversal. The old cook-ahead source is dropped — a batch's plants land on the day it's eaten. *(This was a deliberate reversal mid-session after first trying "prepared > 0 counts too"; the user chose eaten-only. Three plant-points tests were repurposed to assert the new rule.)*
+- **Migration `0013`** (hand-edited after `db:generate`): add `prepared`/`eaten` nullable → backfill (`eat`→`prepared=eaten=servings`; **leftovers `eat`→`prepared=0, eaten=servings`**; `cook_ahead`→`prepared=servings, eaten=0`) → `SET NOT NULL` → drop `servings`/`kind` + the enum. The leftovers branch is the subtle one — a plan-meal leftover must stay out of the shopping list, so its `prepared` backfills to 0.
+
+### Editor / plan-view UX (follow-ups, same session)
+
+- **Base default is `eaten: 0`** when added to a slot's dishes (a batch to supply variations/leftovers). Fixes: listing a base to cover a shortfalling variation now clears the warning — previously it defaulted `eaten = headcount`, so the base consumed itself. Manual-add now matches the "Suggested: cook this?" shortcut.
+- **Eat can't exceed Prepare** in the Dishes table (`withEaten` caps, `withPrepared` pulls eaten down when prepared drops). The leftovers "Servings" input is exempt (`prepared = 0`, food cooked earlier).
+- **Shortfall is per-dish** everywhere now: `⚠ Short N servings — not enough cooked yet` renders under the specific dish on the plan card (via `shortfallByItem`), and the editor's Dishes table shows a `ServingVariationWarning` under each short row (base/meal variant per item) instead of one slot-level warning.
+- **Editor sheet is `lg:max-w-2xl`** (wider on large screens; the Prepare/Eat columns squeezed dish names), and dish names carry a native `title` tooltip. Native `title` chosen over shadcn Tooltip to avoid adding `@radix-ui/react-tooltip` (a stop-and-ask dependency) — revisit if a styled tooltip is wanted.
+
+### Worth carrying
+
+- `shortfallByItem` is keyed by real slot-item id on the plan card; in the editor's `liveBalances` the live items use **synthetic ids `index + 1`**, so the Dishes table looks each row up by index.
+- The latent **eat-a-base-directly double-buy** from the old model is structurally gone (one row, shopping scales by `prepared`). The migration preserves old numeric totals for any pre-existing two-row cases; new edits fix them.
+- Not done (human): a **migration drill against a real pre-migration snapshot** (forward migration is validated on fresh DBs by schema tests) and the Playwright suite (the e2e `db.ts` fixture was updated to `prepared`/`eaten`).
+
+---
+
 ## 2026-06-30 — Base-only occasion saves as an `empty` slot and reopens in Cooking
 
 **Status:** Shipped. Frontend-only (slot editor). No schema, table, or migration change — aligns the save path with DEC-89 as already enforced everywhere else.

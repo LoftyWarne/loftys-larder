@@ -38,8 +38,8 @@ function eat(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isBase: false,
     baseRecipeId: null,
     isDeleted: false,
-    servings: 4,
-    kind: 'eat',
+    prepared: 4,
+    eaten: 4,
     sortOrder: 0,
     ...overrides,
   };
@@ -54,8 +54,8 @@ function cook(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isBase: true,
     baseRecipeId: null,
     isDeleted: false,
-    servings: 8,
-    kind: 'cook_ahead',
+    prepared: 8,
+    eaten: 0,
     sortOrder: 1,
     ...overrides,
   };
@@ -227,13 +227,31 @@ describe('SlotEditorSheet — meal items', () => {
     const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
     expect(input.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ recipeId: 10, kind: 'eat' }),
+        expect.objectContaining({ recipeId: 10, prepared: 4, eaten: 4 }),
         expect.objectContaining({
           recipeId: 22,
-          kind: 'cook_ahead',
-          servings: 8,
+          prepared: 8,
+          eaten: 0,
         }),
       ]),
+    );
+  });
+
+  it('exposes the full dish name as a title tooltip (names can truncate)', () => {
+    render(
+      <SlotEditorSheet
+        open
+        slot={RECIPE_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Tomato Pasta')).toHaveAttribute(
+      'title',
+      'Tomato Pasta',
     );
   });
 
@@ -298,7 +316,7 @@ describe('SlotEditorSheet — meal items', () => {
       expect(onSave).toHaveBeenCalled();
     });
     const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
-    expect(input.items.filter((i) => i.kind === 'eat')).toHaveLength(0);
+    expect(input.items.filter((i) => i.eaten > 0)).toHaveLength(0);
   });
 
   it('adds a picked base recipe as a cooked-ahead item', async () => {
@@ -329,13 +347,13 @@ describe('SlotEditorSheet — meal items', () => {
     expect(input.items).toEqual([
       expect.objectContaining({
         recipeId: 40,
-        kind: 'cook_ahead',
-        servings: 6,
+        prepared: 6,
+        eaten: 0,
       }),
     ]);
-    // DEC-89: no eat item means this isn't a `recipe` occasion. A base-only
-    // slot saves as `empty` while keeping its cook_ahead item (the schema
-    // refine forbids `recipe` with zero eat items).
+    // DEC-91: nothing eaten means this isn't a `recipe` occasion. A batch-only
+    // slot saves as `empty` while keeping its prepared item (the schema refine
+    // forbids `recipe` with zero eaten items).
     expect(input.slotType).toBe('empty');
   });
 
@@ -358,11 +376,13 @@ describe('SlotEditorSheet — meal items', () => {
       expect(onSave).toHaveBeenCalled();
     });
     const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
-    // An eat item is present, so the occasion stays `recipe` and the base rides
-    // along as a cook_ahead item.
+    // An eaten dish is present, so the occasion stays `recipe` and the base
+    // rides along as a prepared-only cook-ahead item.
     expect(input.slotType).toBe('recipe');
-    expect(input.items.filter((i) => i.kind === 'eat')).toHaveLength(1);
-    expect(input.items.filter((i) => i.kind === 'cook_ahead')).toHaveLength(1);
+    expect(input.items.filter((i) => i.eaten > 0)).toHaveLength(1);
+    expect(
+      input.items.filter((i) => i.eaten === 0 && i.prepared > 0),
+    ).toHaveLength(1);
   });
 
   it('offers to cook the base behind an eaten variation', async () => {
@@ -402,8 +422,8 @@ describe('SlotEditorSheet — meal items', () => {
       expect.arrayContaining([
         expect.objectContaining({
           recipeId: 22,
-          kind: 'cook_ahead',
-          servings: 8,
+          prepared: 8,
+          eaten: 0,
         }),
       ]),
     );
@@ -417,8 +437,8 @@ describe('SlotEditorSheet — meal items', () => {
         slot={{
           ...RECIPE_SLOT,
           items: [
-            cook({ recipeId: 22, servings: 3 }),
-            eat({ recipeId: 10, baseRecipeId: 22, servings: 5 }),
+            cook({ recipeId: 22, prepared: 3 }),
+            eat({ recipeId: 10, baseRecipeId: 22, prepared: 5, eaten: 5 }),
           ],
         }}
         members={[]}
@@ -433,6 +453,31 @@ describe('SlotEditorSheet — meal items', () => {
     );
   });
 
+  it('shows the shortfall under each short dish, not once per slot', () => {
+    render(
+      <SlotEditorSheet
+        open
+        // Two variations of different uncooked bases — each runs its base short.
+        slot={{
+          ...RECIPE_SLOT,
+          items: [
+            eat({ recipeId: 10, baseRecipeId: 22, prepared: 3, eaten: 3 }),
+            eat({ recipeId: 11, baseRecipeId: 33, prepared: 2, eaten: 2 }),
+          ],
+        }}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    const warnings = screen.getAllByTestId('serving-variation-warning');
+    expect(warnings).toHaveLength(2);
+    expect(warnings.map((w) => w.textContent).join(' ')).toMatch(/short by 3/);
+    expect(warnings.map((w) => w.textContent).join(' ')).toMatch(/short by 2/);
+  });
+
   it('recomputes "left in plan" against the live items', () => {
     // 8 base servings cooked, a variation eats 3 → 5 left.
     render(
@@ -440,7 +485,10 @@ describe('SlotEditorSheet — meal items', () => {
         open
         slot={{
           ...RECIPE_SLOT,
-          items: [cook(), eat({ recipeId: 10, baseRecipeId: 22, servings: 3 })],
+          items: [
+            cook(),
+            eat({ recipeId: 10, baseRecipeId: 22, prepared: 3, eaten: 3 }),
+          ],
         }}
         members={[]}
         isSaving={false}
@@ -452,6 +500,86 @@ describe('SlotEditorSheet — meal items', () => {
     expect(screen.getByTestId('base-remaining')).toHaveTextContent(
       '5 left in plan',
     );
+  });
+
+  it('clears the shortfall warning when the base is added to the dishes', async () => {
+    const user = userEvent.setup();
+    // The base that supplies the eaten variation is offered by the picker.
+    setupListMock([
+      listItem({ id: 22, name: 'Tomato Base', isBase: true, baseServings: 8 }),
+    ]);
+    render(
+      <SlotEditorSheet
+        open
+        // Eating 5 of a variation of base 22, nothing cooking it yet.
+        slot={{
+          ...RECIPE_SLOT,
+          items: [
+            eat({ recipeId: 10, baseRecipeId: 22, prepared: 5, eaten: 5 }),
+          ],
+        }}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('serving-variation-warning')).toHaveTextContent(
+      'short by 5',
+    );
+
+    // Listing the base in the day's dishes cooks 8 servings, covering the 5.
+    await user.click(screen.getByRole('button', { name: 'Add another dish' }));
+    await user.type(
+      screen.getByRole('combobox', { name: 'Add a dish' }),
+      'Tomato',
+    );
+    await user.click(await screen.findByText('Tomato Base'));
+
+    expect(
+      screen.queryByTestId('serving-variation-warning'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('caps the eaten quantity at the prepared quantity', async () => {
+    const user = userEvent.setup();
+    render(
+      <SlotEditorSheet
+        open
+        // eat() defaults to prepared 4, eaten 4.
+        slot={RECIPE_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    const eatenInput = screen.getByLabelText('Eaten for Tomato Pasta');
+    await user.clear(eatenInput);
+    await user.type(eatenInput, '9');
+    // Can't eat more than the 4 prepared.
+    expect(eatenInput).toHaveValue(4);
+  });
+
+  it('pulls eaten down when prepared is lowered below it', async () => {
+    const user = userEvent.setup();
+    render(
+      <SlotEditorSheet
+        open
+        slot={RECIPE_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    const preparedInput = screen.getByLabelText('Prepared for Tomato Pasta');
+    await user.clear(preparedInput);
+    await user.type(preparedInput, '2');
+    expect(screen.getByLabelText('Eaten for Tomato Pasta')).toHaveValue(2);
   });
 });
 
@@ -551,7 +679,7 @@ describe("SlotEditorSheet — who's eating", () => {
     });
     const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
     expect(input.items).toEqual([
-      expect.objectContaining({ recipeId: 50, kind: 'eat', servings: 4 }),
+      expect.objectContaining({ recipeId: 50, prepared: 4, eaten: 4 }),
     ]);
   });
 });
@@ -583,7 +711,9 @@ describe('SlotEditorSheet — leftovers', () => {
     leftoversSource: null,
     chefUserId: null,
     comment: null,
-    items: [eat({ recipeId: 10, recipeName: 'Tomato Pasta', servings: 6 })],
+    items: [
+      eat({ recipeId: 10, recipeName: 'Tomato Pasta', prepared: 6, eaten: 6 }),
+    ],
     dinerUserIds: [],
     guestCount: 0,
   };
@@ -652,7 +782,7 @@ describe('SlotEditorSheet — leftovers', () => {
     expect(input.slotType).toBe('leftovers');
     expect(input.leftoversSource).toBe('plan_meal');
     expect(input.items).toEqual([
-      expect.objectContaining({ recipeId: 10, kind: 'eat' }),
+      expect.objectContaining({ recipeId: 10, prepared: 0, eaten: 6 }),
     ]);
   });
 
@@ -687,7 +817,13 @@ describe('SlotEditorSheet — leftovers', () => {
   const EARLIER_VARIATION: PlanSlot = {
     ...EARLIER_COOKING,
     items: [
-      eat({ recipeId: 10, recipeName: 'Pasta', baseRecipeId: 22, servings: 4 }),
+      eat({
+        recipeId: 10,
+        recipeName: 'Pasta',
+        baseRecipeId: 22,
+        prepared: 4,
+        eaten: 4,
+      }),
     ],
   };
 
@@ -719,8 +855,14 @@ describe('SlotEditorSheet — leftovers', () => {
   const EARLIER_BASE: PlanSlot = {
     ...EARLIER_COOKING,
     items: [
-      cook({ recipeId: 22, recipeName: 'Base', servings: 2 }),
-      eat({ recipeId: 22, recipeName: 'Base', isBase: true, servings: 2 }),
+      cook({ recipeId: 22, recipeName: 'Base', prepared: 2 }),
+      eat({
+        recipeId: 22,
+        recipeName: 'Base',
+        isBase: true,
+        prepared: 0,
+        eaten: 2,
+      }),
     ],
   };
 

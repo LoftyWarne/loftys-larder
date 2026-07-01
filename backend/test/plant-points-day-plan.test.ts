@@ -247,15 +247,16 @@ describe('day + plan plant points', () => {
       .returning({ id: mealPlanSlots.id });
     const row = inserted[0];
     if (!row) throw new Error('slot insert failed');
-    // Translate the legacy options into items: the eaten recipe → an `eat`
-    // item, the cooked base → a `cook_ahead` item.
+    // Translate the legacy options into items: the eaten recipe → an eaten
+    // dish (prepared == eaten), the cooked base → a prepared-only batch.
     const items: (typeof mealPlanSlotItems.$inferInsert)[] = [];
     if (options.recipeId !== undefined) {
+      const servings = options.numberOfServings ?? 1;
       items.push({
         slotId: row.id,
         recipeId: options.recipeId,
-        servings: options.numberOfServings ?? 1,
-        kind: 'eat',
+        prepared: servings,
+        eaten: servings,
         sortOrder: 0,
       });
     }
@@ -263,8 +264,8 @@ describe('day + plan plant points', () => {
       items.push({
         slotId: row.id,
         recipeId: options.cooksBaseRecipeId,
-        servings: options.cooksBaseServings ?? 1,
-        kind: 'cook_ahead',
+        prepared: options.cooksBaseServings ?? 1,
+        eaten: 0,
         sortOrder: 1,
       });
     }
@@ -386,7 +387,7 @@ describe('day + plan plant points', () => {
       expect(await selectForDay(planId, day)).toBe(4);
     });
 
-    it('unions cooks_base_recipe_id ingredients on a recipe slot', async () => {
+    it('does not count a cooked-ahead base whose plants are not eaten (DEC-91)', async () => {
       const planId = await insertPlan({ start: day, end: day });
       const baseId = await insertRecipe('Curry base', { isBase: true });
       const mealId = await insertRecipe('Chicken curry');
@@ -399,6 +400,8 @@ describe('day + plan plant points', () => {
       await attach(mealId, chicken);
       await attach(mealId, rice);
 
+      // The eaten meal isn't a variation of the base, so the batch cooked
+      // alongside it (eaten = 0) contributes no plants until it's eaten.
       await insertSlot({
         planId,
         date: dayDate,
@@ -409,11 +412,11 @@ describe('day + plan plant points', () => {
         cooksBaseServings: 8,
       });
 
-      // distinct plants: onion, chilli, rice = 3 (chicken is non-plant)
-      expect(await selectForDay(planId, day)).toBe(3);
+      // Only the eaten meal's plants count: rice = 1 (chicken is non-plant).
+      expect(await selectForDay(planId, day)).toBe(1);
     });
 
-    it('counts cooks_base plants on a takeaway slot', async () => {
+    it('does not count a cooked-ahead base on a takeaway slot (nothing eaten)', async () => {
       const planId = await insertPlan({ start: day, end: day });
       const baseId = await insertRecipe('Curry base', { isBase: true });
       const onion = await insertIngredient('Onion', { isPlant: true });
@@ -430,7 +433,8 @@ describe('day + plan plant points', () => {
         cooksBaseServings: 8,
       });
 
-      expect(await selectForDay(planId, day)).toBe(2);
+      // Nothing eaten here — the batch's plants count only when eaten later.
+      expect(await selectForDay(planId, day)).toBe(0);
     });
 
     it('returns 0 for a non-recipe slot with no cooked base', async () => {
@@ -565,7 +569,7 @@ describe('day + plan plant points', () => {
       expect(await selectForPlan(planId)).toBe(3);
     });
 
-    it('includes batch-traversal and cook-base contributions', async () => {
+    it('includes batch-traversal but not an uneaten cooked base (DEC-91)', async () => {
       const planId = await insertPlan({ start: day, end: nextDay });
       const baseId = await insertRecipe('Tomato base', { isBase: true });
       const versionId = await insertRecipe('Pasta', { baseRecipeId: baseId });
@@ -584,6 +588,8 @@ describe('day + plan plant points', () => {
         recipeId: versionId,
         numberOfServings: 2,
       });
+      // A base cooked ahead on a takeaway slot (eaten = 0) — garlic does not
+      // count until it's eaten.
       await insertSlot({
         planId,
         date: nextDayDate,
@@ -593,8 +599,9 @@ describe('day + plan plant points', () => {
         cooksBaseServings: 4,
       });
 
-      // distinct plants across plan: tomato (traversal), pasta, garlic = 3
-      expect(await selectForPlan(planId)).toBe(3);
+      // distinct eaten plants across plan: tomato (variation traversal), pasta
+      // = 2. The uneaten cooked garlic base is excluded.
+      expect(await selectForPlan(planId)).toBe(2);
     });
   });
 

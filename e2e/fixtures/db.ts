@@ -243,8 +243,8 @@ export interface AssignRecipeSpec {
 }
 
 // Mark a slot as a `recipe` meal and add the recipe as its eaten dish. In the
-// composable-slot model (DEC-89) the dish lives in meal_plan_slot_items with
-// kind='eat' rather than on the slot row.
+// composable-slot model (DEC-89/DEC-91) the dish lives in meal_plan_slot_items;
+// an eaten dish cooked here has prepared == eaten.
 export async function assignRecipeToSlot(
   spec: AssignRecipeSpec,
 ): Promise<void> {
@@ -258,8 +258,8 @@ export async function assignRecipeToSlot(
     await insertSlotItem(client, {
       slotId: spec.slotId,
       recipeId: spec.recipeId,
-      servings: spec.numberOfServings,
-      kind: 'eat',
+      prepared: spec.numberOfServings,
+      eaten: spec.numberOfServings,
     });
     await client.query('commit');
   } catch (err) {
@@ -271,9 +271,8 @@ export async function assignRecipeToSlot(
 }
 
 // Add a base cooked ahead in this slot. The slot stays type='empty' — a
-// cook_ahead dish contributes to the shopping list and balance without the
-// slot itself being an eaten meal (DEC-89). The schema couples `eat` items to
-// the `recipe` status, but `cook_ahead` items are orthogonal to slot_type.
+// prepared-only dish (nothing eaten here) contributes to the shopping list and
+// balance without the slot itself being an eaten meal (DEC-91).
 export async function setCooksBaseOnSlot(spec: {
   slotId: number;
   cooksBaseRecipeId: number;
@@ -282,8 +281,8 @@ export async function setCooksBaseOnSlot(spec: {
   await insertSlotItem(getPool(), {
     slotId: spec.slotId,
     recipeId: spec.cooksBaseRecipeId,
-    servings: spec.cooksBaseServings,
-    kind: 'cook_ahead',
+    prepared: spec.cooksBaseServings,
+    eaten: 0,
   });
 }
 
@@ -294,12 +293,12 @@ async function insertSlotItem(
   item: {
     slotId: number;
     recipeId: number;
-    servings: number;
-    kind: 'eat' | 'cook_ahead';
+    prepared: number;
+    eaten: number;
   },
 ): Promise<void> {
   await db.query(
-    `insert into meal_plan_slot_items (slot_id, recipe_id, servings, kind, sort_order)
+    `insert into meal_plan_slot_items (slot_id, recipe_id, prepared, eaten, sort_order)
      values (
        $1, $2, $3, $4,
        coalesce(
@@ -307,7 +306,7 @@ async function insertSlotItem(
          0
        )
      )`,
-    [item.slotId, item.recipeId, item.servings, item.kind],
+    [item.slotId, item.recipeId, item.prepared, item.eaten],
   );
 }
 

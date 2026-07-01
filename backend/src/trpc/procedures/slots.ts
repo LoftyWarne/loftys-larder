@@ -43,16 +43,13 @@ export const slotsRouter = router({
 
       // Coherence rule (DEC-21): a recipe already on the slot can stay even if
       // it was soft-deleted after assignment, so only validate recipes the
-      // caller is *adding*. New `eat` items must be pickable; new `cook_ahead`
-      // items must reference a non-deleted base.
+      // caller is *adding*. New items must reference a pickable recipe; any
+      // recipe may be over-cooked now, so there's no base-only restriction
+      // (DEC-91 dropped the cook-ahead-must-be-a-base rule).
       const existingRecipeIds = await loadSlotItemRecipeIds(ctx.db, slot.id);
       for (const item of input.items) {
         if (existingRecipeIds.has(item.recipeId)) continue;
-        if (item.kind === 'cook_ahead') {
-          await assertRecipeIsBase(ctx.db, item.recipeId);
-        } else {
-          await assertRecipeAssignable(ctx.db, item.recipeId);
-        }
+        await assertRecipeAssignable(ctx.db, item.recipeId);
       }
 
       if (input.chefUserId !== null) {
@@ -202,8 +199,8 @@ async function replaceSlotItems(
     items.map((item) => ({
       slotId,
       recipeId: item.recipeId,
-      servings: item.servings,
-      kind: item.kind,
+      prepared: item.prepared,
+      eaten: item.eaten,
       sortOrder: item.sortOrder,
     })),
   );
@@ -211,8 +208,8 @@ async function replaceSlotItems(
 
 interface RawSlotItem {
   recipeId: number;
-  servings: number;
-  kind: typeof mealPlanSlotItems.$inferSelect.kind;
+  prepared: number;
+  eaten: number;
   sortOrder: number;
 }
 
@@ -223,8 +220,8 @@ async function loadRawSlotItems(
   return tx
     .select({
       recipeId: mealPlanSlotItems.recipeId,
-      servings: mealPlanSlotItems.servings,
-      kind: mealPlanSlotItems.kind,
+      prepared: mealPlanSlotItems.prepared,
+      eaten: mealPlanSlotItems.eaten,
       sortOrder: mealPlanSlotItems.sortOrder,
     })
     .from(mealPlanSlotItems)
@@ -354,43 +351,6 @@ async function assertRecipeAssignable(
       code: 'BAD_REQUEST',
       message: 'Recipe is deleted and cannot be assigned',
       cause: { code: 'SLOT_RECIPE_NOT_PICKABLE' },
-    });
-  }
-}
-
-async function assertRecipeIsBase(
-  db: DbHandle,
-  recipeId: number,
-): Promise<void> {
-  const rows = await db
-    .select({
-      householdId: recipes.householdId,
-      isDeleted: recipes.isDeleted,
-      isBase: recipes.isBase,
-    })
-    .from(recipes)
-    .where(eq(recipes.id, recipeId))
-    .limit(1);
-  const row = rows[0];
-  if (row?.householdId !== CURRENT_HOUSEHOLD_ID) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Base recipe not available in this household',
-      cause: { code: 'SLOT_BASE_CROSS_HOUSEHOLD' },
-    });
-  }
-  if (row.isDeleted) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Base recipe is deleted and cannot be assigned',
-      cause: { code: 'SLOT_BASE_NOT_PICKABLE' },
-    });
-  }
-  if (!row.isBase) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'A cook-ahead item must reference a base recipe',
-      cause: { code: 'SLOT_ITEM_COOK_AHEAD_NOT_BASE' },
     });
   }
 }

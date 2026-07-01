@@ -296,15 +296,19 @@ describe('shopping procedures', () => {
       .returning({ id: mealPlanSlots.id });
     const row = inserted[0];
     if (!row) throw new Error('slot insert failed');
-    // Translate the legacy options into items: eaten recipe → `eat` item,
-    // cooked base → `cook_ahead` item.
+    // Translate the legacy options into items (DEC-91). An eaten dish on a
+    // `recipe` slot is cooked here (prepared == eaten); on a leftovers /
+    // eat-out / takeaway slot it's provisioned elsewhere, so it's a pure-consume
+    // row (prepared 0) that contributes nothing to the buy list. A cooked base
+    // is a prepared-only batch (eaten 0).
     const items: (typeof mealPlanSlotItems.$inferInsert)[] = [];
     if (options.recipeId !== undefined) {
+      const servings = options.numberOfServings ?? 1;
       items.push({
         slotId: row.id,
         recipeId: options.recipeId,
-        servings: options.numberOfServings ?? 1,
-        kind: 'eat',
+        prepared: options.slotType === 'recipe' ? servings : 0,
+        eaten: servings,
         sortOrder: 0,
       });
     }
@@ -312,8 +316,8 @@ describe('shopping procedures', () => {
       items.push({
         slotId: row.id,
         recipeId: options.cooksBaseRecipeId,
-        servings: options.cooksBaseServings ?? 1,
-        kind: 'cook_ahead',
+        prepared: options.cooksBaseServings ?? 1,
+        eaten: 0,
         sortOrder: 1,
       });
     }
@@ -901,10 +905,10 @@ describe('shopping procedures', () => {
       // Bump the eat item to 8 servings → 4.000 total.
       await db
         .update(mealPlanSlotItems)
-        .set({ servings: 8 })
+        .set({ prepared: 8 })
         .where(
           and(
-            eq(mealPlanSlotItems.kind, 'eat'),
+            sql`${mealPlanSlotItems.eaten} > 0`,
             inArray(
               mealPlanSlotItems.slotId,
               db
@@ -939,10 +943,10 @@ describe('shopping procedures', () => {
         .where(eq(shoppingListItems.ingredientId, onionId));
       await db
         .update(mealPlanSlotItems)
-        .set({ servings: 2 })
+        .set({ prepared: 2 })
         .where(
           and(
-            eq(mealPlanSlotItems.kind, 'eat'),
+            sql`${mealPlanSlotItems.eaten} > 0`,
             inArray(
               mealPlanSlotItems.slotId,
               db
@@ -994,10 +998,10 @@ describe('shopping procedures', () => {
       await insertRecipeIngredient(onionOnlyId, onionId, '1.000');
       await db
         .update(mealPlanSlotItems)
-        .set({ servings: 4 })
+        .set({ prepared: 4 })
         .where(
           and(
-            eq(mealPlanSlotItems.kind, 'eat'),
+            sql`${mealPlanSlotItems.eaten} > 0`,
             eq(mealPlanSlotItems.slotId, slotId),
           ),
         );

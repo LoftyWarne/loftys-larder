@@ -1,10 +1,10 @@
 import { cn } from '@/lib/utils.ts';
 
-// Soft warning shown when a slot eats more base than has been cooked up to that
-// point in the plan (the running consumption balance went negative — see
-// `deriveBaseBalances`). Non-blocking — the user can save through it; the base
-// may have been prepped in an earlier period. `shortBy` is how many base
-// servings short the slot is; omit it for the "nothing cooked at all" nudge.
+// Soft warning shown when a slot uses more of a recipe than has been cooked up
+// to that point in the plan (the running consumption balance went negative — see
+// `deriveBaseBalances`, DEC-91). Non-blocking — the user can save through it; the
+// dish may have been prepped in an earlier period. `shortBy` is how many
+// portions short the slot is; omit it for the "nothing cooked at all" nudge.
 //
 // `variant` frames the wording: `base` for a Cooking slot drawing its base pool,
 // `meal` for a leftover of a non-base meal — there the shortfall is "the meal

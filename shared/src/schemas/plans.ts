@@ -36,14 +36,11 @@ export type SlotType = z.infer<typeof slotTypeSchema>;
 export const leftoversSourceSchema = z.enum(['plan_meal', 'takeaway', 'other']);
 export type LeftoversSource = z.infer<typeof leftoversSourceSchema>;
 
-// A dish on a slot (DEC-89). `eat` = consumed here; `cook_ahead` = a base
-// produced here in bulk for later meals.
-export const slotItemKindSchema = z.enum(['eat', 'cook_ahead']);
-export type SlotItemKind = z.infer<typeof slotItemKindSchema>;
-
 // Slot item with the recipe fields denormalised for rendering (name/image,
 // plus `isBase`/`baseRecipeId` for the consumption balance and `isDeleted` for
-// the "(deleted)" hint on historical slots — DEC-21).
+// the "(deleted)" hint on historical slots — DEC-21). `prepared` = portions
+// cooked, `eaten` = portions consumed here (DEC-91); role (produce/consume) is
+// derived from the two, not stored.
 export const planSlotItemSchema = z.object({
   id: z.number().int().positive(),
   recipeId: recipeIdSchema,
@@ -52,8 +49,8 @@ export const planSlotItemSchema = z.object({
   isBase: z.boolean(),
   baseRecipeId: recipeIdSchema.nullable(),
   isDeleted: z.boolean(),
-  servings: z.number().int().positive(),
-  kind: slotItemKindSchema,
+  prepared: z.number().int().nonnegative(),
+  eaten: z.number().int().nonnegative(),
   sortOrder: z.number().int().nonnegative(),
 });
 export type PlanSlotItem = z.infer<typeof planSlotItemSchema>;

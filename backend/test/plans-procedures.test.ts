@@ -226,8 +226,8 @@ describe('plans procedures', () => {
     await db.insert(mealPlanSlotItems).values({
       slotId: slot.id,
       recipeId,
-      servings,
-      kind: 'eat',
+      prepared: servings,
+      eaten: servings,
       sortOrder: 0,
     });
     return slot.id;
@@ -543,8 +543,8 @@ describe('plans procedures', () => {
       await db.insert(mealPlanSlotItems).values({
         slotId: slotRow.id,
         recipeId,
-        servings: 2,
-        kind: 'eat',
+        prepared: 2,
+        eaten: 2,
         sortOrder: 0,
       });
 
@@ -560,8 +560,8 @@ describe('plans procedures', () => {
           isBase: false,
           baseRecipeId: null,
           isDeleted: false,
-          servings: 2,
-          kind: 'eat',
+          prepared: 2,
+          eaten: 2,
           sortOrder: 0,
         },
       ]);
@@ -665,14 +665,14 @@ describe('plans procedures', () => {
           occasionId: mealPlanSlots.occasionId,
           slotType: mealPlanSlots.slotType,
           recipeId: mealPlanSlotItems.recipeId,
-          numberOfServings: mealPlanSlotItems.servings,
+          numberOfServings: mealPlanSlotItems.eaten,
         })
         .from(mealPlanSlots)
         .leftJoin(
           mealPlanSlotItems,
           and(
             eq(mealPlanSlotItems.slotId, mealPlanSlots.id),
-            eq(mealPlanSlotItems.kind, 'eat'),
+            sql`${mealPlanSlotItems.eaten} > 0`,
           ),
         )
         .where(eq(mealPlanSlots.planId, planId));
@@ -813,7 +813,7 @@ describe('plans procedures', () => {
       expect(survivor?.slotType).toBe('recipe');
       expect(survivor?.items).toHaveLength(1);
       expect(survivor?.items[0]?.recipeId).toBe(recipeId);
-      expect(survivor?.items[0]?.servings).toBe(2);
+      expect(survivor?.items[0]?.eaten).toBe(2);
     });
 
     it('is a no-op when the range is unchanged', async () => {
@@ -1128,15 +1128,15 @@ describe('plans procedures', () => {
         {
           slotId: recipeSourceSlot.id,
           recipeId,
-          servings: 3,
-          kind: 'eat',
+          prepared: 3,
+          eaten: 3,
           sortOrder: 0,
         },
         {
           slotId: recipeSourceSlot.id,
           recipeId: baseRecipeId,
-          servings: 6,
-          kind: 'cook_ahead',
+          prepared: 6,
+          eaten: 0,
           sortOrder: 1,
         },
       ]);
@@ -1177,11 +1177,11 @@ describe('plans procedures', () => {
       expect(recipeSlot?.guestCount).toBe(1);
       expect(recipeSlot?.items).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ recipeId, servings: 3, kind: 'eat' }),
+          expect.objectContaining({ recipeId, prepared: 3, eaten: 3 }),
           expect.objectContaining({
             recipeId: baseRecipeId,
-            servings: 6,
-            kind: 'cook_ahead',
+            prepared: 6,
+            eaten: 0,
           }),
         ]),
       );

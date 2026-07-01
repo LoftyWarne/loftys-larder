@@ -84,8 +84,8 @@ const ITEM_PREVIEW: PlanSlotItem = {
   isBase: false,
   baseRecipeId: null,
   isDeleted: false,
-  servings: 2,
-  kind: 'eat',
+  prepared: 2,
+  eaten: 2,
   sortOrder: 0,
 };
 
@@ -95,7 +95,7 @@ const ASSIGN_INPUT: UpdateSlotInput = {
   leftoversSource: null,
   chefUserId: null,
   comment: null,
-  items: [{ recipeId: 10, servings: 2, kind: 'eat', sortOrder: 0 }],
+  items: [{ recipeId: 10, prepared: 2, eaten: 2, sortOrder: 0 }],
   dinerUserIds: [],
   guestCount: 0,
 };
@@ -170,7 +170,7 @@ describe('useOptimisticSlotUpdate', () => {
     const serverSlot: PlanSlot = {
       ...SLOT_EMPTY,
       slotType: 'recipe',
-      items: [{ ...ITEM_PREVIEW, servings: 3 }],
+      items: [{ ...ITEM_PREVIEW, prepared: 3, eaten: 3 }],
     };
     onSettled({ slot: serverSlot });
 

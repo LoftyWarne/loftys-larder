@@ -43,12 +43,6 @@ export const leftoversSource = pgEnum('leftovers_source', [
   'other',
 ]);
 
-// A slot item is one dish on an occasion. `eat` = consumed here (a main, side,
-// or dessert); `cook_ahead` = a base produced here in bulk for later meals to
-// draw on (replaces the old per-slot `cooks_base_*` fields). Composable
-// occasions (DEC-89).
-export const slotItemKind = pgEnum('slot_item_kind', ['eat', 'cook_ahead']);
-
 // Household-scoped dated window (DEC-17). `created_by_user_id` is informational
 // and SET NULL on user delete (DEC-29). The (household_id, start_date) btree
 // is what FEAT-27's plan-overlap check (DEC-38) will hit.
@@ -159,12 +153,14 @@ export const mealPlanSlotDiners = pgTable(
   ],
 );
 
-// Dishes on a slot. Application rules (defence-in-depth above the FK + CHECK):
-// `eat` items only when the slot's `slot_type = 'recipe'`, and `slot_type =
-// 'recipe'` iff the slot has ≥1 `eat` item; `cook_ahead` items must reference
-// an `is_base` recipe and are allowed on any slot_type. `servings` is the
-// number eaten (eat) or the batch size produced (cook_ahead); the shopping
-// list and consumption balance (DEC-88) scale by it.
+// Dishes on a slot (DEC-91). `prepared` = portions cooked, `eaten` = portions
+// consumed at this occasion; both `>= 0` with `prepared + eaten > 0`. Role is
+// derived, not stored: an item produces surplus when `prepared > eaten` and
+// consumes when `eaten > 0`. Application rules (defence-in-depth): a slot is
+// `slot_type = 'recipe'` iff it has ≥1 item with `eaten > 0`; prepared-only
+// cook-ahead rows are allowed on any slot_type. The shopping list scales by
+// `prepared`; the consumption balance (DEC-88) adds `prepared` and subtracts
+// `eaten` per recipe.
 export const mealPlanSlotItems = pgTable(
   'meal_plan_slot_items',
   {
@@ -175,8 +171,8 @@ export const mealPlanSlotItems = pgTable(
     recipeId: integer()
       .notNull()
       .references(() => recipes.id, { onDelete: 'restrict' }),
-    servings: smallint().notNull(),
-    kind: slotItemKind().notNull(),
+    prepared: smallint().notNull(),
+    eaten: smallint().notNull(),
     sortOrder: smallint().notNull(),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
@@ -187,7 +183,15 @@ export const mealPlanSlotItems = pgTable(
       .$onUpdate(() => sql`now()`),
   },
   (table) => [
-    check('meal_plan_slot_items_servings_positive', sql`${table.servings} > 0`),
+    check(
+      'meal_plan_slot_items_prepared_non_negative',
+      sql`${table.prepared} >= 0`,
+    ),
+    check('meal_plan_slot_items_eaten_non_negative', sql`${table.eaten} >= 0`),
+    check(
+      'meal_plan_slot_items_prepared_or_eaten',
+      sql`${table.prepared} + ${table.eaten} > 0`,
+    ),
     index('meal_plan_slot_items_slot_id_idx').on(table.slotId),
   ],
 );

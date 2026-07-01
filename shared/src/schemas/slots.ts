@@ -3,13 +3,12 @@ import { z } from 'zod';
 import {
   leftoversSourceSchema,
   planSlotSchema,
-  slotItemKindSchema,
   slotTypeSchema,
 } from './plans.ts';
 
 const slotIdSchema = z.number().int().positive();
 const recipeIdSchema = z.number().int().positive();
-const servingsSchema = z.number().int().positive();
+const quantitySchema = z.number().int().nonnegative();
 
 export const SLOT_COMMENT_MAX_LENGTH = 2000;
 
@@ -22,24 +21,30 @@ const slotCommentSchema = z
     `Comment must be ${String(SLOT_COMMENT_MAX_LENGTH)} characters or fewer`,
   );
 
-// One dish in the desired slot state. `is_base` for `cook_ahead` and the
-// household scope of each recipe are checked in the procedure (they need a DB
-// read); the schema just shapes the input. `sortOrder` orders dishes within
-// the slot.
-export const slotItemInputSchema = z.object({
-  recipeId: recipeIdSchema,
-  servings: servingsSchema,
-  kind: slotItemKindSchema,
-  sortOrder: z.number().int().nonnegative(),
-});
+// One dish in the desired slot state (DEC-91). `prepared` = portions cooked,
+// `eaten` = portions consumed here; a dish must do at least one (`prepared +
+// eaten > 0`). The household scope of each recipe is checked in the procedure
+// (it needs a DB read); the schema just shapes the input. `sortOrder` orders
+// dishes within the slot.
+export const slotItemInputSchema = z
+  .object({
+    recipeId: recipeIdSchema,
+    prepared: quantitySchema,
+    eaten: quantitySchema,
+    sortOrder: z.number().int().nonnegative(),
+  })
+  .refine((value) => value.prepared + value.eaten > 0, {
+    path: ['prepared'],
+    message: 'A dish must have a prepared or eaten quantity',
+  });
 export type SlotItemInput = z.infer<typeof slotItemInputSchema>;
 
 // Full-replace semantics: the caller declares the slot's desired final state —
 // status + chef + comment + the complete `items` list. The procedure deletes
-// and reinserts the items. Composable occasions (DEC-89): `eat` items are the
-// dishes eaten (a main, sides, dessert); `cook_ahead` items are bases produced
-// in bulk. The refine encodes the slot-status coupling (`eat` items iff the
-// slot is `recipe`); `cook_ahead`-must-be-a-base is enforced in the procedure.
+// and reinserts the items. Composable occasions (DEC-89/DEC-91): each item
+// carries `prepared` (cooked) + `eaten` (consumed here). The refine encodes the
+// slot-status coupling in terms of what's *eaten* (`eaten > 0` items iff the
+// slot is `recipe`); prepared-only cook-ahead rows are allowed on any type.
 export const updateSlotInputSchema = z
   .object({
     slotId: slotIdSchema,
@@ -70,22 +75,28 @@ export const updateSlotInputSchema = z
   )
   .refine(
     (value) => {
-      const eatCount = value.items.filter((item) => item.kind === 'eat').length;
-      // A `recipe` slot is the eaten meal: at least one `eat` dish.
-      if (value.slotType === 'recipe') return eatCount >= 1;
-      // `leftovers` of a planned meal: exactly the one eaten dish, no cooks.
+      const eatenCount = value.items.filter((item) => item.eaten > 0).length;
+      // A `recipe` slot is the eaten meal: at least one dish is eaten here.
+      if (value.slotType === 'recipe') return eatenCount >= 1;
+      // `leftovers` of a planned meal: exactly the one eaten dish (pure
+      // consume — the food was cooked earlier), no cooking here.
       if (value.slotType === 'leftovers') {
+        const only = value.items[0];
         return value.leftoversSource === 'plan_meal'
-          ? value.items.length === 1 && value.items[0]?.kind === 'eat'
+          ? value.items.length === 1 &&
+              only !== undefined &&
+              only.eaten > 0 &&
+              only.prepared === 0
           : value.items.length === 0;
       }
-      // empty / eat_out / takeaway: nothing eaten here.
-      return eatCount === 0;
+      // empty / eat_out / takeaway: nothing eaten here (prepared-only
+      // cook-ahead rows are still allowed).
+      return eatenCount === 0;
     },
     {
       path: ['items'],
       message:
-        'eat items are required when slotType is recipe, are exactly one for leftovers of a planned meal, and not allowed otherwise',
+        'eaten items are required when slotType is recipe, are exactly one pure-consume dish for leftovers of a planned meal, and not allowed otherwise',
     },
   );
 export type UpdateSlotInput = z.infer<typeof updateSlotInputSchema>;

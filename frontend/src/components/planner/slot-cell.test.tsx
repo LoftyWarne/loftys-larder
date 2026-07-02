@@ -203,6 +203,20 @@ describe('SlotCell', () => {
     ).toBeInTheDocument();
   });
 
+  it('names the base when a serving variation runs its base short', () => {
+    render(
+      <SlotCell
+        // A variation of base 22 (baseRecipeId set), short by 2.
+        slot={{ ...RECIPE_SLOT, items: [eatItem({ baseRecipeId: 22 })] }}
+        onClick={() => undefined}
+        shortfallByItem={new Map([[1, 2]])}
+      />,
+    );
+    expect(
+      screen.getByText(/Short 2 servings — not enough base cooked yet/),
+    ).toBeInTheDocument();
+  });
+
   it('opens the editor when a card with a base is clicked', async () => {
     const user = userEvent.setup();
     const onClick = vi.fn();

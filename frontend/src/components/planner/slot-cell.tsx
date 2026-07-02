@@ -153,7 +153,9 @@ function SlotBody({
               ? LEFTOVERS_SOURCE_LABEL[slot.leftoversSource]
               : '—'}
         </span>
-        {short !== undefined && short > 0 && <ShortfallNudge shortBy={short} />}
+        {short !== undefined && short > 0 && dish && (
+          <ShortfallNudge shortBy={short} needsBase={dishNeedsBase(dish)} />
+        )}
       </div>
     );
   }
@@ -182,7 +184,10 @@ function SlotBody({
                 <RecipeTypeBadge recipe={item} className="ml-auto" />
               </span>
               {short !== undefined && short > 0 && (
-                <ShortfallNudge shortBy={short} />
+                <ShortfallNudge
+                  shortBy={short}
+                  needsBase={dishNeedsBase(item)}
+                />
               )}
             </div>
           );
@@ -208,17 +213,33 @@ function SlotBody({
 
 // The shortfall nudge shown on the card and read out for a11y: the slot is
 // planned to eat/use more of a recipe than has been cooked up to this point in
-// the plan (DEC-91). Kept short but self-explanatory.
-function shortfallText(shortBy: number): string {
+// the plan (DEC-91). Kept short but self-explanatory. A dish drawing on a base
+// pool (a serving variation, or a base eaten directly) names the base.
+function shortfallText(shortBy: number, needsBase = false): string {
   const unit = shortBy === 1 ? 'serving' : 'servings';
-  return `Short ${String(shortBy)} ${unit} — not enough cooked yet`;
+  const cause = needsBase
+    ? 'not enough base cooked yet'
+    : 'not enough cooked yet';
+  return `Short ${String(shortBy)} ${unit} — ${cause}`;
+}
+
+// A dish is short on a base pool when it's a base or a variation of one; a plain
+// standalone is short on its own supply.
+function dishNeedsBase(item: PlanSlotItem): boolean {
+  return item.isBase || item.baseRecipeId !== null;
 }
 
 // Per-dish shortfall nudge, rendered under the dish it applies to.
-function ShortfallNudge({ shortBy }: { shortBy: number }): React.ReactElement {
+function ShortfallNudge({
+  shortBy,
+  needsBase,
+}: {
+  shortBy: number;
+  needsBase: boolean;
+}): React.ReactElement {
   return (
     <span className="text-xs text-amber-700" data-testid="slot-item-shortfall">
-      ⚠ {shortfallText(shortBy)}
+      ⚠ {shortfallText(shortBy, needsBase)}
     </span>
   );
 }

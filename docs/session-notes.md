@@ -50,16 +50,20 @@ INSERT INTO households (id, name) VALUES ('00000000-0000-4000-8000-000000000001'
 
 **Resolved by running `node /app/seed-reference.js` on the app machine** (bundle `d822345`, which includes `seedHousehold`) → `seed-reference: complete` → plan creation works.
 
-### ⚠️ Open issue: release machine ≠ app machine database
+### Unresolved anomaly: v19 release seed didn't take, manual app-machine seed did
 
-The deploy of `d822345` (**v19, `complete`**) ran `migrate.js && seed-reference.js` — yet a plan insert **4 minutes after** v19 completed still failed the household FK. Only running `seed-reference.js` **on the app machine** fixed it. Same pattern held for the earlier `meal_occasions` fix (on-app-machine run worked; the release seed hadn't).
+The deploy of `d822345` (**v19, `complete`**, 11:15:46Z) ran `migrate.js && seed-reference.js`; the committed bundle definitely contains `seedHousehold` in `runReferenceSeeds` (verified via `git show`). App machine `d896` rolled to v19 at 11:18, yet a plan insert at **11:20** still failed the household FK. Running `seed-reference.js` **on `d896`** at ~11:23 fixed it. Same pattern earlier for `meal_occasions`.
 
-Conclusion: after the Fly UI re-attach, the **release machine and the app machine resolve `DATABASE_URL` to different databases**. Consequences until fixed:
+**Infra facts gathered while chasing this (these DISPROVE the earlier "different DB" guess):**
 
-- **Deploys do NOT self-heal data** — the release seed lands in a DB the app doesn't read. Reference/household fixes must be run via `seed-reference.js` **on the app machine**.
-- Migrations may be running against a different DB than the app reads — a latent hazard worth confirming.
+- Postgres cluster `loftys-larder-prod-db` is a **single node** (`683e54eb`, `primary`, `postgres-flex:17.2`) — no split-brain.
+- App `DATABASE_URL` = `loftys-larder-prod-db.flycast:5432/loftys_larder_prod` (user `loftys_larder_prod`). The release machine uses the **same** secret, so app and release target the **same** database. There is **no app-vs-release DB split.**
 
-Next step (not yet done): compare the database name in the app's `DATABASE_URL` secret against what the release machine sees, converge on one canonical DB (clean `fly postgres attach` or an explicit `DATABASE_URL`), then confirm a deploy alone seeds correctly. The `seedHousehold`-in-`runReferenceSeeds` change is still correct and needed — it just can't help until app and release agree on the DB.
+So on paper a deploy's release seed *should* write the same DB the app reads — but empirically v19's didn't, while the identical bundle run on the app machine did, 3 min later, same DB. **Root cause not yet explained from outside** (needs DB-side inspection, which the auto-mode classifier blocks). Leading candidates: the release-machine transaction didn't commit to the node the app reads (flycast/networking quirk during the release phase), or the 11:20 error was a tail-of-burst/connection-pool artifact and the release seed actually worked.
+
+**Operational stance until explained:** prod is healthy. The **reliable** reseed path is `seed-reference.js` **on the app machine** (`flyctl ssh console --app loftys-larder-prod -C "node /app/seed-reference.js"`), not trusting the release command. The `seedHousehold`-in-`runReferenceSeeds` change is still correct and kept.
+
+**To settle it:** do a controlled redeploy (or `flyctl deploy`) and watch whether the app sees seeded data **without** a manual app-machine run. If it does, deploys self-heal and the v19 event was a one-off; if not, the release-phase DB write is genuinely unreliable and worth a Fly support thread (unmanaged `postgres-flex`).
 
 ---
 

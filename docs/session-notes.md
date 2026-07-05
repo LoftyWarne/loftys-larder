@@ -18,6 +18,14 @@ Direct browser→Cloudinary upload (DEC-50) POSTs to `api.cloudinary.com` — a 
 
 Added `https://api.cloudinary.com` to `connect-src` (hardcoded alongside `'self'`, mirroring how `res.cloudinary.com` is hardcoded in `img-src`). `security.test.ts` now asserts the upload host is present so it can't silently regress. No schema, no new dependency.
 
+**Deploy/verify gotcha:** the fix serves from the origin the moment it deploys, but the PWA service worker hands back the *cached* app shell, so the old CSP keeps enforcing until the SW updates. Confirm a deploy landed by curling the header directly (`curl -sD- https://loftys-larder.co.uk/ -o/dev/null | grep -i content-security-policy`) rather than trusting the browser; to re-test in-browser, unregister the SW (DevTools → Application → Service Workers) and hard reload.
+
+### Follow-on: theme-guard inline script blocked by `script-src`
+
+Once `connect-src` was fixed, a second **pre-existing** CSP error surfaced: `script-src 'self'` blocked the pre-paint theme-guard inline script in `frontend/index.html` (adds `dark` class before React mounts). Latent since the theme feature shipped — non-fatal (try/catch swallows), only symptom a possible dark-mode flash; only noticed because the console was open for the upload issue.
+
+Fixed **without** loosening `script-src` (DEC-46 keeps it strict, no `'unsafe-inline'`): allowed the one script by its sha256 hash (`THEME_GUARD_SCRIPT_HASH` in `security.ts`). Fragility (hash must track the script bytes) is contained by a `security.test.ts` guard that recomputes the hash from `frontend/index.html` and asserts the served `script-src` lists it — so an edit/reflow that doesn't update the hash fails CI instead of silently reintroducing the flash. Verified source bytes == served bytes (Vite isn't minifying inline HTML scripts). If you ever edit that script, update the hash; the guard test points the way.
+
 ---
 
 ## 2026-07-05 — Prod: "No meal occasions configured" + missing household after DB re-attach

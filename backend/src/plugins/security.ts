@@ -30,6 +30,15 @@ export interface CspDirectives {
   [directive: string]: Iterable<string>;
 }
 
+// Hash of the pre-paint theme-guard inline script in `frontend/index.html`
+// (runs before React mounts to avoid a light-on-dark flash). script-src stays
+// strict — no 'unsafe-inline' (DEC-46) — so this one known script is allowed by
+// its sha256 instead. If the script's bytes change, this hash must change too;
+// `security.test.ts` derives the hash from the source file and fails the build
+// if the policy drifts, so a stale hash can't silently reach prod.
+export const THEME_GUARD_SCRIPT_HASH =
+  "'sha256-urGWfZ5H+UEBsRnxp8kdvcrB/B0yGPja9aA3AYF2FOM='";
+
 export function buildCspDirectives(config: Config): CspDirectives {
   // Direct browser→Cloudinary uploads (DEC-50) POST to api.cloudinary.com,
   // which is a connect-src target. Distinct from res.cloudinary.com in imgSrc,
@@ -47,7 +56,7 @@ export function buildCspDirectives(config: Config): CspDirectives {
     objectSrc: ["'none'"],
     imgSrc: ["'self'", 'https://res.cloudinary.com', 'data:'],
     connectSrc,
-    scriptSrc: ["'self'"],
+    scriptSrc: ["'self'", THEME_GUARD_SCRIPT_HASH],
     styleSrc: ["'self'", "'unsafe-inline'"],
     fontSrc: ["'self'", 'data:'],
   };

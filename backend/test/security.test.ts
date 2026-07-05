@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -131,7 +135,35 @@ describe('CSP policy', () => {
     const response = await app.inject({ method: 'GET', url: '/api/health' });
     const csp = parseCsp(response.headers['content-security-policy']);
     const scriptSrc = csp.get('script-src') ?? [];
-    expect(scriptSrc).toEqual(["'self'"]);
+    expect(scriptSrc).toContain("'self'");
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
+  });
+
+  // Pins the CSP hash to the actual bytes of the pre-paint theme-guard inline
+  // script in frontend/index.html. If the script changes (or Prettier reflows
+  // the HTML) without the hash being updated, the served policy will no longer
+  // list the new hash and this fails — turning a silent flash regression + CSP
+  // console error into a red build.
+  it('allows the theme-guard inline script by its current source hash', async () => {
+    const indexHtmlPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../frontend/index.html',
+    );
+    const html = readFileSync(indexHtmlPath, 'utf8');
+    const match = /<script>([\s\S]*?)<\/script>/.exec(html);
+    expect(match, 'no inline <script> found in frontend/index.html').not.toBe(
+      null,
+    );
+    const scriptBody = match?.[1] ?? '';
+    const digest = createHash('sha256')
+      .update(scriptBody, 'utf8')
+      .digest('base64');
+    const expected = `'sha256-${digest}'`;
+
+    app = await buildApp(devConfig, buildOptions);
+    const response = await app.inject({ method: 'GET', url: '/api/health' });
+    const csp = parseCsp(response.headers['content-security-policy']);
+    expect(csp.get('script-src') ?? []).toContain(expected);
   });
 
   it("permits 'unsafe-inline' in style-src for shadcn/Radix inline styles", async () => {

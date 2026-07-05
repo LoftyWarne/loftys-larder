@@ -48,7 +48,18 @@ flyctl postgres connect -a loftys-larder-prod-db
 INSERT INTO households (id, name) VALUES ('00000000-0000-4000-8000-000000000001', 'Lofty''s Larder') ON CONFLICT (id) DO NOTHING;
 ```
 
-Once deployed, the release command's `seed-reference.js` inserts it automatically and future re-attaches self-heal.
+**Resolved by running `node /app/seed-reference.js` on the app machine** (bundle `d822345`, which includes `seedHousehold`) → `seed-reference: complete` → plan creation works.
+
+### ⚠️ Open issue: release machine ≠ app machine database
+
+The deploy of `d822345` (**v19, `complete`**) ran `migrate.js && seed-reference.js` — yet a plan insert **4 minutes after** v19 completed still failed the household FK. Only running `seed-reference.js` **on the app machine** fixed it. Same pattern held for the earlier `meal_occasions` fix (on-app-machine run worked; the release seed hadn't).
+
+Conclusion: after the Fly UI re-attach, the **release machine and the app machine resolve `DATABASE_URL` to different databases**. Consequences until fixed:
+
+- **Deploys do NOT self-heal data** — the release seed lands in a DB the app doesn't read. Reference/household fixes must be run via `seed-reference.js` **on the app machine**.
+- Migrations may be running against a different DB than the app reads — a latent hazard worth confirming.
+
+Next step (not yet done): compare the database name in the app's `DATABASE_URL` secret against what the release machine sees, converge on one canonical DB (clean `fly postgres attach` or an explicit `DATABASE_URL`), then confirm a deploy alone seeds correctly. The `seedHousehold`-in-`runReferenceSeeds` change is still correct and needed — it just can't help until app and release agree on the DB.
 
 ---
 

@@ -4,9 +4,9 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-07-05 — Prod: "No meal occasions configured" after DB re-attach (ops, no code change)
+## 2026-07-05 — Prod: "No meal occasions configured" + missing household after DB re-attach
 
-**Status:** Resolved on prod. **No code change** — app code and seed wiring were correct. Reference seed re-run against the live DB.
+**Status:** Reference rows re-seeded on prod (ops). Household gap fixed in code (`seedHousehold` added to `runReferenceSeeds`) — takes effect on next deploy; interim insert done by hand. Same root cause (DB re-attach), surfaced across two tables.
 
 ### Symptom & root cause
 
@@ -32,6 +32,23 @@ flyctl ssh console --app loftys-larder-prod -C "node /app/seed-reference.js"   #
 - **Re-attaching the DB / repointing `DATABASE_URL` never re-seeds.** Follow any such change with a fresh deploy or a manual `seed-reference.js` run. Normal `git push` → CI → deploy is unaffected (the release command handles it).
 - The GitHub repo connection is the *deploy* path (the one that *does* re-seed) — not the cause; don't unattach it.
 - Optional hardening (not done, would be a DEC-level decision against "seed only via release_command"): run `runReferenceSeeds` once on boot, guarded, so any DB self-heals regardless of how `DATABASE_URL` got set.
+
+### Follow-on: missing `households` row → plan insert FK failure
+
+After the reference re-seed, creating a plan then failed inserting `meal_plans` (FK `household_id` → `households(id)`, `onDelete: restrict`). The re-attached DB had **no household row**. Cause: `households` is only ever populated by `seedHousehold`, which ran **only** via `runSeeds` in the dev CLI (`backend/scripts/seed.ts`, `tsx` — not in the prod bundle); no migration inserts it, and the prod seed (`runReferenceSeeds`) **deliberately excluded** it. So prod's original household row was an out-of-band manual seed run, and the re-attach wiped it with no supported way to recreate it.
+
+**Fix (code):** added `seedHousehold(tx)` to `runReferenceSeeds` in `backend/src/db/seeds/index.ts` so the prod release command bootstraps the household (`CURRENT_HOUSEHOLD_ID`, DEC-17) alongside the lookup tables. Idempotent (`onConflictDoNothing`). Reverses the documented "household deliberately excluded from prod seed" choice — the exclusion left a fresh prod DB with no way to create the row. `seed-reference.ts` header comment updated to match. Backend typecheck clean; no test asserted the old exclusion.
+
+**Interim (before deploy):** insert the single row by hand. The piped-stdin trick fails — `flyctl postgres connect` opens an interactive PTY and ignores stdin — so do it interactively in a real terminal:
+
+```
+flyctl postgres connect -a loftys-larder-prod-db
+# at postgres=#:
+\c loftys_larder_prod
+INSERT INTO households (id, name) VALUES ('00000000-0000-4000-8000-000000000001', 'Lofty''s Larder') ON CONFLICT (id) DO NOTHING;
+```
+
+Once deployed, the release command's `seed-reference.js` inserts it automatically and future re-attaches self-heal.
 
 ---
 

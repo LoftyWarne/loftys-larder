@@ -29,15 +29,21 @@ export async function runDevSeeds(
   });
 }
 
-// Reference-only subset of `runSeeds`, used by the production seed entrypoint
-// (`src/seed-reference.ts`) that runs as part of the Fly release command. The
-// household row is deliberately excluded — this seeds the global lookup tables
-// (units, prep types, ingredient categories, meal occasions) only. Idempotent
-// via per-seed `ON CONFLICT DO NOTHING`, so it is safe to run on every deploy.
+// Production bootstrap seed, used by the production seed entrypoint
+// (`src/seed-reference.ts`) that runs as part of the Fly release command.
+// Seeds the single-household row (`CURRENT_HOUSEHOLD_ID`, DEC-17) plus the
+// global lookup tables (units, prep types, ingredient categories, meal
+// occasions). The household is included because it is the only supported way
+// to create it on a fresh prod DB — a re-attach or `DATABASE_URL` repoint
+// leaves an empty database and does not re-run migrations' data, so without
+// this the first household-scoped write (e.g. creating a plan) fails an FK to
+// `households`. Idempotent via per-seed `ON CONFLICT DO NOTHING`, so it is safe
+// to run on every deploy.
 export async function runReferenceSeeds(
   withTransaction: WithTransaction,
 ): Promise<void> {
   await withTransaction(async (tx) => {
+    await seedHousehold(tx);
     await seedReference(tx);
   });
 }

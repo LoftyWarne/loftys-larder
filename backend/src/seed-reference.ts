@@ -9,9 +9,10 @@ import { makeWithTransaction } from './db/withTransaction.ts';
 
 // Standalone reference-seed entrypoint, bundled to dist/seed-reference.js and
 // run after migrate.js in the Fly release_command (see fly.toml). Populates the
-// global lookup tables (units, prep types, ingredient categories, meal
-// occasions) so production has them without a UI to edit them. Idempotent via
-// `ON CONFLICT DO NOTHING`, so re-running on every deploy is a no-op once seeded.
+// single-household row plus the global lookup tables (units, prep types,
+// ingredient categories, meal occasions) so production has them without a UI to
+// edit them. Idempotent via `ON CONFLICT DO NOTHING`, so re-running on every
+// deploy is a no-op once seeded.
 //
 // Mirrors migrate.ts: parses only DATABASE_URL (keeping release-machine env
 // requirements minimal) and uses a fresh max:1 pool. This script lives outside

@@ -4,6 +4,37 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-05 — Prod: "No meal occasions configured" after DB re-attach (ops, no code change)
+
+**Status:** Resolved on prod. **No code change** — app code and seed wiring were correct. Reference seed re-run against the live DB.
+
+### Symptom & root cause
+
+Creating a plan on prod threw `INTERNAL_SERVER_ERROR: No meal occasions configured` (thrown at `backend/src/trpc/procedures/plans.ts` `loadOccasionIds` when `meal_occasions` is empty). Tables existed but the reference rows didn't — so a migration had run against the DB but the seed hadn't.
+
+Cause: the prod Postgres was **(re)attached via the Fly UI**, which creates/points a database and sets the `DATABASE_URL` secret. A **secret change restarts the machines but does NOT re-run `release_command`** (`node /app/migrate.js && node /app/seed-reference.js` in `fly.toml`) — that only runs on a *deploy*. So the reference seed (`meal_occasions`, units, prep types, ingredient categories) never populated the attached DB.
+
+Release history was the tell: live release **v17 (`df77afa`, Jul 2) was `complete`**, and its release command *included* the seed — so the seed had succeeded against a *different* DB state than the one the app now reads. That inconsistency is what pointed at an attach/DATABASE_URL repoint rather than a failed deploy.
+
+### Fix
+
+Ran the idempotent seed directly on the live machine (auto-stop idles them, so start one first):
+
+```
+flyctl machine start <id> --app loftys-larder-prod
+flyctl ssh console --app loftys-larder-prod -C "node /app/seed-reference.js"   # → seed-reference: complete
+```
+
+`ON CONFLICT DO NOTHING`, safe to re-run. Verified via `seed-reference: complete` (runs inside `withTransaction`, so "complete" = committed). Note: an ad-hoc `node -e "import('pg')…"` on the prod machine fails — `pg` is bundled into the esbuild output, not a resolvable module — so verify functionally (create a plan), not with a one-off query.
+
+### Worth carrying
+
+- **Re-attaching the DB / repointing `DATABASE_URL` never re-seeds.** Follow any such change with a fresh deploy or a manual `seed-reference.js` run. Normal `git push` → CI → deploy is unaffected (the release command handles it).
+- The GitHub repo connection is the *deploy* path (the one that *does* re-seed) — not the cause; don't unattach it.
+- Optional hardening (not done, would be a DEC-level decision against "seed only via release_command"): run `runReferenceSeeds` once on boot, guarded, so any DB self-heals regardless of how `DATABASE_URL` got set.
+
+---
+
 ## 2026-07-05 — Date-picker hit target on plan start/end fields
 
 **Status:** Shipped. Frontend-only. No schema, DEC, or dependency change. Frontend **392** pass (5 new); typecheck / lint clean.

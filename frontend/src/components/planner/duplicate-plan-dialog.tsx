@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
-import { Input } from '@/components/ui/input.tsx';
+import { DateInput } from '@/components/ui/date-input.tsx';
 
 export interface DuplicatePlanDialogProps {
   open: boolean;
@@ -85,9 +85,8 @@ export function DuplicatePlanDialog({
             >
               New start date
             </label>
-            <Input
+            <DateInput
               id="duplicate-plan-start"
-              type="date"
               disabled={submitting}
               aria-invalid={
                 form.formState.errors.newStartDate ? true : undefined

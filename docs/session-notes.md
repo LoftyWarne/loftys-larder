@@ -4,6 +4,22 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-05 — Date-picker hit target on plan start/end fields
+
+**Status:** Shipped. Frontend-only. No schema, DEC, or dependency change. Frontend **392** pass (5 new); typecheck / lint clean.
+
+### The fix
+
+Native `<input type="date">` only opens the calendar popup from the tiny built-in calendar icon — clicking the text area does nothing, which is the "very small clickable area" the user hit on the New plan and Duplicate plan dialogs. Added a **`DateInput` primitive** (`frontend/src/components/ui/date-input.tsx`) that calls `input.showPicker()` on a click anywhere in the field and sets `cursor-pointer`. Made it a shared primitive rather than an inline handler because it touched three call sites (start + end on new-plan, start on duplicate-plan); any future date field gets it for free.
+
+### Worth carrying
+
+- `showPicker()` is called via `event.currentTarget` (no ref merge needed — react-hook-form owns the ref through `register`) and guarded with `typeof … === 'function'` + try/catch. Older browsers with no `showPicker` fall back to the native icon; jsdom (no `showPicker`) is unaffected, which is why the suite stays green.
+- The onClick respects a caller's `onClick` and skips `showPicker()` if the caller calls `preventDefault()`.
+- iOS Safari already surfaces a wheel picker on focus and behaves differently from desktop programmatic `showPicker()` — not manually verified on-device; flag if a mobile report comes in.
+
+---
+
 ## 2026-07-01 — Per-dish `prepared` / `eaten` quantities (DEC-91) + shortfall UX
 
 **Status:** Shipped. Schema change + data migration (`0013`), ran forward on Testcontainers. New **DEC-91** supersedes/amends DEC-88/89/90. Backend **507** + frontend **386** pass; typecheck / lint / format clean. DoD boxes left unticked (human action).

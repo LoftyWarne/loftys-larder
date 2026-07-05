@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
-import { Input } from '@/components/ui/input.tsx';
+import { DateInput } from '@/components/ui/date-input.tsx';
 
 export interface NewPlanDialogProps {
   open: boolean;
@@ -77,9 +77,8 @@ export function NewPlanDialog({
               <label htmlFor="new-plan-start" className="text-sm font-medium">
                 Start date
               </label>
-              <Input
+              <DateInput
                 id="new-plan-start"
-                type="date"
                 disabled={submitting}
                 aria-invalid={
                   form.formState.errors.startDate ? true : undefined
@@ -96,9 +95,8 @@ export function NewPlanDialog({
               <label htmlFor="new-plan-end" className="text-sm font-medium">
                 End date
               </label>
-              <Input
+              <DateInput
                 id="new-plan-end"
-                type="date"
                 disabled={submitting}
                 aria-invalid={form.formState.errors.endDate ? true : undefined}
                 {...form.register('endDate')}

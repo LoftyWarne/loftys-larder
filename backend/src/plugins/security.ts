@@ -31,7 +31,10 @@ export interface CspDirectives {
 }
 
 export function buildCspDirectives(config: Config): CspDirectives {
-  const connectSrc = ["'self'"];
+  // Direct browser→Cloudinary uploads (DEC-50) POST to api.cloudinary.com,
+  // which is a connect-src target. Distinct from res.cloudinary.com in imgSrc,
+  // which only covers *displaying* the uploaded image.
+  const connectSrc = ["'self'", 'https://api.cloudinary.com'];
   if (config.SENTRY_BROWSER_INGEST_ORIGIN) {
     connectSrc.push(config.SENTRY_BROWSER_INGEST_ORIGIN);
   }

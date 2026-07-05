@@ -4,6 +4,22 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-05 — Prod: recipe image upload "Failed to fetch" (CSP `connect-src`)
+
+**Status:** Fixed in code (`backend/src/plugins/security.ts`), tests updated (`backend/test/security.test.ts`), DEC-46 amended. Takes effect on next deploy to `main`.
+
+### Symptom & root cause
+
+Recipe editor image upload failed **prod-only** with `Failed to fetch`. Console: `Connecting to 'https://api.cloudinary.com/v1_1/…/image/upload' violates … "connect-src 'self' https://…sentry.io"`.
+
+Direct browser→Cloudinary upload (DEC-50) POSTs to `api.cloudinary.com` — a `connect-src` target. The CSP `connect-src` only listed `'self'` + Sentry ingest, so the browser blocked the `fetch` (a CSP-blocked fetch surfaces as `TypeError: Failed to fetch`, not a Cloudinary status). The `img-src` allow-list already had `res.cloudinary.com`, so *displaying* uploaded images worked — masking the gap. Dev was unaffected because Vite serves the SPA without the Fastify/helmet CSP header (that only fronts the statically-served SPA in prod).
+
+### Fix
+
+Added `https://api.cloudinary.com` to `connect-src` (hardcoded alongside `'self'`, mirroring how `res.cloudinary.com` is hardcoded in `img-src`). `security.test.ts` now asserts the upload host is present so it can't silently regress. No schema, no new dependency.
+
+---
+
 ## 2026-07-05 — Prod: "No meal occasions configured" + missing household after DB re-attach
 
 **Status:** Reference rows re-seeded on prod (ops). Household gap fixed in code (`seedHousehold` added to `runReferenceSeeds`) — takes effect on next deploy; interim insert done by hand. Same root cause (DB re-attach), surfaced across two tables.

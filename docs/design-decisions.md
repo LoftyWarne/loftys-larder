@@ -504,13 +504,14 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 ### DEC-46 — Explicit CSP policy
 
-- **Chosen:** CSP configured explicitly via `@fastify/helmet`: `img-src` includes `res.cloudinary.com` and `data:`; `connect-src` includes Sentry's browser ingest; `script-src` and `style-src` allow `'self'` plus the minimum needed for shadcn's styles; everything else defaults to `'self'`.
+- **Chosen:** CSP configured explicitly via `@fastify/helmet`: `img-src` includes `res.cloudinary.com` and `data:`; `connect-src` includes `api.cloudinary.com` (direct browser upload target, DEC-50) and Sentry's browser ingest; `script-src` and `style-src` allow `'self'` plus the minimum needed for shadcn's styles; everything else defaults to `'self'`.
 - **Alternatives:** Helmet's defaults; no CSP; report-only mode.
 - **Why it won:** Explicit allow-list is the strong-default. The dependencies that need cross-origin (Cloudinary, Sentry) are few and named.
 - **Consequences (+):** Tight XSS containment. Any new cross-origin dependency is a deliberate policy edit.
 - **Consequences (−):** Adding a third-party (analytics, a CMS, a chat widget) requires a CSP edit before it works in prod — easy to miss in dev where Vite serves with different headers. Inline styles needed by some shadcn components require `unsafe-inline` for `style-src` or a hash/nonce strategy — the plan accepts the minimum needed; if that turns out to be `unsafe-inline`, a hash/nonce upgrade is the harder path.
+- **Note (2026-07-05):** The "easy to miss in dev" hazard bit us. The recipe image upload POSTs to `api.cloudinary.com` (a `connect-src` target, distinct from the `res.cloudinary.com` display host already in `img-src`), but `connect-src` never listed it. Worked in dev (Vite serves without the CSP) and failed prod-only with `Failed to fetch`. Fixed by adding `https://api.cloudinary.com` to `connect-src`; `security.test.ts` now asserts its presence.
 - **Revisit when:** Adding a new cross-origin source; tightening `style-src` away from `unsafe-inline` if currently permitted.
-- **Cross-refs:** FEAT-48.
+- **Cross-refs:** FEAT-48, DEC-50.
 
 ### DEC-47 — `@fastify/helmet` for security headers
 

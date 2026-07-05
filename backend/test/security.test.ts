@@ -107,11 +107,23 @@ describe('CSP policy', () => {
     expect(connectSrc).toContain('https://o123.ingest.sentry.io');
   });
 
-  it('limits connect-src to self when Sentry ingest is unset', async () => {
+  it('limits connect-src to self and Cloudinary when Sentry ingest is unset', async () => {
     app = await buildApp(devConfig, buildOptions);
     const response = await app.inject({ method: 'GET', url: '/api/health' });
     const csp = parseCsp(response.headers['content-security-policy']);
-    expect(csp.get('connect-src')).toEqual(["'self'"]);
+    expect(csp.get('connect-src')).toEqual([
+      "'self'",
+      'https://api.cloudinary.com',
+    ]);
+  });
+
+  it('allows the Cloudinary upload host in connect-src', async () => {
+    app = await buildApp(devConfig, buildOptions);
+    const response = await app.inject({ method: 'GET', url: '/api/health' });
+    const csp = parseCsp(response.headers['content-security-policy']);
+    expect(csp.get('connect-src') ?? []).toContain(
+      'https://api.cloudinary.com',
+    );
   });
 
   it("keeps script-src strict (no 'unsafe-inline')", async () => {
@@ -158,7 +170,10 @@ describe('CSP policy', () => {
   describe('buildCspDirectives', () => {
     it('omits Sentry ingest entirely when unset', () => {
       const directives = buildCspDirectives(devConfig);
-      expect(Array.from(directives.connectSrc)).toEqual(["'self'"]);
+      expect(Array.from(directives.connectSrc)).toEqual([
+        "'self'",
+        'https://api.cloudinary.com',
+      ]);
     });
   });
 });

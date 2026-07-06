@@ -26,6 +26,12 @@ Once `connect-src` was fixed, a second **pre-existing** CSP error surfaced: `scr
 
 Fixed **without** loosening `script-src` (DEC-46 keeps it strict, no `'unsafe-inline'`): allowed the one script by its sha256 hash (`THEME_GUARD_SCRIPT_HASH` in `security.ts`). Fragility (hash must track the script bytes) is contained by a `security.test.ts` guard that recomputes the hash from `frontend/index.html` and asserts the served `script-src` lists it — so an edit/reflow that doesn't update the hash fails CI instead of silently reintroducing the flash. Verified source bytes == served bytes (Vite isn't minifying inline HTML scripts). If you ever edit that script, update the hash; the guard test points the way.
 
+### Why a hard refresh didn't clear it, and the shell-revision marker
+
+Both CSP fixes are **backend-only** (header changes in `security.ts`). But the CSP travels as a Fastify *response header*, not as part of `index.html`. The PWA precaches `index.html` via `navigateFallback` (`vite.config.ts`) — storing the whole response, header included. Because the file's *content* didn't change, its precache revision didn't change, `registerType: 'autoUpdate'` saw no new SW, and already-installed clients kept replaying the frozen old-CSP response on every navigation (hard refresh routes through the SW, so it doesn't help). Confirmed prod's served CSP header was already correct while the browser still enforced the old one → stale SW shell. Immediate unblock: DevTools → Application → Storage → **Clear site data**, reload.
+
+To make backend-only header changes actually reach installed clients, added a `<meta name="shell-revision">` marker to `frontend/index.html`. Bumping its date changes the file's content hash → new precache revision → new SW → autoUpdate re-fetches `index.html` and captures the current headers. Verified the built `dist/sw.js` `index.html` revision changed (`98fd04cf…` → `a8789b1b…`) and the theme-guard hash still matches after the build (the meta sits outside the `<script>` body). **Bump the marker whenever a backend-only CSP/header change must propagate to installed clients.**
+
 ---
 
 ## 2026-07-05 — Prod: "No meal occasions configured" + missing household after DB re-attach

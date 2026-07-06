@@ -7,6 +7,15 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Larder" />
+    <!-- Precache-bust marker. The CSP travels as a Fastify response header, not
+         as part of this file, so a backend-only CSP change never alters
+         index.html's content hash — the PWA precache keeps replaying the old
+         frozen response (old header included) to already-installed clients.
+         Bumping this date changes the content hash, which ships a new service
+         worker that re-fetches index.html and captures the current headers.
+         Bump it whenever a backend-only CSP/header change must reach installed
+         clients. See DEC-46 / session notes. -->
+    <meta name="shell-revision" content="2026-07-06" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Lofty's Larder</title>
     <script>

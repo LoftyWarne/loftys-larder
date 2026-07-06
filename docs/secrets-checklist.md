@@ -91,6 +91,11 @@ there rather than threaded through a Dockerfile build arg. A Sentry DSN is not
 a credential (it's embedded in every page the SPA serves and visible to anyone
 with DevTools); committing keeps the value next to the code that uses it.
 
+`.dockerignore` excludes every `.env.*` file to keep dev secrets out of the
+image, so it must explicitly re-include this one (`!frontend/.env.production`)
+— otherwise the file never reaches the builder and `vite build` sees no DSN.
+The negation has to sit *after* the broad `.env.*` patterns to take effect.
+
 To rotate the DSN, edit `frontend/.env.production` and redeploy. To disable
 the frontend SDK entirely, blank `VITE_SENTRY_DSN` — `initSentry` no-ops on
 empty (`frontend/src/lib/sentry.ts`).

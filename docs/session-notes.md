@@ -935,7 +935,7 @@ The `debounces the search input before querying` test logged an "update to Ingre
   3. **Rollback rehearsal.** Empty commit to `main` → `Deploy` workflow → confirm new release serving via `flyctl releases` → `flyctl releases rollback v<n-1>` → confirm prior release serving (Axiom log line carrying the prior version tag, or a known fingerprint in the build).
 - **Seed the canary row** before the first drill, after the production schema is in place. The SQL in the doc assumes an `ingredients` table — verify the column list against the live schema at the moment of seeding (`unit` is currently mandatory per DEC-18; `created_at` / `updated_at` are added by Drizzle `$onUpdate` per DEC-16 and may not need explicit values).
 - **Sceptical-reader pass** is the FEAT-51 gate check. Read the document cold in a week and verify a stranger could follow it without context-from-conversation.
-- **`VITE_SENTRY_DSN` Dockerfile follow-up** referenced again in OPERATIONS.md's secrets section. The FEAT-46 task remains — frontend Sentry no-ops in prod until that lands.
+- **`VITE_SENTRY_DSN` Dockerfile follow-up** referenced again in OPERATIONS.md's secrets section. ~~The FEAT-46 task remains — frontend Sentry no-ops in prod until that lands.~~ **Resolved 2026-07-06** — see the dated entry at the end of this file. Root cause was `.dockerignore` stripping the committed `frontend/.env.production` from the build context, not a missing Dockerfile build arg.
 
 ---
 
@@ -3523,3 +3523,19 @@ Cache rule `bypass-api` configured at Cloudflare → Caching → Cache Rules. In
 ### Environment housekeeping (not project state, just useful to future-me)
 
 - Project pins Node LTS via `.nvmrc` (`24`). Today (2026-05) that's v24.15.0. Local environment was previously serving Homebrew's v26 (latest "Current"); Homebrew's `node` and `node@22` formulae were uninstalled; nvm sourcing was added to `~/.zshrc` and `nvm alias default 24.15.0` set. Per DEC-02, revisit the pin around October 2026 when Node 26 is promoted to LTS.
+
+---
+
+## 2026-07-06 — Frontend Sentry no-op in prod (root cause + fix)
+
+**Symptom:** backend Axiom + Sentry verified healthy, but frontend Sentry never initialised in production. Earlier notes (see the FEAT-45/46 "Discovered while writing the secrets checklist" entry) blamed a *missing Dockerfile build arg* and tracked a FEAT-46 follow-up to add `ARG VITE_SENTRY_DSN` + `--build-arg` plumbing.
+
+**Actual root cause:** the design had already moved to committing `frontend/.env.production` (Vite auto-loads it on production build; a DSN is public, not a credential) — `docs/secrets-checklist.md` describes this. The one thing defeating it was `.dockerignore`: its `.env.*` / `**/.env.*` patterns stripped the committed file from the build context, so `vite build` inside the image saw no DSN and `initSentry()` no-op'd. The build-arg plan would have worked too, but it fought the existing `.env.production` approach and — critically — **this repo has no git remote**, so the GitHub Actions `Deploy` workflow never runs; deploys are local `flyctl deploy`. A CI-only `--build-arg` would have been dead code.
+
+**Fix:** one-line `.dockerignore` negation `!frontend/.env.production` after the broad `.env.*` patterns. No Dockerfile or workflow change. Reverted an initial build-arg attempt.
+
+**Verified:**
+- Probe `docker build` COPYing `frontend/.env.production` now succeeds (was "not found in build context" before).
+- `pnpm --filter frontend build` inlines the DSN into `dist/assets/index-*.js`.
+
+**Docs touched:** `.dockerignore`, `OPERATIONS.md` (two entries corrected from the build-arg story), `docs/secrets-checklist.md` (added the `.dockerignore` re-include gotcha). The FEAT-46 follow-up is closed.

@@ -8,6 +8,11 @@
 .env.*
 **/.env
 **/.env.*
+# ...except the committed frontend production env: it carries only the public
+# Sentry DSN (baked into the SPA at build time, visible in DevTools — not a
+# secret) and Vite must see it during `vite build`. Negation must follow the
+# broad `.env.*` patterns above to take effect.
+!frontend/.env.production
 
 # Workspace installs and build output (Dockerfile rebuilds these)
 node_modules

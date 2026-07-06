@@ -52,7 +52,7 @@ Two stores:
 | Surface | Where | Notes |
 |---|---|---|
 | Backend runtime config (DB, auth, Resend, Cloudinary, Axiom, Sentry) | Fly app secrets | See `docs/secrets-checklist.md` § "Fly app secrets" |
-| `VITE_SENTRY_DSN` (frontend) | Docker build arg, **not** Fly secret | Build-time only; bundled into the SPA. Not yet wired through the Dockerfile (FEAT-46 follow-up) — frontend Sentry no-ops in production until then |
+| `VITE_SENTRY_DSN` (frontend) | Committed `frontend/.env.production`, **not** Fly secret | Build-time only; Vite inlines it into the SPA. The DSN is public (visible in DevTools), so it lives next to the code. `.dockerignore` re-includes this one file (`!frontend/.env.production`) so `vite build` sees it in the image build. Missing value = frontend Sentry no-ops |
 | `FLY_API_TOKEN` (deploy token, API app) | GitHub Actions secret | `Deploy` workflow |
 | `FLY_API_TOKEN_BACKUP` (deploy token, Postgres app), `BACKUP_DATABASE_URL`, `R2_*` | GitHub Actions secrets | `Backup` workflow |
 | `FLY_PG_APP` | GitHub Actions **variable** (not secret) | Postgres cluster name is non-sensitive; surfaces in step summaries |
@@ -328,7 +328,7 @@ Takes effect on the next workflow run; no Fly restart needed.
 
 ### Frontend Sentry DSN
 
-`VITE_SENTRY_DSN` is a Docker build arg, not a runtime secret (see above and `docs/secrets-checklist.md` § "Frontend Sentry DSN"). Rotating requires a new deploy so the SPA gets rebuilt with the new DSN baked in. Not wired through the Dockerfile yet — tracked as a FEAT-46 follow-up.
+`VITE_SENTRY_DSN` is inlined into the SPA at build time from the committed `frontend/.env.production` (see above and `docs/secrets-checklist.md` § "Frontend Sentry DSN"), not a runtime secret. A Sentry DSN is not a credential — it is embedded in every page the SPA serves — so it is committed next to the code that uses it. `.dockerignore` excludes all `.env.*` files but re-includes this one (`!frontend/.env.production`) so Vite sees it during the image build. Rotating means editing that file and re-deploying so the SPA is rebuilt with the new DSN.
 
 ---
 

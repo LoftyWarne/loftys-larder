@@ -4,6 +4,14 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-06 — PWA: deprecated `apple-mobile-web-app-capable` console warning
+
+**Status:** Fixed in `frontend/index.html`. Takes effect on next `pnpm --filter frontend build` / deploy.
+
+Chromium logs `<meta name="apple-mobile-web-app-capable"> is deprecated. Please include <meta name="mobile-web-app-capable">`. Added the standard `<meta name="mobile-web-app-capable" content="yes">` alongside — **kept** the Apple-prefixed tag, since iOS Safari only reads that variant for standalone/add-to-home-screen behaviour; removing it would break the iOS PWA. No `shell-revision` bump needed: this edits `index.html` content, so its precache hash changes on its own (the marker is only for backend-only header changes). Didn't touch `dist/index.html` — build artifact, regenerates.
+
+---
+
 ## 2026-07-05 — Prod: recipe image upload "Failed to fetch" (CSP `connect-src`)
 
 **Status:** Fixed in code (`backend/src/plugins/security.ts`), tests updated (`backend/test/security.test.ts`), DEC-46 amended. Takes effect on next deploy to `main`.

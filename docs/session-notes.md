@@ -20,9 +20,16 @@ Not truly dev-immune: the same 100-char cap bites in dev, but with no `STATIC_DI
 
 Added `routerOptions: { maxParamLength: 5000 }` to the Fastify constructor — the canonical tRPC-on-Fastify fix. Used the `routerOptions.*` form rather than the top-level `maxParamLength` option, which emits Fastify 5.8's `FSTDEP022` deprecation warning (confirmed the warning was introduced by the top-level form and that `routerOptions` silences it). No schema change, no new dependency, and it doesn't touch the tRPC URL shape (cross-cutting #16) — it just lets the server accept the shape the client already sends. Regression test in `server.test.ts` sends a batched path >100 chars and asserts `200`; confirmed it fails (`expected 404 to be 200`) without the fix.
 
+### Follow-on: hardened the `/api/*` not-found handler (done)
+
+**Status:** Fixed in code (`backend/src/trpc/not-found.ts` new, `backend/src/plugins/security.ts`), tests added (`backend/test/not-found.test.ts`, `backend/test/security.test.ts`).
+
+The `/api/*` branch of the static not-found handler used to answer `{ error: 'Not Found' }` — a string `error`, the exact shape that trips the opaque client message. Now it sends a real tRPC envelope via `trpcNotFoundBody`: `{ error: { message, code: -32004, data: { code: 'NOT_FOUND', httpStatus: 404, path } } }`. The numeric wire code (`-32004` = `TRPC_ERROR_CODES_BY_KEY.NOT_FOUND`, hand-pinned + guarded by a test rather than reaching into `appRouter._def._config`) is what lets `httpBatchLink`'s `transformResult` decode it into a `TRPCClientError` carrying the message. Query string is stripped (don't echo the tRPC `input`) and the path is capped at 256 chars.
+
+Reachability: the global auth `preHandler` runs before the not-found handler, so an **unauthenticated** `/api/*` miss still 401s there first; only an **authenticated** caller whose `/api/*` request matches no route (the original over-long-batch path) reaches this handler. Integration test hits the auth-exempt-but-unrouted `/api/health/does-not-exist` (with `STATIC_DIR` set) so no session is needed; confirmed it fails against the old body (`expected 'undefined' to be 'number'`).
+
 ### Deferred (need a call before touching)
 
-- Harden the `/api/*` branch of the not-found handler to emit a tRPC-shaped error, so a genuine future 404 surfaces a real message instead of this opaque one.
 - Collapse the N `plants.forDay` calls into one batch procedure (fewer queries, shorter URLs) — a perf refactor, FEAT-level, not part of this bug.
 
 ---

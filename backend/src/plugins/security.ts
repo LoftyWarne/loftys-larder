@@ -4,6 +4,7 @@ import staticPlugin from '@fastify/static';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import path from 'node:path';
 import type { Config } from '../config.ts';
+import { trpcNotFoundBody } from '../trpc/not-found.ts';
 
 // Explicit CSP per DEC-46. `useDefaults: false` keeps the policy auditable in
 // one place rather than splitting it across helmet's defaults and our overrides.
@@ -103,7 +104,10 @@ export async function registerSecurity(
       if (req.method === 'GET' && !req.url.startsWith('/api/')) {
         return reply.type('text/html').sendFile('index.html');
       }
-      return reply.code(404).send({ error: 'Not Found' });
+      // Unrouted /api/* — emit a tRPC-shaped error so a stray API 404 decodes
+      // to a real message on the client instead of the opaque "Unable to
+      // transform response from server".
+      return reply.code(404).send(trpcNotFoundBody(req.method, req.url));
     });
   }
 }

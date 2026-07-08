@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
@@ -207,5 +208,61 @@ describe('CSP policy', () => {
         'https://api.cloudinary.com',
       ]);
     });
+  });
+});
+
+describe('static SPA not-found handler', () => {
+  // The custom not-found handler is only installed when STATIC_DIR is set (the
+  // bundled prod backend serving the SPA). A throwaway dir with an index.html
+  // stands in for the built frontend.
+  const staticDir = mkdtempSync(join(tmpdir(), 'lofty-static-'));
+  writeFileSync(
+    join(staticDir, 'index.html'),
+    '<!doctype html><title>shell</title>',
+  );
+  const staticConfig: Config = { ...prodConfig, STATIC_DIR: staticDir };
+
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+    app = undefined;
+  });
+
+  afterAll(() => {
+    rmSync(staticDir, { recursive: true, force: true });
+  });
+
+  it('answers an unrouted /api/* miss with a decodable tRPC error envelope', async () => {
+    app = await buildApp(staticConfig, buildOptions);
+    // /api/health* is auth-exempt, so an unrouted sub-path reaches the
+    // not-found handler without a session (only /api/health itself is routed).
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/health/does-not-exist',
+    });
+    expect(response.statusCode).toBe(404);
+    const body = response.json<{
+      error: {
+        message: string;
+        code: number;
+        data: { code: string; httpStatus: number };
+      };
+    }>();
+    // Numeric `code` is what lets httpBatchLink decode this instead of throwing
+    // "Unable to transform response from server".
+    expect(typeof body.error.code).toBe('number');
+    expect(body.error.data.code).toBe('NOT_FOUND');
+    expect(body.error.data.httpStatus).toBe(404);
+  });
+
+  it('still serves the SPA shell for an unrouted non-/api GET', async () => {
+    app = await buildApp(staticConfig, buildOptions);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/planner/some/client/route',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
   });
 });

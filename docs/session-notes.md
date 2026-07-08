@@ -4,6 +4,21 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-08 — Home page: richer plan-slot detail
+
+**Status:** Done in code, committed + pushed to `main` (`57a26f2`). Full frontend suite green (412). Touched `frontend/src/routes/-components/index-page.tsx` (+ test); new shared `frontend/src/lib/slot-display.ts` and `frontend/src/components/planner/slot-comment-line.tsx`; refactor of `frontend/src/components/planner/slot-cell.tsx` to consume them.
+
+Home page meal rows previously collapsed every slot to a single label (dropping quantities, leftovers detail, diners, and comments). They now show planner-level detail.
+
+- **What's shown per row:** dish quantities (`×2 +1`, `prep ×4`), what leftovers are actually eating (the eaten dish, or the takeaway/other source), the `SlotDinersChip` (who's eating + guests), and the comment line. Scope confirmed with user as **full planner parity minus chef** — chef was explicitly dropped after being offered (the planner doesn't render chef name anywhere either; only diners via the `chefChip` prop slot).
+- **Layout:** occasion name left, all detail right-justified in a stacked column (`items-end text-right`) — per user request.
+- **Every live recipe name links** to its detail page — single-dish, each dish in a multi-dish slot, and the leftovers dish. Soft-deleted recipes render tagged `(deleted)` and never link (DEC-21). Extracted a `RecipeName` helper so link/deleted logic lives in one place.
+- **Link affordance:** settled on colour + medium weight with **hover/focus underline** (`focus-visible:underline` keeps it reachable for keyboard/AT since touch has no hover). Chose this over a persistent underline (dated) after showing the user the options; the chevron-affordance variant is the noted upgrade path if the colour-only signal proves too subtle on touch.
+- **New members query on home:** `trpc.user.listHouseholdMembers` added to `IndexPage` to resolve diner ids → names, same approach as the planner grid.
+- **Shared-helper extraction (mini cross-cutting):** `dishQtyLabel` + `LEFTOVERS_SOURCE_LABEL` moved out of `slot-cell.tsx` into `lib/slot-display.ts` (added `leftoversSummary`); comment markup pulled into `SlotCommentLine`. Both now reused by the planner card and the home list — flagged to user as a new shared surface, no objection. All user text stays plain (DEC-49). No schema / backend / tRPC-shape change.
+
+---
+
 ## 2026-07-08 — Recipe editor: ingredient quantity entry (fractions + display)
 
 **Status:** Done in code. New util `frontend/src/lib/quantity-input.ts` (+ test); wiring in `ingredient-list.tsx`, `recipe-edit-page.tsx`; tests in the two components + `quantity-input.test.ts`. Full frontend suite green.

@@ -75,6 +75,13 @@ export async function buildAppWithLogger(
     // real client rather than per CDN edge. We're orange-clouded (DEC-72),
     // so a spoofed header requires bypassing Cloudflare.
     trustProxy: true,
+    // A batched tRPC query encodes every procedure name into a single
+    // `/api/trpc/:path` route param (comma-joined). The planner alone fans out
+    // one `plants.forDay` per visible day, so a week-long plan blows past
+    // Fastify's default 100-char param cap — the route then misses and the
+    // not-found handler answers, which the batch client surfaces as the opaque
+    // "Unable to transform response from server". 5000 clears any realistic batch.
+    routerOptions: { maxParamLength: 5000 },
   });
 
   if (sentryEnabled) registerSentryHooks(app);

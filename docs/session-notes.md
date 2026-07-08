@@ -4,6 +4,29 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-08 — Prod: "Unable to transform response from server" when opening a plan
+
+**Status:** Fixed in code (`backend/src/server.ts`), regression test added (`backend/test/server.test.ts`). Takes effect on next deploy to `main`.
+
+### Symptom & root cause
+
+Opening a plan failed **prod-only** with the tRPC client error `Unable to transform response from server`. Not a superjson mismatch — the project runs **no** data transformer; that message is what the batch client throws when the response isn't the `{ result }` / `{ error: { code: <number> } }` envelope it expects.
+
+Chain: the planner fans out **one `plants.forDay` query per visible day** (`frontend/src/hooks/use-day-plant-points.ts` via `trpc.useQueries`), and `httpBatchLink` coalesces them plus `plans.get`, `user.listHouseholdMembers`, `recipes.list` into a single GET. Every procedure name is comma-joined into one `/api/trpc/:path` route param (`@trpc/server` adapter registers `fastify.all('${prefix}/:path')`). Base names ≈ 48 chars, each extra day adds `,plants.forDay` = 14 — so a ~4+ day plan blows past Fastify's default **`maxParamLength: 100`**. The route then misses, and the `setNotFoundHandler` in `security.ts` (registered only when `STATIC_DIR` is set → **prod**) answers `reply.code(404).send({ error: 'Not Found' })`. That's a single object whose `error` is a *string*; `httpBatchLink` maps a non-array response onto every op, and `transformResult` (verified in `@trpc/server@11.17.0`) throws because the error payload isn't `{ code: <number> }`.
+
+Not truly dev-immune: the same 100-char cap bites in dev, but with no `STATIC_DIR` you get Fastify's *default* 404 body (also a string `error`, also this exact message). Only noticed on live because that's where real multi-day plans get opened; short plans/tests stay under the limit.
+
+### Fix
+
+Added `routerOptions: { maxParamLength: 5000 }` to the Fastify constructor — the canonical tRPC-on-Fastify fix. Used the `routerOptions.*` form rather than the top-level `maxParamLength` option, which emits Fastify 5.8's `FSTDEP022` deprecation warning (confirmed the warning was introduced by the top-level form and that `routerOptions` silences it). No schema change, no new dependency, and it doesn't touch the tRPC URL shape (cross-cutting #16) — it just lets the server accept the shape the client already sends. Regression test in `server.test.ts` sends a batched path >100 chars and asserts `200`; confirmed it fails (`expected 404 to be 200`) without the fix.
+
+### Deferred (need a call before touching)
+
+- Harden the `/api/*` branch of the not-found handler to emit a tRPC-shaped error, so a genuine future 404 surfaces a real message instead of this opaque one.
+- Collapse the N `plants.forDay` calls into one batch procedure (fewer queries, shorter URLs) — a perf refactor, FEAT-level, not part of this bug.
+
+---
+
 ## 2026-07-06 — PWA: deprecated `apple-mobile-web-app-capable` console warning
 
 **Status:** Fixed in `frontend/index.html`. Takes effect on next `pnpm --filter frontend build` / deploy.

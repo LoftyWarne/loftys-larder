@@ -206,6 +206,42 @@ describe('static + tRPC coexistence', () => {
   });
 });
 
+describe('batched tRPC route param length', () => {
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('routes a batch whose comma-joined procedure path exceeds 100 chars', async () => {
+    app = await buildApp(devConfig, buildOptions);
+
+    // httpBatchLink coalesces every queued query into one GET, encoding the
+    // procedure names as a single comma-joined `/api/trpc/:path` param. The
+    // planner fans out one `plants.forDay` per visible day, so a real plan
+    // sails past Fastify's default 100-char param cap. Twelve health.ping's
+    // reproduce that overflow using the dev-exempt procedure.
+    const count = 12;
+    const path = Array.from({ length: count }, () => 'health.ping').join(',');
+    expect(path.length).toBeGreaterThan(100);
+
+    const input = Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [i, {}]),
+    );
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/trpc/${path}?batch=1&input=${encodeTrpcInput(input)}`,
+    });
+
+    // Without a raised maxParamLength this path misses the route and the
+    // not-found handler answers 404, which the batch client can't decode.
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ result: { data: { ok: boolean } } }[]>();
+    expect(body).toHaveLength(count);
+    expect(body.every((entry) => entry.result.data.ok)).toBe(true);
+  });
+});
+
 describe('auth pre-handler', () => {
   let app: FastifyInstance | undefined;
 

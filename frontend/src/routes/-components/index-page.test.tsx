@@ -14,7 +14,10 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
-    user: { getMe: { useQuery: vi.fn() } },
+    user: {
+      getMe: { useQuery: vi.fn() },
+      listHouseholdMembers: { useQuery: vi.fn() },
+    },
     plans: { list: { useQuery: vi.fn() }, get: { useQuery: vi.fn() } },
   },
 }));
@@ -25,6 +28,8 @@ import { IndexPage } from './index-page.tsx';
 const getMeMock = trpc.user.getMe.useQuery as unknown as ReturnType<
   typeof vi.fn
 >;
+const membersMock = trpc.user.listHouseholdMembers
+  .useQuery as unknown as ReturnType<typeof vi.fn>;
 const listMock = trpc.plans.list.useQuery as unknown as ReturnType<
   typeof vi.fn
 >;
@@ -42,9 +47,13 @@ beforeEach(() => {
   getMeMock.mockReset();
   listMock.mockReset();
   getPlanMock.mockReset();
+  membersMock.mockReset();
   // Sensible defaults; individual tests override what they exercise.
   stubMe();
   getPlanMock.mockReturnValue({ data: undefined, isLoading: false });
+  membersMock.mockReturnValue({
+    data: { members: [{ id: 'u1', name: 'Conor', email: 'c@example.com' }] },
+  });
 });
 
 describe('IndexPage', () => {
@@ -108,7 +117,8 @@ describe('IndexPage', () => {
     expect(curryLink).toHaveAttribute('href', '/recipes/$recipeId');
     expect(screen.getByRole('link', { name: 'Porridge' })).toBeInTheDocument();
     // A soft-deleted recipe renders, tagged, but is not a link.
-    expect(screen.getByText('Old stew (deleted)')).toBeInTheDocument();
+    expect(screen.getByText('Old stew')).toBeInTheDocument();
+    expect(screen.getByText('(deleted)')).toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /old stew/i }),
     ).not.toBeInTheDocument();
@@ -179,6 +189,93 @@ describe('IndexPage', () => {
     expect(screen.getByText('— not planned —')).toBeInTheDocument();
   });
 
+  it('shows leftover detail, dish quantities, diners, and comments on a slot', () => {
+    listMock.mockReturnValue({
+      data: {
+        items: [
+          {
+            id: 7,
+            startDate: TODAY,
+            endDate: TODAY,
+            createdByUserId: null,
+            slotsTotal: 2,
+            slotsAssigned: 2,
+          },
+        ],
+      },
+      isLoading: false,
+    });
+    getPlanMock.mockReturnValue({
+      isLoading: false,
+      data: {
+        id: 7,
+        startDate: TODAY,
+        endDate: TODAY,
+        createdByUserId: null,
+        slots: [
+          // A batch-cooked dinner: eats 2, cooks 3 (surplus into the pool), a
+          // comment, and two diners plus a guest.
+          {
+            ...slot({ id: 1, occasionId: 2, occasionName: 'Dinner' }, 'Chilli'),
+            comment: 'Double batch — freeze half',
+            dinerUserIds: ['u1'],
+            guestCount: 1,
+            items: [
+              {
+                id: 100,
+                recipeId: 10,
+                recipeName: 'Chilli',
+                recipeImageUrl: null,
+                isBase: false,
+                baseRecipeId: null,
+                isDeleted: false,
+                prepared: 3,
+                eaten: 2,
+                sortOrder: 0,
+              },
+            ],
+          },
+          // A leftovers lunch eating yesterday's chilli.
+          {
+            ...baseSlot({ id: 2, occasionId: 1, occasionName: 'Lunch' }),
+            slotType: 'leftovers',
+            leftoversSource: 'plan_meal',
+            items: [
+              {
+                id: 200,
+                recipeId: 10,
+                recipeName: 'Chilli',
+                recipeImageUrl: null,
+                isBase: false,
+                baseRecipeId: null,
+                isDeleted: false,
+                prepared: 0,
+                eaten: 1,
+                sortOrder: 0,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    render(<IndexPage />);
+
+    // Dish quantity: eats 2, +1 surplus into the pool.
+    expect(screen.getByText('×2 +1')).toBeInTheDocument();
+    // The comment renders as plain text.
+    expect(screen.getByTestId('slot-comment')).toHaveTextContent(
+      'Double batch — freeze half',
+    );
+    // Who's eating: the named member plus the guest.
+    expect(screen.getByTestId('slot-diners')).toHaveTextContent('Conor +1');
+    // Leftovers name the dish being eaten, linked to its recipe (alongside the
+    // dinner that cooked it — two "Chilli" links in all).
+    expect(screen.getByText(/Leftovers/)).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Chilli' })).toHaveLength(2);
+    expect(screen.getByText('×1')).toBeInTheDocument();
+  });
+
   it('shows a loading state while the active plan resolves', () => {
     listMock.mockReturnValue({ data: undefined, isLoading: true });
     render(<IndexPage />);
@@ -210,9 +307,13 @@ function baseSlot(opts: SlotOpts): Record<string, unknown> {
     date: opts.date ?? TODAY,
     occasionId: opts.occasionId,
     occasionName: opts.occasionName,
+    slotType: 'empty',
+    leftoversSource: null,
     chefUserId: null,
     comment: null,
     items: [],
+    dinerUserIds: [],
+    guestCount: 0,
   };
 }
 

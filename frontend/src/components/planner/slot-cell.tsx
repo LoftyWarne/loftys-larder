@@ -1,9 +1,11 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
-import { MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
+import { SlotCommentLine } from '@/components/planner/slot-comment-line.tsx';
+import { dishQtyLabel, LEFTOVERS_SOURCE_LABEL } from '@/lib/slot-display.ts';
 import { cn } from '@/lib/utils.ts';
 
 // Reusable slot card (DEC-89). A slot's dishes — the eaten meal and any base
@@ -94,21 +96,7 @@ export function SlotCell({
       >
         <SlotBody slot={slot} shortfallByItem={shortfallByItem} />
         {chefChip}
-        {commentLine ??
-          (slot.comment !== null && slot.comment !== '' && (
-            <span
-              data-testid="slot-comment"
-              className="flex items-start gap-1 text-xs text-muted-foreground italic"
-            >
-              <MessageSquare
-                className="mt-0.5 h-3 w-3 shrink-0"
-                aria-hidden="true"
-              />
-              <span className="min-w-0 break-words whitespace-pre-wrap">
-                {slot.comment}
-              </span>
-            </span>
-          ))}
+        {commentLine ?? <SlotCommentLine comment={slot.comment} />}
       </button>
       {showClear && (
         <button
@@ -123,14 +111,6 @@ export function SlotCell({
     </div>
   );
 }
-
-const LEFTOVERS_SOURCE_LABEL: Record<
-  Exclude<NonNullable<PlanSlot['leftoversSource']>, 'plan_meal'>,
-  string
-> = {
-  takeaway: 'Takeaway',
-  other: 'Other',
-};
 
 function SlotBody({
   slot,
@@ -229,6 +209,9 @@ function dishNeedsBase(item: PlanSlotItem): boolean {
   return item.isBase || item.baseRecipeId !== null;
 }
 
+// (dish quantity + leftovers-source labels now live in `lib/slot-display.ts`,
+// shared with the home page meal list.)
+
 // Per-dish shortfall nudge, rendered under the dish it applies to.
 function ShortfallNudge({
   shortBy,
@@ -283,15 +266,4 @@ function describeSlotForA11y(slot: PlanSlot, shortBy?: number): string {
 function describeItemForA11y(item: PlanSlotItem): string {
   // A prepared-only dish (nothing eaten here) is a batch cooked for later.
   return item.eaten <= 0 ? `prepped ${item.recipeName}` : item.recipeName;
-}
-
-// Card quantity label (DEC-91): what's eaten here, with a `+N` marker when the
-// dish cooks more than it eats (surplus into the pool). A prepared-only batch
-// (nothing eaten) reads as "prep ×N".
-function dishQtyLabel(item: PlanSlotItem): string {
-  if (item.eaten <= 0) return `prep ×${String(item.prepared)}`;
-  const surplus = item.prepared - item.eaten;
-  return surplus > 0
-    ? `×${String(item.eaten)} +${String(surplus)}`
-    : `×${String(item.eaten)}`;
 }

@@ -1,12 +1,15 @@
 import type { PlanSlot } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 
+import { SlotCommentLine } from '@/components/planner/slot-comment-line.tsx';
+import { SlotDinersChip } from '@/components/planner/slot-diners-chip.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import {
   formatDayLabel,
   hourInLondon,
   todayInLondon,
 } from '@/lib/date-utils.ts';
+import { dishQtyLabel, leftoversSummary } from '@/lib/slot-display.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 function greeting(name: string | undefined): string {
@@ -28,60 +31,129 @@ function isPlanned(slot: PlanSlot): boolean {
   return true;
 }
 
-// Label for a slot on the home lists. Dish names stay plain text (DEC-49). A
-// recipe soft-deleted after assignment still renders, tagged "(deleted)" for
-// historical coherence (DEC-21).
-function slotSummaryLabel(slot: PlanSlot): string {
+// A dish's quantity, shown muted alongside its name.
+function DishQty({
+  item,
+}: {
+  item: PlanSlot['items'][number];
+}): React.ReactElement {
+  return (
+    <span className="ml-1 text-xs text-muted-foreground">
+      {dishQtyLabel(item)}
+    </span>
+  );
+}
+
+// A dish name, linking through to its recipe detail page. A recipe soft-deleted
+// after assignment renders tagged "(deleted)" (DEC-21) and never links — there's
+// no live recipe to open. Names stay plain text (DEC-49).
+function RecipeName({
+  item,
+}: {
+  item: PlanSlot['items'][number];
+}): React.ReactElement {
+  if (item.isDeleted) {
+    return (
+      <>
+        {item.recipeName}
+        <span className="ml-1 text-xs text-muted-foreground">(deleted)</span>
+      </>
+    );
+  }
+  return (
+    <Link
+      to="/recipes/$recipeId"
+      params={{ recipeId: String(item.recipeId) }}
+      className="font-medium text-primary underline-offset-2 hover:underline focus-visible:underline"
+    >
+      {item.recipeName}
+    </Link>
+  );
+}
+
+// The right-hand meal summary for a slot. Recipe dishes link to their detail
+// page and carry their quantity (DEC-91); multiple dishes stack. Leftovers name
+// what's actually being eaten — the eaten dish (linked) or the takeaway/other
+// source. Markers and unplanned occasions are plain text.
+function MealContent({ slot }: { slot: PlanSlot }): React.ReactElement {
   switch (slot.slotType) {
+    case 'eat_out':
+      return <span className="text-sm">Eat out</span>;
+    case 'takeaway':
+      return <span className="text-sm">Takeaway</span>;
+    case 'leftovers': {
+      const dish = slot.items[0];
+      return (
+        <span className="text-sm">
+          <span className="text-muted-foreground">Leftovers · </span>
+          {dish ? (
+            <>
+              <RecipeName item={dish} />
+              <DishQty item={dish} />
+            </>
+          ) : (
+            leftoversSummary(slot)
+          )}
+        </span>
+      );
+    }
     case 'recipe': {
       const items = eatItems(slot);
-      if (items.length === 0) return '— not planned —';
-      return items
-        .map((item) =>
-          item.isDeleted ? `${item.recipeName} (deleted)` : item.recipeName,
-        )
-        .join(', ');
+      if (items.length === 0) {
+        return (
+          <span className="text-sm text-muted-foreground">— not planned —</span>
+        );
+      }
+      const [item] = items;
+      if (items.length === 1 && item) {
+        return (
+          <span className="text-sm">
+            <RecipeName item={item} />
+            <DishQty item={item} />
+          </span>
+        );
+      }
+      return (
+        <ul className="flex flex-col gap-0.5 text-right text-sm">
+          {items.map((item) => (
+            <li key={item.id}>
+              <RecipeName item={item} />
+              <DishQty item={item} />
+            </li>
+          ))}
+        </ul>
+      );
     }
-    case 'eat_out':
-      return 'Eat out';
-    case 'takeaway':
-      return 'Takeaway';
-    case 'leftovers':
-      return 'Leftovers';
     case 'empty':
     default:
-      return '— not planned —';
+      return (
+        <span className="text-sm text-muted-foreground">— not planned —</span>
+      );
   }
 }
 
-// One occasion row. A single live dish links through to its detail page;
-// multiple dishes, markers, deleted recipes, and empty occasions are plain
-// text.
-function MealRow({ slot }: { slot: PlanSlot }): React.ReactElement {
-  const items = slot.slotType === 'recipe' ? eatItems(slot) : [];
-  const first = items.length === 1 ? items[0] : undefined;
-  // Only a single, live dish links through to its recipe detail page.
-  const linkable = first && !first.isDeleted ? first : undefined;
+// One occasion row: the occasion name sits on the left; its meal summary, the
+// "who's eating" chip, and any free-text comment stack right-justified opposite.
+function MealRow({
+  slot,
+  memberNameById,
+}: {
+  slot: PlanSlot;
+  memberNameById: ReadonlyMap<string, string>;
+}): React.ReactElement {
   return (
-    <li className="flex items-center justify-between gap-4 px-4 py-2">
+    <li className="flex items-start justify-between gap-4 px-4 py-2">
       <span className="text-sm font-medium">{slot.occasionName}</span>
-      {linkable ? (
-        <Link
-          to="/recipes/$recipeId"
-          params={{ recipeId: String(linkable.recipeId) }}
-          className="text-sm text-primary hover:underline"
-        >
-          {linkable.recipeName}
-        </Link>
-      ) : (
-        <span
-          className={
-            isPlanned(slot) ? 'text-sm' : 'text-sm text-muted-foreground'
-          }
-        >
-          {slotSummaryLabel(slot)}
-        </span>
-      )}
+      <div className="flex min-w-0 flex-col items-end gap-1 text-right">
+        <MealContent slot={slot} />
+        <SlotDinersChip
+          dinerNames={slot.dinerUserIds.map(
+            (id) => memberNameById.get(id) ?? 'Unknown',
+          )}
+          guestCount={slot.guestCount}
+        />
+        <SlotCommentLine comment={slot.comment} />
+      </div>
     </li>
   );
 }
@@ -111,6 +183,12 @@ export function IndexPage(): React.ReactElement {
   const planDetail = trpc.plans.get.useQuery(
     { id: planId ?? 0 },
     { enabled: planId !== undefined },
+  );
+
+  // Resolve a slot's diner ids to names for the "who's eating" chip.
+  const members = trpc.user.listHouseholdMembers.useQuery();
+  const memberNameById = new Map<string, string>(
+    (members.data?.members ?? []).map((m) => [m.id, m.name]),
   );
 
   const today = todayInLondon();
@@ -183,7 +261,11 @@ export function IndexPage(): React.ReactElement {
             {todaysSlots.length > 0 && (
               <ul className="divide-y rounded-md border">
                 {todaysSlots.map((slot) => (
-                  <MealRow key={slot.id} slot={slot} />
+                  <MealRow
+                    key={slot.id}
+                    slot={slot}
+                    memberNameById={memberNameById}
+                  />
                 ))}
               </ul>
             )}
@@ -202,7 +284,11 @@ export function IndexPage(): React.ReactElement {
                     {meals.length > 0 ? (
                       <ul className="divide-y">
                         {meals.map((slot) => (
-                          <MealRow key={slot.id} slot={slot} />
+                          <MealRow
+                            key={slot.id}
+                            slot={slot}
+                            memberNameById={memberNameById}
+                          />
                         ))}
                       </ul>
                     ) : (

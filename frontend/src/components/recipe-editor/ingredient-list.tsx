@@ -38,12 +38,15 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip.tsx';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
+import {
+  isValidQuantityEntry,
+  parseQuantityToDecimal,
+  sanitizeQuantityInput,
+  trimTrailingZeros,
+} from '@/lib/quantity-input.ts';
 
-// Same regex as the shared `recipeQuantitySchema` — kept in lockstep so the
-// client error matches what the server would reject.
-const QUANTITY_REGEX = /^\d+(\.\d{1,3})?$/;
 const QUANTITY_ERROR =
-  'Quantity must be a non-negative number with up to 3 decimal places';
+  'Enter a number or simple fraction, e.g. 1.5 or 1/2 (up to 3 decimal places)';
 
 interface IngredientPickerOption extends SearchableComboboxOption {
   defaultUnitId: number;
@@ -58,6 +61,9 @@ interface DraftLine {
   prepTypeId: number | null;
   quantityError?: string;
   ingredientError?: string;
+  // Set on blur; cleared while typing. Gates the live quantity error so a
+  // partially-typed value (`1/`, `1.`) doesn't flash an error mid-entry.
+  quantityTouched?: boolean;
 }
 
 export interface ServerLineError {
@@ -113,7 +119,9 @@ function toDraft(line: RecipeIngredientLine, index: number): DraftLine {
       defaultUnitId: line.unitId,
       unitName: line.unitName,
     },
-    quantity: line.quantity,
+    // The DB pads to scale (`50` → `50.000`); show no more precision than the
+    // value needs.
+    quantity: trimTrailingZeros(line.quantity),
     prepTypeId: line.prepTypeId,
   };
 }
@@ -128,7 +136,7 @@ function newRowKey(): string {
 // quantity. Shared by the "Add ingredient" gate and the submit validation so
 // the two never drift.
 function isLineValid(line: DraftLine): boolean {
-  return line.ingredient !== null && QUANTITY_REGEX.test(line.quantity.trim());
+  return line.ingredient !== null && isValidQuantityEntry(line.quantity);
 }
 
 // Row keys of lines that repeat an earlier line's (ingredient, prep type)
@@ -312,7 +320,7 @@ export const IngredientList = forwardRef<
         updated.ingredientError = 'Pick an ingredient';
         if (firstInvalid < 0) firstInvalid = index;
       }
-      if (!QUANTITY_REGEX.test(line.quantity.trim())) {
+      if (!isValidQuantityEntry(line.quantity)) {
         updated.quantityError = QUANTITY_ERROR;
         if (firstInvalid < 0) firstInvalid = index;
       }
@@ -334,9 +342,14 @@ export const IngredientList = forwardRef<
         // an ingredient picked before we get here.
         throw new Error('ingredient missing after validation');
       }
+      const quantity = parseQuantityToDecimal(line.quantity);
+      if (quantity === null) {
+        // Unreachable — validation above rejects anything unparseable.
+        throw new Error('quantity invalid after validation');
+      }
       return {
         ingredientId: ingredient.id,
-        quantity: line.quantity.trim(),
+        quantity,
         unitId: ingredient.defaultUnitId,
         prepTypeId: line.prepTypeId,
       };
@@ -387,6 +400,14 @@ export const IngredientList = forwardRef<
           <ul className="space-y-3">
             {lines.map((line, index) => {
               const serverError = serverErrorsByIndex.get(index);
+              // Show the quantity error after the field is blurred (or a submit
+              // set it), never mid-typing — so a partially-typed `1/` or `1.`
+              // on the way to a valid value doesn't flash an error.
+              const showQuantityError =
+                line.quantityError !== undefined ||
+                (line.quantityTouched === true &&
+                  line.quantity.trim() !== '' &&
+                  !isValidQuantityEntry(line.quantity));
               return (
                 <li
                   key={line.rowKey}
@@ -437,20 +458,27 @@ export const IngredientList = forwardRef<
                   <div className="col-span-2 space-y-1">
                     <Input
                       type="text"
-                      inputMode="decimal"
+                      // `text`, not `decimal`, so the `/` for fractions is on
+                      // the mobile keyboard; sanitize keeps input to digits and
+                      // a single `.` or `/`.
+                      inputMode="text"
                       placeholder="Qty"
                       aria-label={`Quantity for row ${String(index + 1)}`}
                       value={line.quantity}
                       onChange={(event) => {
                         updateLine(line.rowKey, {
-                          quantity: event.target.value,
+                          quantity: sanitizeQuantityInput(event.target.value),
                           quantityError: undefined,
+                          quantityTouched: false,
                         });
                       }}
+                      onBlur={() => {
+                        updateLine(line.rowKey, { quantityTouched: true });
+                      }}
                     />
-                    {line.quantityError && (
+                    {showQuantityError && (
                       <p role="alert" className="text-sm text-destructive">
-                        {line.quantityError}
+                        {QUANTITY_ERROR}
                       </p>
                     )}
                   </div>

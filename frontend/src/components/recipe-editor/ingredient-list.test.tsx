@@ -265,23 +265,89 @@ describe('IngredientList', () => {
     });
   });
 
+  it('strips non-numeric characters from the quantity as typed', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    const qty = screen.getByLabelText('Quantity for row 1');
+    await user.type(qty, '1a2b/3c');
+
+    // Letters gone; the single slash kept.
+    expect(qty).toHaveValue('12/3');
+  });
+
+  it('shows the quantity error on blur, not while typing a fraction', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    const qty = screen.getByLabelText('Quantity for row 1');
+
+    // A partially-typed fraction must not flash an error mid-entry.
+    await user.type(qty, '1/');
+    expect(screen.queryByText(/number or simple fraction/i)).toBeNull();
+
+    // Blurring an incomplete/invalid value surfaces it.
+    await user.tab();
+    expect(screen.getByText(/number or simple fraction/i)).toBeVisible();
+
+    // Correcting the value clears the error, without flashing while typing.
+    await user.clear(qty);
+    await user.type(qty, '1/2');
+    expect(screen.queryByText(/number or simple fraction/i)).toBeNull();
+  });
+
   it('rejects an invalid quantity and surfaces an inline error', async () => {
     const user = userEvent.setup();
     const { onSubmit } = setup();
 
     await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
     await user.click(await screen.findByRole('option', { name: 'Onion' }));
-    await user.type(
-      screen.getByLabelText('Quantity for row 1'),
-      'not-a-number',
-    );
+    // Sanitised to a well-formed shape but an invalid fraction (÷0).
+    await user.type(screen.getByLabelText('Quantity for row 1'), '1/0');
 
     await user.click(screen.getByRole('button', { name: 'Save ingredients' }));
 
-    expect(
-      await screen.findByText(/Quantity must be a non-negative number/i),
-    ).toBeVisible();
+    expect(await screen.findByText(/number or simple fraction/i)).toBeVisible();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('trims trailing zeros from a saved quantity on load', () => {
+    const initial: RecipeIngredientLine[] = [
+      {
+        id: 1,
+        ingredientId: 101,
+        ingredientName: 'Onion',
+        quantity: '50.000',
+        unitId: 1,
+        unitName: 'g',
+        prepTypeId: null,
+        prepTypeName: null,
+        isPlant: true,
+      },
+    ];
+    setup({ initialLines: initial });
+
+    expect(screen.getByLabelText('Quantity for row 1')).toHaveValue('50');
+  });
+
+  it('converts a fraction quantity to a decimal in the payload', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    await user.click(await screen.findByRole('option', { name: 'Onion' }));
+    await user.type(screen.getByLabelText('Quantity for row 1'), '1/2');
+
+    await user.click(screen.getByRole('button', { name: 'Save ingredients' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual([
+      { ingredientId: 101, quantity: '0.5', unitId: 1, prepTypeId: null },
+    ]);
   });
 
   it('creates an ingredient inline and selects it into the row', async () => {

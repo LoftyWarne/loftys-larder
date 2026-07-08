@@ -250,6 +250,33 @@ describe('RecipeEditPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows a saved quantity without trailing zeros', () => {
+    recipeGetUseQueryMock.mockReturnValue({
+      data: {
+        ...RECIPE,
+        ingredients: [
+          {
+            id: 1,
+            ingredientId: 101,
+            ingredientName: 'Onion',
+            quantity: '0.250',
+            unitId: 1,
+            unitName: 'g',
+            prepTypeId: null,
+            prepTypeName: null,
+            isPlant: true,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    render(<RecipeEditPage />);
+
+    expect(screen.getByLabelText('Quantity for row 1')).toHaveValue('0.25');
+  });
+
   it('scrolls the hash-targeted section into view once the recipe loads', async () => {
     useLocationMock.mockReturnValue({
       hash: 'recipe-serving-variation-heading',

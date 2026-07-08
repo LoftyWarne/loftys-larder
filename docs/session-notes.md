@@ -4,6 +4,21 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-08 — Recipe editor: ingredient quantity entry (fractions + display)
+
+**Status:** Done in code. New util `frontend/src/lib/quantity-input.ts` (+ test); wiring in `ingredient-list.tsx`, `recipe-edit-page.tsx`; tests in the two components + `quantity-input.test.ts`. Full frontend suite green.
+
+Quantity field now accepts fractions and shows minimal precision, without touching the wire/DB.
+
+- **Input restricted to digits + a single `.` or `/`.** `sanitizeQuantityInput` strips everything else on every change (first separator typed wins; further separators dropped). Input is `inputMode="text"` so `/` is reachable on mobile keyboards.
+- **Fractions normalise to decimal on save.** Confirmed with user: `1/2` is stored as `0.5`, not preserved verbatim (chosen over a `numeric(10,3)` → text migration). `parseQuantityToDecimal` evaluates the fraction, rounds to the column's 3-dp scale, trims zeros. The **wire contract stays decimal** — the shared `recipeQuantitySchema` is unchanged and still validates on the server; the frontend converts before sending, so backend / `recipe_ingredients.quantity` / the SQL shopping aggregation (`round(quantity * prepared / baseServings, 3)`) are all untouched. Reload shows the decimal.
+- **No more precision than needed.** `trimTrailingZeros` (`50.000` → `50`, `0.250` → `0.25`). **Gotcha:** the edit page seeds the editor via the *draft* path (`initialDraftLines` from `recipe-edit-page.tsx` `serverDefaults`), not `IngredientList`'s `initialLines`/`toDraft` — so the trim had to be applied in `recipe-edit-page.tsx` too, not only in `toDraft`. (`format-quantity.ts` already trims the read-only recipe/shopping views.)
+- **Quantity error is blur-gated, not live-per-keystroke.** Validating on every change flashed an error on the transient `1/` / `1.` while typing toward a valid value. Fixed with a UI-only `quantityTouched` flag on `DraftLine`: set `onBlur`, cleared on `onChange`. `showQuantityError` requires touched (or a submit-set `quantityError`). So the message appears on blur / failed save, never mid-entry. `quantityTouched` is not serialised into the autosave payload (payload maps fields explicitly).
+
+**Deferred:** preserving fractions verbatim (would need the text-column migration + aggregation rewrite); server-side rejection of malformed quantities beyond the existing decimal schema.
+
+---
+
 ## 2026-07-08 — Recipe editor: ingredient row entry hardening
 
 **Status:** Done in code (`frontend/src/components/recipe-editor/ingredient-list.tsx`), new primitive `frontend/src/components/ui/tooltip.tsx`, tests in `ingredient-list.test.tsx` (16 passing). New dep `@radix-ui/react-tooltip@^1.2.12`.

@@ -40,6 +40,7 @@ import type { RecipeSectionHandle } from '@/components/recipe-editor/section-han
 import { Button } from '@/components/ui/button.tsx';
 import { useRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
+import { trimTrailingZeros } from '@/lib/quantity-input.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 type Patch = UpdateRecipeHeaderInput['patch'];
@@ -112,7 +113,9 @@ export function RecipeEditPage(): React.ReactElement {
           defaultUnitId: line.unitId,
           unitName: line.unitName,
         },
-        quantity: line.quantity,
+        // DB pads to scale (`0.25` → `0.250`); show no more precision than
+        // the value needs.
+        quantity: trimTrailingZeros(line.quantity),
         prepTypeId: line.prepTypeId,
       })),
       method: recipe.method.map((step) => ({ instruction: step.instruction })),

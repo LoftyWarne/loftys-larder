@@ -19,6 +19,7 @@ import { IngredientForm } from '@/components/ingredient-form.tsx';
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
 import {
   SearchableCombobox,
+  type SearchableComboboxHandle,
   type SearchableComboboxOption,
 } from '@/components/searchable-combobox.tsx';
 import { Button } from '@/components/ui/button.tsx';
@@ -30,6 +31,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip.tsx';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 
 // Same regex as the shared `recipeQuantitySchema` — kept in lockstep so the
@@ -117,6 +124,29 @@ function newRowKey(): string {
   return `new-${String(nextRowSeed)}`;
 }
 
+// A line is complete once it has an ingredient picked and a well-formed
+// quantity. Shared by the "Add ingredient" gate and the submit validation so
+// the two never drift.
+function isLineValid(line: DraftLine): boolean {
+  return line.ingredient !== null && QUANTITY_REGEX.test(line.quantity.trim());
+}
+
+// Row keys of lines that repeat an earlier line's (ingredient, prep type)
+// pair. DEC-20 keeps *different* prep types apart ("onion sliced" + "onion
+// diced"), so the key includes the prep type — only an exact match is a
+// duplicate. The first occurrence is kept; every later match is flagged.
+function findDuplicateRowKeys(lines: readonly DraftLine[]): Set<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const line of lines) {
+    if (!line.ingredient) continue;
+    const key = `${String(line.ingredient.id)}:${String(line.prepTypeId ?? '')}`;
+    if (seen.has(key)) duplicates.add(line.rowKey);
+    else seen.add(key);
+  }
+  return duplicates;
+}
+
 export const IngredientList = forwardRef<
   RecipeSectionHandle,
   IngredientListProps
@@ -162,6 +192,22 @@ export const IngredientList = forwardRef<
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // Combobox handles keyed by row, so a freshly added row can be focused. The
+  // ref callback self-cleans: React calls it with `null` when a row unmounts.
+  const comboboxRefs = useRef<Map<string, SearchableComboboxHandle | null>>(
+    new Map(),
+  );
+  // Set to the rowKey of a just-added line; the effect below focuses its
+  // combobox once the row has rendered, then clears this.
+  const [pendingFocusRowKey, setPendingFocusRowKey] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!pendingFocusRowKey) return;
+    comboboxRefs.current.get(pendingFocusRowKey)?.focus();
+    setPendingFocusRowKey(null);
+  }, [pendingFocusRowKey, lines]);
+
   // Autosave only on real edits. Emitting on mount (or on a bare re-render —
   // onLinesChange is an inline prop, so its identity changes each render) would
   // mark this section dirty even when untouched, leaving a draft row that can
@@ -206,15 +252,17 @@ export const IngredientList = forwardRef<
   }, []);
 
   const addLine = useCallback(() => {
+    const rowKey = newRowKey();
     setLines((current) => [
       ...current,
       {
-        rowKey: newRowKey(),
+        rowKey,
         ingredient: null,
         quantity: '',
         prepTypeId: null,
       },
     ]);
+    setPendingFocusRowKey(rowKey);
   }, []);
 
   // Close the create dialog without creating: clear the unmatched text from
@@ -271,7 +319,10 @@ export const IngredientList = forwardRef<
       return updated;
     });
 
-    if (firstInvalid >= 0) {
+    // Duplicate (ingredient, prep) rows are surfaced inline as they occur, but
+    // block the save too — nothing should slip through if the user reaches the
+    // button without touching the offending row again.
+    if (firstInvalid >= 0 || findDuplicateRowKeys(lines).size > 0) {
       setLines(validated);
       return false;
     }
@@ -301,8 +352,20 @@ export const IngredientList = forwardRef<
 
   useImperativeHandle(ref, () => ({ submit: runSubmit }), [runSubmit]);
 
+  const duplicateRowKeys = useMemo(() => findDuplicateRowKeys(lines), [lines]);
+  // Why "Add ingredient" is disabled, or null when it's usable. Duplicates are
+  // called out first — it's the more specific fix. Drives both the button gate
+  // and the tooltip so they can never disagree.
+  const addDisabledReason =
+    duplicateRowKeys.size > 0
+      ? 'Resolve the duplicate ingredient before adding another'
+      : !lines.every(isLineValid)
+        ? 'Give each ingredient a name and quantity before adding another'
+        : null;
+  const canAddLine = addDisabledReason === null;
+
   return (
-    <>
+    <TooltipProvider delayDuration={200}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -334,6 +397,9 @@ export const IngredientList = forwardRef<
                       key={`${line.rowKey}-${String(
                         comboboxResetKey[line.rowKey] ?? 0,
                       )}`}
+                      ref={(handle) => {
+                        comboboxRefs.current.set(line.rowKey, handle);
+                      }}
                       value={line.ingredient}
                       onChange={(option) => {
                         updateLine(line.rowKey, {
@@ -359,6 +425,12 @@ export const IngredientList = forwardRef<
                     {line.ingredientError && (
                       <p role="alert" className="text-sm text-destructive">
                         {line.ingredientError}
+                      </p>
+                    )}
+                    {duplicateRowKeys.has(line.rowKey) && (
+                      <p role="alert" className="text-sm text-destructive">
+                        This ingredient is already in the list with the same
+                        prep type
                       </p>
                     )}
                   </div>
@@ -435,9 +507,27 @@ export const IngredientList = forwardRef<
         )}
 
         <div className="flex items-center justify-between">
-          <Button type="button" variant="outline" onClick={addLine}>
-            Add ingredient
-          </Button>
+          <Tooltip>
+            {/* The trigger wraps a span, not the Button directly: a disabled
+                button has `pointer-events-none`, so it never fires the hover
+                events the tooltip listens for. Hover lands on the span. */}
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={addLine}
+                  disabled={!canAddLine}
+                >
+                  Add ingredient
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {/* Rendered only while disabled, so a usable button has no tooltip. */}
+            {addDisabledReason && (
+              <TooltipContent>{addDisabledReason}</TooltipContent>
+            )}
+          </Tooltip>
 
           <div className="flex items-center gap-3">
             {savedNoticeKey !== undefined && (
@@ -489,7 +579,7 @@ export const IngredientList = forwardRef<
           </DialogContent>
         </Dialog>
       )}
-    </>
+    </TooltipProvider>
   );
 });
 

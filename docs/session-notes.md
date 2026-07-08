@@ -4,6 +4,21 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-08 — Recipe editor: ingredient row entry hardening
+
+**Status:** Done in code (`frontend/src/components/recipe-editor/ingredient-list.tsx`), new primitive `frontend/src/components/ui/tooltip.tsx`, tests in `ingredient-list.test.tsx` (16 passing). New dep `@radix-ui/react-tooltip@^1.2.12`.
+
+Four related UX changes to the recipe editor's ingredient list, all client-side:
+
+- **Auto-focus the new row.** Clicking "Add ingredient" focuses the fresh row's ingredient combobox. Reuses the combobox's existing `SearchableComboboxHandle.focus()`; a `comboboxRefs` map keyed by `rowKey` plus a `pendingFocusRowKey` state + effect does the focusing once the row renders. Focusing opens the combobox's listbox (its normal on-focus behaviour) — four existing tests that used to `click(input)` to open dropped that now-redundant step.
+- **Gate "Add ingredient".** A shared per-line `isLineValid` predicate (ingredient picked + `QUANTITY_REGEX`-valid quantity) — the same rules `runSubmit` enforces — disables the button while any preceding row is incomplete. Empty state stays enabled.
+- **Block exact-duplicate ingredient rows.** `findDuplicateRowKeys` keys each line by `ingredientId:prepTypeId`; only a repeat of the *same* pair is a duplicate. **DEC-20 preserved** — "onion sliced" + "onion diced" (different prep) is still allowed and still has its passing test. Duplicates surface an inline error on the offending row, gate the Add button, and block save in `runSubmit`. Scope was confirmed with the user (exact ingredient+prep, not ingredient-only).
+- **Reason-aware tooltip.** Added a shadcn Tooltip primitive (Radix). The Add-button gate is now a derived `addDisabledReason` string (duplicate reason prioritised over incomplete-row reason) that drives both `disabled` and the tooltip text, so they can't disagree. **Gotcha:** a disabled button has `disabled:pointer-events-none`, so neither the native `title` (Chrome suppresses it on disabled controls) nor a Radix tooltip fires on it directly — the `TooltipTrigger` wraps a `<span>` around the button so hover lands on the span. `TooltipProvider` is local to this component with `delayDuration={200}`.
+
+**Deferred (need a call before touching):** server-side duplicate rejection in `recipes.replaceIngredients`. DB has no uniqueness on `(recipe_id, ingredient_id)` by design (DEC-20 / plan.md), and the enforcement here is UI-only. Defence-in-depth would be a procedure change, not a schema change.
+
+---
+
 ## 2026-07-08 — Prod: "Unable to transform response from server" when opening a plan
 
 **Status:** Fixed in code (`backend/src/server.ts`), regression test added (`backend/test/server.test.ts`). Takes effect on next deploy to `main`.

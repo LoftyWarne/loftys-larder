@@ -70,8 +70,6 @@ describe('IngredientList', () => {
     const { onSubmit } = setup();
 
     await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
-    const ingredientInput = screen.getByLabelText('Ingredient for row 1');
-    await user.click(ingredientInput);
     await user.click(await screen.findByRole('option', { name: 'Onion' }));
     await user.type(screen.getByLabelText('Quantity for row 1'), '50');
 
@@ -85,13 +83,87 @@ describe('IngredientList', () => {
     ]);
   });
 
+  it('focuses the new ingredient row after clicking Add ingredient', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+
+    expect(screen.getByLabelText('Ingredient for row 1')).toHaveFocus();
+  });
+
+  it('disables Add ingredient until the preceding row is complete', async () => {
+    const user = userEvent.setup();
+    setup();
+    const addButton = screen.getByRole('button', { name: 'Add ingredient' });
+
+    // Enabled from the empty state — nothing precedes the first row.
+    expect(addButton).toBeEnabled();
+
+    await user.click(addButton);
+    // A fresh, empty row is incomplete, so no further rows can be added.
+    expect(addButton).toBeDisabled();
+
+    await user.click(await screen.findByRole('option', { name: 'Onion' }));
+    // Ingredient picked but quantity still missing.
+    expect(addButton).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Quantity for row 1'), '50');
+    expect(addButton).toBeEnabled();
+  });
+
+  it('explains via a tooltip why Add ingredient is disabled', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    const addButton = screen.getByRole('button', { name: 'Add ingredient' });
+    expect(addButton).toBeDisabled();
+
+    // The disabled button has `pointer-events-none`, so hover the wrapper the
+    // tooltip trigger sits on.
+    const trigger = addButton.parentElement;
+    if (!trigger) throw new Error('expected a tooltip trigger wrapper');
+    await user.hover(trigger);
+
+    expect(
+      await screen.findByRole('tooltip', {
+        name: /Give each ingredient a name and quantity/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('switches the tooltip to the duplicate reason when a row repeats', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    // Row 1: Onion, no prep.
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    await user.click(await screen.findByRole('option', { name: 'Onion' }));
+    await user.type(screen.getByLabelText('Quantity for row 1'), '50');
+
+    // Row 2: Onion again with the same prep — the duplicate now drives the gate.
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    await user.click(await screen.findByRole('option', { name: 'Onion' }));
+
+    const addButton = screen.getByRole('button', { name: 'Add ingredient' });
+    expect(addButton).toBeDisabled();
+    const trigger = addButton.parentElement;
+    if (!trigger) throw new Error('expected a tooltip trigger wrapper');
+    await user.hover(trigger);
+
+    expect(
+      await screen.findByRole('tooltip', {
+        name: /Resolve the duplicate ingredient/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it('preselects the ingredient unit (display-only) from the picker', async () => {
     const user = userEvent.setup();
     setup();
 
     await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
-    const ingredientInput = screen.getByLabelText('Ingredient for row 1');
-    await user.click(ingredientInput);
     await user.click(await screen.findByRole('option', { name: 'Onion' }));
 
     // The "g" cell renders next to the row; assert it's present once selected.
@@ -129,7 +201,6 @@ describe('IngredientList', () => {
 
     // Row 1: Onion, chopped
     await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
-    await user.click(screen.getByLabelText('Ingredient for row 1'));
     await user.click(await screen.findByRole('option', { name: 'Onion' }));
     await user.type(screen.getByLabelText('Quantity for row 1'), '50');
     await user.selectOptions(
@@ -139,7 +210,6 @@ describe('IngredientList', () => {
 
     // Row 2: Onion, diced
     await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
-    await user.click(screen.getByLabelText('Ingredient for row 2'));
     await user.click(await screen.findByRole('option', { name: 'Onion' }));
     await user.type(screen.getByLabelText('Quantity for row 2'), '30');
     await user.selectOptions(
@@ -158,6 +228,34 @@ describe('IngredientList', () => {
     ]);
   });
 
+  it('blocks an exact duplicate ingredient + prep line', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+
+    // Row 1: Onion, no prep.
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    await user.click(await screen.findByRole('option', { name: 'Onion' }));
+    await user.type(screen.getByLabelText('Quantity for row 1'), '50');
+
+    // Row 2: Onion again with the same (default) prep — an exact duplicate.
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    await user.click(await screen.findByRole('option', { name: 'Onion' }));
+
+    // Flagged as soon as it occurs, before any save attempt.
+    expect(
+      await screen.findByText(/already in the list with the same prep type/i),
+    ).toBeVisible();
+    // And it gates adding further rows.
+    expect(
+      screen.getByRole('button', { name: 'Add ingredient' }),
+    ).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Quantity for row 2'), '30');
+    await user.click(screen.getByRole('button', { name: 'Save ingredients' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('submits an empty array when all lines are removed', async () => {
     const user = userEvent.setup();
     const { onSubmit } = setup();
@@ -172,7 +270,6 @@ describe('IngredientList', () => {
     const { onSubmit } = setup();
 
     await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
-    await user.click(screen.getByLabelText('Ingredient for row 1'));
     await user.click(await screen.findByRole('option', { name: 'Onion' }));
     await user.type(
       screen.getByLabelText('Quantity for row 1'),

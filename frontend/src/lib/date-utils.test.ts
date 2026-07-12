@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  addCivilDays,
   clampRange,
   eachDateInRange,
   formatCivilDate,
   formatDayLabel,
+  formatShortDayRangeLabel,
   hourInLondon,
   parseCivilDate,
   todayInLondon,
@@ -131,5 +133,58 @@ describe('hourInLondon', () => {
   it('normalises midnight to 0', () => {
     // 00:00 GMT on 2026-01-15 — Intl can emit "24"; helper returns 0.
     expect(hourInLondon(new Date('2026-01-15T00:00:00Z'))).toBe(0);
+  });
+});
+
+describe('addCivilDays', () => {
+  it('adds days within a month', () => {
+    expect(addCivilDays('2026-07-12', 2)).toBe('2026-07-14');
+  });
+
+  it('rolls over a month boundary', () => {
+    expect(addCivilDays('2026-07-31', 1)).toBe('2026-08-01');
+  });
+
+  it('rolls over a year boundary', () => {
+    expect(addCivilDays('2026-12-31', 1)).toBe('2027-01-01');
+  });
+
+  it('subtracts across a month boundary (non-leap Feb)', () => {
+    expect(addCivilDays('2026-03-01', -1)).toBe('2026-02-28');
+  });
+});
+
+describe('formatShortDayRangeLabel', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('collapses the month within the current year', () => {
+    expect(formatShortDayRangeLabel('2026-07-06', '2026-07-12')).toBe(
+      '6 – 12 Jul',
+    );
+  });
+
+  it('shows both months within the current year', () => {
+    expect(formatShortDayRangeLabel('2026-06-30', '2026-07-06')).toBe(
+      '30 Jun – 6 Jul',
+    );
+  });
+
+  it('appends the year when it is not the current year', () => {
+    expect(formatShortDayRangeLabel('2025-12-21', '2025-12-27')).toBe(
+      '21 – 27 Dec 2025',
+    );
+  });
+
+  it('renders both years when the range spans a year boundary', () => {
+    expect(formatShortDayRangeLabel('2025-12-29', '2026-01-04')).toBe(
+      '29 Dec 2025 – 4 Jan 2026',
+    );
   });
 });

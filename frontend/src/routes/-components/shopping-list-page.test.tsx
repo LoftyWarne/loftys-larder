@@ -33,10 +33,16 @@ let mutationOptions: Record<string, unknown> = {};
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => paramsMock() as unknown,
+  Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
+    // The plan picker reads active + future plans; empty keeps it hidden
+    // (needs ≥2 plans to render) so these tests stay focused on the list.
+    plans: {
+      list: { useQuery: () => ({ data: { items: [] } }) },
+    },
     useUtils: () => ({
       shopping: {
         getForPlan: {

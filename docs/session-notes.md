@@ -4,6 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-12 — `/shopping` defaults to the imminent upcoming plan (DEC-92)
+
+**Status:** Done in code. Frontend suite green (432, +20 new). Typecheck / lint / format clean. Definition-of-done boxes left unticked (human action). Not yet committed.
+
+**Why:** household places the online order **the night before a plan starts**. On that eve the outgoing plan is still `active`, so the old `/shopping` resolver (`plans.list({ status: 'active' })` → first item) opened the *wrong* list. The shopping list was never "cleared" on a date boundary and isn't now — it's strictly per-plan (DEC-82); this only changes which plan the bare `/shopping` route *defaults* to, plus adds a visible switcher.
+
+- **Rule (DEC-92):** precedence = imminent future (`startDate <= todayInLondon() + 2`) → active → soonest future → empty state. Client-side over two bounded reads (`status: 'active'` + `status: 'future'`); status derived from `startDate`/`endDate` because `planListItemSchema` has no status field. 2-day horizon (not 1) so ordering a night early still defaults correctly. Confirmed with user: auto-selection stays, **plus** a segmented-tab picker to switch between the live lists.
+- **Picker:** `frontend/src/components/shopping/plan-picker.tsx` — one tab per active + future plan (past excluded, reached via `/plans`), compact date-range labels (`formatShortDayRangeLabel`), current tab `aria-current="page"`, `data-print-hide`. Hides below 2 live plans. Mounted in the `shopping-list-page` header. User debated tabs vs dropdown; chose tabs (matches the realistic two-plan window; dropdown was overkill and needs a primitive the project lacks).
+- **Touched:** `shopping-index-page.tsx` (resolver rewrite); `date-utils.ts` (new `addCivilDays` + `formatShortDayRangeLabel`); `shopping-list-page.tsx` (header restructured to mount the picker); new `plan-picker.tsx`. Tests: new `shopping-index-page.test.tsx` (9), new `plan-picker.test.tsx` (3), `date-utils.test.ts` (+8 for the two new helpers), plus `shopping-list-page.test.tsx` mocks extended (`Link` + empty `plans.list` so the picker stays hidden).
+- **Test gotcha:** `vi.useFakeTimers()` deadlocks RTL `waitFor` (polls on real timers). For the redirect/index test, pinned "today" via a partial mock of `date-utils` instead. `formatShortDayRangeLabel` reads `todayInLondon()` for its year-suffix, so its own unit tests *do* use `setSystemTime` (no `waitFor` there).
+- **No schema / lifecycle change.** Sits with DEC-37's single-shop assumption; revisit if the household moves to multiple shops per plan.
+
+---
+
 ## 2026-07-08 — Home page: richer plan-slot detail
 
 **Status:** Done in code, committed + pushed to `main` (`57a26f2`). Full frontend suite green (412). Touched `frontend/src/routes/-components/index-page.tsx` (+ test); new shared `frontend/src/lib/slot-display.ts` and `frontend/src/components/planner/slot-comment-line.tsx`; refactor of `frontend/src/components/planner/slot-cell.tsx` to consume them.

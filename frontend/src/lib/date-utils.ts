@@ -78,6 +78,19 @@ export function hourInLondon(now: Date = new Date()): number {
   return hour === 24 ? 0 : hour;
 }
 
+// Shifts a civil date by a whole number of days, returning YYYY-MM-DD. Uses
+// UTC arithmetic (like `eachDateInRange`) so DST transitions never nudge the
+// result off by an hour and across a day boundary.
+export function addCivilDays(iso: string, days: number): string {
+  const { year, month, day } = parseCivilDate(iso);
+  const shifted = new Date(Date.UTC(year, month - 1, day) + days * 86_400_000);
+  return formatCivilDate({
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+  });
+}
+
 // Inclusive day-by-day expansion of a YYYY-MM-DD range. Throws on inverted
 // ranges to match the backend's contract.
 export function eachDateInRange(start: string, end: string): string[] {
@@ -200,4 +213,27 @@ export function formatDayRangeLabel(start: string, end: string): string {
     return `${left} – ${right} ${String(s.year)}`;
   }
   return `${formatLongDayLabel(start)} – ${formatLongDayLabel(end)}`;
+}
+
+function shortMonth(year: number, month: number, day: number): string {
+  return LONG_MONTH_FORMATTER.format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+// Compact range for tight controls (e.g. the shopping-list plan tabs) — drops
+// the weekday and ordinal, and the year within the current civil year. Same
+// month: "15 – 21 Jul". Same year: "30 Jun – 6 Jul". Different years:
+// "21 Dec 2025 – 3 Jan 2026".
+export function formatShortDayRangeLabel(start: string, end: string): string {
+  const s = parseCivilDate(start);
+  const e = parseCivilDate(end);
+  const thisYear = parseCivilDate(todayInLondon()).year;
+  if (s.year === e.year && s.month === e.month) {
+    const yearSuffix = s.year === thisYear ? '' : ` ${String(s.year)}`;
+    return `${String(s.day)} – ${String(e.day)} ${shortMonth(e.year, e.month, e.day)}${yearSuffix}`;
+  }
+  if (s.year === e.year) {
+    const yearSuffix = s.year === thisYear ? '' : ` ${String(s.year)}`;
+    return `${String(s.day)} ${shortMonth(s.year, s.month, s.day)} – ${String(e.day)} ${shortMonth(e.year, e.month, e.day)}${yearSuffix}`;
+  }
+  return `${String(s.day)} ${shortMonth(s.year, s.month, s.day)} ${String(s.year)} – ${String(e.day)} ${shortMonth(e.year, e.month, e.day)} ${String(e.year)}`;
 }

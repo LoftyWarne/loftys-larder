@@ -3,6 +3,7 @@ import { useParams } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
 import { CategorySection } from '@/components/shopping/category-section.tsx';
+import { ShoppingPlanPicker } from '@/components/shopping/plan-picker.tsx';
 import { useOfflineQueue } from '@/hooks/use-offline-queue.ts';
 import { useOptimisticCheckToggle } from '@/hooks/use-optimistic-check-toggle.ts';
 import { drainOfflineQueue } from '@/lib/offline-queue-drain.ts';
@@ -91,11 +92,14 @@ export function ShoppingListPage(): React.ReactElement {
       data-shopping-list-page
       className="mx-auto w-full max-w-3xl space-y-6"
     >
-      <header className="space-y-1" data-print-hide>
-        <h1 className="text-2xl font-semibold">Shopping list</h1>
-        <p className="text-sm text-muted-foreground">
-          Tap items off as you shop. The list refreshes when you reload.
-        </p>
+      <header className="space-y-3" data-print-hide>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold">Shopping list</h1>
+          <p className="text-sm text-muted-foreground">
+            Tap items off as you shop. The list refreshes when you reload.
+          </p>
+        </div>
+        <ShoppingPlanPicker currentPlanId={planId} />
         {!offline.isOnline && (
           <p
             data-shopping-offline-banner

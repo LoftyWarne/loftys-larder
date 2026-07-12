@@ -3628,3 +3628,27 @@ Cache rule `bypass-api` configured at Cloudflare → Caching → Cache Rules. In
 - `pnpm --filter frontend build` inlines the DSN into `dist/assets/index-*.js`.
 
 **Docs touched:** `.dockerignore`, `OPERATIONS.md` (two entries corrected from the build-arg story), `docs/secrets-checklist.md` (added the `.dockerignore` re-include gotcha). The FEAT-46 follow-up is closed.
+
+---
+
+## 2026-07-12 — App-wide button cursor fix
+
+**Symptom:** buttons throughout the app showed the default arrow cursor on hover instead of a pointer.
+
+**Root cause:** the project is on Tailwind v4, whose Preflight dropped the rule that set `cursor: pointer` on `<button>`. v4 follows the raw browser default (`cursor: default`), so every button — the shadcn `Button` (a real `<button>`), icon buttons, and the Radix dialog/checkbox/combobox triggers — lost its pointer.
+
+**Fix:** one base-layer rule in `frontend/src/index.css` rather than sprinkling `cursor-pointer` across every variant/component:
+
+```css
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+label[for] {
+  cursor: pointer;
+}
+```
+
+- `button:not(:disabled)` covers the shadcn `Button` and every Radix primitive that renders a `<button>`; disabled buttons keep the arrow.
+- `[role='button']:not([aria-disabled='true'])` covers elements styled as buttons via role.
+- `label[for]` covers clickable checkbox/radio labels.
+
+Because these are element selectors in `@layer base`, any explicit `cursor-*` utility still wins over them.

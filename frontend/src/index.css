@@ -76,4 +76,11 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Tailwind v4 drops Preflight's pointer cursor on buttons; restore it for
+     interactive elements (disabled buttons keep the default arrow). */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  label[for] {
+    cursor: pointer;
+  }
 }

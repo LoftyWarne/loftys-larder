@@ -70,6 +70,18 @@ export const ServingVariationFields = forwardRef<
   );
   const [submitting, setSubmitting] = useState(false);
 
+  // The "Saved." notice is shown after a save, then cleared the moment the user
+  // changes a field again — a stale "Saved." next to unsaved changes is
+  // misleading. A new `savedNoticeKey` (bumped by the page on every save) turns
+  // it back on; the field handlers below turn it off. The re-seed effects that
+  // follow are programmatic (route swap / refetch), so they must not clear it —
+  // hence the clearing lives in the user-interaction handlers, not the state.
+  const [savedVisible, setSavedVisible] = useState(false);
+  useEffect(() => {
+    if (savedNoticeKey === undefined) return;
+    setSavedVisible(true);
+  }, [savedNoticeKey]);
+
   // Re-seed on the recipe id changing (route swap) — the parent passes a new
   // `initial` shape when the route's recipeId changes, so reset local state.
   useEffect(() => {
@@ -125,6 +137,7 @@ export const ServingVariationFields = forwardRef<
           checked={isBase}
           onChange={(event) => {
             const next = event.target.checked;
+            setSavedVisible(false);
             setIsBase(next);
             // A base is a component, not a meal — it can't itself depend on
             // another base (DEC-23). Clear any selected base so the XOR holds.
@@ -150,7 +163,10 @@ export const ServingVariationFields = forwardRef<
             id="recipe-base"
             ariaLabel="Search base recipes"
             value={base}
-            onChange={setBase}
+            onChange={(next) => {
+              setSavedVisible(false);
+              setBase(next);
+            }}
             searchQuery={searchBases}
             placeholder="Search bases…"
             emptyMessage="No bases match"
@@ -165,7 +181,7 @@ export const ServingVariationFields = forwardRef<
         </p>
       )}
 
-      <SavedNotice key={savedNoticeKey} show={savedNoticeKey !== undefined} />
+      <SavedNotice key={savedNoticeKey} show={savedVisible} />
 
       <div className="flex justify-end">
         <Button type="submit" disabled={submitting}>

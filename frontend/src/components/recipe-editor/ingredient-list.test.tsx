@@ -495,4 +495,49 @@ describe('IngredientList', () => {
     });
     expect(screen.getByText('Expected g, got piece')).toBeVisible();
   });
+
+  it('clears the "Saved." notice once a line is edited', async () => {
+    const user = userEvent.setup();
+    const initial: RecipeIngredientLine[] = [
+      {
+        id: 1,
+        ingredientId: 101,
+        ingredientName: 'Onion',
+        quantity: '50',
+        unitId: 1,
+        unitName: 'g',
+        prepTypeId: null,
+        prepTypeName: null,
+        isPlant: true,
+      },
+    ];
+    const { rerender } = render(
+      <IngredientList
+        initialLines={initial}
+        prepTypes={PREP_TYPES}
+        searchIngredients={defaultSearch}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // No notice before a save.
+    expect(screen.queryByText('Saved.')).toBeNull();
+
+    // The page bumps `savedNoticeKey` when a save lands.
+    rerender(
+      <IngredientList
+        initialLines={initial}
+        prepTypes={PREP_TYPES}
+        searchIngredients={defaultSearch}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        savedNoticeKey={Date.now()}
+      />,
+    );
+    expect(screen.getByText('Saved.')).toBeVisible();
+
+    // Editing a line marks the section dirty — the stale notice must go.
+    await user.clear(screen.getByLabelText('Quantity for row 1'));
+    await user.type(screen.getByLabelText('Quantity for row 1'), '75');
+    expect(screen.queryByText('Saved.')).toBeNull();
+  });
 });

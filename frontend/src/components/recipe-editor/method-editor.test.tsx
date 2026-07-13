@@ -109,4 +109,28 @@ describe('MethodEditor', () => {
       expect(onSubmit).toHaveBeenCalledWith([{ instruction: 'Heat oil' }]);
     });
   });
+
+  it('clears the "Saved." notice once a step is edited', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <MethodEditor initialSteps={[step(1, 'Heat oil')]} onSubmit={onSubmit} />,
+    );
+
+    expect(screen.queryByText('Saved.')).toBeNull();
+
+    // The page bumps `savedNoticeKey` when a save lands.
+    rerender(
+      <MethodEditor
+        initialSteps={[step(1, 'Heat oil')]}
+        onSubmit={onSubmit}
+        savedNoticeKey={Date.now()}
+      />,
+    );
+    expect(screen.getByText('Saved.')).toBeVisible();
+
+    // Editing a step marks the section dirty — the stale notice must go.
+    await user.type(screen.getByLabelText('Step 1 text'), ' more');
+    expect(screen.queryByText('Saved.')).toBeNull();
+  });
 });

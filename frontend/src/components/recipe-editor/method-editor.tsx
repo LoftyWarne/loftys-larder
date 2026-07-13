@@ -93,6 +93,17 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       onStepsChange(payload);
     }, [steps, onStepsChange]);
     const [submitting, setSubmitting] = useState(false);
+
+    // The "Saved." notice is shown after a save, then cleared the moment the
+    // user edits a step again — a stale "Saved." sitting next to unsaved
+    // changes is misleading. A new `savedNoticeKey` (bumped by the page on
+    // every save) turns it back on; the step mutators below turn it off.
+    const [savedVisible, setSavedVisible] = useState(false);
+    useEffect(() => {
+      if (savedNoticeKey === undefined) return;
+      setSavedVisible(true);
+    }, [savedNoticeKey]);
+
     const focusNewIndex = useRef<number | null>(null);
     const textareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
 
@@ -119,6 +130,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     }, [autosize]);
 
     const updateStep = useCallback((rowKey: string, instruction: string) => {
+      setSavedVisible(false);
       setSteps((current) =>
         current.map((step) =>
           step.rowKey === rowKey
@@ -129,10 +141,12 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     }, []);
 
     const removeStep = useCallback((rowKey: string) => {
+      setSavedVisible(false);
       setSteps((current) => current.filter((step) => step.rowKey !== rowKey));
     }, []);
 
     const moveStep = useCallback((index: number, direction: -1 | 1) => {
+      setSavedVisible(false);
       setSteps((current) => {
         const next = [...current];
         const target = index + direction;
@@ -147,6 +161,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     }, []);
 
     const addStep = useCallback(() => {
+      setSavedVisible(false);
       setSteps((current) => {
         focusNewIndex.current = current.length;
         return [...current, { rowKey: newRowKey(), instruction: '' }];
@@ -310,7 +325,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
           </Button>
 
           <div className="flex items-center gap-3">
-            {savedNoticeKey !== undefined && (
+            {savedVisible && (
               <p
                 key={savedNoticeKey}
                 role="status"

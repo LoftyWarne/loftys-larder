@@ -134,4 +134,33 @@ describe('ServingVariationFields', () => {
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual({ baseRecipeId: 42 });
   });
+
+  it('clears the "Saved." notice once a field is changed', async () => {
+    const user = userEvent.setup();
+    const initial: ServingVariationFieldsValues = {
+      isBase: false,
+      baseRecipeId: null,
+    };
+    const searchBases = vi.fn(
+      (): Promise<RecipePickerOption[]> => Promise.resolve([]),
+    );
+    const props = {
+      initial,
+      baseRecipePartner: null,
+      searchBases,
+      onSubmit: vi.fn(() => Promise.resolve(true)),
+      errorMessage: null,
+    };
+    const { rerender } = render(<ServingVariationFields {...props} />);
+
+    expect(screen.queryByText('Saved.')).toBeNull();
+
+    // The page bumps `savedNoticeKey` when a save lands.
+    rerender(<ServingVariationFields {...props} savedNoticeKey={Date.now()} />);
+    expect(screen.getByText('Saved.')).toBeVisible();
+
+    // Toggling a field marks the section dirty — the stale notice must go.
+    await user.click(screen.getByLabelText(/this is a base recipe/i));
+    expect(screen.queryByText('Saved.')).toBeNull();
+  });
 });

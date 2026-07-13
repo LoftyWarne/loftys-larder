@@ -3652,3 +3652,23 @@ label[for] {
 - `label[for]` covers clickable checkbox/radio labels.
 
 Because these are element selectors in `@layer base`, any explicit `cursor-*` utility still wins over them.
+
+---
+
+## 2026-07-13 — Recipe editor "Saved." notice cleared on dirty
+
+**Symptom:** after saving a Recipe Editor section, its green "Saved." confirmation lingered while the user kept editing, so it sat next to unsaved changes and misrepresented state.
+
+**Root cause:** every section gated the notice on `savedNoticeKey !== undefined`. The page sets that key to a `Date.now()` timestamp on each save and never resets it, so once shown the notice stayed until the next save. All four sections shared the bug — Ingredients, Method, Serving variation, and Details (header).
+
+**Fix:** a local `savedVisible` boolean in each section. An effect on `savedNoticeKey` turns it **on** (a save landed); genuine user edits turn it **off**. The render now gates on `savedVisible` (the `key={savedNoticeKey}` remount is retained).
+
+Where "off" lives, per section:
+
+- **Ingredients / Method** — cleared inside the state mutators (`updateLine`/`removeLine`/`addLine`, `updateStep`/`removeStep`/`moveStep`/`addStep`). These are the only user-edit entry points; the failed-validation `setLines`/`setSteps` paths are harmless since the notice is already hidden there.
+- **Serving variation** — cleared in the checkbox and base-combobox `onChange` handlers, deliberately **not** in the programmatic re-seed effects (`setIsBase`/`setBase` on route swap / refetch), so a refetch doesn't wipe a just-shown notice.
+- **Details (header, RHF)** — the value-watch subscription clears only on `type === 'change'` (real user input). The **post-save `form.reset` to fresh defaults fires the watcher with an undefined `type`**, so the just-shown notice survives the reset. The source combobox uses `form.setValue` (which does not emit a `'change'` watch event), so it clears `savedVisible` explicitly in its `onChange` and in the inline-source-create path.
+
+**Known, intentional quirk:** the notice is keyed to "an edit happened," not dirty-vs-clean. If a user edits then manually reverts to the pristine value, the notice stays hidden. Consistent across all four sections; chosen as least-surprising.
+
+**Verified:** four new tests (one per section; header gets a second one asserting the notice survives the post-save reset — the guard for the `type === 'change'` logic). Frontend suite 437 passing; typecheck + lint clean.

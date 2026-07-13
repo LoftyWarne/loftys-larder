@@ -74,10 +74,22 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
       form.reset(defaultValues);
     }, [defaultValues, form]);
 
+    // The "Saved." notice is shown after a save, then cleared the moment the
+    // user edits a field again — a stale "Saved." next to unsaved changes is
+    // misleading. A new `savedNoticeKey` (bumped by the page on every save)
+    // turns it back on; the watch below turns it off. `type === 'change'` fires
+    // only for real user input — the post-save `form.reset` fires with an
+    // undefined type, so it doesn't wipe a freshly-shown notice.
+    const [savedVisible, setSavedVisible] = useState(false);
     useEffect(() => {
-      if (!onValuesChange) return;
-      const subscription = form.watch((values) => {
-        onValuesChange(values as HeaderFormValues);
+      if (savedNoticeKey === undefined) return;
+      setSavedVisible(true);
+    }, [savedNoticeKey]);
+
+    useEffect(() => {
+      const subscription = form.watch((values, { type }) => {
+        if (type === 'change') setSavedVisible(false);
+        onValuesChange?.(values as HeaderFormValues);
       });
       return () => {
         subscription.unsubscribe();
@@ -136,6 +148,8 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
                 ? prev
                 : [...prev, { id: created.id, label: created.name }],
             );
+            // `setValue` doesn't emit a `'change'` watch event; clear directly.
+            setSavedVisible(false);
             form.setValue('sourceId', created.id, { shouldDirty: true });
           })
           .catch((error: unknown) => {
@@ -263,6 +277,9 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
             value={selectedSource}
             onChange={(option) => {
               setSourceCreateError(undefined);
+              // `setValue` doesn't emit a `'change'` watch event, so clear the
+              // saved notice here as the watch subscription won't.
+              setSavedVisible(false);
               form.setValue('sourceId', option?.id ?? null, {
                 shouldDirty: true,
               });
@@ -317,7 +334,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
           </label>
         )}
 
-        <SavedNotice key={savedNoticeKey} show={savedNoticeKey !== undefined} />
+        <SavedNotice key={savedNoticeKey} show={savedVisible} />
 
         <div className="flex justify-end">
           <Button type="submit" disabled={submitting}>

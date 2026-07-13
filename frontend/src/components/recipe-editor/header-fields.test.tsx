@@ -193,4 +193,74 @@ describe('HeaderFields', () => {
     if (!submitted) throw new Error('expected one submit call');
     expect(submitted.sourceDetail).toBe('p.142');
   });
+
+  it('clears the "Saved." notice when a field is edited', async () => {
+    const user = userEvent.setup();
+    const defaults = blankDefaults();
+    defaults.name = 'Pie';
+    const onSubmit = vi
+      .fn<(values: HeaderFormValues) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    const { rerender } = render(
+      <HeaderFields
+        mode="edit"
+        defaultValues={defaults}
+        sources={SOURCES}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.queryByText('Saved.')).toBeNull();
+
+    // The page bumps `savedNoticeKey` when a save lands.
+    rerender(
+      <HeaderFields
+        mode="edit"
+        defaultValues={defaults}
+        sources={SOURCES}
+        onSubmit={onSubmit}
+        savedNoticeKey={Date.now()}
+      />,
+    );
+    expect(screen.getByText('Saved.')).toBeVisible();
+
+    // Editing a field marks the form dirty — the stale notice must go.
+    await user.type(screen.getByLabelText('Name'), ' crust');
+    expect(screen.queryByText('Saved.')).toBeNull();
+  });
+
+  it('keeps the "Saved." notice through the post-save reset to new defaults', () => {
+    const defaults = blankDefaults();
+    defaults.name = 'Pie';
+    const onSubmit = vi
+      .fn<(values: HeaderFormValues) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    const { rerender } = render(
+      <HeaderFields
+        mode="edit"
+        defaultValues={defaults}
+        sources={SOURCES}
+        onSubmit={onSubmit}
+        savedNoticeKey={1}
+      />,
+    );
+    expect(screen.getByText('Saved.')).toBeVisible();
+
+    // A save refetches and hands down fresh defaults, resetting the form. A
+    // programmatic reset fires the value watcher with no 'change' type, so the
+    // just-shown notice must survive it.
+    const savedDefaults = blankDefaults();
+    savedDefaults.name = 'Pie';
+    savedDefaults.baseServings = 4;
+    rerender(
+      <HeaderFields
+        mode="edit"
+        defaultValues={savedDefaults}
+        sources={SOURCES}
+        onSubmit={onSubmit}
+        savedNoticeKey={1}
+      />,
+    );
+    expect(screen.getByText('Saved.')).toBeVisible();
+  });
 });

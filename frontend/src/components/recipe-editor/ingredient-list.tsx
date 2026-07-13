@@ -200,6 +200,16 @@ export const IngredientList = forwardRef<
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // The "Saved." notice is shown after a save, then cleared the moment the user
+  // edits a line again — a stale "Saved." sitting next to unsaved changes is
+  // misleading. A new `savedNoticeKey` (bumped by the page on every save) turns
+  // it back on; the line mutators below turn it off.
+  const [savedVisible, setSavedVisible] = useState(false);
+  useEffect(() => {
+    if (savedNoticeKey === undefined) return;
+    setSavedVisible(true);
+  }, [savedNoticeKey]);
+
   // Combobox handles keyed by row, so a freshly added row can be focused. The
   // ref callback self-cleans: React calls it with `null` when a row unmounts.
   const comboboxRefs = useRef<Map<string, SearchableComboboxHandle | null>>(
@@ -246,6 +256,7 @@ export const IngredientList = forwardRef<
 
   const updateLine = useCallback(
     (rowKey: string, patch: Partial<DraftLine>) => {
+      setSavedVisible(false);
       setLines((current) =>
         current.map((line) =>
           line.rowKey === rowKey ? { ...line, ...patch } : line,
@@ -256,10 +267,12 @@ export const IngredientList = forwardRef<
   );
 
   const removeLine = useCallback((rowKey: string) => {
+    setSavedVisible(false);
     setLines((current) => current.filter((line) => line.rowKey !== rowKey));
   }, []);
 
   const addLine = useCallback(() => {
+    setSavedVisible(false);
     const rowKey = newRowKey();
     setLines((current) => [
       ...current,
@@ -558,7 +571,7 @@ export const IngredientList = forwardRef<
           </Tooltip>
 
           <div className="flex items-center gap-3">
-            {savedNoticeKey !== undefined && (
+            {savedVisible && (
               <p
                 key={savedNoticeKey}
                 role="status"

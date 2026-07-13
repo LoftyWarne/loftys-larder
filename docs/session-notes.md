@@ -4,6 +4,23 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-13 — Axiom check: prod is silently running in development mode (UNRESOLVED) + ingest-error hardening (fixed)
+
+**Headline (action needed, not code):** the prod app is running with **`NODE_ENV=development`**, so **no logs reach Axiom at all** — the `loftys-larder-prod` dataset has **0 events in 14 days** despite live traffic. Verified end-to-end: ~45 prod requests all returned 200, none appeared in Axiom (queried with a PAT; the demo datasets have data, so querying works). `flyctl logs` shows pretty-printed, colorized output with `env: "development"` on every line — proof the process resolved `config.NODE_ENV` to `development`.
+
+**Root cause:** the Dockerfile sets `ENV NODE_ENV=production` (line 33), but **a Fly secret `NODE_ENV` is deployed, and Fly secrets override Dockerfile `ENV` at runtime.** `buildLoggerBundle` only wires Axiom in the `production` branch; the `development` branch pretty-prints to stdout and returns `axiom: null`, so the destination is never constructed. Same misconfig also relaxes every `NODE_ENV !== 'production'` guard in prod (e.g. the `/api/trpc/health.ping` auth exemption goes live) and disables JSON logging. Sentry is unaffected (keys off `SENTRY_DSN`; `SENTRY_ENVIRONMENT` is set explicitly).
+
+**Remediation (pending, prod change — human):**
+1. Deploy the ingest-error hardening below first, so a *real* ingest failure (never yet exercised — the token/endpoint/dataset secret values have never actually been used) surfaces in `flyctl logs` instead of vanishing again.
+2. `flyctl secrets unset NODE_ENV --app loftys-larder-prod` (Dockerfile's `production` then applies) — or set it explicitly to `production`. Check *why* the secret exists first (likely leftover debugging).
+3. Re-run the Axiom gate check (needs a fresh PAT; the one used was shredded). US region (`api.axiom.co`), org `lofty-r0bg`, dataset `loftys-larder-prod`; PATs need an `X-AXIOM-ORG-ID: lofty-r0bg` header. `reqId` is a top-level field; nested req fields are `['req.url']` etc. in APL.
+
+**Ingest-error hardening (committed):** `axiom-destination.ts` already had an `onError` hook but its comment falsely claimed `server.ts` wired one — it didn't, so `onError` defaulted to a no-op and **Axiom ingest failures (bad token, wrong dataset, region mismatch, non-2xx) were swallowed silently.** `logger.ts` now wires an `onError` that reports failures to a dedicated **stderr** Pino logger (its own stream, not the Axiom multistream, so a failed send can't loop back into another send). New injectable `errorStream` option (defaults to `process.stderr`). Comment in `axiom-destination.ts` corrected. Test in `logger.test.ts` (+1): a 401 from Axiom surfaces `"axiom ingest failed"` on the error stream. This is defensive — it does NOT fix the dev-mode issue (in dev mode the destination isn't built), but it's what will make the *next* silent failure visible once prod mode is restored.
+
+**Verification of the rest of Axiom (code + secrets, all correct):** prod multistream (stdout + Axiom NDJSON ingest), dev/test = no Axiom, config fail-fast requires token+dataset in prod, shutdown flush via `SIGTERM/SIGINT → app.close() → axiom.end()`, batching (100-line / 1s), `reqId` via Fastify default label matching the Sentry tag. All three Fly secrets (`AXIOM_TOKEN`, `AXIOM_DATASET`, `AXIOM_ENDPOINT`) deployed. The *only* thing wrong is `NODE_ENV`.
+
+---
+
 ## 2026-07-13 — Sentry finished: procedure errors now reach Sentry; alerts + gate check done
 
 **Status:** Permanent fix committed. Backend suite green (sentry 13, server/not-found 16, auth/security 27). Typecheck + lint clean. Alert rules created in the Sentry dashboard (via API); gate check run end-to-end and passing. No schema / dependency / tRPC-URL-shape change.

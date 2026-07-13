@@ -20,6 +20,10 @@ export interface BuildLoggerOptions {
   // Injectable for tests to capture pretty / multistream output without
   // mutating process.stdout.
   stdout?: NodeJS.WritableStream;
+  // Where Axiom ingest failures are reported. Deliberately separate from the
+  // main stream so a failing send can't loop back through the Axiom
+  // destination. Defaults to stderr; injectable for tests.
+  errorStream?: NodeJS.WritableStream;
 }
 
 export function buildLoggerBundle(
@@ -41,11 +45,23 @@ export function buildLoggerBundle(
         'AXIOM_TOKEN and AXIOM_DATASET must be set in production (config refinement)',
       );
     }
+    // A dedicated stderr logger surfaces ingest failures (bad token, wrong
+    // dataset, region mismatch, non-2xx) in Fly logs. Without this the
+    // destination's onError defaults to a no-op and logs silently stop
+    // reaching Axiom. It writes to its own stream, not the Axiom multistream,
+    // so reporting a failed send can't trigger another send.
+    const diagnostics = pino(
+      baseOptions,
+      options.errorStream ?? process.stderr,
+    );
     const axiom = createAxiomDestination({
       token: AXIOM_TOKEN,
       dataset: AXIOM_DATASET,
       endpoint: config.AXIOM_ENDPOINT,
       fetchImpl: options.fetchImpl,
+      onError: (err) => {
+        diagnostics.error({ err }, 'axiom ingest failed');
+      },
     });
     const stream = pino.multistream([
       { stream: stdout },

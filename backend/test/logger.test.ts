@@ -118,6 +118,32 @@ describe('buildLoggerBundle', () => {
       env: 'production',
     });
   });
+
+  it('reports an Axiom ingest failure to the error stream instead of dropping it silently', async () => {
+    const fetchSpy = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response(null, { status: 401 })),
+    );
+    const { stream: stdout } = collectStream();
+    const { stream: errorStream, lines: errorLines } = collectStream();
+    const { logger, axiom } = buildLoggerBundle(
+      makeConfig({
+        NODE_ENV: 'production',
+        ALLOWED_ORIGIN: undefined,
+        AXIOM_TOKEN: 'xaat-bad',
+        AXIOM_DATASET: 'lofty-prod',
+      }),
+      { fetchImpl: fetchSpy, stdout, errorStream },
+    );
+
+    if (!axiom) throw new Error('expected Axiom destination in production');
+    logger.info({ reqId: 'abc-123' }, 'request completed');
+    await axiom.end();
+
+    const reported = errorLines().map((line) => JSON.parse(line) as unknown);
+    expect(reported).toContainEqual(
+      expect.objectContaining({ msg: 'axiom ingest failed' }),
+    );
+  });
 });
 
 describe('createAxiomDestination', () => {

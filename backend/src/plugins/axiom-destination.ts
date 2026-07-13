@@ -35,8 +35,8 @@ export function createAxiomDestination(
   const maxBatchSize = options.maxBatchSize ?? DEFAULT_MAX_BATCH;
   const fetchImpl = options.fetchImpl ?? fetch;
   // Default to a silent handler so a misconfigured caller can't crash the
-  // app via a logging error. server.ts wires an explicit onError that emits
-  // via Pino to stderr.
+  // app via a logging error. buildLoggerBundle (logger.ts) wires an explicit
+  // onError that reports ingest failures to a dedicated stderr Pino logger.
   const noop: (err: unknown) => void = () => undefined;
   const onError = options.onError ?? noop;
   const url = `${endpoint}/v1/datasets/${encodeURIComponent(options.dataset)}/ingest`;

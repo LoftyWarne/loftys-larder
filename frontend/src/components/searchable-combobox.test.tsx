@@ -238,8 +238,16 @@ describe('SearchableCombobox', () => {
     await user.click(input);
     await user.type(input, 'apple');
 
-    expect(await screen.findByRole('option', { name: 'Apple' })).toBeVisible();
-    expect(screen.queryByRole('option', { name: /Create/ })).toBeNull();
+    // Both the options list and the create action derive from the *debounced*
+    // query, so a mid-type frame (e.g. 'appl') transiently shows the Apple
+    // option alongside a "Create appl" action. Poll for the settled state
+    // rather than asserting on the first frame where Apple appears — otherwise
+    // `findByRole('Apple')` can resolve during that transient and the create
+    // row is still present (flaky under slower CI timing).
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Apple' })).toBeVisible();
+      expect(screen.queryByRole('option', { name: /Create/ })).toBeNull();
+    });
   });
 
   it('fires onCreate via keyboard navigation to the create action', async () => {

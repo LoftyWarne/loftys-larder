@@ -1,5 +1,5 @@
 // Pino destination that batches NDJSON entries and POSTs them to Axiom's
-// `/v1/datasets/<dataset>/ingest` endpoint. Runs in-process — no worker thread
+// `/v1/ingest/<dataset>` endpoint. Runs in-process — no worker thread
 // — so the esbuild bundle ships as a single file (see FEAT-44 implementation
 // notes and the spec's worker-thread gotcha).
 //
@@ -39,7 +39,7 @@ export function createAxiomDestination(
   // onError that reports ingest failures to a dedicated stderr Pino logger.
   const noop: (err: unknown) => void = () => undefined;
   const onError = options.onError ?? noop;
-  const url = `${endpoint}/v1/datasets/${encodeURIComponent(options.dataset)}/ingest`;
+  const url = `${endpoint}/v1/ingest/${encodeURIComponent(options.dataset)}`;
   const auth = `Bearer ${options.token}`;
 
   let buffer: string[] = [];

@@ -90,9 +90,7 @@ describe('buildLoggerBundle', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const call = fetchSpy.mock.calls[0];
     if (!call) throw new Error('fetch was not called');
-    expect(urlOf(call[0])).toBe(
-      'https://api.axiom.co/v1/datasets/lofty-prod/ingest',
-    );
+    expect(urlOf(call[0])).toBe('https://api.axiom.co/v1/ingest/lofty-prod');
     const init = call[1];
     if (!init) throw new Error('fetch was called without init');
     const headers = init.headers as Record<string, string>;
@@ -238,7 +236,7 @@ describe('createAxiomDestination', () => {
     const call = fetchSpy.mock.calls[0];
     if (!call) throw new Error('fetch was not called');
     expect(urlOf(call[0])).toBe(
-      'https://api.axiom.co/v1/datasets/lofty%20prod%2Feu/ingest',
+      'https://api.axiom.co/v1/ingest/lofty%20prod%2Feu',
     );
   });
 });

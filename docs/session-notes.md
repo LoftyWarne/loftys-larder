@@ -4,6 +4,22 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-13 — Sentry finished: procedure errors now reach Sentry; alerts + gate check done
+
+**Status:** Permanent fix committed. Backend suite green (sentry 13, server/not-found 16, auth/security 27). Typecheck + lint clean. Alert rules created in the Sentry dashboard (via API); gate check run end-to-end and passing. No schema / dependency / tRPC-URL-shape change.
+
+**The gap that was closed:** the tRPC Fastify adapter catches procedure errors itself and hands them to the `onError` callback (`server.ts`) — they never propagate to Fastify's error handler, which is the *only* thing `setupFastifyErrorHandler` (Sentry) hooks. So **procedure errors were not reaching Sentry at all**; only non-tRPC Fastify-level errors were. Since the app surface is almost entirely tRPC, Sentry (and the new alert rules) would have seen ~nothing. FEAT-45's own manual-verification #1 ("throw from a procedure; observe the Sentry event") could not have passed as-was.
+
+**Fix:** `server.ts` `onError` now calls `captureException(error)` gated by a new `shouldReportToSentry(error)` helper (`plugins/sentry.ts`) = `getHTTPStatusCodeFromError(error) >= 500`. So **server-fault errors (5xx, incl. raw throws tRPC wraps as INTERNAL_SERVER_ERROR) go to Sentry; expected 4xx client errors (validation / auth / not-found / rate-limit) stay out** so routine failures don't trip the `>5/5min` alert (DEC-78). The `reqId` tag rides the per-request isolation scope already set in `registerSentryHooks`, so captured events cross-reference Axiom (DEC-77). Filter unit-tested in `sentry.test.ts` (+7 cases).
+
+**Alert rules (DEC-78):** two metric alerts created via the Sentry API — `Errors > 5 / 5 min`, `count()` of error events over a 5-min window, fires above 5, emails the `lofty` team. IDs `24017` (backend) / `24018` (frontend), org `lofty-o4`, DE region. Matches what `OPERATIONS.md` § "Sentry — error threshold" documents.
+
+**Gate check (passed):** fired real events to both projects with the real init options + shared `scrubPii`; Sentry accepted delivery (`flush: true`) and the received payload had `Cookie` / `Authorization` / `extra.email` → `[redacted]`, a sibling non-email key preserved (proves key-name-scoped redaction), and the `reqId` tag present. Throwaway triggers used to drive it (a dev-only `debug.boom` procedure, its auth exemption, and a `main.tsx` console hook) were all removed after — only the permanent `onError` fix landed.
+
+**Note:** local `backend/.env` has no `SENTRY_DSN`, so dev-local Sentry is a no-op (expected); the prod Fly secret is set. A few `environment:gate-check` test events now sit in both Sentry projects — harmless, filterable, deletable. DoD boxes left for a human to tick.
+
+---
+
 ## 2026-07-13 — Recipe editor: blur an unknown ingredient auto-opens the create modal
 
 **Status:** Shipped in code. Frontend suite green (441, +4). Typecheck + lint clean. No schema, DEC, or dependency change.

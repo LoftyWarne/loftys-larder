@@ -1,5 +1,7 @@
 import * as Sentry from '@sentry/node';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+import type { TRPCError } from '@trpc/server';
+import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import { scrubPii } from '../../../shared/src/index.ts';
 import type { Config } from '../config.ts';
 
@@ -69,6 +71,16 @@ export function registerSentryHooks(
   });
 
   setupFastifyErrorHandler(app);
+}
+
+// tRPC catches procedure errors itself and never lets them reach Fastify's
+// error handler (where `setupFastifyErrorHandler` hooks Sentry), so the tRPC
+// `onError` callback has to forward them explicitly. Only server-fault errors
+// (HTTP >= 500) belong in Sentry: expected 4xx client errors — validation,
+// auth, not-found — would otherwise be routine noise that trips the
+// >5-errors/5-min alert (DEC-78).
+export function shouldReportToSentry(error: TRPCError): boolean {
+  return getHTTPStatusCodeFromError(error) >= 500;
 }
 
 export { captureException } from '@sentry/node';

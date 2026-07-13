@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
-import { initSentry, registerSentryHooks } from '../src/plugins/sentry.ts';
+import { TRPCError } from '@trpc/server';
+import {
+  initSentry,
+  registerSentryHooks,
+  shouldReportToSentry,
+} from '../src/plugins/sentry.ts';
 import type { Config } from '../src/config.ts';
 
 const authEnv = {
@@ -160,5 +165,32 @@ describe('registerSentryHooks', () => {
     }
     expect(firstCapture.reqId).not.toBe(secondCapture.reqId);
     expect(firstCapture.scopeId).not.toBe(secondCapture.scopeId);
+  });
+});
+
+describe('shouldReportToSentry', () => {
+  it('reports server-fault errors (HTTP >= 500)', () => {
+    expect(
+      shouldReportToSentry(new TRPCError({ code: 'INTERNAL_SERVER_ERROR' })),
+    ).toBe(true);
+  });
+
+  it('reports a raw non-tRPC error wrapped as INTERNAL_SERVER_ERROR', () => {
+    // tRPC wraps unrecognised throws into a 500 before onError sees them.
+    expect(
+      shouldReportToSentry(
+        new TRPCError({ code: 'INTERNAL_SERVER_ERROR', cause: new Error() }),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    'BAD_REQUEST',
+    'UNAUTHORIZED',
+    'FORBIDDEN',
+    'NOT_FOUND',
+    'TOO_MANY_REQUESTS',
+  ] as const)('skips the client error %s (4xx)', (code) => {
+    expect(shouldReportToSentry(new TRPCError({ code }))).toBe(false);
   });
 });

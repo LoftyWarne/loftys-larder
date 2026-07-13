@@ -13,7 +13,13 @@ import { randomUUID } from 'node:crypto';
 import { registerAuth } from './plugins/auth.ts';
 import { registerRateLimit } from './plugins/rate-limit.ts';
 import { registerSecurity } from './plugins/security.ts';
-import { initSentry, registerSentryHooks } from './plugins/sentry.ts';
+import type { TRPCError } from '@trpc/server';
+import {
+  captureException,
+  initSentry,
+  registerSentryHooks,
+  shouldReportToSentry,
+} from './plugins/sentry.ts';
 import { registerHealth } from './routes/health.ts';
 import { createContext } from './trpc/context.ts';
 import { appRouter } from './trpc/router.ts';
@@ -130,10 +136,14 @@ export async function buildAppWithLogger(
         error,
         path,
       }: {
-        error: unknown;
+        error: TRPCError;
         path: string | undefined;
       }) => {
         app.log.error({ err: error, path }, 'tRPC procedure failed');
+        // The per-request isolation scope already carries the reqId tag
+        // (registerSentryHooks), so a captured server-fault event
+        // cross-references the matching Axiom entry (DEC-77).
+        if (shouldReportToSentry(error)) captureException(error);
       },
     },
   });

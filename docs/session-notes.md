@@ -4,22 +4,30 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-07-13 — Axiom check: prod was silently running in development mode (FIXED) + ingest-error hardening
+## 2026-07-13 — Axiom check: prod logs weren't reaching Axiom — four compounding bugs (ALL FIXED)
 
-**Resolution:** `flyctl secrets unset NODE_ENV` run; both machines rolled; **prod mode confirmed** — fresh traffic now logs as JSON with `"env":"production"` (vs the old pretty `env: "development"`), so the production logger branch is active and the Axiom destination is now constructed. Only open item: end-to-end Axiom *ingestion* not yet re-confirmed (the token/endpoint/dataset secret values were never exercised until now) — re-run the gate check with a fresh PAT, or watch `flyctl logs` for `"axiom ingest failed"` once the onError-fix image (`c0fc639`) finishes deploying (silence = healthy).
+**Resolution — Axiom ingestion confirmed working in prod.** After the last deploy, 20 requests over ~10 s (many flush cycles) produced **zero** `axiom ingest failed` lines, where before every flush reliably errored (success is silent — the onError diagnostic only fires on failure). It took **four** compounding fixes, each masking the next:
+
+1. **`NODE_ENV` Fly secret → prod ran in dev mode.** The secret overrode the Dockerfile's `ENV NODE_ENV=production`, so `buildLoggerBundle` took its `development` branch (pretty stdout, `axiom: null`) and the Axiom destination was never even built → 0 events in 14 days. Fix: `flyctl secrets unset NODE_ENV`. (Also relaxed every `NODE_ENV !== 'production'` guard in prod, e.g. the `/api/trpc/health.ping` auth exemption — worth remembering.)
+2. **`AXIOM_ENDPOINT` = wrong region → ingest 403.** Fix: `flyctl secrets set AXIOM_ENDPOINT=https://eu-central-1.aws.edge.axiom.co` (the dataset lives on Axiom's **EU Central edge**, per the new edge architecture — axiom.co/blog/axiom-edge).
+3. **`AXIOM_DATASET`** confirmed/set to `loftys-larder-prod`.
+4. **Code built the legacy ingest path → 404.** `axiom-destination.ts` posted to `/v1/datasets/<ds>/ingest`, which edge deployments don't serve. Fix (commit `b9cf175`): use Axiom's current `/v1/ingest/<dataset>` path (works on both `api.axiom.co` and the edges).
+
+**None of this was visible until the first commit** (`c0fc639`, the onError hardening below) turned silent ingest failures into `flyctl logs` diagnostics — that's what let us peel back 403 → 404 → success. Positive confirmation: the `loftys-larder-prod` dataset in `app.axiom.co` now shows live events.
+
+**Axiom region model (learned):** single global control plane (`api.axiom.co` — auth/listing, works cross-region) + regional **edge** data planes for ingest/query (`us-east-1.aws.edge.axiom.co`, `eu-central-1.aws.edge.axiom.co`). The legacy `app.eu.axiom.co` EU subdomain is being retired (signing into it 400s). Ingest requires an **API token**, not a PAT.
 
 **Headline (was the root cause):** the prod app was running with **`NODE_ENV=development`**, so **no logs reached Axiom at all** — the `loftys-larder-prod` dataset had **0 events in 14 days** despite live traffic. Verified end-to-end: ~45 prod requests all returned 200, none appeared in Axiom (queried with a PAT; the demo datasets have data, so querying works). `flyctl logs` showed pretty-printed, colorized output with `env: "development"` on every line — proof the process resolved `config.NODE_ENV` to `development`.
 
 **Root cause:** the Dockerfile sets `ENV NODE_ENV=production` (line 33), but **a Fly secret `NODE_ENV` is deployed, and Fly secrets override Dockerfile `ENV` at runtime.** `buildLoggerBundle` only wires Axiom in the `production` branch; the `development` branch pretty-prints to stdout and returns `axiom: null`, so the destination is never constructed. Same misconfig also relaxes every `NODE_ENV !== 'production'` guard in prod (e.g. the `/api/trpc/health.ping` auth exemption goes live) and disables JSON logging. Sentry is unaffected (keys off `SENTRY_DSN`; `SENTRY_ENVIRONMENT` is set explicitly).
 
-**Remediation:**
-1. ✅ Committed + pushed the ingest-error hardening below (`c0fc639`) so a *real* ingest failure surfaces in `flyctl logs` instead of vanishing again.
-2. ✅ `flyctl secrets unset NODE_ENV --app loftys-larder-prod` run — Dockerfile's `production` now applies; prod mode confirmed. (Still worth checking *why* the secret existed — likely leftover debugging.)
-3. ⏳ Re-run the Axiom gate check (needs a fresh PAT; the one used was shredded). US region (`api.axiom.co`), org `lofty-r0bg`, dataset `loftys-larder-prod`; PATs need an `X-AXIOM-ORG-ID: lofty-r0bg` header. `reqId` is a top-level field; nested req fields are `['req.url']` etc. in APL.
+**Still worth checking:** *why* the `NODE_ENV` secret existed (likely leftover debugging) — so it doesn't get re-added.
 
 **Ingest-error hardening (committed):** `axiom-destination.ts` already had an `onError` hook but its comment falsely claimed `server.ts` wired one — it didn't, so `onError` defaulted to a no-op and **Axiom ingest failures (bad token, wrong dataset, region mismatch, non-2xx) were swallowed silently.** `logger.ts` now wires an `onError` that reports failures to a dedicated **stderr** Pino logger (its own stream, not the Axiom multistream, so a failed send can't loop back into another send). New injectable `errorStream` option (defaults to `process.stderr`). Comment in `axiom-destination.ts` corrected. Test in `logger.test.ts` (+1): a 401 from Axiom surfaces `"axiom ingest failed"` on the error stream. This is defensive — it does NOT fix the dev-mode issue (in dev mode the destination isn't built), but it's what will make the *next* silent failure visible once prod mode is restored.
 
-**Verification of the rest of Axiom (code + secrets, all correct):** prod multistream (stdout + Axiom NDJSON ingest), dev/test = no Axiom, config fail-fast requires token+dataset in prod, shutdown flush via `SIGTERM/SIGINT → app.close() → axiom.end()`, batching (100-line / 1s), `reqId` via Fastify default label matching the Sentry tag. All three Fly secrets (`AXIOM_TOKEN`, `AXIOM_DATASET`, `AXIOM_ENDPOINT`) deployed. The *only* thing wrong is `NODE_ENV`.
+**Verification of the rest of Axiom (all correct):** prod multistream (stdout + Axiom NDJSON ingest), dev/test = no Axiom, config fail-fast requires token+dataset in prod, shutdown flush via `SIGTERM/SIGINT → app.close() → axiom.end()`, batching (100-line / 1s), `reqId` via Fastify default label matching the Sentry tag. `AXIOM_TOKEN` was fine all along (it authenticated on the edge — a 404, not 401/403, on the wrong path). The bugs were `NODE_ENV`, `AXIOM_ENDPOINT`, and the code ingest path.
+
+**Side-finding (not fixed):** the frontend test `searchable-combobox.test.tsx › "does not offer create when the query exactly matches an option"` is **flaky in CI** (passed 3/3 locally, failed once in CI on a docs-only commit) — likely an async `findBy`/`waitFor` race. It **blocks the Deploy workflow** when it flakes (Deploy runs only on CI success), so it's worth hardening.
 
 ---
 

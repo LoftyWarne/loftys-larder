@@ -41,6 +41,14 @@ export interface SearchableComboboxProps<T extends SearchableComboboxOption> {
   // out by leaving it undefined.
   onCreate?: (query: string) => void;
   createLabel?: (query: string) => string;
+  // When set (alongside `onCreate`), blurring the input while it holds a
+  // settled, unmatched query fires the create action automatically — the same
+  // path as picking "Create …" from the list. Only fires for a genuinely
+  // unknown name (no exact match, nothing selected); an exact match or a
+  // still-debouncing value is left alone. Opt-in so the other pickers that
+  // reuse this primitive (FEAT-23/26/31/32) keep their click-to-create-only
+  // behaviour.
+  createOnBlur?: boolean;
   // Custom rendering for an option row. Defaults to `option.label`. Lets a
   // consumer add a right-aligned adornment (e.g. a type badge) without forking
   // the primitive (FEAT-21). The string `label` is still used for matching,
@@ -73,6 +81,7 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
     inputClassName,
     onCreate,
     createLabel,
+    createOnBlur,
     renderOption,
   } = props;
 
@@ -255,6 +264,19 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
             }}
             onFocus={() => {
               setOpen(true);
+            }}
+            onBlur={() => {
+              // Auto-open create only for a settled, unmatched name. `showCreate`
+              // already encodes "onCreate set, non-empty, no exact match"; the
+              // extra guards ensure nothing is selected and the debounced search
+              // is caught up to what's in the box (so a mid-type blur can't fire
+              // a false "unknown"). Committing an option / clicking the create
+              // row can't reach here — both suppress blur via onMouseDown.
+              if (!createOnBlur) return;
+              if (value !== null) return;
+              if (!showCreate) return;
+              if (debouncedQuery !== inputValue.trim()) return;
+              fireCreate();
             }}
             onKeyDown={handleKeyDown}
           />

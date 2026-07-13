@@ -444,6 +444,7 @@ export const IngredientList = forwardRef<
                       searchQuery={searchIngredients}
                       placeholder="Search ingredients"
                       ariaLabel={`Ingredient for row ${String(index + 1)}`}
+                      createOnBlur={canCreate}
                       onCreate={
                         canCreate
                           ? (query) => {

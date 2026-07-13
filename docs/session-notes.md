@@ -4,6 +4,28 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-13 — Recipe editor: blur an unknown ingredient auto-opens the create modal
+
+**Status:** Shipped in code. Frontend suite green (441, +4). Typecheck + lint clean. No schema, DEC, or dependency change.
+
+**Ask:** in the Recipe Editor ingredient input, tabbing/clicking away from a name that isn't a known ingredient should auto-open the "New ingredient" dialog — previously the user had to explicitly pick the "Create …" list item.
+
+**Change:** additive **opt-in** `createOnBlur?: boolean` prop on the shared `SearchableCombobox` (`frontend/src/components/searchable-combobox.tsx`). When set alongside `onCreate`, the input's `onBlur` fires the *existing* `fireCreate` path — same handler as clicking "Create …". Only the ingredient picker enables it (`createOnBlur={canCreate}` in `ingredient-list.tsx`); the primitive's other four consumers (FEAT-23/26/31/32) are untouched, so this respects cross-cutting #6 (don't fork the combobox).
+
+**Blur only fires create for a genuinely-unknown, settled name** — four guards:
+- `createOnBlur` set,
+- nothing selected (`value === null`),
+- `showCreate` true (there's an `onCreate`, the trimmed text is non-empty, and it has **no exact match** among the current options),
+- the debounced search has caught up (`debouncedQuery === inputValue.trim()`), so a fast type-then-blur can't fire a false "unknown".
+
+An exact match that the user never clicked is deliberately left alone (opening create there would only earn an `INGREDIENT_NAME_TAKEN` error). Committing an option or clicking the "Create …" row can't reach the blur handler — both already `preventDefault` on `onMouseDown`, so there's no double-fire, and the `×` clear button only shows when `value !== null` (guard #2 blocks it).
+
+**Deliberately not done:** auto-*selecting* an existing ingredient on blur when the typed text exactly matches an option but wasn't picked. Out of scope for "open create for unknown ingredients"; flag if wanted.
+
+**Tests (`searchable-combobox.test.tsx`):** blur fires `onCreate` for a settled unmatched query with `createOnBlur`; does **not** fire when the flag is unset, when the query exactly matches an option, or when the input is empty. Harness gained an "elsewhere" button as a blur target.
+
+---
+
 ## 2026-07-12 — `/shopping` defaults to the imminent upcoming plan (DEC-92)
 
 **Status:** Done in code. Frontend suite green (432, +20 new). Typecheck / lint / format clean. Definition-of-done boxes left unticked (human action). Not yet committed.

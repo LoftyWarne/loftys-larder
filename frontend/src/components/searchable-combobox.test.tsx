@@ -22,21 +22,28 @@ function Harness({
   initialValue = null,
   searchQuery,
   onCreate,
+  createOnBlur,
 }: {
   initialValue?: Fruit | null;
   searchQuery: (query: string) => Promise<readonly Fruit[]> | readonly Fruit[];
   onCreate?: (query: string) => void;
+  createOnBlur?: boolean;
 }): React.ReactElement {
   const [value, setValue] = useState<Fruit | null>(initialValue);
   return (
-    <SearchableCombobox
-      value={value}
-      onChange={setValue}
-      searchQuery={searchQuery}
-      ariaLabel="Pick a fruit"
-      debounceMs={50}
-      onCreate={onCreate}
-    />
+    <>
+      <SearchableCombobox
+        value={value}
+        onChange={setValue}
+        searchQuery={searchQuery}
+        ariaLabel="Pick a fruit"
+        debounceMs={50}
+        onCreate={onCreate}
+        createOnBlur={createOnBlur}
+      />
+      {/* A blur target so tests can move focus off the combobox. */}
+      <button type="button">elsewhere</button>
+    </>
   );
 }
 
@@ -248,6 +255,69 @@ describe('SearchableCombobox', () => {
     await user.keyboard('{Enter}');
 
     expect(onCreate).toHaveBeenCalledExactlyOnceWith('zzz');
+  });
+
+  it('fires onCreate on blur for a settled unmatched query when createOnBlur is set', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Harness searchQuery={filterFruits} onCreate={onCreate} createOnBlur />,
+    );
+
+    const input = screen.getByRole('combobox');
+    await user.click(input);
+    await user.type(input, 'Cherry');
+    // Let the debounced search settle so the unmatched name is confirmed.
+    await screen.findByRole('option', { name: /Create .*Cherry/ });
+
+    await user.click(screen.getByRole('button', { name: 'elsewhere' }));
+
+    expect(onCreate).toHaveBeenCalledExactlyOnceWith('Cherry');
+  });
+
+  it('does not fire onCreate on blur when createOnBlur is unset', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness searchQuery={filterFruits} onCreate={onCreate} />);
+
+    const input = screen.getByRole('combobox');
+    await user.click(input);
+    await user.type(input, 'Cherry');
+    await screen.findByRole('option', { name: /Create .*Cherry/ });
+
+    await user.click(screen.getByRole('button', { name: 'elsewhere' }));
+
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not fire onCreate on blur when the query exactly matches an option', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Harness searchQuery={filterFruits} onCreate={onCreate} createOnBlur />,
+    );
+
+    const input = screen.getByRole('combobox');
+    await user.click(input);
+    await user.type(input, 'Apple');
+    await screen.findByRole('option', { name: 'Apple' });
+
+    await user.click(screen.getByRole('button', { name: 'elsewhere' }));
+
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not fire onCreate on blur when the input is empty', async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Harness searchQuery={filterFruits} onCreate={onCreate} createOnBlur />,
+    );
+
+    await user.click(screen.getByRole('combobox'));
+    await user.click(screen.getByRole('button', { name: 'elsewhere' }));
+
+    expect(onCreate).not.toHaveBeenCalled();
   });
 
   it('keeps the input value in sync when the parent updates the selection', async () => {

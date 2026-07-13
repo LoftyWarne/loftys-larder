@@ -4,6 +4,18 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-07-13 — Fixed a flaky combobox test that was intermittently blocking deploys
+
+**Status:** Fixed (`searchable-combobox.test.tsx`), committed + pushed. 16 combobox tests green ×5 runs; typecheck + lint clean. Test-only change — no component behaviour touched.
+
+**The flake:** `SearchableCombobox › "does not offer create when the query exactly matches an option"` failed occasionally in CI (`expected <li> to be null`) while passing locally. Not a component bug — the test read a transient render frame. `options` and the create action both derive from the **debounced** query, so a mid-type frame (e.g. `appl`) shows the `Apple` option *alongside* a "Create appl" action. `await findByRole('option', {name:'Apple'})` could resolve during that transient (Apple is present for both `appl` and `apple`), and the immediately-following synchronous `queryByRole(/Create/)` then found the still-present create row. Locally the 50 ms debounce settled before the poll; slower CI didn't always.
+
+**Fix:** wrap both assertions (Apple visible + create absent) in one `waitFor`, so it polls for the **settled** frame instead of the first frame where Apple appears. The sibling blur-exact-match test isn't racy (its `debouncedQuery !== inputValue.trim()` guard means `onCreate` can't fire for an exact match regardless of timing).
+
+**Why it mattered:** the Deploy workflow runs only on CI success (`workflow_run`), so this flake intermittently **skipped deploys** — it's what briefly blocked the Axiom ingest-path fix from shipping.
+
+---
+
 ## 2026-07-13 — Axiom check: prod logs weren't reaching Axiom — four compounding bugs (ALL FIXED)
 
 **Resolution — Axiom ingestion confirmed working in prod.** After the last deploy, 20 requests over ~10 s (many flush cycles) produced **zero** `axiom ingest failed` lines, where before every flush reliably errored (success is silent — the onError diagnostic only fires on failure). It took **four** compounding fixes, each masking the next:
@@ -27,7 +39,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 **Verification of the rest of Axiom (all correct):** prod multistream (stdout + Axiom NDJSON ingest), dev/test = no Axiom, config fail-fast requires token+dataset in prod, shutdown flush via `SIGTERM/SIGINT → app.close() → axiom.end()`, batching (100-line / 1s), `reqId` via Fastify default label matching the Sentry tag. `AXIOM_TOKEN` was fine all along (it authenticated on the edge — a 404, not 401/403, on the wrong path). The bugs were `NODE_ENV`, `AXIOM_ENDPOINT`, and the code ingest path.
 
-**Side-finding (not fixed):** the frontend test `searchable-combobox.test.tsx › "does not offer create when the query exactly matches an option"` is **flaky in CI** (passed 3/3 locally, failed once in CI on a docs-only commit) — likely an async `findBy`/`waitFor` race. It **blocks the Deploy workflow** when it flakes (Deploy runs only on CI success), so it's worth hardening.
+**Side-finding (now fixed — see the entry above):** the frontend test `searchable-combobox.test.tsx › "does not offer create when the query exactly matches an option"` was **flaky in CI** and blocked the Deploy workflow when it flaked. Fixed by polling for the settled frame.
 
 ---
 

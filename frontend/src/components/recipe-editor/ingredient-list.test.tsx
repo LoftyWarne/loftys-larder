@@ -8,6 +8,8 @@ import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { describe, expect, it, vi } from 'vitest';
 
+import { suppressActNoise } from '@/test/act-noise.ts';
+
 import {
   IngredientList,
   type IngredientListProps,
@@ -368,31 +370,35 @@ describe('IngredientList', () => {
     await user.click(ingredientInput);
     await user.type(ingredientInput, 'Carrot');
 
-    await user.click(
-      await screen.findByRole('option', { name: /Create .*Carrot/ }),
-    );
+    // The dialog is opened, driven, and closed by clicks — see suppressActNoise.
+    await suppressActNoise(async () => {
+      await user.click(
+        await screen.findByRole('option', { name: /Create .*Carrot/ }),
+      );
 
-    // The create dialog opens, prefilled with the typed name.
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText('Name')).toHaveValue('Carrot');
-    await user.click(
-      within(dialog).getByRole('button', { name: 'Create ingredient' }),
-    );
+      // The create dialog opens, prefilled with the typed name.
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByLabelText('Name')).toHaveValue('Carrot');
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Create ingredient' }),
+      );
 
-    await waitFor(() => {
-      expect(createIngredient).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(createIngredient).toHaveBeenCalledTimes(1);
+      });
+
+      // Dialog closes and the new ingredient is selected for the row.
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
     });
+
     expect(createIngredient.mock.calls[0]?.[0]).toEqual({
       name: 'Carrot',
       categoryId: 5,
       defaultUnitId: 1,
       isPlant: false,
       averageShelfLifeDays: null,
-    });
-
-    // Dialog closes and the new ingredient is selected for the row.
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(ingredientInput).toHaveValue('Carrot');
     // The create-form submit must not bubble to the outer ingredients form and
@@ -421,15 +427,18 @@ describe('IngredientList', () => {
     await user.click(screen.getByLabelText('Ingredient for row 1'));
     await user.type(screen.getByLabelText('Ingredient for row 1'), 'Carrot');
 
-    await user.click(
-      await screen.findByRole('option', { name: /Create .*Carrot/ }),
-    );
-    const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await suppressActNoise(async () => {
+      await user.click(
+        await screen.findByRole('option', { name: /Create .*Carrot/ }),
+      );
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
     });
+
     expect(createIngredient).not.toHaveBeenCalled();
     // The remounted combobox is empty again.
     expect(screen.getByLabelText('Ingredient for row 1')).toHaveValue('');
@@ -447,19 +456,21 @@ describe('IngredientList', () => {
     await user.click(ingredientInput);
     await user.type(ingredientInput, 'Leek');
 
-    await user.click(
-      await screen.findByRole('option', { name: /Create .*Leek/ }),
-    );
-    const dialog = await screen.findByRole('dialog');
-    await user.click(
-      within(dialog).getByRole('button', { name: 'Create ingredient' }),
-    );
+    await suppressActNoise(async () => {
+      await user.click(
+        await screen.findByRole('option', { name: /Create .*Leek/ }),
+      );
+      const dialog = await screen.findByRole('dialog');
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Create ingredient' }),
+      );
 
-    expect(
-      await within(dialog).findByText(
-        'An ingredient with this name already exists',
-      ),
-    ).toBeVisible();
+      expect(
+        await within(dialog).findByText(
+          'An ingredient with this name already exists',
+        ),
+      ).toBeVisible();
+    });
   });
 
   it('does not offer inline create without references or a create handler', async () => {

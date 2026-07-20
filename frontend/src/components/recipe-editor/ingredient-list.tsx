@@ -179,6 +179,12 @@ export const IngredientList = forwardRef<
     rowKey: string;
     name: string;
   } | null>(null);
+  // Opening the dialog moves focus into it, which blurs the originating combobox
+  // and — via createOnBlur — fires onCreate a second time. This mirrors
+  // createState (a ref stays current where the closed-over state would be stale)
+  // so that echo can be dropped before it re-opens an already-open dialog.
+  const createStateRef = useRef(createState);
+  createStateRef.current = createState;
   const [createNameError, setCreateNameError] = useState<string | undefined>();
   // Bumped per row to remount its combobox, which resets the input text. Used
   // when the create dialog is dismissed so the unmatched text the user typed
@@ -448,6 +454,10 @@ export const IngredientList = forwardRef<
                       onCreate={
                         canCreate
                           ? (query) => {
+                              // Drop the blur echo that opening the dialog
+                              // triggers (see createStateRef): the dialog is
+                              // already open for this row.
+                              if (createStateRef.current) return;
                               setCreateNameError(undefined);
                               setCreateState({
                                 rowKey: line.rowKey,

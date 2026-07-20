@@ -3749,3 +3749,26 @@ Where "off" lives, per section:
 **Known, intentional quirk:** the notice is keyed to "an edit happened," not dirty-vs-clean. If a user edits then manually reverts to the pristine value, the notice stays hidden. Consistent across all four sections; chosen as least-surprising.
 
 **Verified:** four new tests (one per section; header gets a second one asserting the notice survives the post-save reset — the guard for the `type === 'change'` logic). Frontend suite 437 passing; typecheck + lint clean.
+
+---
+
+## 2026-07-20 — `act(...)` warnings on the inline-create dialog tests
+
+**Symptom:** the frontend test logs carried a cascade of `An update to Presence / FocusScope / DismissableLayer / IngredientForm / IngredientList2 inside a test was not wrapped in act(...)` warnings. All tests passed — pure noise. Isolated to `ingredient-list.test.tsx`, and only the **3 tests that open the inline "Create ingredient" dialog** (`creates an ingredient inline…`, `clears the typed text…`, `surfaces INGREDIENT_NAME_TAKEN…`) — 26 warnings per test.
+
+**Why here and not the other Radix-dialog tests:** the create dialog **mounts in response to a click**. That one click both mounts the Radix `Dialog` and moves focus into it, which schedules React state updates from three places that all fire on `requestAnimationFrame` / document listeners / microtasks — in the gaps *between* userEvent's simulated sub-events, where no `act()` scope is active:
+
+1. **`searchable-combobox` `onBlur` → `onCreate`** — focus leaving the input re-fires the create action a second time (a genuine, benign double-open of the dialog).
+2. **react-hook-form** — `IngredientForm`'s `useForm` mount update (`useForm.ts:104`).
+3. **Radix `Dialog` internals** — `FocusScope`, `Presence`, `DismissableLayer`.
+
+`slot-editor-sheet.test.tsx` uses a Radix Dialog too but stays clean because it renders the sheet with `open` **at the initial `render()`** — the mount happens inside RTL's `render` act scope. Not available here: opening the dialog *is* the behaviour under test.
+
+**Ruled out (empirically, each removed at most one source):** `act()` timer/microtask flushes after the click; a focus-settle `waitFor`; `userEvent.setup({ delay: null })`; and an idempotent `setState`. The RHF + Radix updates land mid-click on rAF/DOM listeners and cannot be awaited away — React emits the warning at *schedule* time inside `scheduleUpdateOnFiber`, before any state-equality bailout, so even a no-op `setState` warns.
+
+**Fix — two parts:**
+
+- **Source #1 was a real bug** (double-fire of `onCreate`). Fixed in `ingredient-list.tsx` with a `createStateRef` (mirrors `createState`; a ref because the `onCreate` closure would see stale state) and an early `if (createStateRef.current) return;` guard — drops the blur echo rather than re-opening an already-open dialog. Measured: NAME_TAKEN dropped 26 → 25 warnings, i.e. exactly the one echo. Confirmed the guard does **not** cascade-fix the rest (the other 25 are independent), so it's a correctness fix, not the warning fix.
+- **Sources #2/#3 are library-internal and unfixable from app code.** Added `frontend/src/test/act-noise.ts` → `suppressActNoise(run)`, which filters only the `"not wrapped in act"` `console.error` for the duration of `run` then restores it (in `finally`). The 3 tests wrap just their dialog open→drive→close region. Scoped deliberately — a global filter in `setup.ts` would hide genuine act violations everywhere; this keeps them visible outside the dialog blocks. (Chosen with the user over a global filter / leave-as-is.)
+
+**Verified:** full frontend suite **0** `not wrapped in act` warnings, 441/441 passing across 52 files; typecheck + lint + format clean.

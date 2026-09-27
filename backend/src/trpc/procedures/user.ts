@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, count, eq } from 'drizzle-orm';
+import { and, asc, count, eq, gt, sql } from 'drizzle-orm';
 import {
   deleteAccountInputSchema,
   deleteAccountResultSchema,
@@ -14,7 +14,7 @@ import {
   listHouseholdMembersResultSchema,
   type ListHouseholdMembersResult,
 } from '../../../../shared/src/schemas/users.ts';
-import { users, verifications } from '../../db/schema/auth.ts';
+import { sessions, users, verifications } from '../../db/schema/auth.ts';
 import { mealPlans, mealPlanSlots } from '../../db/schema/meal-plans.ts';
 import { recipeDrafts } from '../../db/schema/recipe-drafts.ts';
 import {
@@ -24,6 +24,8 @@ import {
 import { recipes } from '../../db/schema/recipes.ts';
 import { makeWithTransaction } from '../../db/withTransaction.ts';
 import { protectedProcedure, router } from '../init.ts';
+
+const RECENT_SIGN_IN_HOURS = 24;
 
 export const userRouter = router({
   getMe: protectedProcedure
@@ -152,6 +154,32 @@ export const userRouter = router({
           code: 'FORBIDDEN',
           message: 'Email confirmation does not match your account email.',
           cause: { code: 'ACCOUNT_DELETE_EMAIL_MISMATCH' },
+        });
+      }
+
+      // Sessions roll for 30 days (DEC-93), so holding one proves little.
+      // `created_at` is fixed at sign-in, and comparing against Postgres
+      // `now()` keeps the check off the application clock (DEC-33).
+      const freshSession = await ctx.db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.id, ctx.session.id),
+            eq(sessions.userId, ctx.user.id),
+            gt(
+              sessions.createdAt,
+              sql`now() - make_interval(hours => ${RECENT_SIGN_IN_HOURS})`,
+            ),
+          ),
+        )
+        .limit(1);
+      if (freshSession.length === 0) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'For your security, sign in again before deleting your account.',
+          cause: { code: 'ACCOUNT_DELETE_REAUTH_REQUIRED' },
         });
       }
 

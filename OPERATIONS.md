@@ -305,7 +305,7 @@ Generic rotation procedure for both stores is in `docs/secrets-checklist.md` § 
 | `DATABASE_URL` | Managed by Fly Postgres; rotate via `flyctl postgres users` + `flyctl postgres attach`. Hand-editing risks drift from the cluster's actual password |
 | `BETTER_AUTH_SECRET` | Rotating invalidates every existing session cookie (DEC-43). Users get signed out and have to magic-link in again. Schedule with awareness, or accept the blast |
 | `BETTER_AUTH_URL`, `MAGIC_LINK_TRUSTED_ORIGIN` | Must match the actual frontend / backend origins; mismatch breaks magic-link callback (AGENTS.md trap row) |
-| `MAGIC_LINK_ALLOWED_EMAILS` | Comma-separated, lowercased internally. Removing an email immediately blocks future magic-link sends for that address; existing sessions remain |
+| `MAGIC_LINK_ALLOWED_EMAILS` | Comma-separated, lowercased internally. Removing an email immediately blocks future magic-link sends for that address; existing sessions remain (up to 30 days idle, indefinitely if in use — DEC-93). Follow with [§ Revoking a user's sessions](#revoking-a-users-sessions) |
 | `RESEND_API_KEY` | Rotate at Resend dashboard first, then set in Fly. A stale key fails magic-link sends silently from the user's perspective (they see a generic "sent" UI per FEAT-15) — watch Axiom for `magic-link.send.error` |
 | `CLOUDINARY_API_SECRET` | Signs short-lived upload credentials (DEC-50). In-flight uploads keep working until their signed URL expires; rotate during a quiet window |
 | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` | Rarely rotate — usually only when migrating Cloudinary accounts |
@@ -313,6 +313,30 @@ Generic rotation procedure for both stores is in `docs/secrets-checklist.md` § 
 | `AXIOM_ENDPOINT` | Only rotated to switch regions; not a credential |
 | `SENTRY_DSN`, `SENTRY_BROWSER_INGEST_ORIGIN` | Mismatched DSN ⇒ Sentry init no-ops silently. Verify by introducing a deliberate error after the restart and checking it lands |
 | `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` | Cosmetic / sampling; safe to rotate any time |
+
+### Revoking a user's sessions
+
+There is no in-app "sign out everywhere". To cut off someone removed from `MAGIC_LINK_ALLOWED_EMAILS`, delete their session rows by hand. Session validation reads the database on every request (no cookie cache), so each device loses access on its next request.
+
+```bash
+flyctl postgres connect --app loftys-larder-prod-db
+```
+
+Then at the `postgres=#` prompt:
+
+```sql
+DELETE FROM sessions
+WHERE user_id = (SELECT id FROM users WHERE lower(email) = lower('person@example.com'));
+-- Expect: DELETE n, one row per signed-in device.
+DELETE FROM verifications
+WHERE CASE WHEN pg_input_is_valid(value, 'jsonb')
+        THEN lower(value::jsonb ->> 'email') END = lower('person@example.com');
+-- Clears any unused magic link sent before the allow-list change. The magic-link
+-- plugin stores the token in `identifier` and the email inside the `value` JSON.
+\q
+```
+
+This signs the person out; it does not delete their account or data. For that, they delete the account from Settings (DEC-29).
 
 ### GitHub Actions secrets and variables
 

@@ -7,6 +7,8 @@ import * as schema from '../db/schema/index.ts';
 import type { MagicLinkSender } from './resend.ts';
 
 const TEN_MINUTES_IN_SECONDS = 60 * 10;
+const ONE_DAY_IN_SECONDS = 60 * 60 * 24;
+const THIRTY_DAYS_IN_SECONDS = ONE_DAY_IN_SECONDS * 30;
 
 export interface CreateAuthOptions {
   config: Config;
@@ -36,6 +38,12 @@ export function createAuth({ config, db, sendMagicLink }: CreateAuthOptions) {
     advanced: {
       cookiePrefix: 'lofty-larder',
       useSecureCookies: config.NODE_ENV === 'production',
+    },
+    // 30-day rolling window (DEC-93). Account deletion compensates by demanding
+    // a recent sign-in — see `user.deleteAccount`.
+    session: {
+      expiresIn: THIRTY_DAYS_IN_SECONDS,
+      updateAge: ONE_DAY_IN_SECONDS,
     },
     user: {
       additionalFields: {

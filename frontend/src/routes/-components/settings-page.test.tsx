@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { TRPCClientError } from '@trpc/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -9,6 +10,7 @@ const {
   deleteAccountMock,
   useUtilsMock,
   signOutMock,
+  magicLinkMock,
   refreshSessionMock,
   navigateMock,
 } = vi.hoisted(() => ({
@@ -18,6 +20,7 @@ const {
   deleteAccountMock: vi.fn(),
   useUtilsMock: vi.fn(),
   signOutMock: vi.fn(),
+  magicLinkMock: vi.fn(),
   refreshSessionMock: vi.fn(),
   navigateMock: vi.fn(),
 }));
@@ -37,6 +40,7 @@ vi.mock('@/lib/trpc.ts', () => ({
 vi.mock('@/lib/auth-client.ts', () => ({
   authClient: {
     signOut: signOutMock,
+    signIn: { magicLink: magicLinkMock },
   },
   refreshSession: refreshSessionMock,
 }));
@@ -53,6 +57,12 @@ const ME = {
   name: 'Test User',
   themePreference: 'system' as const,
 };
+
+function makeTrpcError(cause: { code: string }): TRPCClientError<never> {
+  const err = new TRPCClientError<never>('boom');
+  Object.assign(err, { shape: { data: { cause } } });
+  return err;
+}
 
 const SUMMARY = { commentCount: 2, recipeCount: 3, planCount: 1 };
 
@@ -114,6 +124,7 @@ beforeEach(() => {
   deleteAccountMock.mockReset();
   useUtilsMock.mockReset();
   signOutMock.mockReset();
+  magicLinkMock.mockReset();
   refreshSessionMock.mockReset();
   navigateMock.mockReset();
 });
@@ -345,6 +356,49 @@ describe('SettingsPage', () => {
       });
       // Dialog is still open; the input is still rendered.
       expect(screen.getByLabelText(/your email/i)).toBeInTheDocument();
+      expect(navigateMock).not.toHaveBeenCalled();
+      expect(signOutMock).not.toHaveBeenCalled();
+    });
+
+    it('closes the dialog and offers a fresh sign-in link when the session is too old', async () => {
+      const deleteMutateAsync = vi
+        .fn()
+        .mockRejectedValue(
+          makeTrpcError({ code: 'ACCOUNT_DELETE_REAUTH_REQUIRED' }),
+        );
+      setup({ deleteMutateAsync });
+      magicLinkMock.mockResolvedValue({ data: {}, error: null });
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      await screen.findByLabelText('Name');
+
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      await user.type(screen.getByLabelText(/your email/i), 'me@example.com');
+      await user.click(
+        await screen.findByRole('button', { name: /^delete account$/i }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          /signed in within the last 24 hours/i,
+        );
+      });
+      expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument();
+
+      await user.click(
+        screen.getByRole('button', { name: /email me a sign-in link/i }),
+      );
+
+      expect(magicLinkMock).toHaveBeenCalledWith({
+        email: 'me@example.com',
+        callbackURL: `${window.location.origin}/settings`,
+        errorCallbackURL: `${window.location.origin}/auth/verify`,
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(
+          /we sent a sign-in link to me@example.com/i,
+        );
+      });
       expect(navigateMock).not.toHaveBeenCalled();
       expect(signOutMock).not.toHaveBeenCalled();
     });

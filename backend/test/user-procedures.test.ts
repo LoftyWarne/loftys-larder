@@ -560,6 +560,12 @@ describe('user procedures', () => {
       await db
         .insert(recipeRatings)
         .values({ recipeId: otherRecipe, userId: OTHER_USER_ID, rating: 4 });
+      await db.insert(sessions).values({
+        id: SESSION_ID,
+        userId: USER_ID,
+        token: 'tok',
+        expiresAt: new Date(Date.now() + 60_000),
+      });
 
       const caller = createCaller(makeContext());
       await caller.user.deleteAccount({ emailConfirmation: USER_EMAIL });
@@ -635,6 +641,46 @@ describe('user procedures', () => {
         code: 'FORBIDDEN',
         cause: { code: 'ACCOUNT_DELETE_EMAIL_MISMATCH' },
       });
+    });
+
+    it('rejects FORBIDDEN with ACCOUNT_DELETE_REAUTH_REQUIRED when the session is older than 24 hours', async () => {
+      await seedFullDataset();
+      await db
+        .update(sessions)
+        .set({ createdAt: sql`now() - interval '25 hours'` })
+        .where(eq(sessions.id, SESSION_ID));
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.user.deleteAccount({ emailConfirmation: USER_EMAIL }),
+      ).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+        cause: { code: 'ACCOUNT_DELETE_REAUTH_REQUIRED' },
+      });
+
+      const userRows = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, USER_ID));
+      expect(userRows).toHaveLength(1);
+      const draftRows = await db
+        .select()
+        .from(recipeDrafts)
+        .where(eq(recipeDrafts.userId, USER_ID));
+      expect(draftRows).toHaveLength(1);
+    });
+
+    it('allows deletion from a session signed in just under 24 hours ago', async () => {
+      await seedFullDataset();
+      await db
+        .update(sessions)
+        .set({ createdAt: sql`now() - interval '23 hours'` })
+        .where(eq(sessions.id, SESSION_ID));
+
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.user.deleteAccount({ emailConfirmation: USER_EMAIL }),
+      ).resolves.toEqual({ deleted: true });
     });
 
     it('rolls back every step if the sequence fails midway', async () => {

@@ -12,12 +12,20 @@ import { DangerConfirmDialog } from '@/components/danger-confirm-dialog.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { authClient, refreshSession } from '@/lib/auth-client.ts';
+import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 type SaveState =
   | { kind: 'idle' }
   | { kind: 'saving' }
   | { kind: 'saved' }
+  | { kind: 'error'; message: string };
+
+type ReauthState =
+  | { kind: 'idle' }
+  | { kind: 'required' }
+  | { kind: 'sending' }
+  | { kind: 'sent' }
   | { kind: 'error'; message: string };
 
 const THEME_OPTIONS: readonly {
@@ -46,6 +54,7 @@ export function SettingsPage(): React.ReactElement {
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [reauth, setReauth] = useState<ReauthState>({ kind: 'idle' });
 
   const form = useForm<UpdateProfileInput>({
     resolver: zodResolver(updateProfileInputSchema),
@@ -124,6 +133,51 @@ export function SettingsPage(): React.ReactElement {
   const me = meQuery.data;
   const saving = save.kind === 'saving';
   const currentTheme = form.watch('themePreference') ?? 'system';
+
+  const confirmDeleteAccount = async (): Promise<void> => {
+    setDeleteError(null);
+    try {
+      await deleteAccount.mutateAsync({
+        emailConfirmation: me.email,
+      });
+      // Best-effort: session is already cascade-deleted server-side, but
+      // signOut clears the cached React-Query session so the redirect
+      // doesn't flash a stale signed-in state.
+      await authClient.signOut().catch(() => {
+        /* ignore — session is gone server-side regardless */
+      });
+      await navigate({ to: '/sign-in', search: { deleted: '1' } });
+    } catch (error) {
+      if (getDomainErrorCode(error) === 'ACCOUNT_DELETE_REAUTH_REQUIRED') {
+        setDeleteOpen(false);
+        setReauth({ kind: 'required' });
+        return;
+      }
+      setDeleteError(
+        error instanceof Error
+          ? error.message
+          : 'Could not delete your account. Try again.',
+      );
+    }
+  };
+
+  const sendReauthLink = async (): Promise<void> => {
+    setReauth({ kind: 'sending' });
+    const { error } = await authClient.signIn.magicLink({
+      email: me.email,
+      callbackURL: `${window.location.origin}/settings`,
+      errorCallbackURL: `${window.location.origin}/auth/verify`,
+    });
+    setReauth(
+      error
+        ? {
+            kind: 'error',
+            message:
+              error.message ?? 'Could not send the sign-in link. Try again.',
+          }
+        : { kind: 'sent' },
+    );
+  };
 
   return (
     <section className="mx-auto max-w-md space-y-6">
@@ -221,27 +275,9 @@ export function SettingsPage(): React.ReactElement {
         }}
         pending={deleteAccount.isPending}
         errorMessage={deleteError}
-        onConfirm={async () => {
-          setDeleteError(null);
-          try {
-            await deleteAccount.mutateAsync({
-              emailConfirmation: me.email,
-            });
-            // Best-effort: session is already cascade-deleted server-side, but
-            // signOut clears the cached React-Query session so the redirect
-            // doesn't flash a stale signed-in state.
-            await authClient.signOut().catch(() => {
-              /* ignore — session is gone server-side regardless */
-            });
-            await navigate({ to: '/sign-in', search: { deleted: '1' } });
-          } catch (error) {
-            setDeleteError(
-              error instanceof Error
-                ? error.message
-                : 'Could not delete your account. Try again.',
-            );
-          }
-        }}
+        reauth={reauth}
+        onSendReauthLink={sendReauthLink}
+        onConfirm={confirmDeleteAccount}
       />
     </section>
   );
@@ -257,6 +293,8 @@ interface DangerZoneProps {
   onOpenChange: (open: boolean) => void;
   pending: boolean;
   errorMessage: string | null;
+  reauth: ReauthState;
+  onSendReauthLink: () => Promise<void>;
   onConfirm: () => Promise<void>;
 }
 
@@ -268,6 +306,8 @@ function DangerZone({
   onOpenChange,
   pending,
   errorMessage,
+  reauth,
+  onSendReauthLink,
   onConfirm,
 }: DangerZoneProps): React.ReactElement {
   return (
@@ -309,6 +349,13 @@ function DangerZone({
           </li>
         </ul>
       )}
+      {reauth.kind !== 'idle' && (
+        <ReauthPrompt
+          email={email}
+          reauth={reauth}
+          onSendReauthLink={onSendReauthLink}
+        />
+      )}
       <Button
         type="button"
         variant="destructive"
@@ -344,5 +391,54 @@ function DangerZone({
         onConfirm={onConfirm}
       />
     </section>
+  );
+}
+
+interface ReauthPromptProps {
+  email: string;
+  reauth: Exclude<ReauthState, { kind: 'idle' }>;
+  onSendReauthLink: () => Promise<void>;
+}
+
+function ReauthPrompt({
+  email,
+  reauth,
+  onSendReauthLink,
+}: ReauthPromptProps): React.ReactElement {
+  if (reauth.kind === 'sent') {
+    return (
+      <p
+        role="status"
+        className="rounded-md border border-border bg-muted p-3 text-sm"
+      >
+        We sent a sign-in link to <strong>{email}</strong>. Open it on this
+        device, then delete your account again.
+      </p>
+    );
+  }
+  return (
+    <div
+      role="alert"
+      className="space-y-2 rounded-md border border-border bg-muted p-3 text-sm"
+    >
+      <p>
+        For your security, you need to have signed in within the last 24 hours
+        to delete your account.
+      </p>
+      {reauth.kind === 'error' && (
+        <p className="text-destructive dark:text-red-400">{reauth.message}</p>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={reauth.kind === 'sending'}
+        onClick={() => {
+          void onSendReauthLink();
+        }}
+      >
+        {reauth.kind === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
+      </Button>
+    </div>
   );
 }

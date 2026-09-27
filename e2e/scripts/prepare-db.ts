@@ -35,6 +35,7 @@ const PREPARATION_TYPES = [
   'sliced',
   'minced',
   'grated',
+  'drained',
 ];
 const MEAL_OCCASIONS = ['Lunch', 'Dinner'];
 

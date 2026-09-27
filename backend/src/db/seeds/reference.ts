@@ -39,6 +39,7 @@ export const PREPARATION_TYPES = [
   'sliced',
   'minced',
   'grated',
+  'drained',
 ] as const;
 
 export const MEAL_OCCASIONS = ['Lunch', 'Dinner'] as const;

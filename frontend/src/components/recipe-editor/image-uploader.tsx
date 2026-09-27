@@ -100,27 +100,16 @@ export function ImageUploader({
       </h2>
 
       {imageUrl ? (
-        <div className="space-y-2">
-          <img
-            src={imageUrl}
-            alt="Recipe"
-            className="aspect-[4/3] w-full max-w-sm rounded-lg object-cover"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void handleRemove();
-            }}
-          >
-            Remove image
-          </Button>
-        </div>
+        <img
+          src={imageUrl}
+          alt="Recipe"
+          className="aspect-[4/3] w-full max-w-sm rounded-lg object-cover"
+        />
       ) : (
         <p className="text-sm text-muted-foreground">No image yet.</p>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <input
           ref={fileInputRef}
           type="file"
@@ -145,6 +134,17 @@ export function ImageUploader({
         >
           {imageUrl ? 'Replace image' : 'Choose image'}
         </Button>
+        {imageUrl && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void handleRemove();
+            }}
+          >
+            Remove image
+          </Button>
+        )}
         {uploading && (
           <p role="status" className="text-sm text-muted-foreground">
             Uploading…

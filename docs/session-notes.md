@@ -3801,3 +3801,23 @@ Where "off" lives, per section:
 
 - No absolute session lifetime cap (Better Auth has none natively) — accepted in DEC-93.
 - No in-app "sign out everywhere" (`revokeSessions`) — deferred; would widen the auth surface.
+
+---
+
+## 2026-09-27 — Loading screen during Fly cold starts
+
+**Symptom:** after the machine auto-stops (DEC-64, measured cold start ~3 s), returning users saw a blank screen. The PWA precache serves the shell instantly, but `_authed`'s `beforeLoad` awaits `authClient.getSession()`, which is the request that wakes Fly. With no pending component configured, TanStack Router rendered nothing while it waited.
+
+**What landed:**
+
+- `frontend/src/router.tsx` — `defaultPendingComponent: AppPendingScreen`, `defaultPendingMs: 300`, `defaultPendingMinMs: 400`. Warm loads (~50 ms) resolve before 300 ms and never show it; once shown, it stays at least 400 ms so it doesn't flicker.
+- `frontend/src/components/app-pending-screen.tsx` — spinner + "Loading…", switching to "Waking up the larder…" after 1.5 s (`WAKING_HINT_DELAY_MS`). `role="status"` + `aria-live="polite"`, matching the app's other loading states.
+
+**Worth carrying:**
+
+- It's the router-wide default, so any navigation pending > 300 ms shows it (e.g. an auto-code-split chunk on a slow connection). Intended; a route can override with its own `pendingComponent` / `pendingMs`.
+- Confirmed with a throwaway memory-router test (slow `beforeLoad` → pending screen → route renders) that router 1.170 shows the pending component during `beforeLoad`, not just loaders. Not kept — it tested library behaviour.
+
+**Not covered (case 2):** first-ever visits, or visits with no service worker, still get only the browser's tab spinner, because `index.html` itself comes from the sleeping machine. Fixing that would mean edge-caching the shell at Cloudflare, which touches DEC-72. Not pursued.
+
+**Verified:** 2 new unit tests; frontend suite 444 passing; typecheck + lint + format clean. **Not yet observed on a real prod cold start.**

@@ -461,12 +461,28 @@ describe('user procedures', () => {
         accountId: 'acct-1',
         providerId: 'magic-link',
       });
-      await db.insert(verifications).values({
-        id: 'ver-1',
-        identifier: USER_EMAIL,
-        value: 'token',
-        expiresAt: new Date(Date.now() + 60_000),
-      });
+      // Magic-link rows as the plugin writes them: token in `identifier`,
+      // JSON payload in `value`. Plus rows that must survive the sweep.
+      await db.insert(verifications).values([
+        {
+          id: 'ver-1',
+          identifier: 'magic-token-mine',
+          value: JSON.stringify({ email: USER_EMAIL, name: '' }),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+        {
+          id: 'ver-other',
+          identifier: 'magic-token-theirs',
+          value: JSON.stringify({ email: 'someone-else@example.com' }),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+        {
+          id: 'ver-plain',
+          identifier: 'non-json-row',
+          value: 'not json',
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      ]);
       return { recipeId, planId, slotId: slot.id, occasionId };
     }
 
@@ -540,10 +556,13 @@ describe('user procedures', () => {
       expect(accountRows).toEqual([]);
 
       const verificationRows = await db
-        .select()
+        .select({ id: verifications.id })
         .from(verifications)
-        .where(eq(verifications.identifier, USER_EMAIL));
-      expect(verificationRows).toEqual([]);
+        .orderBy(verifications.id);
+      expect(verificationRows).toEqual([
+        { id: 'ver-other' },
+        { id: 'ver-plain' },
+      ]);
     });
 
     it('does not touch another user’s data', async () => {
@@ -754,7 +773,7 @@ describe('user procedures', () => {
       const verificationRows = await db
         .select()
         .from(verifications)
-        .where(eq(verifications.identifier, USER_EMAIL));
+        .where(eq(verifications.id, 'ver-1'));
       expect(verificationRows).toHaveLength(1);
     });
 

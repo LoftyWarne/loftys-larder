@@ -143,8 +143,8 @@ export const userRouter = router({
   // adds another, extend this block at the same time (cross-cutting #15).
   // Ordering matters — RESTRICT FKs (`recipe_ratings`, `recipe_drafts`) must be
   // cleared before the final `DELETE FROM users`, which then cascades to
-  // Better Auth's `sessions` / `accounts`. `verifications` is keyed by email,
-  // not user id, so we sweep it explicitly.
+  // Better Auth's `sessions` / `accounts`. `verifications` has no user FK, so
+  // we sweep it explicitly.
   deleteAccount: protectedProcedure
     .input(deleteAccountInputSchema)
     .output(deleteAccountResultSchema)
@@ -219,11 +219,16 @@ export const userRouter = router({
         // 6. Hard-delete in-progress recipe drafts (RESTRICT FK).
         await tx.delete(recipeDrafts).where(eq(recipeDrafts.userId, userId));
 
-        // Better Auth's verification tokens are keyed by email, not user id —
-        // sweep any outstanding magic-link rows for this address.
+        // Sweep unused magic links for this address, or one clicked after
+        // deletion would sign the user straight back up. The magic-link plugin
+        // stores the token in `identifier` and `{ email, name }` JSON in
+        // `value`; the CASE guards the cast against non-JSON rows from other
+        // verification kinds.
         await tx
           .delete(verifications)
-          .where(eq(verifications.identifier, email));
+          .where(
+            sql`case when pg_input_is_valid(${verifications.value}, 'jsonb') then lower(${verifications.value}::jsonb ->> 'email') end = lower(${email})`,
+          );
 
         // 7. Delete the user row. `sessions` and `accounts` cascade.
         await tx.delete(users).where(eq(users.id, userId));

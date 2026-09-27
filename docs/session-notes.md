@@ -3772,3 +3772,32 @@ Where "off" lives, per section:
 - **Sources #2/#3 are library-internal and unfixable from app code.** Added `frontend/src/test/act-noise.ts` → `suppressActNoise(run)`, which filters only the `"not wrapped in act"` `console.error` for the duration of `run` then restores it (in `finally`). The 3 tests wrap just their dialog open→drive→close region. Scoped deliberately — a global filter in `setup.ts` would hide genuine act violations everywhere; this keeps them visible outside the dialog blocks. (Chosen with the user over a global filter / leave-as-is.)
 
 **Verified:** full frontend suite **0** `not wrapped in act` warnings, 441/441 passing across 52 files; typecheck + lint + format clean.
+
+---
+
+## 2026-09-27 — 30-day rolling sessions + recent-sign-in check on account deletion (DEC-93); magic-link sweep bug fixed
+
+**Status:** Implemented, not committed. Full suite green (backend 525, frontend 442); typecheck + lint clean. End-to-end magic-link round trip (email → click → back on Settings with a fresh session → delete succeeds) **not yet manually probed in dev** — only covered by mocked frontend tests.
+
+**Starting point:** session lifetime was never configured, so Better Auth defaults applied — `expiresIn` 7 days, `updateAge` 1 day (rolling). Verified in the installed v1.6.11 source (`node_modules/better-auth/dist/context/create-context.mjs:143-145`), not from memory. Re-check there after any Better Auth upgrade.
+
+**What landed (DEC-93):**
+
+- `backend/src/auth/index.ts` — `session: { expiresIn: 30 days, updateAge: 1 day }`. Existing sessions pick up the new window on their next refresh; no migration.
+- `user.deleteAccount` now rejects `FORBIDDEN` / `ACCOUNT_DELETE_REAUTH_REQUIRED` unless the current `sessions` row's `created_at` is within 24 h. Check runs after the email-mismatch check, before the transaction. Compared against Postgres `now()` in SQL so no `new Date()` in domain code and no new `dateUtils` helper was needed. `created_at` is fixed at sign-in; rolling refresh only moves `expires_at` / `updated_at`.
+- Better Auth's own `freshAge` does **not** protect `deleteAccount` — it only guards Better Auth endpoints, and deletion is a tRPC procedure. That's why the check is ours.
+- Settings page: on the reauth error the dialog closes and a prompt offers "Email me a sign-in link" (`authClient.signIn.magicLink` → `callbackURL: <origin>/settings`). Handlers extracted to named `confirmDeleteAccount` / `sendReauthLink`.
+- `OPERATIONS.md` — new "Revoking a user's sessions" runbook; the `MAGIC_LINK_ALLOWED_EMAILS` rotation row links to it. Removing an email from the allow-list only blocks *new* links; existing sessions live on (now up to 30 days idle, indefinitely if used) until their rows are deleted by hand.
+
+**Bug found + fixed — account deletion never swept magic links.** `deleteAccount` deleted `verifications WHERE identifier = email`, but the magic-link plugin stores the **token** in `identifier` and `{ email, name }` JSON in `value` (`magic-link/index.mjs:59-64`). So the sweep matched nothing: an unused link sent in the 10 min before deletion stayed valid, and with sign-up enabled clicking it would recreate the user (if still allow-listed). The existing test passed only because it seeded a row keyed by email — the fixture didn't match reality. Fix: match `lower(value::jsonb ->> 'email')`, guarded by `CASE WHEN pg_input_is_valid(value, 'jsonb')` so non-JSON rows from other verification kinds can't abort the transaction (Postgres 16+; dev/CI/prod are all 17). Test fixtures now use the real row shape plus two survivor rows (another user's link, a non-JSON row). Confirmed the test fails against the old sweep.
+
+**Worth carrying:**
+
+- Test fixtures for Better Auth tables should mirror what the library actually writes — check the plugin source, not the column names.
+- Session validation hits the DB every request (`cookieCache` off), so deleting `sessions` rows revokes immediately. Enabling `cookieCache` later would open a revocation lag — revisit DEC-93 if that happens.
+- Local Docker runtime is **Colima** (`colima start`), not Docker Desktop — Testcontainers needs it running.
+
+**Deferred / open:**
+
+- No absolute session lifetime cap (Better Auth has none natively) — accepted in DEC-93.
+- No in-app "sign out everywhere" (`revokeSessions`) — deferred; would widen the auth surface.

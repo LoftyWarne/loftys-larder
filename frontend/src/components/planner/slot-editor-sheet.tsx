@@ -254,17 +254,32 @@ export function SlotEditorSheet({
   // Meals prepared on earlier "Cooking" slots in this plan — the leftovers
   // picker's plan-meal options. Deduped by recipe so a dish that recurs lists
   // once. "Earlier" is (date, occasion) order, matching the consumption walk.
-  const earlierMeals = useMemo(() => {
-    if (!slot) return [];
+  // A meal already eaten up by earlier slots has no leftovers to offer, so it's
+  // dropped — unless it's the meal this slot was saved eating, which stays so
+  // the picker still shows it (with its shortfall warning). `remainingBefore`
+  // also caps the servings a picked meal defaults to.
+  const { earlierMeals, remainingBefore } = useMemo(() => {
+    if (!slot) {
+      return { earlierMeals: [], remainingBefore: new Map<number, number>() };
+    }
+    const earlierSlots = slots.filter((candidate) =>
+      isSlotBefore(candidate, slot),
+    );
+    const remainingBefore = deriveBaseBalances(earlierSlots).remainingByBase;
+    const savedRecipeId =
+      slot.leftoversSource === 'plan_meal' ? slot.items[0]?.recipeId : null;
     const byRecipe = new Map<number, PlanSlotItem>();
-    for (const candidate of slots) {
+    for (const candidate of earlierSlots) {
       if (candidate.slotType !== 'recipe') continue;
-      if (!isSlotBefore(candidate, slot)) continue;
       for (const item of candidate.items) {
-        if (!byRecipe.has(item.recipeId)) byRecipe.set(item.recipeId, item);
+        if (byRecipe.has(item.recipeId)) continue;
+        const hasLeftovers = (remainingBefore.get(item.recipeId) ?? 0) > 0;
+        if (hasLeftovers || item.recipeId === savedRecipeId) {
+          byRecipe.set(item.recipeId, item);
+        }
       }
     }
-    return [...byRecipe.values()];
+    return { earlierMeals: [...byRecipe.values()], remainingBefore };
   }, [slots, slot]);
 
   const liveBalances = useMemo(() => {
@@ -671,6 +686,7 @@ export function SlotEditorSheet({
                           prev,
                           event.target.value,
                           earlierMeals,
+                          remainingBefore,
                         )
                       : prev,
                   );
@@ -875,11 +891,13 @@ function leftoversSelectValue(state: EditorState): string {
 // Fold a leftovers-picker choice back into editor state. A plan meal becomes
 // the slot's single pure-consume item (DEC-91: `prepared=0`, since the food was
 // cooked earlier; `eaten` defaults to the headcount, falling back to the
-// original serving count); takeaway/other clear the items.
+// original serving count, capped at the portions left); takeaway/other clear
+// the items.
 function applyLeftoversChoice(
   state: EditorState,
   value: string,
   earlierMeals: readonly PlanSlotItem[],
+  remainingBefore: ReadonlyMap<number, number>,
 ): EditorState {
   if (value === 'takeaway' || value === 'other') {
     return { ...state, leftoversSource: value, items: [] };
@@ -890,7 +908,11 @@ function applyLeftoversChoice(
   const meal = earlierMeals.find((item) => item.recipeId === recipeId);
   if (!meal) return { ...state, leftoversSource: null, items: [] };
   const headcount = headcountOf(state);
-  const eaten = headcount > 0 ? headcount : meal.eaten || meal.prepared;
+  const wanted = headcount > 0 ? headcount : meal.eaten || meal.prepared;
+  // A saved meal can be offered with nothing left; leave its default uncapped
+  // rather than zero so the slot stays saveable and the shortfall shows.
+  const remaining = remainingBefore.get(meal.recipeId) ?? 0;
+  const eaten = remaining > 0 ? Math.min(wanted, remaining) : wanted;
   return {
     ...state,
     leftoversSource: 'plan_meal',

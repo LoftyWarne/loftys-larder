@@ -700,7 +700,8 @@ describe('SlotEditorSheet — leftovers', () => {
     guestCount: 0,
   };
 
-  // A Cooking slot dated before EMPTY_SLOT — its dish is a plan-meal option.
+  // A Cooking slot dated before EMPTY_SLOT that cooked more than it ate — its
+  // dish is a plan-meal option.
   const EARLIER_COOKING: PlanSlot = {
     id: 3,
     planId: 1,
@@ -712,7 +713,7 @@ describe('SlotEditorSheet — leftovers', () => {
     chefUserId: null,
     comment: null,
     items: [
-      eat({ recipeId: 10, recipeName: 'Tomato Pasta', prepared: 6, eaten: 6 }),
+      eat({ recipeId: 10, recipeName: 'Tomato Pasta', prepared: 8, eaten: 2 }),
     ],
     dinerUserIds: [],
     guestCount: 0,
@@ -766,6 +767,124 @@ describe('SlotEditorSheet — leftovers', () => {
     expect(Array.from(select.querySelectorAll('optgroup'))).toHaveLength(0);
   });
 
+  function planMealOptions(): string[] {
+    const select = screen.getByLabelText('Leftovers of which meal');
+    return Array.from(
+      select.querySelectorAll('optgroup option'),
+      (o) => o.textContent,
+    );
+  }
+
+  it('does not offer a meal that was eaten in full where it was cooked', async () => {
+    const user = userEvent.setup();
+    render(
+      <SlotEditorSheet
+        open
+        slot={EMPTY_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[
+          {
+            ...EARLIER_COOKING,
+            items: [
+              eat({ recipeId: 10, recipeName: 'Tomato Pasta' }),
+              eat({
+                id: 2,
+                recipeId: 11,
+                recipeName: 'Curry',
+                prepared: 6,
+                eaten: 2,
+              }),
+            ],
+          },
+          EMPTY_SLOT,
+        ]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    await user.click(screen.getByText('Leftovers'));
+    expect(planMealOptions()).toEqual(['Curry']);
+  });
+
+  it('does not offer a meal whose leftovers an earlier slot already ate', async () => {
+    const user = userEvent.setup();
+    const EARLIER_LEFTOVERS: PlanSlot = {
+      ...EMPTY_SLOT,
+      id: 4,
+      date: '2026-06-16',
+      slotType: 'leftovers',
+      leftoversSource: 'plan_meal',
+      items: [eat({ id: 3, recipeId: 10, prepared: 0, eaten: 6 })],
+    };
+    render(
+      <SlotEditorSheet
+        open
+        slot={EMPTY_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[EARLIER_COOKING, EARLIER_LEFTOVERS, EMPTY_SLOT]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    await user.click(screen.getByText('Leftovers'));
+    expect(planMealOptions()).toEqual([]);
+  });
+
+  it('still offers a meal that only a later slot eats up', async () => {
+    const user = userEvent.setup();
+    const LATER_LEFTOVERS: PlanSlot = {
+      ...EMPTY_SLOT,
+      id: 12,
+      date: '2026-06-18',
+      slotType: 'leftovers',
+      leftoversSource: 'plan_meal',
+      items: [eat({ id: 3, recipeId: 10, prepared: 0, eaten: 6 })],
+    };
+    render(
+      <SlotEditorSheet
+        open
+        slot={EMPTY_SLOT}
+        members={[]}
+        isSaving={false}
+        slots={[EARLIER_COOKING, EMPTY_SLOT, LATER_LEFTOVERS]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    await user.click(screen.getByText('Leftovers'));
+    expect(planMealOptions()).toEqual(['Tomato Pasta']);
+  });
+
+  it('keeps the saved meal selectable even once earlier slots eat it up', () => {
+    const SAVED_LEFTOVERS: PlanSlot = {
+      ...EMPTY_SLOT,
+      slotType: 'leftovers',
+      leftoversSource: 'plan_meal',
+      items: [eat({ id: 3, recipeId: 10, prepared: 0, eaten: 2 })],
+    };
+    render(
+      <SlotEditorSheet
+        open
+        slot={SAVED_LEFTOVERS}
+        members={[]}
+        isSaving={false}
+        slots={[
+          { ...EARLIER_COOKING, items: [eat({ recipeId: 10 })] },
+          SAVED_LEFTOVERS,
+        ]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    expect(planMealOptions()).toEqual(['Tomato Pasta']);
+    expect(screen.getByLabelText('Leftovers of which meal')).toHaveValue(
+      'recipe:10',
+    );
+    expect(screen.getByTestId('serving-variation-warning')).toBeInTheDocument();
+  });
+
   it('saves a plan-meal leftover as one eat item linked to the source recipe', async () => {
     const user = userEvent.setup();
     const onSave = renderLeftovers();
@@ -782,7 +901,7 @@ describe('SlotEditorSheet — leftovers', () => {
     expect(input.slotType).toBe('leftovers');
     expect(input.leftoversSource).toBe('plan_meal');
     expect(input.items).toEqual([
-      expect.objectContaining({ recipeId: 10, prepared: 0, eaten: 6 }),
+      expect.objectContaining({ recipeId: 10, prepared: 0, eaten: 2 }),
     ]);
   });
 
@@ -812,8 +931,8 @@ describe('SlotEditorSheet — leftovers', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  // A variation of base 22 eaten earlier, with no base 22 cooked anywhere — so
-  // eating its leftovers runs the (empty) base pool short.
+  // A variation of base 22 cooked earlier with 2 portions spare — eating 4 here
+  // runs the meal's own pool short.
   const EARLIER_VARIATION: PlanSlot = {
     ...EARLIER_COOKING,
     items: [
@@ -821,11 +940,35 @@ describe('SlotEditorSheet — leftovers', () => {
         recipeId: 10,
         recipeName: 'Pasta',
         baseRecipeId: 22,
-        prepared: 4,
+        prepared: 6,
         eaten: 4,
       }),
     ],
   };
+
+  it('caps the default servings at the portions left', async () => {
+    const user = userEvent.setup();
+    render(
+      <SlotEditorSheet
+        open
+        slot={{ ...EMPTY_SLOT, guestCount: 4 }}
+        members={[]}
+        isSaving={false}
+        slots={[EARLIER_VARIATION, EMPTY_SLOT]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+    await user.click(screen.getByText('Leftovers'));
+    await user.selectOptions(
+      screen.getByLabelText('Leftovers of which meal'),
+      'recipe:10',
+    );
+    expect(screen.getByLabelText('Servings for Pasta')).toHaveValue(2);
+    expect(
+      screen.queryByTestId('serving-variation-warning'),
+    ).not.toBeInTheDocument();
+  });
 
   it('frames a non-base leftover shortfall around the meal, not the base', async () => {
     const user = userEvent.setup();
@@ -845,17 +988,20 @@ describe('SlotEditorSheet — leftovers', () => {
       screen.getByLabelText('Leftovers of which meal'),
       'recipe:10',
     );
+    const servings = screen.getByLabelText('Servings for Pasta');
+    await user.clear(servings);
+    await user.type(servings, '4');
     expect(screen.getByTestId('serving-variation-warning')).toHaveTextContent(
       'Not enough of this meal prepared',
     );
   });
 
-  // A base eaten earlier with nothing cooked ahead — its leftover is a true
-  // base-pool deficit, so it keeps the base wording.
+  // A base cooked earlier with 2 portions spare — eating 4 here is a base-pool
+  // deficit, so it keeps the base wording.
   const EARLIER_BASE: PlanSlot = {
     ...EARLIER_COOKING,
     items: [
-      cook({ recipeId: 22, recipeName: 'Base', prepared: 2 }),
+      cook({ recipeId: 22, recipeName: 'Base', prepared: 4 }),
       eat({
         recipeId: 22,
         recipeName: 'Base',
@@ -884,6 +1030,9 @@ describe('SlotEditorSheet — leftovers', () => {
       screen.getByLabelText('Leftovers of which meal'),
       'recipe:22',
     );
+    const servings = screen.getByLabelText('Servings for Base');
+    await user.clear(servings);
+    await user.type(servings, '4');
     expect(screen.getByTestId('serving-variation-warning')).toHaveTextContent(
       'Not enough base cooked yet',
     );

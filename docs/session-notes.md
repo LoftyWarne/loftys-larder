@@ -4,6 +4,21 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-09-27 — Slot editor: leftovers picker hides eaten-up meals; default servings capped
+
+**Status:** Done (`slot-editor-sheet.tsx`), committed + pushed. 34 slot-editor tests green; frontend typecheck + lint clean. Frontend only — no schema / API change.
+
+**Change:** the Leftovers "Which meal?" picker used to list every dish from an earlier Cooking slot, even ones already eaten in full. It now works out each recipe's cooked-portion pool from the slots **strictly before** this one — `deriveBaseBalances(earlierSlots).remainingByBase`, the same walk behind the shortfall warnings, so picker and warnings agree — and only offers meals with **> 0** portions left. Picking a meal now defaults servings to `min(headcount-or-original-servings, portions left)`; the user can still type more and gets the shortfall warning.
+
+**Decisions worth carrying:**
+- **Only earlier slots count.** A meal that a *later* slot eats up is still offered; picking it moves the shortfall onto that later slot.
+- **Threshold is > 0, not ≥ headcount** — so the list doesn't reshuffle as diners are ticked.
+- **The saved meal stays listed** even if earlier slots have since eaten it up, so the select doesn't go blank; its servings default is left uncapped there (capping at 0 would make the slot unsaveable) and the shortfall warning explains it.
+
+**Known gap (pre-existing, not changed):** only `slotType === 'recipe'` slots feed the picker, so a dish cooked on a batch-prep-only slot (saved as `empty` per DEC-91) is never offered as leftovers.
+
+---
+
 ## 2026-07-13 — Fixed a flaky combobox test that was intermittently blocking deploys
 
 **Status:** Fixed (`searchable-combobox.test.tsx`), committed + pushed. 16 combobox tests green ×5 runs; typecheck + lint clean. Test-only change — no component behaviour touched.

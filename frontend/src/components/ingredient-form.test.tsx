@@ -79,6 +79,22 @@ describe('IngredientForm', () => {
     });
   });
 
+  it('keeps "and" / "or" lower-case unless they open the name', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderForm();
+
+    await user.type(screen.getByLabelText('Name'), 'or salt AND pepper');
+    await user.selectOptions(screen.getByLabelText('Category'), '2');
+    await user.selectOptions(screen.getByLabelText('Default unit'), '11');
+    await user.click(screen.getByRole('button', { name: /add ingredient/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Or Salt and Pepper' }),
+      );
+    });
+  });
+
   it('surfaces a server-provided name error', async () => {
     renderForm({ nameError: 'An ingredient with this name already exists' });
     await waitFor(() => {

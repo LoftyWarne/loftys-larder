@@ -3872,3 +3872,21 @@ Where "off" lives, per section:
 - To confirm the seed runs, look for `seed-reference: starting` / `complete` in the release-machine logs.
 
 **Verified:** release on `8d3e229` ran the seed; `drained` now appears in the prod prep-type dropdown (user-confirmed).
+
+---
+
+## 2026-09-27 — Title-case follow-up: brackets and connectives
+
+**Trigger:** `Frozen Dumplings (prawn, Chicken Or Pork)` — the first rule only capitalised a letter directly after whitespace, so `(prawn` stayed lower, and `or` was capitalised.
+
+**What landed:**
+
+- `toTitleCase` now works per whitespace token: leading non-alphanumerics are skipped (`(prawn` → `(Prawn`), while a leading digit still blocks capitalisation (`3kg bag` → `3kg Bag`). `and` / `or` (bare, ignoring surrounding punctuation) are forced lower-case unless they're the first word (`or else` → `Or Else`, `salt AND pepper` → `Salt and Pepper`).
+- `backend/drizzle/0015_title_case_ingredient_connectives.sql` — re-backfill with the revised rule. 0014 had already run in prod, so it's left as-is and 0015 supersedes its output.
+
+**Worth carrying:**
+
+- The SQL mirrors the TS via `[:alpha:]` / `[:alnum:]` classes; verified matching on 10 samples (incl. `(éclair)` → `(Éclair)`) on local Postgres 17 only. Prod classification of non-ASCII letters is assumed identical.
+- Adding more lower-case words means changing both `LOWERCASE_WORDS` and a new backfill migration.
+
+**Verified:** probe row applied locally via `db:migrate` (then removed); new tests in `ingredient-form.test.tsx` and `ingredient-procedures.test.ts`; frontend 453 / backend 527 passing; typecheck + lint + format clean.

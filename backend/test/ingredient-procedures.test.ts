@@ -287,6 +287,19 @@ describe('ingredients procedures', () => {
       expect(created.name).toBe('Smoky BBQ Sauce');
     });
 
+    it('capitalises inside brackets and keeps "and" / "or" lower-case', async () => {
+      const caller = createCaller(makeContext());
+      const created = await caller.ingredients.create({
+        name: 'frozen dumplings (prawn, Chicken Or Pork)',
+        categoryId,
+        defaultUnitId: unitId,
+        isPlant: false,
+        averageShelfLifeDays: null,
+      });
+
+      expect(created.name).toBe('Frozen Dumplings (Prawn, Chicken or Pork)');
+    });
+
     it('rejects empty name', async () => {
       const caller = createCaller(makeContext());
       await expect(

@@ -3855,3 +3855,20 @@ Where "off" lives, per section:
 - Recipe names are not title-cased. e2e specs keep `Chicken thigh` in their own mocked fixtures — independent of the seed.
 
 **Verified:** backfill SQL previewed against samples + dev data (matches the TS helper), applied locally via `db:migrate`; new tests in `ingredient-form.test.tsx` and `ingredient-procedures.test.ts`; frontend 445 / backend 526 passing; typecheck + lint + format clean. No automated migration test (no existing pattern).
+
+---
+
+## 2026-09-27 — Reference seed never ran on deploy (release_command shell fix)
+
+**Symptom:** `drained` added to `PREPARATION_TYPES` (`f271914`) and deployed, but absent from the prep-type dropdown in prod. Prod `preparation_types` held only the original six rows.
+
+**Root cause:** Fly execs `release_command` without a shell. `node /app/migrate.js && node /app/seed-reference.js` ran as `node /app/migrate.js "&&" "node" "/app/seed-reference.js"` — migrations applied, the trailing args were ignored, and the seed never started. The release still reported success. The deployed `/app/seed-reference.js` did contain `drained`, ruling out a stale bundle.
+
+**Fix:** `fly.toml` → `release_command = "sh -c 'node /app/migrate.js && node /app/seed-reference.js'"`. Comment updated.
+
+**Worth carrying:**
+
+- Any reference-seed change before this fix never reached prod on deploy; earlier prod rows came from manual seed runs.
+- To confirm the seed runs, look for `seed-reference: starting` / `complete` in the release-machine logs.
+
+**Not yet verified:** first deploy with the fix; `drained` in prod.

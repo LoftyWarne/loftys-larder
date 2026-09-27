@@ -14,10 +14,12 @@ primary_region = "lhr"
 # Fly reads it. The release machine boots the runtime image and runs the
 # bundled migrate entrypoint (drizzle-orm's programmatic migrator, DEC-61)
 # before the new version goes live — prod never needs drizzle-kit. The
-# reference seed runs right after (idempotent, `ON CONFLICT DO NOTHING`); `&&`
-# means it only runs if migration succeeds.
+# reference seed runs right after (idempotent, `ON CONFLICT DO NOTHING`) and
+# only if migration succeeds. Fly execs release_command without a shell, so the
+# `sh -c` wrapper is required for `&&` — without it the seed args are passed to
+# migrate.js and silently ignored.
 [deploy]
-  release_command = "node /app/migrate.js && node /app/seed-reference.js"
+  release_command = "sh -c 'node /app/migrate.js && node /app/seed-reference.js'"
 
 [http_service]
   internal_port = 3000

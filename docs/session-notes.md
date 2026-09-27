@@ -3871,4 +3871,4 @@ Where "off" lives, per section:
 - Any reference-seed change before this fix never reached prod on deploy; earlier prod rows came from manual seed runs.
 - To confirm the seed runs, look for `seed-reference: starting` / `complete` in the release-machine logs.
 
-**Not yet verified:** first deploy with the fix; `drained` in prod.
+**Verified:** release on `8d3e229` ran the seed; `drained` now appears in the prod prep-type dropdown (user-confirmed).

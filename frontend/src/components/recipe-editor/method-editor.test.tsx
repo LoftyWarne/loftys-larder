@@ -36,6 +36,46 @@ describe('MethodEditor', () => {
     ]);
   });
 
+  it('disables Add step until every step has text', async () => {
+    const user = userEvent.setup();
+    render(<MethodEditor initialSteps={[]} onSubmit={vi.fn()} />);
+    const addButton = screen.getByRole('button', { name: 'Add step' });
+
+    // Enabled from the empty state — nothing precedes the first step.
+    expect(addButton).toBeEnabled();
+
+    await user.click(addButton);
+    expect(addButton).toBeDisabled();
+
+    // Whitespace alone doesn't count as step text.
+    await user.type(screen.getByLabelText('Step 1 text'), '   ');
+    expect(addButton).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Step 1 text'), 'Heat oil');
+    expect(addButton).toBeEnabled();
+  });
+
+  it('explains via a tooltip why Add step is disabled', async () => {
+    const user = userEvent.setup();
+    render(<MethodEditor initialSteps={[]} onSubmit={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Add step' }));
+    const addButton = screen.getByRole('button', { name: 'Add step' });
+    expect(addButton).toBeDisabled();
+
+    // The disabled button has `pointer-events-none`, so hover the wrapper the
+    // tooltip trigger sits on.
+    const trigger = addButton.parentElement;
+    if (!trigger) throw new Error('expected a tooltip trigger wrapper');
+    await user.hover(trigger);
+
+    expect(
+      await screen.findByRole('tooltip', {
+        name: /Fill in each step before adding another/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it('reorders steps with up/down buttons and disables at boundaries', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();

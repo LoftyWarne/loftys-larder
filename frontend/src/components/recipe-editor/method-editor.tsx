@@ -15,6 +15,12 @@ import {
 
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
 import { Button } from '@/components/ui/button.tsx';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip.tsx';
 
 interface DraftStep {
   rowKey: string;
@@ -45,6 +51,12 @@ let nextRowSeed = 0;
 function newRowKey(): string {
   nextRowSeed += 1;
   return `new-${String(nextRowSeed)}`;
+}
+
+// Shared by the "Add step" gate and the submit validation so the two never
+// drift.
+function isStepValid(step: DraftStep): boolean {
+  return step.instruction.trim().length > 0;
 }
 
 function toDraft(step: RecipeMethodStep): DraftStep {
@@ -191,8 +203,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     const runSubmit = useCallback(async (): Promise<boolean> => {
       let firstInvalid = -1;
       const validated = steps.map((step, index) => {
-        const trimmed = step.instruction.trim();
-        if (trimmed.length === 0) {
+        if (!isStepValid(step)) {
           if (firstInvalid < 0) firstInvalid = index;
           return { ...step, error: 'Step text is required' };
         }
@@ -218,128 +229,152 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
 
     useImperativeHandle(ref, () => ({ submit: runSubmit }), [runSubmit]);
 
+    const canAddStep = steps.every(isStepValid);
+
     return (
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void runSubmit();
-        }}
-        className="space-y-4"
-        noValidate
-        aria-labelledby="recipe-method-heading"
-      >
-        <h2 id="recipe-method-heading" className="text-lg font-semibold">
-          Method
-        </h2>
+      <TooltipProvider delayDuration={200}>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runSubmit();
+          }}
+          className="space-y-4"
+          noValidate
+          aria-labelledby="recipe-method-heading"
+        >
+          <h2 id="recipe-method-heading" className="text-lg font-semibold">
+            Method
+          </h2>
 
-        {steps.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No steps yet. Click &ldquo;Add step&rdquo; to start.
-          </p>
-        ) : (
-          <ol className="space-y-3">
-            {steps.map((step, index) => (
-              <li
-                key={step.rowKey}
-                className="flex items-start gap-2 rounded-md border border-input p-2"
-              >
-                <span
-                  className="mt-2 w-6 text-center text-sm font-medium text-muted-foreground"
-                  aria-hidden
+          {steps.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No steps yet. Click &ldquo;Add step&rdquo; to start.
+            </p>
+          ) : (
+            <ol className="space-y-3">
+              {steps.map((step, index) => (
+                <li
+                  key={step.rowKey}
+                  className="flex items-start gap-2 rounded-md border border-input p-2"
                 >
-                  {index + 1}.
+                  <span
+                    className="mt-2 w-6 text-center text-sm font-medium text-muted-foreground"
+                    aria-hidden
+                  >
+                    {index + 1}.
+                  </span>
+                  <div className="flex-1 space-y-1">
+                    <textarea
+                      ref={(el) => {
+                        registerTextarea(step.rowKey, el);
+                      }}
+                      aria-label={`Step ${String(index + 1)} text`}
+                      rows={2}
+                      maxLength={RECIPE_INSTRUCTION_MAX_LENGTH}
+                      className="flex min-h-16 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={step.instruction}
+                      onChange={(event) => {
+                        updateStep(step.rowKey, event.target.value);
+                        autosize(event.currentTarget);
+                      }}
+                    />
+                    {step.error && (
+                      <p role="alert" className="text-sm text-destructive">
+                        {step.error}
+                      </p>
+                    )}
+                    {step.instruction.length >=
+                      RECIPE_INSTRUCTION_MAX_LENGTH - 500 && (
+                      <p className="text-right text-xs text-muted-foreground">
+                        {step.instruction.length} /{' '}
+                        {RECIPE_INSTRUCTION_MAX_LENGTH}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Move step ${String(index + 1)} up`}
+                      disabled={index === 0}
+                      onClick={() => {
+                        moveStep(index, -1);
+                      }}
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Move step ${String(index + 1)} down`}
+                      disabled={index === steps.length - 1}
+                      onClick={() => {
+                        moveStep(index, 1);
+                      }}
+                    >
+                      ↓
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Remove step ${String(index + 1)}`}
+                      onClick={() => {
+                        removeStep(step.rowKey);
+                      }}
+                    >
+                      ×
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          <div className="flex items-center justify-between">
+            <Tooltip>
+              {/* The trigger wraps a span, not the Button directly: a disabled
+                button has `pointer-events-none`, so it never fires the hover
+                events the tooltip listens for. Hover lands on the span. */}
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addStep}
+                    disabled={!canAddStep}
+                  >
+                    Add step
+                  </Button>
                 </span>
-                <div className="flex-1 space-y-1">
-                  <textarea
-                    ref={(el) => {
-                      registerTextarea(step.rowKey, el);
-                    }}
-                    aria-label={`Step ${String(index + 1)} text`}
-                    rows={2}
-                    maxLength={RECIPE_INSTRUCTION_MAX_LENGTH}
-                    className="flex min-h-16 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    value={step.instruction}
-                    onChange={(event) => {
-                      updateStep(step.rowKey, event.target.value);
-                      autosize(event.currentTarget);
-                    }}
-                  />
-                  {step.error && (
-                    <p role="alert" className="text-sm text-destructive">
-                      {step.error}
-                    </p>
-                  )}
-                  {step.instruction.length >=
-                    RECIPE_INSTRUCTION_MAX_LENGTH - 500 && (
-                    <p className="text-right text-xs text-muted-foreground">
-                      {step.instruction.length} /{' '}
-                      {RECIPE_INSTRUCTION_MAX_LENGTH}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Move step ${String(index + 1)} up`}
-                    disabled={index === 0}
-                    onClick={() => {
-                      moveStep(index, -1);
-                    }}
-                  >
-                    ↑
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Move step ${String(index + 1)} down`}
-                    disabled={index === steps.length - 1}
-                    onClick={() => {
-                      moveStep(index, 1);
-                    }}
-                  >
-                    ↓
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Remove step ${String(index + 1)}`}
-                    onClick={() => {
-                      removeStep(step.rowKey);
-                    }}
-                  >
-                    ×
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
+              </TooltipTrigger>
+              {/* Rendered only while disabled, so a usable button has no tooltip. */}
+              {!canAddStep && (
+                <TooltipContent>
+                  Fill in each step before adding another
+                </TooltipContent>
+              )}
+            </Tooltip>
 
-        <div className="flex items-center justify-between">
-          <Button type="button" variant="outline" onClick={addStep}>
-            Add step
-          </Button>
-
-          <div className="flex items-center gap-3">
-            {savedVisible && (
-              <p
-                key={savedNoticeKey}
-                role="status"
-                className="text-sm text-emerald-600"
-              >
-                Saved.
-              </p>
-            )}
-            <Button type="submit" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Save method'}
-            </Button>
+            <div className="flex items-center gap-3">
+              {savedVisible && (
+                <p
+                  key={savedNoticeKey}
+                  role="status"
+                  className="text-sm text-emerald-600"
+                >
+                  Saved.
+                </p>
+              )}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? 'Saving…' : 'Save method'}
+              </Button>
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </TooltipProvider>
     );
   },
 );

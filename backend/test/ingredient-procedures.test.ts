@@ -274,6 +274,19 @@ describe('ingredients procedures', () => {
       expect(row[0]?.householdId).toBe(CURRENT_HOUSEHOLD_ID);
     });
 
+    it('title-cases each word of the name, preserving existing capitals', async () => {
+      const caller = createCaller(makeContext());
+      const created = await caller.ingredients.create({
+        name: 'smoky BBQ sauce',
+        categoryId,
+        defaultUnitId: unitId,
+        isPlant: false,
+        averageShelfLifeDays: null,
+      });
+
+      expect(created.name).toBe('Smoky BBQ Sauce');
+    });
+
     it('rejects empty name', async () => {
       const caller = createCaller(makeContext());
       await expect(
@@ -370,7 +383,7 @@ describe('ingredients procedures', () => {
       });
 
       expect(updated).toMatchObject({
-        name: 'Red onion',
+        name: 'Red Onion',
         categoryName: 'Pantry',
         defaultUnitName: 'piece',
         isPlant: true,

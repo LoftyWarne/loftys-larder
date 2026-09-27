@@ -227,6 +227,7 @@ export {
   type GetPlanPlantPointsResult,
 } from './schemas/plants.ts';
 export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
+export { toTitleCase } from './lib/title-case.ts';
 export {
   scrubPii,
   type ScrubbableEvent,

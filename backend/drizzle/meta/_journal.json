@@ -99,6 +99,13 @@
       "when": 1782898288097,
       "tag": "0013_cultured_medusa",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790527473726,
+      "tag": "0014_title_case_ingredient_names",
+      "breakpoints": true
     }
   ]
 }

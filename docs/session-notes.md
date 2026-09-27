@@ -3821,3 +3821,22 @@ Where "off" lives, per section:
 **Not covered (case 2):** first-ever visits, or visits with no service worker, still get only the browser's tab spinner, because `index.html` itself comes from the sleeping machine. Fixing that would mean edge-caching the shell at Cloudflare, which touches DEC-72. Not pursued.
 
 **Verified:** 2 new unit tests; frontend suite 444 passing; typecheck + lint + format clean. **Not yet observed on a real prod cold start.**
+
+---
+
+## 2026-09-27 — Title-case ingredient names
+
+**What landed:**
+
+- `shared/src/lib/title-case.ts` — `toTitleCase` upper-cases the first letter of each whitespace-separated word and leaves the rest untouched, so acronyms (`BBQ`) and accented words (`crème fraîche`) survive. Wired as a `.transform` on `ingredientNameSchema`, so the ingredient form (Ingredients page + recipe-editor inline create) and `ingredients.create` / `update` all normalise from the one schema. Casing applies on submit, not while typing.
+- `backend/drizzle/0014_title_case_ingredient_names.sql` — hand-written data migration backfilling existing names with the same rule. Deliberately not `initcap`, which lower-cases each word's tail (`BBQ` → `Bbq`). Only rows whose name changes are written. Local dev: 4 rows changed.
+- Seeds: `Olive oil` → `Olive Oil`, `Chicken thigh` → `Chicken Thigh`. Required, not cosmetic — `seedDevRecipes` resolves recipe lines via an exact-case name map, so post-backfill the old spellings would miss.
+
+**Worth carrying:**
+
+- Words split on whitespace only: `stir-fry` → `Stir-fry`; small words aren't special-cased (`Salt And Pepper`).
+- The backfill spans all households (raw SQL can't read `CURRENT_HOUSEHOLD_ID`; prod has one) and doesn't bump `updated_at` (raw SQL bypasses `$onUpdate`; it's a normalisation, not a user edit).
+- Case-only change, so `ingredients_household_lower_name_unique` can't collide.
+- Recipe names are not title-cased. e2e specs keep `Chicken thigh` in their own mocked fixtures — independent of the seed.
+
+**Verified:** backfill SQL previewed against samples + dev data (matches the TS helper), applied locally via `db:migrate`; new tests in `ingredient-form.test.tsx` and `ingredient-procedures.test.ts`; frontend 445 / backend 526 passing; typecheck + lint + format clean. No automated migration test (no existing pattern).

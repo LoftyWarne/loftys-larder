@@ -63,6 +63,22 @@ describe('IngredientForm', () => {
     });
   });
 
+  it('title-cases each word of the name on submit', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderForm();
+
+    await user.type(screen.getByLabelText('Name'), 'red onion');
+    await user.selectOptions(screen.getByLabelText('Category'), '2');
+    await user.selectOptions(screen.getByLabelText('Default unit'), '11');
+    await user.click(screen.getByRole('button', { name: /add ingredient/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Red Onion' }),
+      );
+    });
+  });
+
   it('surfaces a server-provided name error', async () => {
     renderForm({ nameError: 'An ingredient with this name already exists' });
     await waitFor(() => {

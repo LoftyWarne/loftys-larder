@@ -43,10 +43,10 @@ const INGREDIENT_FIXTURES: IngredientSpec[] = [
   { name: 'Garlic', category: 'Fruit & Veg', unit: 'piece', isPlant: true },
   { name: 'Carrot', category: 'Fruit & Veg', unit: 'piece', isPlant: true },
   { name: 'Tomato', category: 'Fruit & Veg', unit: 'piece', isPlant: true },
-  { name: 'Olive oil', category: 'Pantry', unit: 'tbsp', isPlant: true },
+  { name: 'Olive Oil', category: 'Pantry', unit: 'tbsp', isPlant: true },
   { name: 'Pasta', category: 'Pantry', unit: 'g', isPlant: true },
   { name: 'Butter', category: 'Dairy', unit: 'g', isPlant: false },
-  { name: 'Chicken thigh', category: 'Meat', unit: 'g', isPlant: false },
+  { name: 'Chicken Thigh', category: 'Meat', unit: 'g', isPlant: false },
 ];
 
 const RECIPE_FIXTURES: RecipeSpec[] = [
@@ -60,7 +60,7 @@ const RECIPE_FIXTURES: RecipeSpec[] = [
       { ingredientName: 'Pasta', quantity: '200' },
       { ingredientName: 'Tomato', quantity: '4', prepType: 'chopped' },
       { ingredientName: 'Garlic', quantity: '2', prepType: 'minced' },
-      { ingredientName: 'Olive oil', quantity: '2' },
+      { ingredientName: 'Olive Oil', quantity: '2' },
     ],
     method: [
       'Boil a pan of salted water and cook the pasta.',
@@ -75,7 +75,7 @@ const RECIPE_FIXTURES: RecipeSpec[] = [
     activeTimeMins: 15,
     totalTimeMins: 50,
     ingredients: [
-      { ingredientName: 'Chicken thigh', quantity: '600' },
+      { ingredientName: 'Chicken Thigh', quantity: '600' },
       { ingredientName: 'Carrot', quantity: '3', prepType: 'chopped' },
       { ingredientName: 'Onion', quantity: '1', prepType: 'sliced' },
       { ingredientName: 'Butter', quantity: '20' },

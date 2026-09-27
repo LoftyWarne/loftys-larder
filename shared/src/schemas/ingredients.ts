@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import { toTitleCase } from '../lib/title-case.ts';
 
 export const ingredientNameSchema = z
   .string()
   .trim()
   .min(1, 'Name is required')
-  .max(120, 'Name must be 120 characters or fewer');
+  .max(120, 'Name must be 120 characters or fewer')
+  .transform(toTitleCase);
 
 export const ingredientShelfLifeSchema = z
   .number()

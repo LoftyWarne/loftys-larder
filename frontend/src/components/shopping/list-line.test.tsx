@@ -17,6 +17,7 @@ function makeLine(overrides: Partial<ShoppingListLine> = {}): ShoppingListLine {
         recipeName: 'Tomato pasta',
         date: '2026-06-15',
         scaledQuantity: '300.000',
+        isOptional: false,
       },
       {
         slotId: 2,
@@ -24,9 +25,11 @@ function makeLine(overrides: Partial<ShoppingListLine> = {}): ShoppingListLine {
         recipeName: 'Bruschetta',
         date: '2026-06-17',
         scaledQuantity: '200.000',
+        isOptional: false,
       },
     ],
     isChecked: false,
+    isOptional: false,
     ...overrides,
   };
 }
@@ -52,6 +55,46 @@ describe('ListLine', () => {
     const [line, next] = onToggle.mock.calls[0] ?? [];
     expect(line?.ingredient.id).toBe(100);
     expect(next).toBe(true);
+  });
+
+  it('labels a fully optional line and not its contributing meals', () => {
+    render(
+      <ListLine
+        line={makeLine({
+          isOptional: true,
+          contributingSlots: makeLine().contributingSlots.map((slot) => ({
+            ...slot,
+            isOptional: true,
+          })),
+        })}
+        onToggle={() => undefined}
+      />,
+    );
+
+    expect(screen.getAllByText(/\(optional\)/)).toHaveLength(1);
+    expect(screen.getByText('(optional)').closest('label')).not.toBeNull();
+  });
+
+  it('labels only the optional meals on a mixed line', () => {
+    const base = makeLine();
+    render(
+      <ListLine
+        line={makeLine({
+          isOptional: false,
+          contributingSlots: base.contributingSlots.map((slot, i) => ({
+            ...slot,
+            isOptional: i === 0,
+          })),
+        })}
+        onToggle={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('Tomato pasta (optional)')).toBeInTheDocument();
+    expect(screen.getByText('Bruschetta')).toBeInTheDocument();
+    expect(screen.getByText('Tomato').closest('label')).not.toHaveTextContent(
+      '(optional)',
+    );
   });
 
   it('renders checked lines with strikethrough styling', () => {

@@ -226,6 +226,7 @@ const contributionProjection = {
   unitId: unitsOfMeasurement.id,
   unitName: unitsOfMeasurement.name,
   averageShelfLifeDays: ingredients.averageShelfLifeDays,
+  isOptional: recipeIngredients.isOptional,
   // numeric arithmetic preserves precision; round to the column's
   // numeric(10,3) scale so the helper's integer-milli math is exact.
   scaledQuantity: sql<string>`round(${recipeIngredients.quantity} * ${mealPlanSlotItems.prepared}::numeric / ${recipes.baseServings}::numeric, 3)`,
@@ -243,6 +244,7 @@ interface ContributionRow {
   unitId: number;
   unitName: string;
   averageShelfLifeDays: number | null;
+  isOptional: boolean;
   scaledQuantity: string;
 }
 
@@ -259,6 +261,7 @@ function toContribution(row: ContributionRow): ShoppingContribution {
     unitId: row.unitId,
     unitName: row.unitName,
     averageShelfLifeDays: row.averageShelfLifeDays,
+    isOptional: row.isOptional,
     scaledQuantity: row.scaledQuantity,
   };
 }

@@ -136,6 +136,9 @@ export function RecipeDetailPage(): React.ReactElement {
                     , {line.prepTypeName}
                   </span>
                 )}
+                {line.isOptional && (
+                  <span className="text-muted-foreground"> (optional)</span>
+                )}
               </li>
             ))}
           </ul>

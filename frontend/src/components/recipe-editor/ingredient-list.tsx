@@ -23,6 +23,7 @@ import {
   type SearchableComboboxOption,
 } from '@/components/searchable-combobox.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { Checkbox } from '@/components/ui/checkbox.tsx';
 import {
   Dialog,
   DialogContent,
@@ -59,6 +60,7 @@ interface DraftLine {
   ingredient: IngredientPickerOption | null;
   quantity: string;
   prepTypeId: number | null;
+  isOptional: boolean;
   quantityError?: string;
   ingredientError?: string;
   // Set on blur; cleared while typing. Gates the live quantity error so a
@@ -78,6 +80,8 @@ export interface IngredientDraftLine {
   ingredient: IngredientPickerOption | null;
   quantity: string;
   prepTypeId: number | null;
+  // Absent on drafts persisted before optional ingredients existed.
+  isOptional?: boolean;
 }
 
 export interface IngredientListProps {
@@ -123,6 +127,7 @@ function toDraft(line: RecipeIngredientLine, index: number): DraftLine {
     // value needs.
     quantity: trimTrailingZeros(line.quantity),
     prepTypeId: line.prepTypeId,
+    isOptional: line.isOptional,
   };
 }
 
@@ -200,6 +205,7 @@ export const IngredientList = forwardRef<
         ingredient: line.ingredient,
         quantity: line.quantity,
         prepTypeId: line.prepTypeId,
+        isOptional: line.isOptional ?? false,
       }));
     }
     return initialLines.map(toDraft);
@@ -243,6 +249,7 @@ export const IngredientList = forwardRef<
       ingredient: line.ingredient,
       quantity: line.quantity,
       prepTypeId: line.prepTypeId,
+      isOptional: line.isOptional,
     }));
     const serialized = JSON.stringify(payload);
     if (lastEmittedRef.current === null) {
@@ -287,6 +294,7 @@ export const IngredientList = forwardRef<
         ingredient: null,
         quantity: '',
         prepTypeId: null,
+        isOptional: false,
       },
     ]);
     setPendingFocusRowKey(rowKey);
@@ -371,6 +379,7 @@ export const IngredientList = forwardRef<
         quantity,
         unitId: ingredient.defaultUnitId,
         prepTypeId: line.prepTypeId,
+        isOptional: line.isOptional,
       };
     });
 
@@ -478,6 +487,19 @@ export const IngredientList = forwardRef<
                         prep type
                       </p>
                     )}
+                    <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                      <Checkbox
+                        checked={line.isOptional}
+                        onCheckedChange={(value) => {
+                          updateLine(line.rowKey, {
+                            isOptional: value === true,
+                          });
+                        }}
+                        aria-label={`Optional for row ${String(index + 1)}`}
+                        className="h-4 w-4"
+                      />
+                      Optional
+                    </label>
                   </div>
                   <div className="col-span-2 space-y-1">
                     <Input

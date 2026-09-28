@@ -31,6 +31,7 @@ function contribution(
     unitName: 'unit',
     scaledQuantity: '1.000',
     averageShelfLifeDays: null,
+    isOptional: false,
     ...overrides,
   };
 }
@@ -64,6 +65,7 @@ describe('aggregateContributions', () => {
             ingredient: { id: 1, name: 'Onion' },
             unit: { id: 1, name: 'unit' },
             totalQuantity: '2.000',
+            isOptional: false,
             contributingSlots: [
               {
                 slotId: 1,
@@ -71,6 +73,7 @@ describe('aggregateContributions', () => {
                 recipeName: 'Recipe',
                 date: '2026-01-01',
                 scaledQuantity: '2.000',
+                isOptional: false,
               },
             ],
           },
@@ -106,6 +109,43 @@ describe('aggregateContributions', () => {
       'Curry',
       'Stew',
     ]);
+  });
+
+  it('marks a line optional only when every contribution is optional', () => {
+    const allOptional = aggregateContributions(
+      [
+        contribution({ slotId: 1, isOptional: true }),
+        contribution({ slotId: 2, isOptional: true }),
+      ],
+      { planStart: DEFAULT_PLAN_START },
+    );
+    expect(allOptional[0]?.lines[0]?.isOptional).toBe(true);
+
+    const mixed = aggregateContributions(
+      [
+        contribution({ slotId: 1, isOptional: true }),
+        contribution({ slotId: 2, isOptional: false }),
+      ],
+      { planStart: DEFAULT_PLAN_START },
+    );
+    const line = mixed[0]?.lines[0];
+    expect(line?.isOptional).toBe(false);
+    expect(line?.totalQuantity).toBe('2.000');
+    expect(line?.contributingSlots.map((c) => c.isOptional)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it('treats a within-slot duplicate as required if either line is required', () => {
+    const result = aggregateContributions(
+      [contribution({ isOptional: true }), contribution({ isOptional: false })],
+      { planStart: DEFAULT_PLAN_START },
+    );
+
+    const line = result[0]?.lines[0];
+    expect(line?.isOptional).toBe(false);
+    expect(line?.contributingSlots[0]?.isOptional).toBe(false);
   });
 
   it('collapses within-slot duplicate lines from the same recipe', () => {

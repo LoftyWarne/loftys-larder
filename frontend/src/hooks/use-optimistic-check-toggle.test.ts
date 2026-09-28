@@ -55,6 +55,7 @@ const LIST: GetShoppingListForPlanResult = {
           totalQuantity: '500.000',
           contributingSlots: [],
           isChecked: false,
+          isOptional: false,
         },
         {
           ingredient: { id: 101, name: 'Onion' },
@@ -62,6 +63,7 @@ const LIST: GetShoppingListForPlanResult = {
           totalQuantity: '300.000',
           contributingSlots: [],
           isChecked: false,
+          isOptional: false,
         },
       ],
     },

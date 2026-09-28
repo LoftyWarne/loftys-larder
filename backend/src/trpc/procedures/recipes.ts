@@ -530,6 +530,7 @@ export const recipesRouter = router({
                 ingredientId: line.ingredientId,
                 quantity: line.quantity,
                 prepTypeId: line.prepTypeId,
+                isOptional: line.isOptional,
               })),
             );
           }
@@ -1145,6 +1146,7 @@ async function loadIngredientLines(
       prepTypeId: recipeIngredients.prepTypeId,
       prepTypeName: preparationTypes.name,
       isPlant: ingredients.isPlant,
+      isOptional: recipeIngredients.isOptional,
     })
     .from(recipeIngredients)
     .innerJoin(ingredients, eq(ingredients.id, recipeIngredients.ingredientId))

@@ -11,7 +11,8 @@ import { recipeIngredients, recipes } from '../db/schema/recipes.ts';
 import type { Tx } from '../db/withTransaction.ts';
 
 // Recipe-level plant points: COUNT(DISTINCT ingredient_id) over the recipe's
-// ingredients filtered to `is_plant = true` (DEC-32 — never stored). DISTINCT
+// non-optional ingredients filtered to `is_plant = true` (DEC-32 — never
+// stored). Optional lines are excluded everywhere — you might not add them. DISTINCT
 // covers the "same plant entered twice with different prep types" case (e.g.
 // 1 onion sliced + 1 onion diced count as one point).
 //
@@ -46,6 +47,7 @@ export function recipePlantPointsExpr(
     inner join ${ingredients}
       on ingredients.id = recipe_ingredients.ingredient_id
     where recipe_ingredients.recipe_id = ${outerRecipeIdSql}
+      and recipe_ingredients.is_optional = false
       and ingredients.is_plant = true
   )`;
 }
@@ -64,6 +66,7 @@ export async function selectRecipePlantPoints(
     inner join ${ingredients}
       on ingredients.id = recipe_ingredients.ingredient_id
     where recipe_ingredients.recipe_id = ${recipeId}
+      and recipe_ingredients.is_optional = false
       and ingredients.is_plant = true
   `);
   const row = rows.rows[0];
@@ -151,6 +154,7 @@ async function countDistinctPlants(
         and meal_plan_slot_items.eaten > 0
       inner join ${recipeIngredients}
         on recipe_ingredients.recipe_id = meal_plan_slot_items.recipe_id
+        and recipe_ingredients.is_optional = false
       where ${planFilter}
         ${dateFilter}
 
@@ -167,6 +171,7 @@ async function countDistinctPlants(
         on recipes.id = meal_plan_slot_items.recipe_id
       inner join ${recipeIngredients}
         on recipe_ingredients.recipe_id = recipes.base_recipe_id
+        and recipe_ingredients.is_optional = false
       where ${planFilter}
         and recipes.base_recipe_id is not null
         ${dateFilter}

@@ -45,6 +45,9 @@ export interface ShoppingContribution {
   // Ingredient's `average_shelf_life_days`; `null` means the cook hasn't set
   // one, in which case no shelf-life warning is computed for the line.
   averageShelfLifeDays: number | null;
+  // The recipe line is marked optional. Optional quantities still sum into
+  // the total; the flag only decides how the line is labelled.
+  isOptional: boolean;
 }
 
 export interface AggregateOptions {
@@ -75,6 +78,8 @@ export function aggregateContributions(
     // SELECTs always project the same column. The shelf-life pass treats
     // `null` as "no warning, ever" regardless of slot dates.
     averageShelfLifeDays: number | null;
+    // Stays true only while every contribution seen is optional.
+    isOptional: boolean;
     // per (slotId, recipeId) — collapses within-slot duplicates of the same
     // recipe ("onion sliced" + "onion diced" → one entry).
     contributingSlots: Map<string, ContributingAccumulator>;
@@ -85,6 +90,7 @@ export function aggregateContributions(
     recipeName: string;
     date: string;
     scaledMilli: bigint;
+    isOptional: boolean;
   }
 
   const ingredientBuckets = new Map<number, IngredientBucket>();
@@ -100,17 +106,20 @@ export function aggregateContributions(
         unit: { id: row.unitId, name: row.unitName },
         totalMilli: 0n,
         averageShelfLifeDays: row.averageShelfLifeDays,
+        isOptional: true,
         contributingSlots: new Map(),
       };
       ingredientBuckets.set(row.ingredientId, bucket);
     }
 
     bucket.totalMilli += milli;
+    bucket.isOptional &&= row.isOptional;
 
     const contributingKey = `${row.slotId.toString()}:${row.recipeId.toString()}`;
     const existing = bucket.contributingSlots.get(contributingKey);
     if (existing) {
       existing.scaledMilli += milli;
+      existing.isOptional &&= row.isOptional;
     } else {
       bucket.contributingSlots.set(contributingKey, {
         slotId: row.slotId,
@@ -118,6 +127,7 @@ export function aggregateContributions(
         recipeName: row.recipeName,
         date: row.slotDate,
         scaledMilli: milli,
+        isOptional: row.isOptional,
       });
     }
   }
@@ -140,12 +150,14 @@ export function aggregateContributions(
         recipeName: entry.recipeName,
         date: entry.date,
         scaledQuantity: formatFixed3FromMilli(entry.scaledMilli),
+        isOptional: entry.isOptional,
       }));
 
     const line: AggregatedShoppingListLine = {
       ingredient: ingredient.ingredient,
       unit: ingredient.unit,
       totalQuantity: formatFixed3FromMilli(ingredient.totalMilli),
+      isOptional: ingredient.isOptional,
       contributingSlots,
     };
 

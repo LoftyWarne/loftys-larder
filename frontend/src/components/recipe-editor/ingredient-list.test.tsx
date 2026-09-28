@@ -81,7 +81,86 @@ describe('IngredientList', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { ingredientId: 101, quantity: '50', unitId: 1, prepTypeId: null },
+      {
+        ingredientId: 101,
+        quantity: '50',
+        unitId: 1,
+        prepTypeId: null,
+        isOptional: false,
+      },
+    ]);
+  });
+
+  it('submits the optional flag for a ticked line', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    await user.click(await screen.findByRole('option', { name: 'Onion' }));
+    await user.type(screen.getByLabelText('Quantity for row 1'), '50');
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Optional for row 1' }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Save ingredients' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual([
+      {
+        ingredientId: 101,
+        quantity: '50',
+        unitId: 1,
+        prepTypeId: null,
+        isOptional: true,
+      },
+    ]);
+  });
+
+  it('seeds the optional toggle from saved lines and old drafts', () => {
+    setup({
+      initialDraftLines: [
+        {
+          ingredient: ONION,
+          quantity: '50',
+          prepTypeId: null,
+          isOptional: true,
+        },
+        // Drafts saved before the flag existed carry no `isOptional`.
+        { ingredient: GARLIC, quantity: '10', prepTypeId: null },
+      ],
+    });
+
+    expect(
+      screen.getByRole('checkbox', { name: 'Optional for row 1' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Optional for row 2' }),
+    ).not.toBeChecked();
+  });
+
+  it('includes the optional flag in autosave snapshots', async () => {
+    const user = userEvent.setup();
+    const onLinesChange = vi.fn();
+    setup({
+      initialDraftLines: [
+        {
+          ingredient: ONION,
+          quantity: '50',
+          prepTypeId: null,
+          isOptional: false,
+        },
+      ],
+      onLinesChange,
+    });
+
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Optional for row 1' }),
+    );
+
+    expect(onLinesChange).toHaveBeenLastCalledWith([
+      { ingredient: ONION, quantity: '50', prepTypeId: null, isOptional: true },
     ]);
   });
 
@@ -185,6 +264,7 @@ describe('IngredientList', () => {
         prepTypeId: null,
         prepTypeName: null,
         isPlant: true,
+        isOptional: false,
       },
     ];
     const { onSubmit } = setup({ initialLines: initial });
@@ -225,8 +305,20 @@ describe('IngredientList', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { ingredientId: 101, quantity: '50', unitId: 1, prepTypeId: 21 },
-      { ingredientId: 101, quantity: '30', unitId: 1, prepTypeId: 22 },
+      {
+        ingredientId: 101,
+        quantity: '50',
+        unitId: 1,
+        prepTypeId: 21,
+        isOptional: false,
+      },
+      {
+        ingredientId: 101,
+        quantity: '30',
+        unitId: 1,
+        prepTypeId: 22,
+        isOptional: false,
+      },
     ]);
   });
 
@@ -327,6 +419,7 @@ describe('IngredientList', () => {
         prepTypeId: null,
         prepTypeName: null,
         isPlant: true,
+        isOptional: false,
       },
     ];
     setup({ initialLines: initial });
@@ -348,7 +441,13 @@ describe('IngredientList', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { ingredientId: 101, quantity: '0.5', unitId: 1, prepTypeId: null },
+      {
+        ingredientId: 101,
+        quantity: '0.5',
+        unitId: 1,
+        prepTypeId: null,
+        isOptional: false,
+      },
     ]);
   });
 
@@ -414,7 +513,13 @@ describe('IngredientList', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { ingredientId: 201, quantity: '2', unitId: 1, prepTypeId: null },
+      {
+        ingredientId: 201,
+        quantity: '2',
+        unitId: 1,
+        prepTypeId: null,
+        isOptional: false,
+      },
     ]);
   });
 
@@ -498,6 +603,7 @@ describe('IngredientList', () => {
         prepTypeId: null,
         prepTypeName: null,
         isPlant: true,
+        isOptional: false,
       },
     ];
     setup({
@@ -520,6 +626,7 @@ describe('IngredientList', () => {
         prepTypeId: null,
         prepTypeName: null,
         isPlant: true,
+        isOptional: false,
       },
     ];
     const { rerender } = render(

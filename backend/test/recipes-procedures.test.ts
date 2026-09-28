@@ -249,13 +249,18 @@ describe('recipes procedures', () => {
   async function insertRecipeIngredient(
     recipeId: number,
     ingredientId: number,
-    options: { quantity?: string; prepTypeId?: number } = {},
+    options: {
+      quantity?: string;
+      prepTypeId?: number;
+      isOptional?: boolean;
+    } = {},
   ): Promise<void> {
     await db.insert(recipeIngredients).values({
       recipeId,
       ingredientId,
       quantity: options.quantity ?? '100',
       prepTypeId: options.prepTypeId,
+      isOptional: options.isOptional ?? false,
     });
   }
 
@@ -461,6 +466,19 @@ describe('recipes procedures', () => {
       expect(recipe?.plantPointsCount).toBe(2);
     });
 
+    it('leaves optional plant ingredients out of plantPointsCount', async () => {
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      const chilli = await insertIngredient({ name: 'Chilli', isPlant: true });
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      await insertRecipeIngredient(recipeId, onion);
+      await insertRecipeIngredient(recipeId, chilli, { isOptional: true });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.list();
+      const recipe = result.items.find((r) => r.id === recipeId);
+      expect(recipe?.plantPointsCount).toBe(1);
+    });
+
     it('rejects without a session', async () => {
       const caller = createCaller(makeContext({ authenticated: false }));
       await expect(caller.recipes.list()).rejects.toMatchObject({
@@ -525,7 +543,27 @@ describe('recipes procedures', () => {
         prepTypeName: 'chopped',
         isPlant: true,
         quantity: '300.000',
+        isOptional: false,
       });
+    });
+
+    it('returns the optional flag on each ingredient line', async () => {
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      const chilli = await insertIngredient({ name: 'Chilli', isPlant: true });
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      await insertRecipeIngredient(recipeId, onion);
+      await insertRecipeIngredient(recipeId, chilli, { isOptional: true });
+
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.get({ id: recipeId });
+
+      expect(
+        result.ingredients.map((i) => [i.ingredientName, i.isOptional]),
+      ).toEqual([
+        ['Onion', false],
+        ['Chilli', true],
+      ]);
+      expect(result.plantPointsCount).toBe(1);
     });
 
     it('returns soft-deleted recipes (historical rendering)', async () => {
@@ -623,6 +661,23 @@ describe('recipes procedures', () => {
 
       const points = await selectRecipePlantPoints(db, recipeId);
       expect(points).toBe(0);
+    });
+
+    it('ignores optional lines unless the plant is also required', async () => {
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      const chilli = await insertIngredient({ name: 'Chilli', isPlant: true });
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      await insertRecipeIngredient(recipeId, onion, {
+        prepTypeId: prepChopped,
+      });
+      await insertRecipeIngredient(recipeId, onion, {
+        prepTypeId: prepDiced,
+        isOptional: true,
+      });
+      await insertRecipeIngredient(recipeId, chilli, { isOptional: true });
+
+      const points = await selectRecipePlantPoints(db, recipeId);
+      expect(points).toBe(1);
     });
   });
 
@@ -871,12 +926,14 @@ describe('recipes procedures', () => {
             quantity: '10',
             unitId: unitG,
             prepTypeId: null,
+            isOptional: false,
           },
           {
             ingredientId: onion,
             quantity: '200',
             unitId: unitG,
             prepTypeId: prepDiced,
+            isOptional: false,
           },
         ],
       });
@@ -897,6 +954,46 @@ describe('recipes procedures', () => {
       ]);
     });
 
+    it('persists the optional flag per line', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const onion = await insertIngredient({ name: 'Onion', isPlant: true });
+      const chilli = await insertIngredient({ name: 'Chilli', isPlant: true });
+
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceIngredients({
+        recipeId,
+        lines: [
+          {
+            ingredientId: onion,
+            quantity: '200',
+            unitId: unitG,
+            prepTypeId: null,
+            isOptional: false,
+          },
+          {
+            ingredientId: chilli,
+            quantity: '5',
+            unitId: unitG,
+            prepTypeId: null,
+            isOptional: true,
+          },
+        ],
+      });
+
+      const rows = await db
+        .select({
+          ingredientId: recipeIngredients.ingredientId,
+          isOptional: recipeIngredients.isOptional,
+        })
+        .from(recipeIngredients)
+        .where(eq(recipeIngredients.recipeId, recipeId))
+        .orderBy(asc(recipeIngredients.id));
+      expect(rows).toEqual([
+        { ingredientId: onion, isOptional: false },
+        { ingredientId: chilli, isOptional: true },
+      ]);
+    });
+
     it('allows the same ingredient twice with different prep types', async () => {
       const recipeId = await insertRecipe({ name: 'Demo' });
       const onion = await insertIngredient({ name: 'Onion', isPlant: true });
@@ -909,12 +1006,14 @@ describe('recipes procedures', () => {
             quantity: '100',
             unitId: unitG,
             prepTypeId: prepChopped,
+            isOptional: false,
           },
           {
             ingredientId: onion,
             quantity: '50',
             unitId: unitG,
             prepTypeId: prepDiced,
+            isOptional: false,
           },
         ],
       });
@@ -945,6 +1044,7 @@ describe('recipes procedures', () => {
               quantity: '1',
               unitId: pieceId,
               prepTypeId: null,
+              isOptional: false,
             },
           ],
         }),
@@ -979,6 +1079,7 @@ describe('recipes procedures', () => {
               quantity: '1',
               unitId: unitG,
               prepTypeId: null,
+              isOptional: false,
             },
           ],
         }),
@@ -1008,6 +1109,7 @@ describe('recipes procedures', () => {
               quantity: '999',
               unitId: unitG,
               prepTypeId: 99999,
+              isOptional: false,
             },
           ],
         }),

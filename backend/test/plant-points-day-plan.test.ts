@@ -196,10 +196,11 @@ describe('day + plan plant points', () => {
     recipeId: number,
     ingredientId: number,
     quantity = '1',
+    isOptional = false,
   ): Promise<void> {
     await db
       .insert(recipeIngredients)
-      .values({ recipeId, ingredientId, quantity });
+      .values({ recipeId, ingredientId, quantity, isOptional });
   }
 
   interface InsertPlanOptions {
@@ -385,6 +386,30 @@ describe('day + plan plant points', () => {
 
       // distinct plants: tomato, basil, garlic, pasta = 4
       expect(await selectForDay(planId, day)).toBe(4);
+    });
+
+    it('excludes optional ingredients on the eaten recipe and its base', async () => {
+      const planId = await insertPlan({ start: day, end: day });
+      const baseId = await insertRecipe('Tomato base', { isBase: true });
+      const versionId = await insertRecipe('Tomato pasta', {
+        baseRecipeId: baseId,
+      });
+      const tomato = await insertIngredient('Tomato', { isPlant: true });
+      const basil = await insertIngredient('Basil', { isPlant: true });
+      const chilli = await insertIngredient('Chilli', { isPlant: true });
+      await attach(baseId, tomato);
+      await attach(baseId, basil, '1', true);
+      await attach(versionId, chilli, '1', true);
+
+      await insertSlot({
+        planId,
+        date: dayDate,
+        occasionId: dinnerId,
+        recipeId: versionId,
+        numberOfServings: 2,
+      });
+
+      expect(await selectForDay(planId, day)).toBe(1);
     });
 
     it('does not count a cooked-ahead base whose plants are not eaten (DEC-91)', async () => {

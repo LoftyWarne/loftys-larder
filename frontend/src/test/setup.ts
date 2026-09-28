@@ -20,3 +20,20 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
     return mql as MediaQueryList;
   };
 }
+
+// jsdom omits ResizeObserver. Radix's Checkbox measures its hidden form
+// input with it whenever the checkbox sits inside a <form> (the recipe
+// ingredient editor's optional toggle).
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe(): void {
+      return undefined;
+    }
+    unobserve(): void {
+      return undefined;
+    }
+    disconnect(): void {
+      return undefined;
+    }
+  };
+}

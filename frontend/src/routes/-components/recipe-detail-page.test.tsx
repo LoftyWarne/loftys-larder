@@ -121,6 +121,7 @@ const FULL_RECIPE: Recipe = {
       prepTypeId: 1,
       prepTypeName: 'chopped',
       isPlant: true,
+      isOptional: false,
     },
     {
       id: 2,
@@ -132,6 +133,7 @@ const FULL_RECIPE: Recipe = {
       prepTypeId: null,
       prepTypeName: null,
       isPlant: false,
+      isOptional: false,
     },
   ],
   method: [
@@ -175,6 +177,28 @@ describe('RecipeDetailPage', () => {
       .parentElement?.querySelectorAll('ol li');
     expect(methodItems?.[0]).toHaveTextContent('Sauté onions.');
     expect(methodItems?.[1]).toHaveTextContent('Simmer.');
+  });
+
+  it('labels optional ingredients', () => {
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...FULL_RECIPE,
+        ingredients: FULL_RECIPE.ingredients.map((line) =>
+          line.ingredientName === 'Butter'
+            ? { ...line, isOptional: true }
+            : line,
+        ),
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    const items = screen
+      .getByRole('heading', { name: /ingredients/i })
+      .parentElement?.querySelectorAll('ul li');
+    expect(items?.[0]).not.toHaveTextContent('(optional)');
+    expect(items?.[1]).toHaveTextContent('Butter (optional)');
   });
 
   it('shows the source name with its detail and links to the URL', () => {

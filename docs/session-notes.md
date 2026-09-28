@@ -4,6 +4,28 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-09-28 — Optional recipe ingredients
+
+**Status:** Implemented, not yet committed. Backend 535 tests + frontend 459 tests green; typecheck, lint, format:check clean.
+
+**Change:** each recipe ingredient line can be marked optional (e.g. "chilli flakes, optional").
+
+- **Schema:** `recipe_ingredients.is_optional boolean NOT NULL DEFAULT false`, migration `0016_chunky_stone_men.sql` (single `ADD COLUMN`; existing rows backfill to `false`).
+- **`/shared`:** `isOptional` on `recipeIngredientLineSchema` (get DTO) and `replaceRecipeIngredientsLineSchema` (**required**, not `.default(false)`, per the earlier `z.input`/`z.output` split lesson). `isOptional` on `shoppingListLineSchema` and `shoppingListContributingSlotSchema`.
+- **Editor:** "Optional" checkbox under each row's ingredient combobox. `IngredientDraftLine.isOptional` is `?:` because autosaved drafts from before this change don't carry it; seeding reads `?? false`.
+- **Detail page:** "(optional)" after the line.
+
+**Decisions (user-confirmed at kick-off):**
+- **Shopping list: include, flagged.** Optional quantities still sum into the total. A line is `isOptional` only when **every** contribution is optional — one required use makes the whole line required. Contributing meals carry their own `isOptional` (all lines for that ingredient in that recipe optional); the UI labels a meal "(optional)" only on a **mixed** line, since a fully-optional line is already labelled once.
+- **Plant points: optional lines don't count** — recipe-level (`recipePlantPointsExpr`, `selectRecipePlantPoints`) and day/plan level (both unions in `countDistinctPlants`). A plant that's optional in one line but required in another (different prep type) still counts once.
+- **No FEAT/DEC opened** — logged here instead.
+
+**Carry-forward:**
+- Check-state reset (DEC-31) is unaffected: optional quantities are in the total, so toggling a line optional doesn't change the total and doesn't reset a ticked line.
+- `frontend/src/test/setup.ts` gained a no-op `ResizeObserver` stub: Radix `Checkbox` measures its hidden bubble input with it whenever the checkbox is inside a `<form>` (the shopping list's checkbox isn't, which is why this didn't surface before).
+
+---
+
 ## 2026-09-27 — Slot editor: leftovers picker hides eaten-up meals; default servings capped
 
 **Status:** Done (`slot-editor-sheet.tsx`), committed + pushed. 34 slot-editor tests green; frontend typecheck + lint clean. Frontend only — no schema / API change.

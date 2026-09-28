@@ -243,11 +243,13 @@ describe('shopping procedures', () => {
     recipeId: number,
     ingredientId: number,
     quantity: string,
+    isOptional = false,
   ): Promise<void> {
     await db.insert(recipeIngredients).values({
       recipeId,
       ingredientId,
       quantity,
+      isOptional,
     });
   }
 
@@ -361,6 +363,7 @@ describe('shopping procedures', () => {
           recipeName: 'Curry',
           date: '2026-01-01',
           scaledQuantity: '2.000',
+          isOptional: false,
         },
       ]);
     });
@@ -440,6 +443,58 @@ describe('shopping procedures', () => {
       expect(line?.contributingSlots.map((c) => c.recipeName)).toEqual([
         'Curry',
         'Stew',
+      ]);
+    });
+
+    it('includes optional ingredients, flagged, and a required use clears the flag', async () => {
+      const onionId = await insertIngredient('Onion');
+      const chilliId = await insertIngredient('Chilli');
+      const curryId = await insertRecipe('Curry', { baseServings: 4 });
+      const stewId = await insertRecipe('Stew', { baseServings: 4 });
+      await insertRecipeIngredient(curryId, onionId, '2.000', true);
+      await insertRecipeIngredient(curryId, chilliId, '1.000', true);
+      await insertRecipeIngredient(stewId, onionId, '1.000');
+
+      const planId = await insertPlan({
+        startDate: civilDate(2026, 1, 1),
+        endDate: civilDate(2026, 1, 2),
+      });
+      await insertSlot({
+        planId,
+        date: civilDate(2026, 1, 1),
+        occasionId: dinnerId,
+        slotType: 'recipe',
+        recipeId: curryId,
+        numberOfServings: 4,
+      });
+      await insertSlot({
+        planId,
+        date: civilDate(2026, 1, 2),
+        occasionId: dinnerId,
+        slotType: 'recipe',
+        recipeId: stewId,
+        numberOfServings: 4,
+      });
+
+      const result = await createCaller(makeContext()).shopping.getForPlan({
+        planId,
+      });
+      const lines = result.categories.flatMap((c) => c.lines);
+      const chilli = lines.find((l) => l.ingredient.id === chilliId);
+      const onion = lines.find((l) => l.ingredient.id === onionId);
+      expect(chilli).toMatchObject({
+        totalQuantity: '1.000',
+        isOptional: true,
+      });
+      expect(onion).toMatchObject({
+        totalQuantity: '3.000',
+        isOptional: false,
+      });
+      expect(
+        onion?.contributingSlots.map((c) => [c.recipeName, c.isOptional]),
+      ).toEqual([
+        ['Curry', true],
+        ['Stew', false],
       ]);
     });
 

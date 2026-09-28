@@ -27,6 +27,8 @@ export const shoppingListContributingSlotSchema = z.object({
   recipeName: z.string(),
   date: civilDateSchema,
   scaledQuantity: quantitySchema,
+  // True when every line of this ingredient in the recipe is optional.
+  isOptional: z.boolean(),
 });
 export type ShoppingListContributingSlot = z.infer<
   typeof shoppingListContributingSlotSchema
@@ -59,6 +61,9 @@ export const shoppingListLineSchema = z.object({
   // performs any reset before returning, so the value reflects post-reset
   // truth.
   isChecked: z.boolean(),
+  // True only when every contribution is optional — one required use makes
+  // the whole line required.
+  isOptional: z.boolean(),
   shelfLifeWarning: shelfLifeWarningSchema.optional(),
 });
 export type ShoppingListLine = z.infer<typeof shoppingListLineSchema>;

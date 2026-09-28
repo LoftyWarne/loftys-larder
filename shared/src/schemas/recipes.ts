@@ -27,6 +27,9 @@ export const recipeIngredientLineSchema = z.object({
   prepTypeId: prepTypeIdSchema.nullable(),
   prepTypeName: z.string().nullable(),
   isPlant: z.boolean(),
+  // Optional lines still carry a quantity (DEC-19) and still reach the
+  // shopping list, flagged; they don't count towards plant points.
+  isOptional: z.boolean(),
 });
 
 export type RecipeIngredientLine = z.infer<typeof recipeIngredientLineSchema>;
@@ -245,6 +248,7 @@ export const replaceRecipeIngredientsLineSchema = z.object({
   quantity: recipeQuantitySchema,
   unitId: unitIdSchema,
   prepTypeId: prepTypeIdSchema.nullable(),
+  isOptional: z.boolean(),
 });
 
 export type ReplaceRecipeIngredientsLine = z.infer<

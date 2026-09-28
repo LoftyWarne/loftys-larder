@@ -54,7 +54,17 @@ export function ListLine({
             line.isChecked && 'text-muted-foreground line-through opacity-60',
           )}
         >
-          <span className="font-medium">{line.ingredient.name}</span>
+          <span>
+            <span className="font-medium">{line.ingredient.name}</span>
+            {line.isOptional && (
+              <span
+                data-shopping-optional
+                className="ml-2 text-sm text-muted-foreground"
+              >
+                (optional)
+              </span>
+            )}
+          </span>
           <span className="flex flex-wrap items-center gap-2">
             <span data-shopping-total className="tabular-nums">
               {totalLabel}
@@ -90,7 +100,12 @@ export function ListLine({
               key={slot.slotId}
               className="flex flex-wrap items-baseline justify-between gap-x-3"
             >
-              <span>{slot.recipeName}</span>
+              <span>
+                {slot.recipeName}
+                {/* Only worth calling out on a mixed line — a fully optional
+                    line is already labelled above. */}
+                {!line.isOptional && slot.isOptional && ' (optional)'}
+              </span>
               <span className="flex items-baseline gap-2 text-muted-foreground/80">
                 <span>{formatDayLabel(slot.date)}</span>
                 <span aria-hidden="true">·</span>

@@ -128,6 +128,7 @@ export const recipeIngredients = pgTable(
     prepTypeId: smallint().references(() => preparationTypes.id, {
       onDelete: 'restrict',
     }),
+    isOptional: boolean().notNull().default(false),
   },
   (table) => [
     index('recipe_ingredients_recipe_id_idx').on(table.recipeId),

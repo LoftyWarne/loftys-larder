@@ -117,6 +117,7 @@ export function RecipeEditPage(): React.ReactElement {
         // the value needs.
         quantity: trimTrailingZeros(line.quantity),
         prepTypeId: line.prepTypeId,
+        isOptional: line.isOptional,
       })),
       method: recipe.method.map((step) => ({ instruction: step.instruction })),
     };

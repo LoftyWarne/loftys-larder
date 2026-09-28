@@ -306,6 +306,8 @@ export const recipesRouter = router({
               id: recipeMethod.id,
               stepNumber: recipeMethod.stepNumber,
               instruction: recipeMethod.instruction,
+              safetyNote: recipeMethod.safetyNote,
+              tip: recipeMethod.tip,
             })
             .from(recipeMethod)
             .where(eq(recipeMethod.recipeId, recipeId))
@@ -560,6 +562,8 @@ export const recipesRouter = router({
               recipeId: input.recipeId,
               stepNumber: index + 1,
               instruction: step.instruction,
+              safetyNote: step.safetyNote,
+              tip: step.tip,
             })),
           );
         }

@@ -11,6 +11,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { RECIPE_STEP_NOTE_MAX_LENGTH } from '../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../src/config.ts';
 import * as schema from '../src/db/schema/index.ts';
 import {
@@ -1169,9 +1170,9 @@ describe('recipes procedures', () => {
       const result = await caller.recipes.replaceMethod({
         recipeId,
         steps: [
-          { instruction: 'first new step' },
-          { instruction: 'second new step' },
-          { instruction: 'third new step' },
+          { instruction: 'first new step', safetyNote: null, tip: null },
+          { instruction: 'second new step', safetyNote: null, tip: null },
+          { instruction: 'third new step', safetyNote: null, tip: null },
         ],
       });
       expect(result).toEqual({ recipeId, count: 3 });
@@ -1230,7 +1231,92 @@ describe('recipes procedures', () => {
       await expect(
         caller.recipes.replaceMethod({
           recipeId,
-          steps: [{ instruction: '   ' }],
+          steps: [{ instruction: '   ', safetyNote: null, tip: null }],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('persists safety notes and tips, trimmed, and returns them from get', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          {
+            instruction: 'Add the chicken to the hot oil',
+            safetyNote: '  Oil will spit — lay it away from you  ',
+            tip: 'Pat it dry first',
+          },
+          { instruction: 'Simmer', safetyNote: null, tip: 'Lid on' },
+          { instruction: 'Serve', safetyNote: null, tip: null },
+        ],
+      });
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(
+        result.method.map(({ instruction, safetyNote, tip }) => ({
+          instruction,
+          safetyNote,
+          tip,
+        })),
+      ).toEqual([
+        {
+          instruction: 'Add the chicken to the hot oil',
+          safetyNote: 'Oil will spit — lay it away from you',
+          tip: 'Pat it dry first',
+        },
+        { instruction: 'Simmer', safetyNote: null, tip: 'Lid on' },
+        { instruction: 'Serve', safetyNote: null, tip: null },
+      ]);
+    });
+
+    it('drops previous notes when the method is replaced', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      await db.insert(recipeMethod).values({
+        recipeId,
+        stepNumber: 1,
+        instruction: 'old step',
+        safetyNote: 'old warning',
+        tip: 'old tip',
+      });
+
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [{ instruction: 'new step', safetyNote: null, tip: null }],
+      });
+
+      const rows = await db
+        .select({ safetyNote: recipeMethod.safetyNote, tip: recipeMethod.tip })
+        .from(recipeMethod)
+        .where(eq(recipeMethod.recipeId, recipeId));
+      expect(rows).toEqual([{ safetyNote: null, tip: null }]);
+    });
+
+    it('rejects a blank note rather than storing it', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [{ instruction: 'Stir', safetyNote: '   ', tip: null }],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects a note over the length cap', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [
+            {
+              instruction: 'Stir',
+              safetyNote: null,
+              tip: 'x'.repeat(RECIPE_STEP_NOTE_MAX_LENGTH + 1),
+            },
+          ],
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });

@@ -119,7 +119,11 @@ export function RecipeEditPage(): React.ReactElement {
         prepTypeId: line.prepTypeId,
         isOptional: line.isOptional,
       })),
-      method: recipe.method.map((step) => ({ instruction: step.instruction })),
+      method: recipe.method.map((step) => ({
+        instruction: step.instruction,
+        safetyNote: step.safetyNote,
+        tip: step.tip,
+      })),
     };
   }, [recipe]);
 

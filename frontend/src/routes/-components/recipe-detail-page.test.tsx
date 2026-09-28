@@ -137,8 +137,20 @@ const FULL_RECIPE: Recipe = {
     },
   ],
   method: [
-    { id: 1, stepNumber: 1, instruction: 'Sauté onions.' },
-    { id: 2, stepNumber: 2, instruction: 'Simmer.' },
+    {
+      id: 1,
+      stepNumber: 1,
+      instruction: 'Sauté onions.',
+      safetyNote: null,
+      tip: null,
+    },
+    {
+      id: 2,
+      stepNumber: 2,
+      instruction: 'Simmer.',
+      safetyNote: null,
+      tip: null,
+    },
   ],
   averageRating: null,
   ratingCount: 0,
@@ -199,6 +211,38 @@ describe('RecipeDetailPage', () => {
       .parentElement?.querySelectorAll('ul li');
     expect(items?.[0]).not.toHaveTextContent('(optional)');
     expect(items?.[1]).toHaveTextContent('Butter (optional)');
+  });
+
+  it('renders step notes as labelled callouts, safety before tip', () => {
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...FULL_RECIPE,
+        method: [
+          {
+            ...FULL_RECIPE.method[0],
+            safetyNote: 'Hot pan.',
+            tip: 'Low and slow.',
+          },
+          FULL_RECIPE.method[1],
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    const notes = screen.getAllByRole('note');
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toHaveAccessibleName('Safety');
+    expect(notes[0]).toHaveTextContent('Hot pan.');
+    expect(notes[1]).toHaveAccessibleName('Tip');
+    expect(notes[1]).toHaveTextContent('Low and slow.');
+
+    const methodItems = screen
+      .getByRole('heading', { name: /method/i })
+      .parentElement?.querySelectorAll('ol li');
+    expect(methodItems?.[0]).toContainElement(notes[0] ?? null);
+    expect(methodItems?.[1]?.querySelector('[role="note"]')).toBeNull();
   });
 
   it('shows the source name with its detail and links to the URL', () => {

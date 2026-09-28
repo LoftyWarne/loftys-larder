@@ -5,8 +5,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { MethodEditor } from './method-editor.tsx';
 
-function step(id: number, text: string): RecipeMethodStep {
-  return { id, stepNumber: id, instruction: text };
+function step(
+  id: number,
+  text: string,
+  notes: { safetyNote?: string; tip?: string } = {},
+): RecipeMethodStep {
+  return {
+    id,
+    stepNumber: id,
+    instruction: text,
+    safetyNote: notes.safetyNote ?? null,
+    tip: notes.tip ?? null,
+  };
 }
 
 describe('MethodEditor', () => {
@@ -31,8 +41,8 @@ describe('MethodEditor', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { instruction: 'Heat oil' },
-      { instruction: 'Add onions' },
+      { instruction: 'Heat oil', safetyNote: null, tip: null },
+      { instruction: 'Add onions', safetyNote: null, tip: null },
     ]);
   });
 
@@ -100,9 +110,9 @@ describe('MethodEditor', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { instruction: 'B' },
-      { instruction: 'A' },
-      { instruction: 'C' },
+      { instruction: 'B', safetyNote: null, tip: null },
+      { instruction: 'A', safetyNote: null, tip: null },
+      { instruction: 'C', safetyNote: null, tip: null },
     ]);
   });
 
@@ -120,7 +130,9 @@ describe('MethodEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Save method' }));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith([{ instruction: 'B' }]);
+      expect(onSubmit).toHaveBeenCalledWith([
+        { instruction: 'B', safetyNote: null, tip: null },
+      ]);
     });
   });
 
@@ -146,7 +158,9 @@ describe('MethodEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Save method' }));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith([{ instruction: 'Heat oil' }]);
+      expect(onSubmit).toHaveBeenCalledWith([
+        { instruction: 'Heat oil', safetyNote: null, tip: null },
+      ]);
     });
   });
 
@@ -172,5 +186,175 @@ describe('MethodEditor', () => {
     // Editing a step marks the section dirty — the stale notice must go.
     await user.type(screen.getByLabelText('Step 1 text'), ' more');
     expect(screen.queryByText('Saved.')).toBeNull();
+  });
+
+  describe('step notes', () => {
+    it('opens a safety note and a tip, focuses the note, and submits them', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor initialSteps={[step(1, 'Fry')]} onSubmit={onSubmit} />,
+      );
+
+      await user.click(
+        screen.getByRole('button', { name: 'Add safety note to step 1' }),
+      );
+      const safety = screen.getByLabelText('Step 1 safety note');
+      expect(safety).toHaveFocus();
+      await user.type(safety, '  Oil will spit  ');
+      expect(
+        screen.queryByRole('button', { name: 'Add safety note to step 1' }),
+      ).toBeNull();
+
+      await user.click(
+        screen.getByRole('button', { name: 'Add tip to step 1' }),
+      );
+      await user.type(screen.getByLabelText('Step 1 tip'), 'Pat dry first');
+
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith([
+          {
+            instruction: 'Fry',
+            safetyNote: 'Oil will spit',
+            tip: 'Pat dry first',
+          },
+        ]);
+      });
+    });
+
+    it('sends an opened-but-blank note as null', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor initialSteps={[step(1, 'Fry')]} onSubmit={onSubmit} />,
+      );
+
+      await user.click(
+        screen.getByRole('button', { name: 'Add tip to step 1' }),
+      );
+      await user.type(screen.getByLabelText('Step 1 tip'), '   ');
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith([
+          { instruction: 'Fry', safetyNote: null, tip: null },
+        ]);
+      });
+    });
+
+    it('seeds existing notes and removes one', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[
+            step(1, 'Fry', { safetyNote: 'Hot oil', tip: 'Dry it' }),
+          ]}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      expect(screen.getByLabelText('Step 1 safety note')).toHaveValue(
+        'Hot oil',
+      );
+      expect(screen.getByLabelText('Step 1 tip')).toHaveValue('Dry it');
+
+      await user.click(
+        screen.getByRole('button', { name: 'Remove safety note from step 1' }),
+      );
+      expect(screen.queryByLabelText('Step 1 safety note')).toBeNull();
+      expect(
+        screen.getByRole('button', { name: 'Add safety note to step 1' }),
+      ).toBeVisible();
+
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith([
+          { instruction: 'Fry', safetyNote: null, tip: 'Dry it' },
+        ]);
+      });
+    });
+
+    it('keeps notes attached to their step when reordering', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[step(1, 'A'), step(2, 'B', { tip: 'B tip' })]}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Move step 2 up' }));
+      expect(screen.getByLabelText('Step 1 tip')).toHaveValue('B tip');
+
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith([
+          { instruction: 'B', safetyNote: null, tip: 'B tip' },
+          { instruction: 'A', safetyNote: null, tip: null },
+        ]);
+      });
+    });
+
+    it('seeds a legacy draft without note fields as no notes', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[]}
+          initialDraftSteps={[{ instruction: 'From draft' }]}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      expect(screen.queryByLabelText('Step 1 safety note')).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith([
+          { instruction: 'From draft', safetyNote: null, tip: null },
+        ]);
+      });
+    });
+
+    it('still requires step text when the step has a note', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<MethodEditor initialSteps={[]} onSubmit={onSubmit} />);
+
+      await user.click(screen.getByRole('button', { name: 'Add step' }));
+      await user.click(
+        screen.getByRole('button', { name: 'Add tip to step 1' }),
+      );
+      await user.type(screen.getByLabelText('Step 1 tip'), 'A tip');
+
+      expect(screen.getByRole('button', { name: 'Add step' })).toBeDisabled();
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      expect(await screen.findByText('Step text is required')).toBeVisible();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('includes notes in the autosave payload', async () => {
+      const onStepsChange = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[step(1, 'Fry')]}
+          onSubmit={vi.fn()}
+          onStepsChange={onStepsChange}
+        />,
+      );
+
+      await user.click(
+        screen.getByRole('button', { name: 'Add tip to step 1' }),
+      );
+      await user.type(screen.getByLabelText('Step 1 tip'), 'X');
+
+      expect(onStepsChange).toHaveBeenLastCalledWith([
+        { instruction: 'Fry', safetyNote: null, tip: 'X' },
+      ]);
+    });
   });
 });

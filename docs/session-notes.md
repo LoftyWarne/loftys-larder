@@ -4,6 +4,21 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-09-28 — Method-step safety notes and tips (DEC-94)
+
+**Status:** Implemented, not yet committed. Backend 539 tests + frontend 467 tests green; typecheck, lint, format:check clean. Not yet eyeballed in a browser.
+
+**Change:** each method step can carry at most one safety note and one tip, each rendered as a callout under its step. This came out of a request for bold/colour formatting in steps. Structured notes were chosen so DEC-49 (plain text only) stands unchanged. The "Rich text" non-goal is narrowed to say structured notes aren't covered by it.
+
+- **Schema:** `recipe_method.safety_note text NULL`, `recipe_method.tip text NULL`, migration `0017_groovy_ultron.sql` (two `ADD COLUMN`s, no backfill).
+- **`/shared`:** `RECIPE_STEP_NOTE_MAX_LENGTH = 1000`. `safetyNote` / `tip` are `string | null` on `recipeMethodStepSchema` and are **required** keys on `replaceRecipeMethodStepInputSchema` (no `.default()`, same `z.input`/`z.output` lesson as `isOptional`). The input schema **rejects** a blank note (`min(1)` after trim) rather than coercing it; the editor sends `null` for "no note", so there's one stored form.
+- **Editor (`method-editor.tsx`):** a `DraftStep` note is `null` when closed and `''` when opened but empty. "+ Safety note" / "+ Tip" buttons open a note, which gets focus; × closes it. A blank note is sent as `null`. Notes move with their step when reordering. `MethodDraftStep` note fields are `?:` for autosaved drafts from before this change (seeded `?? null`). Note textareas share `textareaRefs` (keyed `rowKey:field`) so the mount autosize pass covers them.
+- **Detail page:** new `components/step-note-callout.tsx` (`role="note"`, `aria-label` "Safety" / "Tip", lucide icon + visible label). Safety uses the existing amber banner palette; tip uses light green (`border-emerald-300 bg-emerald-50 text-emerald-900`). No `dark:` variants, matching the other amber banners. The editor reuses the same callout as the frame around each note textarea.
+
+**Decisions (user-confirmed at kick-off):** one of each note per step; blank → `null` in the editor, rejected at the boundary; a note never makes an empty step valid; safety before tip; no recipe-level safety summary in v1; no FEAT opened.
+
+---
+
 ## 2026-09-28 — Optional recipe ingredients
 
 **Status:** Implemented, not yet committed. Backend 535 tests + frontend 459 tests green; typecheck, lint, format:check clean.

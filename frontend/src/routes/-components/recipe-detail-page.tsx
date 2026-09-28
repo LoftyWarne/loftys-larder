@@ -4,6 +4,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { RecipeComments } from '@/components/recipe-comments.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { RelatedRecipes } from '@/components/related-recipes.tsx';
+import { StepNoteCallout } from '@/components/step-note-callout.tsx';
 import { formatQuantity } from '@/lib/format-quantity.ts';
 import { formatAverageRating } from '@/lib/format-rating.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -156,6 +157,20 @@ export function RecipeDetailPage(): React.ReactElement {
             {recipe.method.map((step) => (
               <li key={step.id} className="text-sm">
                 {step.instruction}
+                {(step.safetyNote !== null || step.tip !== null) && (
+                  <div className="mt-2 space-y-2">
+                    {step.safetyNote !== null && (
+                      <StepNoteCallout kind="safety">
+                        <p>{step.safetyNote}</p>
+                      </StepNoteCallout>
+                    )}
+                    {step.tip !== null && (
+                      <StepNoteCallout kind="tip">
+                        <p>{step.tip}</p>
+                      </StepNoteCallout>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ol>

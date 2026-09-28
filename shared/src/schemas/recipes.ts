@@ -38,6 +38,8 @@ export const recipeMethodStepSchema = z.object({
   id: z.number().int().positive(),
   stepNumber: z.number().int().positive(),
   instruction: z.string(),
+  safetyNote: z.string().nullable(),
+  tip: z.string().nullable(),
 });
 
 export type RecipeMethodStep = z.infer<typeof recipeMethodStepSchema>;
@@ -180,6 +182,18 @@ const recipeInstructionSchema = z
     `Step text must be ${String(RECIPE_INSTRUCTION_MAX_LENGTH)} characters or fewer`,
   );
 
+export const RECIPE_STEP_NOTE_MAX_LENGTH = 1000;
+// Blank is rejected rather than coerced to null: the editor sends `null` for
+// "no note", so there is exactly one stored form (DEC-94).
+const recipeStepNoteSchema = z
+  .string()
+  .trim()
+  .min(1, 'Note cannot be blank')
+  .max(
+    RECIPE_STEP_NOTE_MAX_LENGTH,
+    `Note must be ${String(RECIPE_STEP_NOTE_MAX_LENGTH)} characters or fewer`,
+  );
+
 // Fields editable on the recipe header via `create` and `updateHeader`.
 // Deliberately excludes `isBase` and `baseRecipeId` — those belong to the
 // serving-variation surface, which owns the XOR enforcement against `is_base`.
@@ -275,6 +289,8 @@ export type ReplaceRecipeIngredientsResult = z.infer<
 
 export const replaceRecipeMethodStepInputSchema = z.object({
   instruction: recipeInstructionSchema,
+  safetyNote: recipeStepNoteSchema.nullable(),
+  tip: recipeStepNoteSchema.nullable(),
 });
 
 export type ReplaceRecipeMethodStepInput = z.infer<

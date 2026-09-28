@@ -145,6 +145,8 @@ export const recipeMethod = pgTable(
       .references(() => recipes.id, { onDelete: 'restrict' }),
     stepNumber: smallint().notNull(),
     instruction: text().notNull(),
+    safetyNote: text(),
+    tip: text(),
   },
   (table) => [
     uniqueIndex('recipe_method_recipe_step_unique').on(

@@ -2,7 +2,10 @@ import type {
   RecipeMethodStep,
   ReplaceRecipeMethodStepInput,
 } from '@loftys-larder/shared';
-import { RECIPE_INSTRUCTION_MAX_LENGTH } from '@loftys-larder/shared';
+import {
+  RECIPE_INSTRUCTION_MAX_LENGTH,
+  RECIPE_STEP_NOTE_MAX_LENGTH,
+} from '@loftys-larder/shared';
 import {
   forwardRef,
   useCallback,
@@ -14,6 +17,10 @@ import {
 } from 'react';
 
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
+import {
+  StepNoteCallout,
+  type StepNoteKind,
+} from '@/components/step-note-callout.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import {
   Tooltip,
@@ -22,14 +29,43 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip.tsx';
 
+// `null` means the note is closed; an open-but-empty note is `''` and is sent
+// as `null` on save.
 interface DraftStep {
   rowKey: string;
   instruction: string;
+  safetyNote: string | null;
+  tip: string | null;
   error?: string;
 }
 
 export interface MethodDraftStep {
   instruction: string;
+  // Optional because autosaved drafts from before step notes don't carry them.
+  safetyNote?: string | null;
+  tip?: string | null;
+}
+
+type NoteField = 'safetyNote' | 'tip';
+
+const NOTE_FIELDS: readonly {
+  field: NoteField;
+  kind: StepNoteKind;
+  noun: string;
+  addLabel: string;
+}[] = [
+  {
+    field: 'safetyNote',
+    kind: 'safety',
+    noun: 'safety note',
+    addLabel: 'Safety note',
+  },
+  { field: 'tip', kind: 'tip', noun: 'tip', addLabel: 'Tip' },
+];
+
+function toNotePayload(note: string | null): string | null {
+  const trimmed = note?.trim() ?? '';
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export interface MethodEditorProps {
@@ -63,6 +99,8 @@ function toDraft(step: RecipeMethodStep): DraftStep {
   return {
     rowKey: `existing-${String(step.id)}`,
     instruction: step.instruction,
+    safetyNote: step.safetyNote,
+    tip: step.tip,
   };
 }
 
@@ -82,6 +120,8 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
         return initialDraftSteps.map((step) => ({
           rowKey: newRowKey(),
           instruction: step.instruction,
+          safetyNote: step.safetyNote ?? null,
+          tip: step.tip ?? null,
         }));
       }
       return initialSteps.map(toDraft);
@@ -94,7 +134,11 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     const lastEmittedRef = useRef<string | null>(null);
     useEffect(() => {
       if (!onStepsChange) return;
-      const payload = steps.map((step) => ({ instruction: step.instruction }));
+      const payload = steps.map((step) => ({
+        instruction: step.instruction,
+        safetyNote: step.safetyNote,
+        tip: step.tip,
+      }));
       const serialized = JSON.stringify(payload);
       if (lastEmittedRef.current === null) {
         lastEmittedRef.current = serialized;
@@ -117,6 +161,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     }, [savedNoticeKey]);
 
     const focusNewIndex = useRef<number | null>(null);
+    const focusNoteKey = useRef<string | null>(null);
     const textareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
 
     // Resetting height to `auto` briefly collapses the textarea so we can read
@@ -152,6 +197,26 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       );
     }, []);
 
+    const setNote = useCallback(
+      (rowKey: string, field: NoteField, value: string | null) => {
+        setSavedVisible(false);
+        setSteps((current) =>
+          current.map((step) =>
+            step.rowKey === rowKey ? { ...step, [field]: value } : step,
+          ),
+        );
+      },
+      [],
+    );
+
+    const openNote = useCallback(
+      (rowKey: string, field: NoteField) => {
+        focusNoteKey.current = `${rowKey}:${field}`;
+        setNote(rowKey, field, '');
+      },
+      [setNote],
+    );
+
     const removeStep = useCallback((rowKey: string) => {
       setSavedVisible(false);
       setSteps((current) => current.filter((step) => step.rowKey !== rowKey));
@@ -176,7 +241,10 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       setSavedVisible(false);
       setSteps((current) => {
         focusNewIndex.current = current.length;
-        return [...current, { rowKey: newRowKey(), instruction: '' }];
+        return [
+          ...current,
+          { rowKey: newRowKey(), instruction: '', safetyNote: null, tip: null },
+        ];
       });
     }, []);
 
@@ -200,6 +268,23 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       }
     }
 
+    // Note textareas share `textareaRefs` (keyed `rowKey:field`) so the mount
+    // autosize pass covers seeded notes too.
+    function registerNoteTextarea(
+      noteKey: string,
+      el: HTMLTextAreaElement | null,
+    ): void {
+      if (el) {
+        textareaRefs.current.set(noteKey, el);
+        if (focusNoteKey.current === noteKey) {
+          el.focus();
+          focusNoteKey.current = null;
+        }
+      } else {
+        textareaRefs.current.delete(noteKey);
+      }
+    }
+
     const runSubmit = useCallback(async (): Promise<boolean> => {
       let firstInvalid = -1;
       const validated = steps.map((step, index) => {
@@ -217,6 +302,8 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
 
       const payload: ReplaceRecipeMethodStepInput[] = steps.map((step) => ({
         instruction: step.instruction.trim(),
+        safetyNote: toNotePayload(step.safetyNote),
+        tip: toNotePayload(step.tip),
       }));
 
       setSubmitting(true);
@@ -289,6 +376,67 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
                         {step.instruction.length} /{' '}
                         {RECIPE_INSTRUCTION_MAX_LENGTH}
                       </p>
+                    )}
+                    {NOTE_FIELDS.map(({ field, kind, noun }) => {
+                      const note = step[field];
+                      if (note === null) return null;
+                      const noteKey = `${step.rowKey}:${field}`;
+                      return (
+                        <StepNoteCallout
+                          key={field}
+                          kind={kind}
+                          action={
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-6 w-6"
+                              aria-label={`Remove ${noun} from step ${String(index + 1)}`}
+                              onClick={() => {
+                                setNote(step.rowKey, field, null);
+                              }}
+                            >
+                              ×
+                            </Button>
+                          }
+                        >
+                          <textarea
+                            ref={(el) => {
+                              registerNoteTextarea(noteKey, el);
+                            }}
+                            aria-label={`Step ${String(index + 1)} ${noun}`}
+                            rows={1}
+                            maxLength={RECIPE_STEP_NOTE_MAX_LENGTH}
+                            className="flex min-h-9 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            value={note}
+                            onChange={(event) => {
+                              setNote(step.rowKey, field, event.target.value);
+                              autosize(event.currentTarget);
+                            }}
+                          />
+                        </StepNoteCallout>
+                      );
+                    })}
+                    {NOTE_FIELDS.some(({ field }) => step[field] === null) && (
+                      <div className="flex gap-1">
+                        {NOTE_FIELDS.map(({ field, noun, addLabel }) =>
+                          step[field] === null ? (
+                            <Button
+                              key={field}
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-muted-foreground"
+                              aria-label={`Add ${noun} to step ${String(index + 1)}`}
+                              onClick={() => {
+                                openNote(step.rowKey, field);
+                              }}
+                            >
+                              + {addLabel}
+                            </Button>
+                          ) : null,
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="flex flex-col">

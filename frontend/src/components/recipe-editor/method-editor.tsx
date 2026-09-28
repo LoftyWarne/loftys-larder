@@ -291,11 +291,12 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
                       </p>
                     )}
                   </div>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col">
                     <Button
                       type="button"
                       size="icon"
                       variant="ghost"
+                      className="h-7 w-7"
                       aria-label={`Move step ${String(index + 1)} up`}
                       disabled={index === 0}
                       onClick={() => {
@@ -308,6 +309,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
                       type="button"
                       size="icon"
                       variant="ghost"
+                      className="h-7 w-7"
                       aria-label={`Move step ${String(index + 1)} down`}
                       disabled={index === steps.length - 1}
                       onClick={() => {
@@ -320,6 +322,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
                       type="button"
                       size="icon"
                       variant="ghost"
+                      className="h-7 w-7"
                       aria-label={`Remove step ${String(index + 1)}`}
                       onClick={() => {
                         removeStep(step.rowKey);

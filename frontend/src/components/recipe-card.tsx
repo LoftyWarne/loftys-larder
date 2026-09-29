@@ -1,5 +1,6 @@
 import type { RecipeListItem } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
+import { Fragment } from 'react';
 
 import { formatAverageRating } from '@/lib/format-rating.ts';
 
@@ -8,12 +9,14 @@ export interface RecipeCardProps {
 }
 
 export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
-  const timeLabel =
+  const timeLabels = [
+    recipe.activeTimeMins !== null
+      ? `${String(recipe.activeTimeMins)} min active`
+      : null,
     recipe.totalTimeMins !== null
-      ? `${String(recipe.totalTimeMins)} min`
-      : recipe.activeTimeMins !== null
-        ? `${String(recipe.activeTimeMins)} min active`
-        : null;
+      ? `${String(recipe.totalTimeMins)} min total`
+      : null,
+  ].filter((label) => label !== null);
   const ratingLabel =
     recipe.ratingCount > 0
       ? `★ ${formatAverageRating(recipe.averageRating) ?? ''} (${String(
@@ -53,9 +56,13 @@ export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {timeLabel && <span>{timeLabel}</span>}
-          {timeLabel && <span aria-hidden="true">·</span>}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          {timeLabels.map((label) => (
+            <Fragment key={label}>
+              <span>{label}</span>
+              <span aria-hidden="true">·</span>
+            </Fragment>
+          ))}
           <span aria-label="plant points">
             🌱 {String(recipe.plantPointsCount)}
           </span>

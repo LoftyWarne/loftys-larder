@@ -42,6 +42,7 @@ What it is: markdown, formatting controls, or HTML in recipe names, descriptions
 Why not: plain text + React's default escaping is the XSS mitigation, and the project has zero `dangerouslySetInnerHTML`. Introducing rich text expands the attack surface materially (sanitiser dependency, CSP implications, render parity across surfaces) for an aesthetic gain.
 Revisit: if method steps become structurally hard to parse without bold/italic emphasis — which two cooks sharing one dataset can negotiate verbally instead.
 Not covered by this exclusion: structured per-step safety notes and tips (DEC-94). Those are separate plain-text fields rendered as fixed callouts, not formatting inside the text, so the exclusion still applies to inline emphasis, colour and markup.
+Also not covered: automatic bold on times, temperatures, quantities and ingredient names in method steps (DEC-95). That emphasis is worked out when the step is displayed; nothing is stored and users can't type any markup, so the stored text stays plain.
 
 ### Password authentication
 What it is: traditional email + password sign-in alongside or instead of magic links.

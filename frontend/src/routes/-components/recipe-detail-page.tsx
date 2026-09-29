@@ -4,6 +4,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { RecipeComments } from '@/components/recipe-comments.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { RelatedRecipes } from '@/components/related-recipes.tsx';
+import { StepInstruction } from '@/components/step-instruction.tsx';
 import { StepNoteCallout } from '@/components/step-note-callout.tsx';
 import { formatQuantity } from '@/lib/format-quantity.ts';
 import { formatAverageRating } from '@/lib/format-rating.ts';
@@ -38,6 +39,8 @@ export function RecipeDetailPage(): React.ReactElement {
 
   const recipe = query.data;
   if (!recipe) return <NotFound />;
+  const ingredientNames = recipe.ingredients.map((line) => line.ingredientName);
+  const unitNames = recipe.ingredients.map((line) => line.unitName);
 
   return (
     <article className="mx-auto max-w-3xl space-y-6">
@@ -156,7 +159,11 @@ export function RecipeDetailPage(): React.ReactElement {
           <ol className="space-y-2 list-decimal pl-5">
             {recipe.method.map((step) => (
               <li key={step.id} className="text-sm">
-                {step.instruction}
+                <StepInstruction
+                  text={step.instruction}
+                  ingredientNames={ingredientNames}
+                  unitNames={unitNames}
+                />
                 {(step.safetyNote !== null || step.tip !== null) && (
                   <div className="mt-2 space-y-2">
                     {step.safetyNote !== null && (

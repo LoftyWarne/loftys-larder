@@ -4,6 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-09-29 — Method steps: automatic bold on times, temperatures, quantities and ingredients (DEC-95)
+
+**Status:** Implemented, not yet committed. Frontend 520 tests green; typecheck, lint and format clean. Backend untouched. Not yet eyeballed in a browser.
+
+**Change:** the recipe detail page bolds times, temperatures, quantities and the recipe's own ingredient names inside step text. Chosen over a user-typed `**bold**` syntax so DEC-49 stands; the rich-text non-goal is narrowed to exclude derived emphasis.
+
+- **`lib/step-highlights.ts`:** pure `highlightStep(text, { ingredientNames, unitNames })` → `{ text, bold }[]`. One regex per category, collected as spans; overlaps resolved longest-first, then earlier. Units are a fixed list (`g kg ml l tsp tbsp cup pinch`) plus the recipe's own `unitName`s, since units are user-editable. Ingredient names drop bracketed parts and allow `s`/`es` plurals.
+- **No lookbehind:** the left word boundary is a capture group (`(^|[^\p{L}\p{N}.])`) because regex lookbehind needs Safari 16.4+, and a `new RegExp` with one throws on older Safari, taking the page down with it.
+- **`components/step-instruction.tsx`** renders segments as text / `<strong className="font-semibold">`. Used only at `recipe-detail-page.tsx`; notes and the editor are unchanged.
+- **Tests:** `step-highlights.test.ts` (52 cases, including false-positive checks: "Cut into 4", "2 large onions", "salted", "peanuts") and one detail-page RTL test.
+- **Known misses (accepted):** shortened names ("the oil" for "Olive Oil"), irregular plurals, wordy times ("a few minutes").
+
+---
+
 ## 2026-09-29 — Planner: dish names link to their recipe; bank click-to-assign removed (DEC-84 amended)
 
 **Status:** Committed + pushed to `main`. Frontend 467 tests green; typecheck, lint, format:check clean. Playwright 23/23 green on fresh builds, including `planner.spec.ts` and the planner axe checks (light + dark). One run hit a one-off dark-theme `color-contrast` failure on the **ingredients** page (`.bg-primary, input`). This change doesn't touch that page, and it passed 10/10 on repeat, so it's likely flaky (axe racing the theme switch?). Worth watching in CI. Not yet eyeballed in a browser.

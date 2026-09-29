@@ -245,6 +245,36 @@ describe('RecipeDetailPage', () => {
     expect(methodItems?.[1]?.querySelector('[role="note"]')).toBeNull();
   });
 
+  it('bolds ingredients, quantities, times and temperatures in step text', () => {
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...FULL_RECIPE,
+        method: [
+          {
+            ...FULL_RECIPE.method[0],
+            instruction: 'Fry the onions in 50g butter at 180°C for 5 mins.',
+          },
+          FULL_RECIPE.method[1],
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    const methodItems = screen
+      .getByRole('heading', { name: /method/i })
+      .parentElement?.querySelectorAll('ol li');
+    const bold = [...(methodItems?.[0]?.querySelectorAll('strong') ?? [])].map(
+      (element) => element.textContent,
+    );
+    expect(bold).toEqual(['onions', '50g', 'butter', '180°C', '5 mins']);
+    expect(methodItems?.[0]).toHaveTextContent(
+      'Fry the onions in 50g butter at 180°C for 5 mins.',
+    );
+    expect(methodItems?.[1]?.querySelector('strong')).toBeNull();
+  });
+
   it('shows the source name with its detail and links to the URL', () => {
     getUseQueryMock.mockReturnValue({
       data: {

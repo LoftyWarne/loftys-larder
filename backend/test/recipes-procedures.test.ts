@@ -1170,9 +1170,24 @@ describe('recipes procedures', () => {
       const result = await caller.recipes.replaceMethod({
         recipeId,
         steps: [
-          { instruction: 'first new step', safetyNote: null, tip: null },
-          { instruction: 'second new step', safetyNote: null, tip: null },
-          { instruction: 'third new step', safetyNote: null, tip: null },
+          {
+            instruction: 'first new step',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
+          {
+            instruction: 'second new step',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
+          {
+            instruction: 'third new step',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
         ],
       });
       expect(result).toEqual({ recipeId, count: 3 });
@@ -1231,7 +1246,14 @@ describe('recipes procedures', () => {
       await expect(
         caller.recipes.replaceMethod({
           recipeId,
-          steps: [{ instruction: '   ', safetyNote: null, tip: null }],
+          steps: [
+            {
+              instruction: '   ',
+              safetyNote: null,
+              tip: null,
+              prepAhead: null,
+            },
+          ],
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });
@@ -1246,9 +1268,20 @@ describe('recipes procedures', () => {
             instruction: 'Add the chicken to the hot oil',
             safetyNote: '  Oil will spit — lay it away from you  ',
             tip: 'Pat it dry first',
+            prepAhead: null,
           },
-          { instruction: 'Simmer', safetyNote: null, tip: 'Lid on' },
-          { instruction: 'Serve', safetyNote: null, tip: null },
+          {
+            instruction: 'Simmer',
+            safetyNote: null,
+            tip: 'Lid on',
+            prepAhead: null,
+          },
+          {
+            instruction: 'Serve',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
         ],
       });
 
@@ -1283,7 +1316,14 @@ describe('recipes procedures', () => {
       const caller = createCaller(makeContext());
       await caller.recipes.replaceMethod({
         recipeId,
-        steps: [{ instruction: 'new step', safetyNote: null, tip: null }],
+        steps: [
+          {
+            instruction: 'new step',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
+        ],
       });
 
       const rows = await db
@@ -1299,7 +1339,14 @@ describe('recipes procedures', () => {
       await expect(
         caller.recipes.replaceMethod({
           recipeId,
-          steps: [{ instruction: 'Stir', safetyNote: '   ', tip: null }],
+          steps: [
+            {
+              instruction: 'Stir',
+              safetyNote: '   ',
+              tip: null,
+              prepAhead: null,
+            },
+          ],
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });
@@ -1315,6 +1362,98 @@ describe('recipes procedures', () => {
               instruction: 'Stir',
               safetyNote: null,
               tip: 'x'.repeat(RECIPE_STEP_NOTE_MAX_LENGTH + 1),
+              prepAhead: null,
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('persists prep-ahead marks and returns them from get', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          {
+            instruction: 'Marinate overnight',
+            safetyNote: null,
+            tip: null,
+            prepAhead: 'required',
+          },
+          {
+            instruction: 'Make the sauce',
+            safetyNote: null,
+            tip: null,
+            prepAhead: 'optional',
+          },
+          {
+            instruction: 'Grill',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
+        ],
+      });
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(result.method.map((step) => step.prepAhead)).toEqual([
+        'required',
+        'optional',
+        null,
+      ]);
+    });
+
+    it('keeps a prep-ahead mark attached to its step when steps are reordered', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          {
+            instruction: 'Grill',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
+          {
+            instruction: 'Marinate overnight',
+            safetyNote: null,
+            tip: null,
+            prepAhead: 'required',
+          },
+        ],
+      });
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(
+        result.method.map(({ stepNumber, instruction, prepAhead }) => ({
+          stepNumber,
+          instruction,
+          prepAhead,
+        })),
+      ).toEqual([
+        { stepNumber: 1, instruction: 'Grill', prepAhead: null },
+        {
+          stepNumber: 2,
+          instruction: 'Marinate overnight',
+          prepAhead: 'required',
+        },
+      ]);
+    });
+
+    it('rejects an unknown prep-ahead value at the boundary', async () => {
+      const recipeId = await insertRecipe({ name: 'Demo' });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [
+            {
+              instruction: 'Stir',
+              safetyNote: null,
+              tip: null,
+              prepAhead: 'someday' as 'optional',
             },
           ],
         }),

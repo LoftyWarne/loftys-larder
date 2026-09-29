@@ -1,6 +1,8 @@
 import { TRPCClientError } from '@trpc/client';
 import { Link, useParams } from '@tanstack/react-router';
 
+import { PlanAheadSummary } from '@/components/plan-ahead-summary.tsx';
+import { PrepAheadBadge } from '@/components/prep-ahead-badge.tsx';
 import { RecipeComments } from '@/components/recipe-comments.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { RelatedRecipes } from '@/components/related-recipes.tsx';
@@ -149,6 +151,12 @@ export function RecipeDetailPage(): React.ReactElement {
         )}
       </section>
 
+      <PlanAheadSummary
+        method={recipe.method}
+        ingredientNames={ingredientNames}
+        unitNames={unitNames}
+      />
+
       <section className="space-y-2" aria-labelledby="method-heading">
         <h2 id="method-heading" className="text-xl font-semibold">
           Method
@@ -159,6 +167,12 @@ export function RecipeDetailPage(): React.ReactElement {
           <ol className="space-y-2 list-decimal pl-5">
             {recipe.method.map((step) => (
               <li key={step.id} className="text-sm">
+                {step.prepAhead !== null && (
+                  <PrepAheadBadge
+                    prepAhead={step.prepAhead}
+                    className="mb-1 flex w-fit"
+                  />
+                )}
                 <StepInstruction
                   text={step.instruction}
                   ingredientNames={ingredientNames}

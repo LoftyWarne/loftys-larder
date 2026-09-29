@@ -8,7 +8,11 @@ import { MethodEditor } from './method-editor.tsx';
 function step(
   id: number,
   text: string,
-  notes: { safetyNote?: string; tip?: string } = {},
+  notes: {
+    safetyNote?: string;
+    tip?: string;
+    prepAhead?: RecipeMethodStep['prepAhead'];
+  } = {},
 ): RecipeMethodStep {
   return {
     id,
@@ -16,6 +20,7 @@ function step(
     instruction: text,
     safetyNote: notes.safetyNote ?? null,
     tip: notes.tip ?? null,
+    prepAhead: notes.prepAhead ?? null,
   };
 }
 
@@ -41,8 +46,13 @@ describe('MethodEditor', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { instruction: 'Heat oil', safetyNote: null, tip: null },
-      { instruction: 'Add onions', safetyNote: null, tip: null },
+      { instruction: 'Heat oil', safetyNote: null, tip: null, prepAhead: null },
+      {
+        instruction: 'Add onions',
+        safetyNote: null,
+        tip: null,
+        prepAhead: null,
+      },
     ]);
   });
 
@@ -110,9 +120,9 @@ describe('MethodEditor', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { instruction: 'B', safetyNote: null, tip: null },
-      { instruction: 'A', safetyNote: null, tip: null },
-      { instruction: 'C', safetyNote: null, tip: null },
+      { instruction: 'B', safetyNote: null, tip: null, prepAhead: null },
+      { instruction: 'A', safetyNote: null, tip: null, prepAhead: null },
+      { instruction: 'C', safetyNote: null, tip: null, prepAhead: null },
     ]);
   });
 
@@ -131,7 +141,7 @@ describe('MethodEditor', () => {
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith([
-        { instruction: 'B', safetyNote: null, tip: null },
+        { instruction: 'B', safetyNote: null, tip: null, prepAhead: null },
       ]);
     });
   });
@@ -159,7 +169,12 @@ describe('MethodEditor', () => {
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith([
-        { instruction: 'Heat oil', safetyNote: null, tip: null },
+        {
+          instruction: 'Heat oil',
+          safetyNote: null,
+          tip: null,
+          prepAhead: null,
+        },
       ]);
     });
   });
@@ -219,6 +234,7 @@ describe('MethodEditor', () => {
             instruction: 'Fry',
             safetyNote: 'Oil will spit',
             tip: 'Pat dry first',
+            prepAhead: null,
           },
         ]);
       });
@@ -239,7 +255,7 @@ describe('MethodEditor', () => {
 
       await waitFor(() => {
         expect(onSubmit).toHaveBeenCalledWith([
-          { instruction: 'Fry', safetyNote: null, tip: null },
+          { instruction: 'Fry', safetyNote: null, tip: null, prepAhead: null },
         ]);
       });
     });
@@ -272,7 +288,12 @@ describe('MethodEditor', () => {
       await user.click(screen.getByRole('button', { name: 'Save method' }));
       await waitFor(() => {
         expect(onSubmit).toHaveBeenCalledWith([
-          { instruction: 'Fry', safetyNote: null, tip: 'Dry it' },
+          {
+            instruction: 'Fry',
+            safetyNote: null,
+            tip: 'Dry it',
+            prepAhead: null,
+          },
         ]);
       });
     });
@@ -293,8 +314,8 @@ describe('MethodEditor', () => {
       await user.click(screen.getByRole('button', { name: 'Save method' }));
       await waitFor(() => {
         expect(onSubmit).toHaveBeenCalledWith([
-          { instruction: 'B', safetyNote: null, tip: 'B tip' },
-          { instruction: 'A', safetyNote: null, tip: null },
+          { instruction: 'B', safetyNote: null, tip: 'B tip', prepAhead: null },
+          { instruction: 'A', safetyNote: null, tip: null, prepAhead: null },
         ]);
       });
     });
@@ -314,7 +335,12 @@ describe('MethodEditor', () => {
       await user.click(screen.getByRole('button', { name: 'Save method' }));
       await waitFor(() => {
         expect(onSubmit).toHaveBeenCalledWith([
-          { instruction: 'From draft', safetyNote: null, tip: null },
+          {
+            instruction: 'From draft',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
         ]);
       });
     });
@@ -353,7 +379,131 @@ describe('MethodEditor', () => {
       await user.type(screen.getByLabelText('Step 1 tip'), 'X');
 
       expect(onStepsChange).toHaveBeenLastCalledWith([
-        { instruction: 'Fry', safetyNote: null, tip: 'X' },
+        { instruction: 'Fry', safetyNote: null, tip: 'X', prepAhead: null },
+      ]);
+    });
+  });
+
+  describe('prep ahead', () => {
+    it('marks a step as must-be-done-ahead and sends it on save', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[step(1, 'Marinate'), step(2, 'Grill')]}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      const select = screen.getByLabelText('Step 1 prep ahead');
+      expect(select).toHaveValue('');
+      await user.selectOptions(select, 'Must be done ahead');
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith([
+          {
+            instruction: 'Marinate',
+            safetyNote: null,
+            tip: null,
+            prepAhead: 'required',
+          },
+          {
+            instruction: 'Grill',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
+        ]);
+      });
+    });
+
+    it('seeds an existing mark and clears it back to on the day', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[step(1, 'Make sauce', { prepAhead: 'optional' })]}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      const select = screen.getByLabelText('Step 1 prep ahead');
+      expect(select).toHaveValue('optional');
+      await user.selectOptions(select, 'On the day');
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith([
+          {
+            instruction: 'Make sauce',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
+        ]);
+      });
+    });
+
+    it('keeps the mark attached to its step when reordering', async () => {
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[
+            step(1, 'Grill'),
+            step(2, 'Marinate', { prepAhead: 'required' }),
+          ]}
+          onSubmit={vi.fn()}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Move step 2 up' }));
+      expect(screen.getByLabelText('Step 1 prep ahead')).toHaveValue(
+        'required',
+      );
+      expect(screen.getByLabelText('Step 2 prep ahead')).toHaveValue('');
+    });
+
+    it('reads an unrecognised draft value as on the day', () => {
+      render(
+        <MethodEditor
+          initialSteps={[]}
+          initialDraftSteps={[
+            {
+              instruction: 'From draft',
+              prepAhead: 'someday' as 'optional',
+            },
+          ]}
+          onSubmit={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByLabelText('Step 1 prep ahead')).toHaveValue('');
+    });
+
+    it('includes the mark in the autosave payload', async () => {
+      const onStepsChange = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[step(1, 'Soak beans')]}
+          onSubmit={vi.fn()}
+          onStepsChange={onStepsChange}
+        />,
+      );
+
+      await user.selectOptions(
+        screen.getByLabelText('Step 1 prep ahead'),
+        'Must be done ahead',
+      );
+
+      expect(onStepsChange).toHaveBeenLastCalledWith([
+        {
+          instruction: 'Soak beans',
+          safetyNote: null,
+          tip: null,
+          prepAhead: 'required',
+        },
       ]);
     });
   });

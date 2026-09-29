@@ -1,5 +1,5 @@
 import type { Recipe } from '@loftys-larder/shared';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { TRPCClientError } from '@trpc/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -143,6 +143,7 @@ const FULL_RECIPE: Recipe = {
       instruction: 'Sauté onions.',
       safetyNote: null,
       tip: null,
+      prepAhead: null,
     },
     {
       id: 2,
@@ -150,6 +151,7 @@ const FULL_RECIPE: Recipe = {
       instruction: 'Simmer.',
       safetyNote: null,
       tip: null,
+      prepAhead: null,
     },
   ],
   averageRating: null,
@@ -387,5 +389,95 @@ describe('RecipeDetailPage', () => {
       'data-disabled',
       'true',
     );
+  });
+
+  describe('plan ahead', () => {
+    it('omits the Plan ahead section when no step is marked', () => {
+      getUseQueryMock.mockReturnValue({
+        data: FULL_RECIPE,
+        isLoading: false,
+        error: null,
+      });
+      render(<RecipeDetailPage />);
+
+      expect(
+        screen.queryByRole('heading', { name: 'Plan ahead' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('lists must-do steps before can-do steps, above the method', () => {
+      getUseQueryMock.mockReturnValue({
+        data: {
+          ...FULL_RECIPE,
+          method: [
+            {
+              id: 1,
+              stepNumber: 1,
+              instruction: 'Make the stock.',
+              safetyNote: null,
+              tip: null,
+              prepAhead: 'optional',
+            },
+            {
+              id: 2,
+              stepNumber: 2,
+              instruction: 'Marinate overnight.',
+              safetyNote: null,
+              tip: null,
+              prepAhead: 'required',
+            },
+            {
+              id: 3,
+              stepNumber: 3,
+              instruction: 'Grill.',
+              safetyNote: null,
+              tip: null,
+              prepAhead: null,
+            },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+      render(<RecipeDetailPage />);
+
+      const heading = screen.getByRole('heading', { name: 'Plan ahead' });
+      const methodHeading = screen.getByRole('heading', { name: /method/i });
+      expect(
+        heading.compareDocumentPosition(methodHeading) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      const groups = within(
+        screen.getByRole('region', { name: 'Plan ahead' }),
+      ).getAllByRole('group');
+      expect(groups).toHaveLength(2);
+      expect(groups[0]).toHaveAccessibleName('Must be done ahead');
+      expect(groups[0]).toHaveTextContent('Step 2: Marinate overnight.');
+      expect(groups[1]).toHaveAccessibleName('Can be done ahead');
+      expect(groups[1]).toHaveTextContent('Step 1: Make the stock.');
+      expect(groups[1]).not.toHaveTextContent('Grill.');
+    });
+
+    it('badges marked steps in the method list', () => {
+      getUseQueryMock.mockReturnValue({
+        data: {
+          ...FULL_RECIPE,
+          method: [
+            { ...FULL_RECIPE.method[0], prepAhead: 'required' },
+            FULL_RECIPE.method[1],
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+      render(<RecipeDetailPage />);
+
+      const methodItems = screen
+        .getByRole('heading', { name: /method/i })
+        .parentElement?.querySelectorAll('ol li');
+      expect(methodItems?.[0]).toHaveTextContent('Must be done ahead');
+      expect(methodItems?.[1]).not.toHaveTextContent('done ahead');
+    });
   });
 });

@@ -1,10 +1,12 @@
 import type {
   RecipeMethodStep,
   ReplaceRecipeMethodStepInput,
+  StepPrepAhead,
 } from '@loftys-larder/shared';
 import {
   RECIPE_INSTRUCTION_MAX_LENGTH,
   RECIPE_STEP_NOTE_MAX_LENGTH,
+  stepPrepAheadSchema,
 } from '@loftys-larder/shared';
 import {
   forwardRef,
@@ -36,6 +38,7 @@ interface DraftStep {
   instruction: string;
   safetyNote: string | null;
   tip: string | null;
+  prepAhead: StepPrepAhead | null;
   error?: string;
 }
 
@@ -44,6 +47,7 @@ export interface MethodDraftStep {
   // Optional because autosaved drafts from before step notes don't carry them.
   safetyNote?: string | null;
   tip?: string | null;
+  prepAhead?: StepPrepAhead | null;
 }
 
 type NoteField = 'safetyNote' | 'tip';
@@ -62,6 +66,22 @@ const NOTE_FIELDS: readonly {
   },
   { field: 'tip', kind: 'tip', noun: 'tip', addLabel: 'Tip' },
 ];
+
+const PREP_AHEAD_OPTIONS: readonly {
+  value: StepPrepAhead | '';
+  label: string;
+}[] = [
+  { value: '', label: 'On the day' },
+  { value: 'optional', label: 'Can be done ahead' },
+  { value: 'required', label: 'Must be done ahead' },
+];
+
+// Autosaved drafts are untyped JSON, so anything unrecognised reads as "on the
+// day" rather than reaching the server as an invalid enum value.
+function parsePrepAhead(value: unknown): StepPrepAhead | null {
+  const parsed = stepPrepAheadSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 function toNotePayload(note: string | null): string | null {
   const trimmed = note?.trim() ?? '';
@@ -101,6 +121,7 @@ function toDraft(step: RecipeMethodStep): DraftStep {
     instruction: step.instruction,
     safetyNote: step.safetyNote,
     tip: step.tip,
+    prepAhead: step.prepAhead,
   };
 }
 
@@ -122,6 +143,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
           instruction: step.instruction,
           safetyNote: step.safetyNote ?? null,
           tip: step.tip ?? null,
+          prepAhead: parsePrepAhead(step.prepAhead),
         }));
       }
       return initialSteps.map(toDraft);
@@ -138,6 +160,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
         instruction: step.instruction,
         safetyNote: step.safetyNote,
         tip: step.tip,
+        prepAhead: step.prepAhead,
       }));
       const serialized = JSON.stringify(payload);
       if (lastEmittedRef.current === null) {
@@ -209,6 +232,18 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       [],
     );
 
+    const setPrepAhead = useCallback(
+      (rowKey: string, prepAhead: StepPrepAhead | null) => {
+        setSavedVisible(false);
+        setSteps((current) =>
+          current.map((step) =>
+            step.rowKey === rowKey ? { ...step, prepAhead } : step,
+          ),
+        );
+      },
+      [],
+    );
+
     const openNote = useCallback(
       (rowKey: string, field: NoteField) => {
         focusNoteKey.current = `${rowKey}:${field}`;
@@ -243,7 +278,13 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
         focusNewIndex.current = current.length;
         return [
           ...current,
-          { rowKey: newRowKey(), instruction: '', safetyNote: null, tip: null },
+          {
+            rowKey: newRowKey(),
+            instruction: '',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+          },
         ];
       });
     }, []);
@@ -304,6 +345,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
         instruction: step.instruction.trim(),
         safetyNote: toNotePayload(step.safetyNote),
         tip: toNotePayload(step.tip),
+        prepAhead: step.prepAhead,
       }));
 
       setSubmitting(true);
@@ -417,27 +459,42 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
                         </StepNoteCallout>
                       );
                     })}
-                    {NOTE_FIELDS.some(({ field }) => step[field] === null) && (
-                      <div className="flex gap-1">
-                        {NOTE_FIELDS.map(({ field, noun, addLabel }) =>
-                          step[field] === null ? (
-                            <Button
-                              key={field}
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-muted-foreground"
-                              aria-label={`Add ${noun} to step ${String(index + 1)}`}
-                              onClick={() => {
-                                openNote(step.rowKey, field);
-                              }}
-                            >
-                              + {addLabel}
-                            </Button>
-                          ) : null,
-                        )}
-                      </div>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {NOTE_FIELDS.map(({ field, noun, addLabel }) =>
+                        step[field] === null ? (
+                          <Button
+                            key={field}
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-muted-foreground"
+                            aria-label={`Add ${noun} to step ${String(index + 1)}`}
+                            onClick={() => {
+                              openNote(step.rowKey, field);
+                            }}
+                          >
+                            + {addLabel}
+                          </Button>
+                        ) : null,
+                      )}
+                      <select
+                        aria-label={`Step ${String(index + 1)} prep ahead`}
+                        className="ml-auto h-7 rounded-md border border-input bg-background px-2 text-sm text-muted-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        value={step.prepAhead ?? ''}
+                        onChange={(event) => {
+                          setPrepAhead(
+                            step.rowKey,
+                            parsePrepAhead(event.target.value),
+                          );
+                        }}
+                      >
+                        {PREP_AHEAD_OPTIONS.map(({ value, label }) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div className="flex flex-col">
                     <Button

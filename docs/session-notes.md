@@ -4,9 +4,22 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-09-29 — Method steps: prep-ahead mark + "Plan ahead" summary (DEC-96)
+
+**Status:** Committed + pushed to `main`. Backend 542 and frontend 528 tests green; typecheck, lint and format clean. Migration `0018_free_william_stryker` applied to local dev; prod gets it via `release_command` on this deploy.
+
+**Change:** a step can be marked "Can be done ahead" or "Must be done ahead". The recipe page lists marked steps in a **Plan ahead** section above the method, "must" first, and badges them in the method list. Scope confirmed with the user: both values, recipe page only (no planner), section placed above the method.
+
+- **Schema:** `recipe_method.prep_ahead` (nullable), typed by the `step_prep_ahead` enum (`optional` | `required`). The shared `stepPrepAheadSchema` / `StepPrepAhead` is on `recipeMethodStepSchema` and `replaceRecipeMethodStepInputSchema` (required-nullable, like the notes).
+- **Editor:** a native `<select>` per step, labelled `Step N prep ahead`, in the row with the note buttons (that row now always renders). Autosaved drafts carry `prepAhead`; `parsePrepAhead` reads an unknown or missing draft value as `null`.
+- **Detail:** `components/plan-ahead-summary.tsx` (renders nothing when no step is marked) and `components/prep-ahead-badge.tsx` (`PREP_AHEAD_STYLES` shared by both). "Must" is sky-toned, "can" is muted. Neither has `dark:` variants, matching the DEC-94 callouts.
+- **Tests:** 3 backend (`recipes-procedures.test.ts`: round-trip, reorder, bad enum), 5 editor, 3 detail page.
+
+---
+
 ## 2026-09-29 — Method steps: automatic bold on times, temperatures, quantities and ingredients (DEC-95)
 
-**Status:** Implemented, not yet committed. Frontend 520 tests green; typecheck, lint and format clean. Backend untouched. Not yet eyeballed in a browser.
+**Status:** Committed + pushed to `main` (7e27909). Frontend 520 tests green; typecheck, lint and format clean. Backend untouched. Not yet eyeballed in a browser.
 
 **Change:** the recipe detail page bolds times, temperatures, quantities and the recipe's own ingredient names inside step text. Chosen over a user-typed `**bold**` syntax so DEC-49 stands; the rich-text non-goal is narrowed to exclude derived emphasis.
 

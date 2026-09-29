@@ -7,6 +7,7 @@ import {
   index,
   integer,
   numeric,
+  pgEnum,
   pgTable,
   smallint,
   text,
@@ -136,6 +137,13 @@ export const recipeIngredients = pgTable(
   ],
 );
 
+// Whether a step can (`optional`) or must (`required`) be done ahead of
+// cooking day; NULL means an ordinary on-the-day step (DEC-96).
+export const stepPrepAhead = pgEnum('step_prep_ahead', [
+  'optional',
+  'required',
+]);
+
 export const recipeMethod = pgTable(
   'recipe_method',
   {
@@ -147,6 +155,7 @@ export const recipeMethod = pgTable(
     instruction: text().notNull(),
     safetyNote: text(),
     tip: text(),
+    prepAhead: stepPrepAhead(),
   },
   (table) => [
     uniqueIndex('recipe_method_recipe_step_unique').on(

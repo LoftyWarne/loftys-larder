@@ -34,12 +34,19 @@ export const recipeIngredientLineSchema = z.object({
 
 export type RecipeIngredientLine = z.infer<typeof recipeIngredientLineSchema>;
 
+// `optional` = can be done ahead; `required` = must be started ahead
+// (marinating, soaking). `null` is an ordinary on-the-day step (DEC-96).
+export const stepPrepAheadSchema = z.enum(['optional', 'required']);
+
+export type StepPrepAhead = z.infer<typeof stepPrepAheadSchema>;
+
 export const recipeMethodStepSchema = z.object({
   id: z.number().int().positive(),
   stepNumber: z.number().int().positive(),
   instruction: z.string(),
   safetyNote: z.string().nullable(),
   tip: z.string().nullable(),
+  prepAhead: stepPrepAheadSchema.nullable(),
 });
 
 export type RecipeMethodStep = z.infer<typeof recipeMethodStepSchema>;
@@ -291,6 +298,7 @@ export const replaceRecipeMethodStepInputSchema = z.object({
   instruction: recipeInstructionSchema,
   safetyNote: recipeStepNoteSchema.nullable(),
   tip: recipeStepNoteSchema.nullable(),
+  prepAhead: stepPrepAheadSchema.nullable(),
 });
 
 export type ReplaceRecipeMethodStepInput = z.infer<

@@ -123,6 +123,7 @@ export function RecipeEditPage(): React.ReactElement {
         instruction: step.instruction,
         safetyNote: step.safetyNote,
         tip: step.tip,
+        prepAhead: step.prepAhead,
       })),
     };
   }, [recipe]);

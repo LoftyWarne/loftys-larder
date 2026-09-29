@@ -5,7 +5,7 @@ import type {
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { Link, useParams, useSearch } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { DndProvider } from '@/components/planner/dnd-provider.tsx';
 import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
@@ -42,20 +42,8 @@ export function PlannerPage(): React.ReactElement {
   );
   const membersQuery = trpc.user.listHouseholdMembers.useQuery();
 
-  const [selectedRecipe, setSelectedRecipe] = useState<RecipeListItem | null>(
-    null,
-  );
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
-
-  // When the viewport shrinks below `lg`, the bank disappears — drop any
-  // recipe that was selected for click-to-assign so the assignment-hint
-  // banner doesn't outlive the bank that produced it.
-  useEffect(() => {
-    if (!isLargeViewport && selectedRecipe !== null) {
-      setSelectedRecipe(null);
-    }
-  }, [isLargeViewport, selectedRecipe]);
 
   const { update, isPending } = useOptimisticSlotUpdate({
     planId,
@@ -152,15 +140,6 @@ export function PlannerPage(): React.ReactElement {
   );
 
   function handleSlotClick(slot: PlanSlot): void {
-    if (slot.slotType === 'empty' && selectedRecipe) {
-      // Two-tap assign — bank selection + empty slot tap. The slot becomes a
-      // single-dish "cooking in" occasion.
-      update(assignSingleEat(slot, selectedRecipe));
-      setSelectedRecipe(null);
-      return;
-    }
-    // Anything else opens the editor sheet — including an empty slot when no
-    // recipe is selected (lets the user pick a non-recipe state directly).
     setEditingSlotId(slot.id);
   }
 
@@ -223,11 +202,7 @@ export function PlannerPage(): React.ReactElement {
     >
       {isLargeViewport && (
         <div className="lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden">
-          <RecipeBank
-            selectedRecipeId={selectedRecipe?.id ?? null}
-            onSelect={setSelectedRecipe}
-            dndEnabled
-          />
+          <RecipeBank dndEnabled />
         </div>
       )}
       <div className="space-y-4">
@@ -241,21 +216,14 @@ export function PlannerPage(): React.ReactElement {
               variant="plan"
             />
           </div>
-          <div className="flex items-center gap-3">
-            {selectedRecipe && (
-              <p className="text-sm text-muted-foreground" role="status">
-                Tap an empty slot to assign “{selectedRecipe.name}”.
-              </p>
-            )}
-            <Button asChild size="sm" variant="outline">
-              <Link
-                to="/plans/$planId/shopping"
-                params={{ planId: String(plan.id) }}
-              >
-                Shopping list
-              </Link>
-            </Button>
-          </div>
+          <Button asChild size="sm" variant="outline">
+            <Link
+              to="/plans/$planId/shopping"
+              params={{ planId: String(plan.id) }}
+            >
+              Shopping list
+            </Link>
+          </Button>
         </header>
         {mutationError && (
           <p role="alert" className="text-sm text-destructive">
@@ -313,7 +281,7 @@ export function PlannerPage(): React.ReactElement {
   );
 }
 
-// Assign a single eaten dish to a slot (bank click-to-assign + drag-drop): the
+// Assign a single eaten dish to a slot (bank → slot drag-drop): the
 // slot becomes a one-item "cooking in" occasion. Attendance already on the slot
 // is preserved — assigning a dish doesn't change who's eating. The optimistic
 // item previews the dish name until the server row settles.

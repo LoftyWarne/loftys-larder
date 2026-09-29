@@ -4,7 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-09-28 — Method-step safety notes and tips (DEC-94)
+## 2026-09-29 — Planner: dish names link to their recipe; bank click-to-assign removed (DEC-84 amended)
+
+**Status:** Committed + pushed to `main`. Frontend 467 tests green; typecheck, lint, format:check clean. Playwright 23/23 green on fresh builds, including `planner.spec.ts` and the planner axe checks (light + dark). One run hit a one-off dark-theme `color-contrast` failure on the **ingredients** page (`.bg-primary, input`). This change doesn't touch that page, and it passed 10/10 on repeat, so it's likely flaky (axe racing the theme switch?). Worth watching in CI. Not yet eyeballed in a browser.
+
+**Change:** click-through from the plan to a recipe, and bank → slot assignment is drag-only.
+
+- **Slot card (`slot-cell.tsx`):** the editor/drag `<button>` is now an empty, full-card (`absolute inset-0`) layer carrying the `aria-label`, click and drag listeners. The content sits above it with `pointer-events-none`, and links re-enable pointer events (`[&_a]:pointer-events-auto`). Every live dish name links to `/recipes/$recipeId`: each dish in a multi-dish slot, cooked-ahead bases and the plan-meal leftover. Deleted dishes stay plain `(deleted)`. `data-slot-id` / `data-slot-type` moved from the button to the card container so e2e `toContainText` still sees the content. Named content regions (`chefChip`, `commentLine`) unchanged.
+- **Trade-off (user-accepted):** pressing and holding on a dish name won't lift the card for a drag, and tapping it won't open the editor. Press elsewhere on the card for either. Deleted dish names now render at normal weight (the shared component's deleted form).
+- **Shared `components/recipe-name-link.tsx`:** the home page's `RecipeName` moved here unchanged, now used by both home and the slot card (same link styling as the 2026-07-08 home entry).
+- **Click-to-assign removed:** `planner-page.tsx` drops `selectedRecipe`, the viewport-shrink reset effect, the "Tap an empty slot to assign…" hint, and the assign branch in `handleSlotClick` (a tap always opens the editor). `recipe-bank.tsx` drops `selectedRecipeId` / `onSelect`, and the listbox/option/`aria-selected` semantics. Rows are plain list items with a dnd-kit draggable button (dnd-kit supplies `aria-roledescription` + keyboard pick-up instructions). A brief tap on a bank row does nothing.
+- **Links open in the same tab.** The planner date range lives in the URL, so Back restores the view.
+- **Docs:** DEC-84 amendment bullet; amendment notes on FEAT-31 and FEAT-40 (AC checkboxes untouched); README frontend line.
+
+
 
 **Status:** Implemented, not yet committed. Backend 539 tests + frontend 467 tests green; typecheck, lint, format:check clean. Not yet eyeballed in a browser.
 

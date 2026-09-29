@@ -1258,6 +1258,11 @@ Conventions:
 
 ### FEAT-31 — Meal Planner UI: Recipe Bank sidebar + Grid + click-to-assign
 
+> **Amended by DEC-84 (2026-09-29).** Bank click-to-assign (tap a recipe, then
+> tap a slot) was removed; the bank assigns by drag only (FEAT-40). Tapping any
+> slot opens the slot editor. Live dish names on the slot card link to the
+> recipe detail page.
+
 **Goal:** The planner view — a sidebar of recipe cards (the Bank) and a grid of slots by (date × occasion). Click-to-assign interaction: tap a recipe to select; tap a slot to assign. Tap an assigned slot to open the slot editor (servings, change recipe, clear, set state to non-recipe, chef, comment). Optimistic updates via TanStack Query. Date range in TanStack Router search params. `[DEC-TBD: click-to-assign interaction model]` `[DEC-TBD: date range in URL search params for shareable views]` `[DEC-TBD: last-write-wins on slot assignments]`
 
 **Estimate:** 4 hr. **Depends on:** FEAT-19, 27, 28, 30. **Enables:** FEAT-32, 33, 34.
@@ -1608,6 +1613,11 @@ Conventions:
 ---
 
 ### FEAT-40 — Responsive planner interactions: hide bank below `lg`, slot ↔ slot drag everywhere, bank → slot drag at `lg+`
+
+> **Amended by DEC-84 (2026-09-29).** Click-to-assign no longer exists at `lg+`:
+> bank → slot drag is the only bank assignment path, and a brief tap on a bank
+> row does nothing. Acceptance criteria below that mention click-to-assign
+> describe the original scope.
 
 **Goal:** Reshape the planner around a single breakpoint, `lg` (1024 px). **Below `lg`**: the Recipe Bank is not rendered and the `recipes.list` infinite query is not started; recipe assignment routes through the existing slot-editor sheet (tap any slot → editor → flip `slot_type` to `recipe` → pick via the `SearchableCombobox`). **At `lg+`**: the bank renders alongside the grid and click-to-assign also works. **A `@dnd-kit/core` `DndContext` mounts at every viewport** with `PointerSensor` (5 px activation), `KeyboardSensor`, and `TouchSensor` (200 ms / 5 px activation) — populated slot cells are draggables and every slot cell is a droppable, so users can move / swap meals on phones, tablets, and desktops alike. The bank → slot drag path only triggers at `lg+`, since the bank itself is only mounted there. Drop on empty = move, drop on populated = swap (atomic, server-side). `[DEC-84: bank → slot DnD lg+ only; slot ↔ slot DnD at every viewport]` `[DEC-85: hide Recipe Bank below lg]`
 

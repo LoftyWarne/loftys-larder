@@ -3,6 +3,18 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('@tanstack/react-router', () => ({
+  Link: (props: {
+    children: React.ReactNode;
+    to?: string;
+    params?: Record<string, string>;
+  }): React.ReactElement => (
+    <a href={props.to?.replace('$recipeId', props.params?.recipeId ?? '')}>
+      {props.children}
+    </a>
+  ),
+}));
+
 import { SlotCell } from './slot-cell.tsx';
 
 const BASE_SLOT: PlanSlot = {
@@ -102,6 +114,39 @@ describe('SlotCell', () => {
       />,
     );
     expect(screen.getByText(/deleted/)).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('links each live dish to its recipe detail page', () => {
+    render(
+      <SlotCell
+        slot={{
+          ...RECIPE_SLOT,
+          items: [eatItem(), cookItem()],
+        }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('link', { name: 'Tomato pasta' })).toHaveAttribute(
+      'href',
+      '/recipes/10',
+    );
+    expect(screen.getByRole('link', { name: 'Curry Base' })).toHaveAttribute(
+      'href',
+      '/recipes/22',
+    );
+  });
+
+  it('keeps dish links off the editor button so tapping a name does not open the editor', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(<SlotCell slot={RECIPE_SLOT} onClick={onClick} dndEnabled />);
+    const link = screen.getByRole('link', { name: 'Tomato pasta' });
+    expect(
+      screen.getByRole('button', { name: /Dinner on/ }),
+    ).not.toContainElement(link);
+    await user.click(link);
+    expect(onClick).not.toHaveBeenCalled();
   });
 
   it('renders the slot-type label for non-recipe states', () => {
@@ -273,7 +318,11 @@ describe('SlotCell', () => {
       />,
     );
     expect(screen.getByText('Leftovers')).toBeInTheDocument();
-    expect(screen.getByText('Tomato pasta ×2')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tomato pasta' })).toHaveAttribute(
+      'href',
+      '/recipes/10',
+    );
+    expect(screen.getByText(/×2/)).toBeInTheDocument();
   });
 
   it('renders a takeaway leftover with the source label', () => {

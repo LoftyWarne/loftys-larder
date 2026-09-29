@@ -6,7 +6,7 @@ import type {
   RecipeListItem,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -244,37 +244,31 @@ beforeEach(() => {
   plantsForDayInvalidateMock.mockClear();
   plantsForPlanInvalidateMock.mockClear();
   mutationOptions = {};
-  // Default to the large-viewport branch so the bank is visible and the
-  // pre-FEAT-40 click-to-assign tests keep their assertions. Tests that need
-  // the compact branch (below `lg`) reassign matchMedia themselves.
+  // Default to the large-viewport branch so the bank is visible. Tests that
+  // need the compact branch (below `lg`) reassign matchMedia themselves.
   mockIsLargeViewport(true);
 });
 
 describe('PlannerPage', () => {
-  it('assigns the selected recipe when an empty slot is tapped', async () => {
+  it('does not assign on tap — a bank row then an empty slot opens the editor', async () => {
     const user = userEvent.setup();
     setup();
     render(<PlannerPage />);
 
-    await user.click(screen.getByRole('option', { name: /tomato pasta/i }));
+    const bank = screen.getByRole('complementary', { name: /recipe bank/i });
+    await user.click(
+      within(bank).getByRole('button', { name: /tomato pasta/i }),
+    );
     await user.click(
       screen.getByRole('button', {
         name: /^Lunch on 2026-06-15: empty slot$/i,
       }),
     );
 
-    expect(updateMutateMock).toHaveBeenCalledTimes(1);
-    const payload = updateMutateMock.mock.calls[0]?.[0] as UpdateSlotInput;
-    expect(payload).toEqual({
-      slotId: 100,
-      slotType: 'recipe',
-      leftoversSource: null,
-      chefUserId: null,
-      comment: null,
-      items: [{ recipeId: 10, prepared: 2, eaten: 2, sortOrder: 0 }],
-      dinerUserIds: [],
-      guestCount: 0,
-    });
+    expect(updateMutateMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('heading', { name: /lunch.*Mon 15th Jun 2026/i }),
+    ).toBeInTheDocument();
   });
 
   it('renders the plan-total plant points badge in the header', () => {
@@ -462,8 +456,8 @@ describe('PlannerPage', () => {
 
   // FEAT-40 — two interaction shapes gated on `lg`. Below `lg`: no Recipe
   // Bank, slot taps open the editor — but slot ↔ slot drag still works.
-  // At `lg+`: bank visible alongside the grid, full DnD active, click-to-
-  // assign still works.
+  // At `lg+`: bank visible alongside the grid, full DnD active; the bank
+  // assigns by drag only.
   describe('responsive interaction shape', () => {
     it('hides the Recipe Bank below the `lg` breakpoint', () => {
       mockIsLargeViewport(false);
@@ -471,10 +465,10 @@ describe('PlannerPage', () => {
       render(<PlannerPage />);
 
       expect(
-        screen.queryByRole('listbox', { name: /pickable recipes/i }),
+        screen.queryByRole('complementary', { name: /recipe bank/i }),
       ).not.toBeInTheDocument();
       expect(
-        screen.queryByRole('option', { name: /tomato pasta/i }),
+        screen.queryByRole('list', { name: /pickable recipes/i }),
       ).not.toBeInTheDocument();
     });
 
@@ -514,7 +508,8 @@ describe('PlannerPage', () => {
       setup();
       render(<PlannerPage />);
 
-      const row = screen.getByRole('option', { name: /tomato pasta/i });
+      const bank = screen.getByRole('complementary', { name: /recipe bank/i });
+      const row = within(bank).getByRole('button', { name: /tomato pasta/i });
       expect(row).toBeInTheDocument();
       // The grab cursor on a bank row and a populated slot card is the
       // visible signal that the DnD path is mounted.

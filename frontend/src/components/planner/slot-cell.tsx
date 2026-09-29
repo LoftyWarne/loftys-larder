@@ -3,6 +3,7 @@ import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
 import { Plus, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { RecipeNameLink } from '@/components/recipe-name-link.tsx';
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
 import { SlotCommentLine } from '@/components/planner/slot-comment-line.tsx';
 import { dishQtyLabel, LEFTOVERS_SOURCE_LABEL } from '@/lib/slot-display.ts';
@@ -11,7 +12,7 @@ import { cn } from '@/lib/utils.ts';
 // Reusable slot card (DEC-89). A slot's dishes — the eaten meal and any base
 // cooked ahead — are one list now: tapping the card opens the slot editor where
 // both are managed. FEAT-40 adds optional DnD on the card (the drag handle);
-// click semantics are untouched.
+// click semantics are untouched. Live dish names link to their recipe.
 export interface SlotCellProps {
   slot: PlanSlot;
   onClick: () => void;
@@ -68,6 +69,8 @@ export function SlotCell({
   return (
     <div
       ref={setDropRef}
+      data-slot-id={slot.id}
+      data-slot-type={slot.slotType}
       className={cn(
         'group relative flex h-full min-h-20 w-full flex-col rounded-md border border-input bg-card text-sm transition hover:border-primary',
         slot.slotType === 'empty' && 'border-dashed',
@@ -76,6 +79,10 @@ export function SlotCell({
         isDragging && 'opacity-40',
       )}
     >
+      {/* The editor/drag button fills the card underneath the content, so the
+          dish-name links can sit above it: a link nested inside a <button> is
+          invalid, and keeping links off the drag node means tapping a name
+          navigates without opening the editor or lifting the card. */}
       <button
         type="button"
         ref={setDragRef}
@@ -83,13 +90,16 @@ export function SlotCell({
         {...listeners}
         onClick={onClick}
         aria-label={describeSlotForA11y(slot, shortBy)}
-        data-slot-id={slot.id}
-        data-slot-type={slot.slotType}
         className={cn(
-          'flex flex-1 flex-col items-stretch gap-1 rounded-md p-2 text-left focus:outline-none focus:ring-2 focus:ring-ring',
+          'absolute inset-0 rounded-md focus:outline-none focus:ring-2 focus:ring-ring',
           dndEnabled && slot.slotType !== 'empty'
             ? 'cursor-grab'
             : 'cursor-pointer',
+        )}
+      />
+      <div
+        className={cn(
+          'pointer-events-none relative flex flex-1 flex-col items-stretch gap-1 p-2 text-left [&_a]:pointer-events-auto',
           showClear && 'pr-8',
           slot.slotType === 'empty' && 'text-muted-foreground italic',
         )}
@@ -97,7 +107,7 @@ export function SlotCell({
         <SlotBody slot={slot} shortfallByItem={shortfallByItem} />
         {chefChip}
         {commentLine ?? <SlotCommentLine comment={slot.comment} />}
-      </button>
+      </div>
       {showClear && (
         <button
           type="button"
@@ -126,12 +136,16 @@ function SlotBody({
       <div className="flex flex-col gap-0.5">
         <span className="text-xs text-muted-foreground">Leftovers</span>
         <span className="min-w-0 truncate font-medium">
-          {dish
-            ? `${dish.recipeName} ${dishQtyLabel(dish)}`
-            : slot.leftoversSource !== null &&
-                slot.leftoversSource !== 'plan_meal'
-              ? LEFTOVERS_SOURCE_LABEL[slot.leftoversSource]
-              : '—'}
+          {dish ? (
+            <>
+              <RecipeNameLink item={dish} /> {dishQtyLabel(dish)}
+            </>
+          ) : slot.leftoversSource !== null &&
+            slot.leftoversSource !== 'plan_meal' ? (
+            LEFTOVERS_SOURCE_LABEL[slot.leftoversSource]
+          ) : (
+            '—'
+          )}
         </span>
         {short !== undefined && short > 0 && dish && (
           <ShortfallNudge shortBy={short} needsBase={dishNeedsBase(dish)} />
@@ -151,12 +165,7 @@ function SlotBody({
                 data-testid="slot-item-row"
               >
                 <span className="min-w-0 truncate">
-                  <span className="font-medium">{item.recipeName}</span>
-                  {item.isDeleted && (
-                    <span className="ml-1 text-xs text-muted-foreground">
-                      (deleted)
-                    </span>
-                  )}
+                  <RecipeNameLink item={item} />
                   <span className="ml-1 text-xs text-muted-foreground">
                     {dishQtyLabel(item)}
                   </span>

@@ -11,17 +11,12 @@ const SEARCH_DEBOUNCE_MS = 200;
 const PAGE_SIZE = 30;
 
 export interface RecipeBankProps {
-  selectedRecipeId: number | null;
-  onSelect: (recipe: RecipeListItem | null) => void;
   // When true, each row registers as a dnd-kit draggable so it can be dragged
-  // onto an empty slot. Click-to-select keeps working alongside the drag —
-  // the pointer sensor's 5 px activation constraint keeps taps as taps.
+  // onto a slot — the only way the bank assigns a recipe.
   dndEnabled?: boolean;
 }
 
 export function RecipeBank({
-  selectedRecipeId,
-  onSelect,
   dndEnabled = false,
 }: RecipeBankProps): React.ReactElement {
   const [searchInput, setSearchInput] = useState('');
@@ -85,21 +80,13 @@ export function RecipeBank({
       )}
 
       <ul
-        role="listbox"
         aria-label="Pickable recipes"
-        aria-activedescendant={
-          selectedRecipeId !== null
-            ? `recipe-bank-${String(selectedRecipeId)}`
-            : undefined
-        }
         className="flex flex-1 flex-col gap-2 overflow-y-auto"
       >
         {recipes.map((recipe) => (
           <RecipeBankRow
             key={recipe.id}
             recipe={recipe}
-            isSelected={recipe.id === selectedRecipeId}
-            onSelect={onSelect}
             dndEnabled={dndEnabled}
           />
         ))}
@@ -123,15 +110,11 @@ export function RecipeBank({
 
 interface RecipeBankRowProps {
   recipe: RecipeListItem;
-  isSelected: boolean;
-  onSelect: (recipe: RecipeListItem | null) => void;
   dndEnabled: boolean;
 }
 
 function RecipeBankRow({
   recipe,
-  isSelected,
-  onSelect,
   dndEnabled,
 }: RecipeBankRowProps): React.ReactElement {
   // Hook always called; `disabled` short-circuits the drag when we're not in
@@ -143,24 +126,14 @@ function RecipeBankRow({
     disabled: !dndEnabled,
   });
   return (
-    // role="presentation" so axe walks past the <li> when matching
-    // listbox's required `role="option"` children — the button below carries
-    // the actual option semantics.
-    <li role="presentation">
+    <li>
       <button
         type="button"
-        id={`recipe-bank-${String(recipe.id)}`}
         ref={setNodeRef}
-        onClick={() => {
-          onSelect(isSelected ? null : recipe);
-        }}
         {...attributes}
         {...listeners}
-        role="option"
-        aria-selected={isSelected}
         className={cn(
           'flex w-full items-center gap-3 rounded-md border border-input bg-background p-2 text-left transition hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring',
-          isSelected && 'border-primary ring-2 ring-ring',
           dndEnabled && 'cursor-grab',
           isDragging && 'opacity-40',
         )}

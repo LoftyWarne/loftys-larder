@@ -1,6 +1,5 @@
 import type { ListRecipesResult, RecipeListItem } from '@loftys-larder/shared';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { useInfiniteQueryMock } = vi.hoisted(() => ({
@@ -61,7 +60,7 @@ beforeEach(() => {
 describe('RecipeBank', () => {
   it('passes includePickerHidden: true to recipes.list', () => {
     setup();
-    render(<RecipeBank selectedRecipeId={null} onSelect={() => undefined} />);
+    render(<RecipeBank />);
     expect(useInfiniteQueryMock).toHaveBeenCalled();
     const firstCall = useInfiniteQueryMock.mock.calls[0];
     if (!firstCall) throw new Error('expected list query call');
@@ -69,53 +68,36 @@ describe('RecipeBank', () => {
     expect(input.includePickerHidden).toBe(true);
   });
 
-  it('renders one option per recipe', () => {
+  it('renders one row per recipe', () => {
     setup();
-    render(<RecipeBank selectedRecipeId={null} onSelect={() => undefined} />);
+    render(<RecipeBank />);
     expect(
-      screen.getByRole('option', { name: /tomato pasta/i }),
+      screen.getByRole('button', { name: /tomato pasta/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('option', { name: /roast chicken/i }),
+      screen.getByRole('button', { name: /roast chicken/i }),
     ).toBeInTheDocument();
   });
 
-  it('marks the option matching selectedRecipeId as selected', () => {
+  it('has no selection state — rows are drag sources only', () => {
     setup();
-    render(<RecipeBank selectedRecipeId={1} onSelect={() => undefined} />);
-    const selected = screen.getByRole('option', { name: /tomato pasta/i });
-    expect(selected).toHaveAttribute('aria-selected', 'true');
-    const unselected = screen.getByRole('option', { name: /roast chicken/i });
-    expect(unselected).toHaveAttribute('aria-selected', 'false');
-  });
-
-  it('invokes onSelect with the recipe row when clicked', async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    setup();
-    render(<RecipeBank selectedRecipeId={null} onSelect={onSelect} />);
-    await user.click(screen.getByRole('option', { name: /tomato pasta/i }));
-    expect(onSelect).toHaveBeenCalledWith(TOMATO);
-  });
-
-  it('toggles the selection off when the selected option is clicked again', async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    setup();
-    render(<RecipeBank selectedRecipeId={1} onSelect={onSelect} />);
-    await user.click(screen.getByRole('option', { name: /tomato pasta/i }));
-    expect(onSelect).toHaveBeenCalledWith(null);
+    render(<RecipeBank dndEnabled />);
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    const row = screen.getByRole('button', { name: /tomato pasta/i });
+    expect(row).not.toHaveAttribute('aria-selected');
+    expect(row.className).toContain('cursor-grab');
   });
 
   it('shows the empty state when no recipes are returned', () => {
     setup({ items: [] });
-    render(<RecipeBank selectedRecipeId={null} onSelect={() => undefined} />);
+    render(<RecipeBank />);
     expect(screen.getByText(/no recipes yet/i)).toBeInTheDocument();
   });
 
   it('renders a Load more button when there is another page', () => {
     setup({ hasNextPage: true });
-    render(<RecipeBank selectedRecipeId={null} onSelect={() => undefined} />);
+    render(<RecipeBank />);
     expect(
       screen.getByRole('button', { name: /load more/i }),
     ).toBeInTheDocument();

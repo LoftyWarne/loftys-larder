@@ -1,6 +1,7 @@
 import type { PlanSlot } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 
+import { RecipeNameLink } from '@/components/recipe-name-link.tsx';
 import { SlotCommentLine } from '@/components/planner/slot-comment-line.tsx';
 import { SlotDinersChip } from '@/components/planner/slot-diners-chip.tsx';
 import { Button } from '@/components/ui/button.tsx';
@@ -44,33 +45,6 @@ function DishQty({
   );
 }
 
-// A dish name, linking through to its recipe detail page. A recipe soft-deleted
-// after assignment renders tagged "(deleted)" (DEC-21) and never links — there's
-// no live recipe to open. Names stay plain text (DEC-49).
-function RecipeName({
-  item,
-}: {
-  item: PlanSlot['items'][number];
-}): React.ReactElement {
-  if (item.isDeleted) {
-    return (
-      <>
-        {item.recipeName}
-        <span className="ml-1 text-xs text-muted-foreground">(deleted)</span>
-      </>
-    );
-  }
-  return (
-    <Link
-      to="/recipes/$recipeId"
-      params={{ recipeId: String(item.recipeId) }}
-      className="font-medium text-primary underline-offset-2 hover:underline focus-visible:underline"
-    >
-      {item.recipeName}
-    </Link>
-  );
-}
-
 // The right-hand meal summary for a slot. Recipe dishes link to their detail
 // page and carry their quantity (DEC-91); multiple dishes stack. Leftovers name
 // what's actually being eaten — the eaten dish (linked) or the takeaway/other
@@ -88,7 +62,7 @@ function MealContent({ slot }: { slot: PlanSlot }): React.ReactElement {
           <span className="text-muted-foreground">Leftovers · </span>
           {dish ? (
             <>
-              <RecipeName item={dish} />
+              <RecipeNameLink item={dish} />
               <DishQty item={dish} />
             </>
           ) : (
@@ -108,7 +82,7 @@ function MealContent({ slot }: { slot: PlanSlot }): React.ReactElement {
       if (items.length === 1 && item) {
         return (
           <span className="text-sm">
-            <RecipeName item={item} />
+            <RecipeNameLink item={item} />
             <DishQty item={item} />
           </span>
         );
@@ -117,7 +91,7 @@ function MealContent({ slot }: { slot: PlanSlot }): React.ReactElement {
         <ul className="flex flex-col gap-0.5 text-right text-sm">
           {items.map((item) => (
             <li key={item.id}>
-              <RecipeName item={item} />
+              <RecipeNameLink item={item} />
               <DishQty item={item} />
             </li>
           ))}

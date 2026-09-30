@@ -37,6 +37,8 @@ import {
   type MethodDraftStep,
 } from '@/components/recipe-editor/method-editor.tsx';
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
+import { TagFields } from '@/components/recipe-editor/tag-fields.tsx';
+import type { SearchableComboboxOption } from '@/components/searchable-combobox.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { useRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
@@ -49,6 +51,7 @@ interface EditorDraftShape {
   header: HeaderFormValues;
   ingredients: IngredientDraftLine[];
   method: MethodDraftStep[];
+  tags: string[];
 }
 
 export function RecipeEditPage(): React.ReactElement {
@@ -74,6 +77,7 @@ export function RecipeEditPage(): React.ReactElement {
   const updateHeader = trpc.recipes.updateHeader.useMutation();
   const replaceIngredients = trpc.recipes.replaceIngredients.useMutation();
   const replaceMethod = trpc.recipes.replaceMethod.useMutation();
+  const replaceTags = trpc.recipes.replaceTags.useMutation();
   const setServingVariationFields =
     trpc.recipes.setServingVariationFields.useMutation();
 
@@ -82,6 +86,7 @@ export function RecipeEditPage(): React.ReactElement {
     number | undefined
   >();
   const [methodSavedKey, setMethodSavedKey] = useState<number | undefined>();
+  const [tagsSavedKey, setTagsSavedKey] = useState<number | undefined>();
   const [imageSavedKey, setImageSavedKey] = useState<number | undefined>();
   const [servingVariationSavedKey, setServingVariationSavedKey] = useState<
     number | undefined
@@ -99,6 +104,7 @@ export function RecipeEditPage(): React.ReactElement {
   const servingVariationRef = useRef<RecipeSectionHandle>(null);
   const ingredientsRef = useRef<RecipeSectionHandle>(null);
   const methodRef = useRef<RecipeSectionHandle>(null);
+  const tagsRef = useRef<RecipeSectionHandle>(null);
 
   const recipe = recipeQuery.data ?? null;
 
@@ -125,6 +131,7 @@ export function RecipeEditPage(): React.ReactElement {
         tip: step.tip,
         prepAhead: step.prepAhead,
       })),
+      tags: recipe.tags.map((tag) => tag.name),
     };
   }, [recipe]);
 
@@ -185,6 +192,17 @@ export function RecipeEditPage(): React.ReactElement {
       return created;
     },
     [createSourceMutation, utils.recipes.references],
+  );
+
+  const searchTags = useCallback(
+    async (query: string): Promise<readonly SearchableComboboxOption[]> => {
+      const tags = await utils.recipes.listTags.fetch();
+      const lowered = query.trim().toLowerCase();
+      return tags
+        .filter((tag) => tag.name.toLowerCase().includes(lowered))
+        .map((tag) => ({ id: tag.id, label: tag.name }));
+    },
+    [utils.recipes.listTags],
   );
 
   const searchBases = useCallback(
@@ -298,6 +316,20 @@ export function RecipeEditPage(): React.ReactElement {
     }
   }
 
+  async function handleTagsSubmit(names: string[]): Promise<boolean> {
+    setTopLevelError(null);
+    try {
+      await replaceTags.mutateAsync({ recipeId, names });
+      await Promise.all([invalidate(), utils.recipes.listTags.invalidate()]);
+      setTagsSavedKey(Date.now());
+      draft.clearSection('tags');
+      return true;
+    } catch (err) {
+      setTopLevelError(extractMessage(err));
+      return false;
+    }
+  }
+
   async function handleImageChange(secureUrl: string | null): Promise<void> {
     setTopLevelError(null);
     try {
@@ -331,7 +363,7 @@ export function RecipeEditPage(): React.ReactElement {
   // own validation + save and reports success. We stop at the first failure so
   // its error stays on screen — the sections share one top-level error slot, so
   // letting a later section run would clear the failing one's message. Earlier
-  // sections have already saved; navigation only happens once all four pass.
+  // sections have already saved; navigation only happens once every one passes.
   async function handleSaveAndFinish(): Promise<void> {
     setFinishing(true);
     try {
@@ -340,6 +372,7 @@ export function RecipeEditPage(): React.ReactElement {
         servingVariationRef,
         ingredientsRef,
         methodRef,
+        tagsRef,
       ];
       for (const section of sections) {
         const saved = (await section.current?.submit()) ?? false;
@@ -460,6 +493,18 @@ export function RecipeEditPage(): React.ReactElement {
         savedNoticeKey={methodSavedKey}
       />
 
+      <TagFields
+        ref={tagsRef}
+        initialNames={serverDefaults.tags}
+        initialDraftNames={parseDraftTags(defaults.tags)}
+        searchTags={searchTags}
+        onSubmit={handleTagsSubmit}
+        onNamesChange={(names) => {
+          draft.queueAutosave('tags', names);
+        }}
+        savedNoticeKey={tagsSavedKey}
+      />
+
       <ImageUploader
         imageUrl={recipe.imageUrl}
         getCredentials={fetchCredentials}
@@ -521,6 +566,7 @@ const EMPTY_DRAFT_SHAPE: EditorDraftShape = {
   },
   ingredients: [],
   method: [],
+  tags: [],
 };
 
 function toHeaderDefaults(recipe: Recipe): HeaderFormValues {
@@ -578,6 +624,13 @@ function diffHeader(before: HeaderFormValues, after: HeaderFormValues): Patch {
     }
   }
   return patch;
+}
+
+// Drafts are stored as untyped JSON; anything that isn't a list of strings
+// (a corrupt row) falls back to the saved tags.
+function parseDraftTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.every((item) => typeof item === 'string') ? value : undefined;
 }
 
 function extractMessage(err: unknown): string {

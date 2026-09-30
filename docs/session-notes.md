@@ -4,6 +4,21 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-09-30 — Recipe tags: free-form, create-on-type, filter on list / bank / picker (DEC-97)
+
+**Status:** Committed + pushed to `main`. Backend 555, frontend 544 and e2e 24 tests green; typecheck, lint and format clean. Migration `0019_salty_whirlwind` applied to local dev and the e2e DB; prod gets it via `release_command` on this deploy. Not yet eyeballed in a browser.
+
+**Change:** recipes carry free-form tags, added in the editor by typing or picking an existing one. Tags show on cards and the detail page, and a toggle row filters the recipes page, the Recipe Bank and the slot-editor dish picker. Scope confirmed with the user: option A (household tag table + link table), create-on-type only (no rename / merge / delete in v1), AND filtering, filter state in `useState` (not the URL), picker filter resets whenever the sheet opens. The user said dietary tagging isn't necessarily out of scope, so the non-goal adjacency note now allows dietary labels as free-form tags; allergen tracking and exposure warnings stay unbuilt.
+
+- **Schema:** `recipe_tags` (`household_id`, `name`; unique on `(household_id, lower(name))`; CHECK length 1–40) and `recipe_tag_links` (PK `(recipe_id, tag_id)`, index on `tag_id`). Both FKs `restrict`. Tag rows are never deleted; unlinked ones just drop out of `listTags`.
+- **Shared:** `recipeTagNameSchema` (trim + collapse inner whitespace via `normaliseRecipeTagName`, max `RECIPE_TAG_NAME_MAX_LENGTH` = 40), `RECIPE_TAGS_MAX` = 10, `tags` on `recipeListItemSchema` (so also on `recipeSchema`), `tagIds` on `listRecipesInputSchema`, `replaceRecipeTagsInputSchema` / result, `listRecipeTagsResultSchema`.
+- **Backend:** `recipes.replaceTags` is a full replace by name in `withTransaction`: it de-dupes case-insensitively, inserts with `ON CONFLICT DO NOTHING` (so the first spelling wins), then re-links. `recipes.listTags` returns tags on at least one pickable recipe (`pickableRecipesWhere({ includePickerHidden: true })`). `list` filters with one `EXISTS` per tag id and loads page tags in a second query (`loadTagsByRecipe`), which `get` also uses.
+- **Frontend:** `recipe-editor/tag-fields.tsx` is a new editor section (after Method, part of Save & Finish) that wraps the combobox with `onCreate`. The combobox is remounted via `key` after each add to clear the input, then refocused. Drafts carry `tags: string[]`; `parseDraftTags` falls back to the saved tags for a missing or corrupt value. `tag-filter.tsx` (toggle row with `aria-pressed` + ✓, hidden when no tags) is used by `recipes-page`, `recipe-bank` and `slot-editor-sheet`. `recipe-tag-list.tsx` renders the chips on the card and the detail page. The new-recipe page is unchanged (it only saves the header).
+- **Tests:** 13 backend (`recipes-procedures.test.ts` `tags` block, including a rollback test using a temporary `NOT VALID` CHECK), 9 edit page, 4 recipes page, 2 slot editor, 1 detail page. New e2e `specs/recipe-tags.spec.ts` covers tagging in the editor, then filtering the recipes page and the bank. `fixtures/db.ts` now truncates the tag tables.
+- **Open:** the slot-editor picker filter has no e2e (covered by RTL only). Tag rename / merge is the named revisit trigger if drift appears.
+
+---
+
 ## 2026-09-29 — Method steps: prep-ahead mark + "Plan ahead" summary (DEC-96)
 
 **Status:** Committed + pushed to `main`. Backend 542 and frontend 528 tests green; typecheck, lint and format clean. Migration `0018_free_william_stryker` applied to local dev; prod gets it via `release_command` on this deploy.

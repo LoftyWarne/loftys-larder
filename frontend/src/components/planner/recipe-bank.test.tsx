@@ -10,6 +10,7 @@ vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     recipes: {
       list: { useInfiniteQuery: useInfiniteQueryMock },
+      listTags: { useQuery: () => ({ data: [] }) },
     },
   },
 }));
@@ -29,6 +30,7 @@ const TOMATO: RecipeListItem = {
   plantPointsCount: 0,
   averageRating: null,
   ratingCount: 0,
+  tags: [],
 };
 
 const ROAST: RecipeListItem = { ...TOMATO, id: 2, name: 'Roast chicken' };

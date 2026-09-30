@@ -18,6 +18,9 @@ const {
   replaceIngredientsUseMutationMock,
   replaceMethodUseMutationMock,
   setServingVariationFieldsUseMutationMock,
+  replaceTagsMutateAsyncMock,
+  listTagsFetchMock,
+  listTagsInvalidateMock,
   draftGetForRecipeUseQueryMock,
   draftGetNewDraftsUseQueryMock,
   draftUpsertMutateMock,
@@ -42,6 +45,9 @@ const {
   replaceIngredientsUseMutationMock: vi.fn(),
   replaceMethodUseMutationMock: vi.fn(),
   setServingVariationFieldsUseMutationMock: vi.fn(),
+  replaceTagsMutateAsyncMock: vi.fn(),
+  listTagsFetchMock: vi.fn(),
+  listTagsInvalidateMock: vi.fn(),
   draftGetForRecipeUseQueryMock: vi.fn(),
   draftGetNewDraftsUseQueryMock: vi.fn(),
   draftUpsertMutateMock: vi.fn(),
@@ -60,6 +66,10 @@ vi.mock('@/lib/trpc.ts', () => ({
         get: { invalidate: recipeGetInvalidateMock },
         list: { fetch: recipesListFetchMock },
         references: { invalidate: vi.fn().mockResolvedValue(undefined) },
+        listTags: {
+          fetch: listTagsFetchMock,
+          invalidate: listTagsInvalidateMock,
+        },
       },
       ingredients: {
         list: { fetch: ingredientsListFetchMock, invalidate: vi.fn() },
@@ -78,6 +88,9 @@ vi.mock('@/lib/trpc.ts', () => ({
       replaceMethod: { useMutation: replaceMethodUseMutationMock },
       setServingVariationFields: {
         useMutation: setServingVariationFieldsUseMutationMock,
+      },
+      replaceTags: {
+        useMutation: () => ({ mutateAsync: replaceTagsMutateAsyncMock }),
       },
     },
     ingredients: {
@@ -185,6 +198,7 @@ const RECIPE: Recipe = {
   method: [],
   averageRating: null,
   ratingCount: 0,
+  tags: [],
   yourRating: null,
 };
 
@@ -218,6 +232,9 @@ beforeEach(() => {
     mutateAsync: setServingVariationFieldsMutateAsyncMock,
   });
   recipesListFetchMock.mockResolvedValue({ items: [], nextCursor: null });
+  listTagsFetchMock.mockResolvedValue([{ id: 3, name: 'Batch' }]);
+  listTagsInvalidateMock.mockResolvedValue(undefined);
+  replaceTagsMutateAsyncMock.mockResolvedValue({ recipeId: 7, tags: [] });
   recipeGetInvalidateMock.mockResolvedValue(undefined);
   draftGetForRecipeUseQueryMock.mockReturnValue({
     data: null,
@@ -525,5 +542,163 @@ describe('RecipeEditPage', () => {
       screen.getByRole('button', { name: 'Save ingredients' }),
     ).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Save method' })).toBeEnabled();
+  });
+  describe('tags', () => {
+    const TAGGED: Recipe = { ...RECIPE, tags: [{ id: 1, name: 'Quick' }] };
+
+    beforeEach(() => {
+      recipeGetUseQueryMock.mockReturnValue({
+        data: TAGGED,
+        isLoading: false,
+        error: null,
+      });
+    });
+
+    it('shows the saved tags as removable chips', () => {
+      render(<RecipeEditPage />);
+      expect(
+        screen.getByRole('button', { name: 'Remove tag Quick' }),
+      ).toBeInTheDocument();
+    });
+
+    it('adds a new tag by typing and saves the names', async () => {
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      await user.type(
+        screen.getByRole('combobox', { name: 'Add a tag' }),
+        '  Sunday   roast',
+      );
+      await user.click(await screen.findByText('Add “Sunday roast”'));
+      await user.click(screen.getByRole('button', { name: 'Save tags' }));
+
+      await waitFor(() => {
+        expect(replaceTagsMutateAsyncMock).toHaveBeenCalledWith({
+          recipeId: 7,
+          names: ['Quick', 'Sunday roast'],
+        });
+      });
+      expect(listTagsInvalidateMock).toHaveBeenCalled();
+      expect(recipeGetInvalidateMock).toHaveBeenCalled();
+    });
+
+    it('offers existing household tags and hides ones already on the recipe', async () => {
+      listTagsFetchMock.mockResolvedValue([
+        { id: 1, name: 'Quick' },
+        { id: 3, name: 'Batch' },
+      ]);
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      await user.click(screen.getByRole('combobox', { name: 'Add a tag' }));
+      await user.click(await screen.findByRole('option', { name: 'Batch' }));
+
+      expect(
+        screen.getByRole('button', { name: 'Remove tag Batch' }),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole('combobox', { name: 'Add a tag' }));
+      await waitFor(() => {
+        expect(listTagsFetchMock).toHaveBeenCalledTimes(2);
+      });
+      expect(screen.queryByRole('option', { name: 'Quick' })).toBeNull();
+      expect(screen.queryByRole('option', { name: 'Batch' })).toBeNull();
+    });
+
+    it('ignores a case-insensitive duplicate of a chip already added', async () => {
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      await user.type(
+        screen.getByRole('combobox', { name: 'Add a tag' }),
+        'quick',
+      );
+      await user.click(await screen.findByText('Add “quick”'));
+
+      expect(
+        screen.getAllByRole('button', { name: /^Remove tag/ }),
+      ).toHaveLength(1);
+    });
+
+    it('removes a chip and saves the remaining names', async () => {
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      await user.click(
+        screen.getByRole('button', { name: 'Remove tag Quick' }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Save tags' }));
+
+      await waitFor(() => {
+        expect(replaceTagsMutateAsyncMock).toHaveBeenCalledWith({
+          recipeId: 7,
+          names: [],
+        });
+      });
+    });
+
+    it('does not call the server when the tags are unchanged', async () => {
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      await user.click(screen.getByRole('button', { name: 'Save tags' }));
+
+      expect(replaceTagsMutateAsyncMock).not.toHaveBeenCalled();
+    });
+
+    it('restores tags from a draft', () => {
+      draftGetForRecipeUseQueryMock.mockReturnValue({
+        data: {
+          id: 99,
+          draftData: { version: 1, fields: { tags: ['Quick', 'Draft tag'] } },
+          lastUpdatedAt: 1700000000000,
+        },
+        isSuccess: true,
+        error: null,
+      });
+
+      render(<RecipeEditPage />);
+
+      expect(
+        screen.getByRole('button', { name: 'Remove tag Draft tag' }),
+      ).toBeInTheDocument();
+    });
+
+    it('falls back to the saved tags for a draft without a valid tags field', () => {
+      draftGetForRecipeUseQueryMock.mockReturnValue({
+        data: {
+          id: 99,
+          draftData: { version: 1, fields: { tags: 'not-a-list' } },
+          lastUpdatedAt: 1700000000000,
+        },
+        isSuccess: true,
+        error: null,
+      });
+
+      render(<RecipeEditPage />);
+
+      expect(
+        screen.getByRole('button', { name: 'Remove tag Quick' }),
+      ).toBeInTheDocument();
+    });
+
+    it('saves changed tags as part of Save & Finish', async () => {
+      replaceIngredientsMutateAsyncMock.mockResolvedValue(undefined);
+      replaceMethodMutateAsyncMock.mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      await user.click(
+        screen.getByRole('button', { name: 'Remove tag Quick' }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Save & Finish' }));
+
+      await waitFor(() => {
+        expect(navigateMock).toHaveBeenCalled();
+      });
+      expect(replaceTagsMutateAsyncMock).toHaveBeenCalledWith({
+        recipeId: 7,
+        names: [],
+      });
+    });
   });
 });

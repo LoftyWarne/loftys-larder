@@ -156,6 +156,7 @@ const FULL_RECIPE: Recipe = {
   ],
   averageRating: null,
   ratingCount: 0,
+  tags: [],
   yourRating: null,
 };
 
@@ -364,6 +365,27 @@ describe('RecipeDetailPage', () => {
     expect(widget).toHaveAttribute('data-your-rating', 'null');
     expect(widget).toHaveAttribute('data-disabled', 'false');
     expect(screen.queryByLabelText(/average rating/i)).not.toBeInTheDocument();
+  });
+
+  it('lists the recipe’s tags and omits the list when there are none', () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, tags: [{ id: 1, name: 'Weeknight' }] },
+      isLoading: false,
+      error: null,
+    });
+    const { unmount } = render(<RecipeDetailPage />);
+    expect(screen.getByRole('list', { name: 'Tags' })).toHaveTextContent(
+      'Weeknight',
+    );
+    unmount();
+
+    getUseQueryMock.mockReturnValue({
+      data: FULL_RECIPE,
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    expect(screen.queryByRole('list', { name: 'Tags' })).toBeNull();
   });
 
   it('renders the average summary when there is at least one rating', () => {

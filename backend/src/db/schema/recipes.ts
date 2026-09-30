@@ -9,6 +9,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   uniqueIndex,
@@ -162,5 +163,46 @@ export const recipeMethod = pgTable(
       table.recipeId,
       table.stepNumber,
     ),
+  ],
+);
+
+// Free-form organising tags (DEC-97). The household's vocabulary lives here,
+// one row per tag; `lower(name)` uniqueness makes "Weeknight" and "weeknight"
+// the same tag. Rows are never deleted — unlinked tags just drop out of the
+// tag list.
+export const recipeTags = pgTable(
+  'recipe_tags',
+  {
+    id: integer().generatedAlwaysAsIdentity().primaryKey(),
+    householdId: uuid()
+      .notNull()
+      .references(() => households.id, { onDelete: 'restrict' }),
+    name: text().notNull(),
+  },
+  (table) => [
+    uniqueIndex('recipe_tags_household_lower_name_unique').on(
+      table.householdId,
+      sql`lower(${table.name})`,
+    ),
+    check(
+      'recipe_tags_name_length',
+      sql`char_length(${table.name}) BETWEEN 1 AND 40`,
+    ),
+  ],
+);
+
+export const recipeTagLinks = pgTable(
+  'recipe_tag_links',
+  {
+    recipeId: integer()
+      .notNull()
+      .references(() => recipes.id, { onDelete: 'restrict' }),
+    tagId: integer()
+      .notNull()
+      .references(() => recipeTags.id, { onDelete: 'restrict' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.recipeId, table.tagId] }),
+    index('recipe_tag_links_tag_id_idx').on(table.tagId),
   ],
 );

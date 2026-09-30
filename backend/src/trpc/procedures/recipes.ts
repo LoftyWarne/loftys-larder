@@ -20,6 +20,7 @@ import {
   listRecipesInputSchema,
   listRecipesResultSchema,
   listRelatedRecipesInputSchema,
+  listRecipeTagsResultSchema,
   listRelatedRecipesResultSchema,
   rateRecipeInputSchema,
   rateRecipeResultSchema,
@@ -32,6 +33,8 @@ import {
   replaceRecipeIngredientsResultSchema,
   replaceRecipeMethodInputSchema,
   replaceRecipeMethodResultSchema,
+  replaceRecipeTagsInputSchema,
+  replaceRecipeTagsResultSchema,
   setRecipeServingVariationFieldsInputSchema,
   setRecipeServingVariationFieldsResultSchema,
   setRecipeDeletionInputSchema,
@@ -47,15 +50,18 @@ import {
   type DomainErrorCode,
   type EditRecipeCommentResult,
   type ListRecipeCommentsResult,
+  type ListRecipeTagsResult,
   type ListRecipesResult,
   type ListRelatedRecipesResult,
   type RateRecipeResult,
   type Recipe,
   type RecipeReferenceItem,
+  type RecipeTag,
   type RecipeReferences,
   type RemoveRelatedRecipeResult,
   type ReplaceRecipeIngredientsResult,
   type ReplaceRecipeMethodResult,
+  type ReplaceRecipeTagsResult,
   type SetRecipeServingVariationFieldsResult,
   type SetRecipeDeletionResult,
   type UnrateRecipeResult,
@@ -79,6 +85,8 @@ import {
   recipeIngredients,
   recipeMethod,
   recipeSources,
+  recipeTagLinks,
+  recipeTags,
   recipes,
 } from '../../db/schema/recipes.ts';
 import {
@@ -164,6 +172,19 @@ export const recipesRouter = router({
         conditions.push(sql`lower(${recipes.name}) like ${`%${lowered}%`}`);
       }
 
+      // AND semantics: one EXISTS per requested tag (DEC-97). Links only ever
+      // point at this household's tags, so a foreign tag id simply matches
+      // nothing.
+      for (const tagId of new Set(input?.tagIds ?? [])) {
+        conditions.push(
+          sql`exists (
+            select 1 from ${recipeTagLinks}
+            where recipe_tag_links.recipe_id = recipes.id
+              and recipe_tag_links.tag_id = ${tagId}
+          )`,
+        );
+      }
+
       // Keyset pagination on (lower(name), id). Compare by `lower(name)` for
       // deterministic ordering identical to the ORDER BY clause; ties broken
       // by id.
@@ -224,6 +245,10 @@ export const recipesRouter = router({
         hasMore && last
           ? { lowerName: last.name.toLowerCase(), id: last.id }
           : null;
+      const tagsByRecipe = await loadTagsByRecipe(
+        ctx.db,
+        page.map((row) => row.id),
+      );
 
       return {
         items: page.map((row) => ({
@@ -240,6 +265,7 @@ export const recipesRouter = router({
           averageRating:
             row.averageRating === null ? null : Number(row.averageRating),
           ratingCount: row.ratingCount,
+          tags: tagsByRecipe.get(row.id) ?? [],
         })),
         nextCursor,
       };
@@ -258,7 +284,7 @@ export const recipesRouter = router({
       // via an aliased self-join so the editor can render the base affordance
       // + a "(deleted)" hint without a second request.
       const baseRecipe = alias(recipes, 'base_recipe');
-      const [headerRows, ingredientRows, methodRows, ratingRow] =
+      const [headerRows, ingredientRows, methodRows, ratingRow, tagsByRecipe] =
         await Promise.all([
           ctx.db
             .select({
@@ -314,6 +340,7 @@ export const recipesRouter = router({
             .where(eq(recipeMethod.recipeId, recipeId))
             .orderBy(asc(recipeMethod.stepNumber)),
           loadRatingAggregate(ctx.db, recipeId, userId),
+          loadTagsByRecipe(ctx.db, [recipeId]),
         ]);
 
       const header = headerRows[0];
@@ -357,6 +384,7 @@ export const recipesRouter = router({
         averageRating: ratingRow.averageRating,
         ratingCount: ratingRow.ratingCount,
         yourRating: ratingRow.yourRating,
+        tags: tagsByRecipe.get(recipeId) ?? [],
       };
     }),
 
@@ -572,6 +600,83 @@ export const recipesRouter = router({
       });
 
       return { recipeId: input.recipeId, count: input.steps.length };
+    }),
+
+  // Full replace by name (DEC-97). Unknown names are inserted into the
+  // household vocabulary; `ON CONFLICT DO NOTHING` against the
+  // `lower(name)` unique index means an existing spelling is kept and reused.
+  replaceTags: protectedProcedure
+    .input(replaceRecipeTagsInputSchema)
+    .output(replaceRecipeTagsResultSchema)
+    .mutation(async ({ ctx, input }): Promise<ReplaceRecipeTagsResult> => {
+      await assertRecipeInHousehold(ctx.db, input.recipeId);
+
+      const byLowerName = new Map<string, string>();
+      for (const name of input.names) {
+        const key = name.toLowerCase();
+        if (!byLowerName.has(key)) byLowerName.set(key, name);
+      }
+      const names = Array.from(byLowerName.values());
+
+      const withTransaction = makeWithTransaction(ctx.db);
+      await withTransaction(async (tx) => {
+        await tx
+          .delete(recipeTagLinks)
+          .where(eq(recipeTagLinks.recipeId, input.recipeId));
+        if (names.length === 0) return;
+
+        await tx
+          .insert(recipeTags)
+          .values(
+            names.map((name) => ({ householdId: CURRENT_HOUSEHOLD_ID, name })),
+          )
+          .onConflictDoNothing();
+        const tagRows = await tx
+          .select({ id: recipeTags.id })
+          .from(recipeTags)
+          .where(
+            and(
+              eq(recipeTags.householdId, CURRENT_HOUSEHOLD_ID),
+              inArray(sql`lower(${recipeTags.name})`, [...byLowerName.keys()]),
+            ),
+          );
+        await tx.insert(recipeTagLinks).values(
+          tagRows.map((row) => ({
+            recipeId: input.recipeId,
+            tagId: row.id,
+          })),
+        );
+      });
+
+      const tagsByRecipe = await loadTagsByRecipe(ctx.db, [input.recipeId]);
+      return {
+        recipeId: input.recipeId,
+        tags: tagsByRecipe.get(input.recipeId) ?? [],
+      };
+    }),
+
+  // Tags on at least one pickable recipe — a tag whose recipes are all
+  // soft-deleted (or that has no links left) drops out (DEC-21, DEC-97).
+  listTags: protectedProcedure
+    .output(listRecipeTagsResultSchema)
+    .query(async ({ ctx }): Promise<ListRecipeTagsResult> => {
+      return ctx.db
+        .selectDistinct({
+          id: recipeTags.id,
+          name: recipeTags.name,
+          lowerName: sql<string>`lower(${recipeTags.name})`,
+        })
+        .from(recipeTags)
+        .innerJoin(recipeTagLinks, eq(recipeTagLinks.tagId, recipeTags.id))
+        .innerJoin(recipes, eq(recipes.id, recipeTagLinks.recipeId))
+        .where(
+          and(
+            eq(recipeTags.householdId, CURRENT_HOUSEHOLD_ID),
+            pickableRecipesWhere({ includePickerHidden: true }),
+          ),
+        )
+        .orderBy(sql`lower(${recipeTags.name})`, asc(recipeTags.id))
+        .then((rows) => rows.map(({ id, name }) => ({ id, name })));
     }),
 
   softDelete: protectedProcedure
@@ -1135,6 +1240,35 @@ async function setRecipeDeletion(
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipe not found' });
   }
   return { id: row.id, isDeleted: row.isDeleted };
+}
+
+async function loadTagsByRecipe(
+  db: Db,
+  recipeIds: readonly number[],
+): Promise<Map<number, RecipeTag[]>> {
+  const byRecipe = new Map<number, RecipeTag[]>();
+  if (recipeIds.length === 0) return byRecipe;
+  const rows = await db
+    .select({
+      recipeId: recipeTagLinks.recipeId,
+      id: recipeTags.id,
+      name: recipeTags.name,
+    })
+    .from(recipeTagLinks)
+    .innerJoin(recipeTags, eq(recipeTags.id, recipeTagLinks.tagId))
+    .where(
+      and(
+        inArray(recipeTagLinks.recipeId, [...recipeIds]),
+        eq(recipeTags.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .orderBy(asc(sql`lower(${recipeTags.name})`), asc(recipeTags.id));
+  for (const row of rows) {
+    const list = byRecipe.get(row.recipeId) ?? [];
+    list.push({ id: row.id, name: row.name });
+    byRecipe.set(row.recipeId, list);
+  }
+  return byRecipe;
 }
 
 async function loadIngredientLines(

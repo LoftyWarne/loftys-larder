@@ -9,7 +9,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listFetchMock, getQueryMock } = vi.hoisted(() => ({
+const { listFetchMock, getQueryMock, listTagsQueryMock } = vi.hoisted(() => ({
+  listTagsQueryMock: vi.fn(),
   listFetchMock: vi.fn(),
   getQueryMock: vi.fn(),
 }));
@@ -23,6 +24,7 @@ vi.mock('@/lib/trpc.ts', () => ({
     }),
     recipes: {
       get: { useQuery: getQueryMock },
+      listTags: { useQuery: listTagsQueryMock },
     },
   },
 }));
@@ -95,6 +97,7 @@ function listItem(overrides: Partial<RecipeListItem> = {}): RecipeListItem {
     plantPointsCount: 0,
     averageRating: null,
     ratingCount: 0,
+    tags: [],
     ...overrides,
   };
 }
@@ -108,6 +111,8 @@ beforeEach(() => {
   listFetchMock.mockReset();
   getQueryMock.mockReset();
   getQueryMock.mockReturnValue({ data: undefined });
+  listTagsQueryMock.mockReset();
+  listTagsQueryMock.mockReturnValue({ data: [] });
   setupListMock([]);
 });
 
@@ -317,6 +322,62 @@ describe('SlotEditorSheet — meal items', () => {
     });
     const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
     expect(input.items.filter((i) => i.eaten > 0)).toHaveLength(0);
+  });
+
+  it('narrows the dish picker by the selected tag', async () => {
+    const user = userEvent.setup();
+    listTagsQueryMock.mockReturnValue({ data: [{ id: 7, name: 'Quick' }] });
+    render(
+      <SlotEditorSheet
+        open
+        slot={{ ...RECIPE_SLOT, items: [] }}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Quick' }));
+    await user.click(screen.getByRole('combobox', { name: 'Add a dish' }));
+
+    await waitFor(() => {
+      expect(listFetchMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ tagIds: [7] }),
+      );
+    });
+  });
+
+  it('starts with no tag selected each time the sheet opens', async () => {
+    const user = userEvent.setup();
+    listTagsQueryMock.mockReturnValue({ data: [{ id: 7, name: 'Quick' }] });
+    const props = {
+      open: true,
+      members: [],
+      isSaving: false,
+      slots: [],
+      onClose: () => undefined,
+      onSave: () => undefined,
+    };
+    const { rerender } = render(
+      <SlotEditorSheet {...props} slot={{ ...RECIPE_SLOT, items: [] }} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Quick' }));
+    expect(screen.getByRole('button', { name: 'Quick' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    rerender(<SlotEditorSheet {...props} slot={null} />);
+    rerender(
+      <SlotEditorSheet {...props} slot={{ ...RECIPE_SLOT, items: [] }} />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Quick' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 
   it('adds a picked base recipe as a cooked-ahead item', async () => {

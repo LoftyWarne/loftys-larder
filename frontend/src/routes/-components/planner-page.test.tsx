@@ -84,6 +84,7 @@ vi.mock('@/lib/trpc.ts', () => ({
     useQueries: plantsForDayUseQueriesMock,
     recipes: {
       list: { useInfiniteQuery: recipesUseInfiniteQueryMock },
+      listTags: { useQuery: () => ({ data: [] }) },
       get: { useQuery: vi.fn().mockReturnValue({ data: undefined }) },
     },
     user: { listHouseholdMembers: { useQuery: membersUseQueryMock } },
@@ -119,6 +120,7 @@ const TOMATO: RecipeListItem = {
   plantPointsCount: 0,
   averageRating: null,
   ratingCount: 0,
+  tags: [],
 };
 
 const EMPTY_SLOT: PlanSlot = {

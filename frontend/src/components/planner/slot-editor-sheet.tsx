@@ -20,6 +20,7 @@ import {
   type SearchableComboboxHandle,
   type SearchableComboboxOption,
 } from '@/components/searchable-combobox.tsx';
+import { TagFilter } from '@/components/tag-filter.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import {
   Dialog,
@@ -183,6 +184,7 @@ export function SlotEditorSheet({
   const formId = useId();
   const [state, setState] = useState<EditorState | null>(null);
   const [isAddingDish, setIsAddingDish] = useState(false);
+  const [tagIds, setTagIds] = useState<number[]>([]);
   const comboboxRef = useRef<SearchableComboboxHandle>(null);
 
   useEffect(() => {
@@ -191,6 +193,7 @@ export function SlotEditorSheet({
       return;
     }
     setIsAddingDish(false);
+    setTagIds([]);
     // A batch-prep-only occasion is saved as an `empty`-status slot still
     // carrying its prepared-only items (DEC-91: `recipe` iff ≥1 eaten item).
     // The dish list only renders under "Cooking", so open such a slot in
@@ -577,6 +580,9 @@ export function SlotEditorSheet({
                   })}
                 </div>
               )}
+              {showAdder && (
+                <TagFilter selectedIds={tagIds} onChange={setTagIds} />
+              )}
               {showAdder ? (
                 <SearchableCombobox<RecipeOption>
                   ref={comboboxRef}
@@ -591,6 +597,7 @@ export function SlotEditorSheet({
                   searchQuery={async (query) => {
                     const result = await utils.recipes.list.fetch({
                       search: query || undefined,
+                      tagIds: tagIds.length > 0 ? tagIds : undefined,
                       includePickerHidden: true,
                       limit: 20,
                     });

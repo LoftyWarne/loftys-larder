@@ -136,6 +136,18 @@ export {
   RECIPE_STEP_NOTE_MAX_LENGTH,
   stepPrepAheadSchema,
   type StepPrepAhead,
+  RECIPE_TAG_NAME_MAX_LENGTH,
+  RECIPE_TAGS_MAX,
+  normaliseRecipeTagName,
+  recipeTagNameSchema,
+  recipeTagSchema,
+  type RecipeTag,
+  replaceRecipeTagsInputSchema,
+  type ReplaceRecipeTagsInput,
+  replaceRecipeTagsResultSchema,
+  type ReplaceRecipeTagsResult,
+  listRecipeTagsResultSchema,
+  type ListRecipeTagsResult,
 } from './schemas/recipes.ts';
 export {
   RECIPE_DRAFT_VERSION,

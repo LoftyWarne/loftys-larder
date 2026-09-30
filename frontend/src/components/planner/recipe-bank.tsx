@@ -3,6 +3,7 @@ import type { ListRecipesCursor, RecipeListItem } from '@loftys-larder/shared';
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button.tsx';
+import { TagFilter } from '@/components/tag-filter.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { trpc } from '@/lib/trpc.ts';
 import { cn } from '@/lib/utils.ts';
@@ -21,6 +22,7 @@ export function RecipeBank({
 }: RecipeBankProps): React.ReactElement {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [tagIds, setTagIds] = useState<number[]>([]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -34,6 +36,7 @@ export function RecipeBank({
   const listQuery = trpc.recipes.list.useInfiniteQuery(
     {
       search: debouncedSearch || undefined,
+      tagIds: tagIds.length > 0 ? tagIds : undefined,
       includePickerHidden: true,
       limit: PAGE_SIZE,
     },
@@ -44,7 +47,7 @@ export function RecipeBank({
   );
 
   const recipes = listQuery.data?.pages.flatMap((page) => page.items) ?? [];
-  const hasSearch = debouncedSearch.length > 0;
+  const hasSearch = debouncedSearch.length > 0 || tagIds.length > 0;
 
   return (
     <aside
@@ -60,6 +63,8 @@ export function RecipeBank({
           setSearchInput(event.target.value);
         }}
       />
+
+      <TagFilter selectedIds={tagIds} onChange={setTagIds} />
 
       {listQuery.isLoading && (
         <p role="status" className="text-sm text-muted-foreground">

@@ -31,6 +31,8 @@ import {
   recipeIngredients,
   recipeMethod,
   recipeSources,
+  recipeTagLinks,
+  recipeTags,
   recipes,
 } from '../src/db/schema/recipes.ts';
 import {
@@ -88,6 +90,8 @@ describe('recipes procedures', () => {
         ${recipeRatings},
         ${recipeComments},
         ${relatedRecipes},
+        ${recipeTagLinks},
+        ${recipeTags},
         ${recipeMethod},
         ${recipeIngredients},
         ${recipes},
@@ -2430,6 +2434,244 @@ describe('recipes procedures', () => {
       const result = await caller.recipes.listRelated({ recipeId: anchor });
 
       expect(result.items.map((r) => r.id)).toEqual([partner]);
+    });
+  });
+  describe('tags', () => {
+    async function tagNames(recipeId: number): Promise<string[]> {
+      const caller = createCaller(makeContext());
+      const recipe = await caller.recipes.get({ id: recipeId });
+      return recipe.tags.map((tag) => tag.name);
+    }
+
+    it('creates unknown tags and returns them sorted by name', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const caller = createCaller(makeContext());
+
+      const result = await caller.recipes.replaceTags({
+        recipeId,
+        names: ['weeknight', 'Freezer-friendly'],
+      });
+
+      expect(result.tags.map((tag) => tag.name)).toEqual([
+        'Freezer-friendly',
+        'weeknight',
+      ]);
+      const rows = await db
+        .select({ householdId: recipeTags.householdId })
+        .from(recipeTags);
+      expect(rows).toEqual([
+        { householdId: CURRENT_HOUSEHOLD_ID },
+        { householdId: CURRENT_HOUSEHOLD_ID },
+      ]);
+    });
+
+    it('reuses an existing tag case-insensitively, keeping the first spelling', async () => {
+      const first = await insertRecipe({ name: 'Dal' });
+      const second = await insertRecipe({ name: 'Chilli' });
+      const caller = createCaller(makeContext());
+
+      const a = await caller.recipes.replaceTags({
+        recipeId: first,
+        names: ['Weeknight'],
+      });
+      const b = await caller.recipes.replaceTags({
+        recipeId: second,
+        names: ['  weeknight  '],
+      });
+
+      expect(b.tags).toEqual(a.tags);
+      expect(b.tags.map((tag) => tag.name)).toEqual(['Weeknight']);
+      expect(await db.select().from(recipeTags)).toHaveLength(1);
+    });
+
+    it('collapses inner whitespace and de-duplicates names in one call', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const caller = createCaller(makeContext());
+
+      const result = await caller.recipes.replaceTags({
+        recipeId,
+        names: ['Sunday   roast', 'sunday roast'],
+      });
+
+      expect(result.tags.map((tag) => tag.name)).toEqual(['Sunday roast']);
+    });
+
+    it('replaces the previous set and clears with an empty array', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceTags({ recipeId, names: ['A', 'B'] });
+
+      await caller.recipes.replaceTags({ recipeId, names: ['B', 'C'] });
+      expect(await tagNames(recipeId)).toEqual(['B', 'C']);
+
+      await caller.recipes.replaceTags({ recipeId, names: [] });
+      expect(await tagNames(recipeId)).toEqual([]);
+    });
+
+    it('rolls back the link delete when the link insert fails', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceTags({ recipeId, names: ['Keep'] });
+
+      // A NOT VALID check leaves the existing row alone but rejects every new
+      // link, so the failure lands after the DELETE inside the transaction.
+      await db.execute(
+        sql`alter table recipe_tag_links add constraint block_new_links check (tag_id < 0) not valid`,
+      );
+      try {
+        await expect(
+          caller.recipes.replaceTags({ recipeId, names: ['Other'] }),
+        ).rejects.toBeDefined();
+      } finally {
+        await db.execute(
+          sql`alter table recipe_tag_links drop constraint block_new_links`,
+        );
+      }
+
+      expect(await tagNames(recipeId)).toEqual(['Keep']);
+    });
+
+    it('rejects more than the tag limit', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const caller = createCaller(makeContext());
+      const names = Array.from({ length: 11 }, (_, i) => `tag ${String(i)}`);
+
+      await expect(
+        caller.recipes.replaceTags({ recipeId, names }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects a blank or over-long name', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.replaceTags({ recipeId, names: ['   '] }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        caller.recipes.replaceTags({ recipeId, names: ['x'.repeat(41)] }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('returns NOT_FOUND for a recipe in another household', async () => {
+      const otherId = await insertRecipe({
+        name: 'Other',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.replaceTags({ recipeId: otherId, names: ['A'] }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('includes tags on list items', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      await insertRecipe({ name: 'Plain' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceTags({ recipeId, names: ['b', 'A'] });
+
+      const result = await caller.recipes.list();
+
+      expect(
+        result.items.map((r) => [r.name, r.tags.map((t) => t.name)]),
+      ).toEqual([
+        ['Dal', ['A', 'b']],
+        ['Plain', []],
+      ]);
+    });
+
+    it('filters the list to recipes carrying every requested tag', async () => {
+      const both = await insertRecipe({ name: 'Both' });
+      const onlyA = await insertRecipe({ name: 'Only A' });
+      await insertRecipe({ name: 'None' });
+      const caller = createCaller(makeContext());
+      const tagged = await caller.recipes.replaceTags({
+        recipeId: both,
+        names: ['A', 'B'],
+      });
+      await caller.recipes.replaceTags({ recipeId: onlyA, names: ['A'] });
+      const [tagA, tagB] = tagged.tags;
+      if (!tagA || !tagB) throw new Error('expected two tags');
+
+      const justA = await caller.recipes.list({ tagIds: [tagA.id] });
+      expect(justA.items.map((r) => r.name)).toEqual(['Both', 'Only A']);
+
+      const aAndB = await caller.recipes.list({ tagIds: [tagA.id, tagB.id] });
+      expect(aAndB.items.map((r) => r.name)).toEqual(['Both']);
+    });
+
+    it('combines the tag filter with search and the keyset cursor', async () => {
+      const ids = await Promise.all(
+        ['Apple pie', 'Apple tart', 'Apple crumble', 'Banana bread'].map(
+          (name) => insertRecipe({ name }),
+        ),
+      );
+      const caller = createCaller(makeContext());
+      let tagId = 0;
+      for (const id of ids) {
+        const result = await caller.recipes.replaceTags({
+          recipeId: id,
+          names: ['Pudding'],
+        });
+        tagId = result.tags[0]?.id ?? 0;
+      }
+
+      const first = await caller.recipes.list({
+        tagIds: [tagId],
+        search: 'apple',
+        limit: 2,
+      });
+      expect(first.items.map((r) => r.name)).toEqual([
+        'Apple crumble',
+        'Apple pie',
+      ]);
+      const second = await caller.recipes.list({
+        tagIds: [tagId],
+        search: 'apple',
+        limit: 2,
+        cursor: first.nextCursor ?? undefined,
+      });
+      expect(second.items.map((r) => r.name)).toEqual(['Apple tart']);
+      expect(second.nextCursor).toBeNull();
+    });
+
+    it('listTags returns only tags on pickable recipes, sorted by name', async () => {
+      const live = await insertRecipe({ name: 'Live' });
+      const deleted = await insertRecipe({ name: 'Gone' });
+      const cleared = await insertRecipe({ name: 'Cleared' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceTags({
+        recipeId: live,
+        names: ['weeknight', 'Batch'],
+      });
+      await caller.recipes.replaceTags({
+        recipeId: deleted,
+        names: ['Party', 'weeknight'],
+      });
+      await caller.recipes.replaceTags({ recipeId: cleared, names: ['Old'] });
+      await caller.recipes.replaceTags({ recipeId: cleared, names: [] });
+      await caller.recipes.softDelete({ id: deleted });
+
+      const tags = await caller.recipes.listTags();
+
+      expect(tags.map((tag) => tag.name)).toEqual(['Batch', 'weeknight']);
+    });
+
+    it("listTags ignores another household's tags", async () => {
+      const otherRecipe = await insertRecipe({
+        name: 'Other',
+        householdId: OTHER_HOUSEHOLD_ID,
+      });
+      const inserted = await db
+        .insert(recipeTags)
+        .values({ householdId: OTHER_HOUSEHOLD_ID, name: 'Theirs' })
+        .returning({ id: recipeTags.id });
+      const tagId = inserted[0]?.id;
+      if (tagId === undefined) throw new Error('tag insert failed');
+      await db.insert(recipeTagLinks).values({ recipeId: otherRecipe, tagId });
+
+      const caller = createCaller(makeContext());
+      expect(await caller.recipes.listTags()).toEqual([]);
     });
   });
 });

@@ -55,6 +55,8 @@ export async function resetHouseholdData(): Promise<void> {
         meal_plans,
         recipe_method,
         recipe_ingredients,
+        recipe_tag_links,
+        recipe_tags,
         recipes,
         recipe_sources,
         ingredients

@@ -51,6 +51,38 @@ export const recipeMethodStepSchema = z.object({
 
 export type RecipeMethodStep = z.infer<typeof recipeMethodStepSchema>;
 
+// Free-form organising tags (DEC-97). Names are plain text (DEC-49); the
+// household vocabulary is case-insensitively unique, so the first spelling
+// used is the one kept.
+export const RECIPE_TAG_NAME_MAX_LENGTH = 40;
+export const RECIPE_TAGS_MAX = 10;
+
+const recipeTagIdSchema = z.number().int().positive();
+
+export function normaliseRecipeTagName(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+export const recipeTagNameSchema = z
+  .string()
+  .transform(normaliseRecipeTagName)
+  .pipe(
+    z
+      .string()
+      .min(1, 'Tag cannot be blank')
+      .max(
+        RECIPE_TAG_NAME_MAX_LENGTH,
+        `Tag must be ${String(RECIPE_TAG_NAME_MAX_LENGTH)} characters or fewer`,
+      ),
+  );
+
+export const recipeTagSchema = z.object({
+  id: recipeTagIdSchema,
+  name: z.string(),
+});
+
+export type RecipeTag = z.infer<typeof recipeTagSchema>;
+
 // Browse card / picker row.
 export const recipeListItemSchema = z.object({
   id: recipeIdSchema,
@@ -67,6 +99,8 @@ export const recipeListItemSchema = z.object({
   // Aggregate over `recipe_ratings`; `null` average when no ratings exist.
   averageRating: z.number().nullable(),
   ratingCount: z.number().int().nonnegative(),
+  // Sorted by name, case-insensitively.
+  tags: z.array(recipeTagSchema),
 });
 
 export type RecipeListItem = z.infer<typeof recipeListItemSchema>;
@@ -117,6 +151,8 @@ export const listRecipesInputSchema = z
     includeDeleted: z.boolean().optional(),
     includePickerHidden: z.boolean().optional(),
     isBase: z.boolean().optional(),
+    // A recipe must carry every listed tag (AND).
+    tagIds: z.array(recipeTagIdSchema).max(RECIPE_TAGS_MAX).optional(),
     cursor: listRecipesCursorSchema.optional(),
     limit: z.number().int().min(1).max(60).optional(),
   })
@@ -322,6 +358,31 @@ export const replaceRecipeMethodResultSchema = z.object({
 export type ReplaceRecipeMethodResult = z.infer<
   typeof replaceRecipeMethodResultSchema
 >;
+
+// Full replace by *name*: unknown names become new household tags, known ones
+// (matched case-insensitively) are reused (DEC-97).
+export const replaceRecipeTagsInputSchema = z.object({
+  recipeId: recipeIdSchema,
+  names: z.array(recipeTagNameSchema).max(RECIPE_TAGS_MAX),
+});
+
+export type ReplaceRecipeTagsInput = z.infer<
+  typeof replaceRecipeTagsInputSchema
+>;
+
+export const replaceRecipeTagsResultSchema = z.object({
+  recipeId: recipeIdSchema,
+  tags: z.array(recipeTagSchema),
+});
+
+export type ReplaceRecipeTagsResult = z.infer<
+  typeof replaceRecipeTagsResultSchema
+>;
+
+// Tags linked to at least one pickable recipe, sorted by name.
+export const listRecipeTagsResultSchema = z.array(recipeTagSchema);
+
+export type ListRecipeTagsResult = z.infer<typeof listRecipeTagsResultSchema>;
 
 export const setRecipeDeletionInputSchema = z.object({
   id: recipeIdSchema,

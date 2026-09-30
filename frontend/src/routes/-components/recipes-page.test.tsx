@@ -3,14 +3,16 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listUseQueryMock } = vi.hoisted(() => ({
+const { listUseQueryMock, listTagsUseQueryMock } = vi.hoisted(() => ({
   listUseQueryMock: vi.fn(),
+  listTagsUseQueryMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     recipes: {
       list: { useQuery: listUseQueryMock },
+      listTags: { useQuery: listTagsUseQueryMock },
     },
   },
 }));
@@ -59,6 +61,7 @@ const TOMATO: RecipeListItem = {
   plantPointsCount: 3,
   averageRating: 4.25,
   ratingCount: 4,
+  tags: [],
 };
 
 const ROAST: RecipeListItem = {
@@ -74,6 +77,7 @@ const ROAST: RecipeListItem = {
   plantPointsCount: 2,
   averageRating: null,
   ratingCount: 0,
+  tags: [],
 };
 
 interface SetupOptions {
@@ -96,6 +100,8 @@ function setup(options: SetupOptions = {}): void {
 
 beforeEach(() => {
   listUseQueryMock.mockReset();
+  listTagsUseQueryMock.mockReset();
+  listTagsUseQueryMock.mockReturnValue({ data: [] });
 });
 
 describe('RecipesPage', () => {
@@ -177,6 +183,71 @@ describe('RecipesPage', () => {
     setup({ items: [ROAST] });
     render(<RecipesPage />);
     expect(screen.queryByLabelText(/average rating/i)).not.toBeInTheDocument();
+  });
+
+  it('renders each recipe’s tags on its card', () => {
+    setup({
+      items: [
+        {
+          ...TOMATO,
+          tags: [
+            { id: 1, name: 'Quick' },
+            { id: 2, name: 'weeknight' },
+          ],
+        },
+      ],
+    });
+    render(<RecipesPage />);
+    const tags = screen.getByRole('list', { name: 'Tags' });
+    expect(tags).toHaveTextContent('Quick');
+    expect(tags).toHaveTextContent('weeknight');
+  });
+
+  it('hides the tag filter when the household has no tags', () => {
+    setup();
+    render(<RecipesPage />);
+    expect(
+      screen.queryByRole('group', { name: /filter by tag/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('forwards every selected tag to the list query and clears on untoggle', async () => {
+    const user = userEvent.setup();
+    listTagsUseQueryMock.mockReturnValue({
+      data: [
+        { id: 1, name: 'Quick' },
+        { id: 2, name: 'Vegetarian' },
+      ],
+    });
+    setup();
+    render(<RecipesPage />);
+
+    const quick = screen.getByRole('button', { name: 'Quick' });
+    await user.click(quick);
+    await user.click(screen.getByRole('button', { name: 'Vegetarian' }));
+
+    expect(quick).toHaveAttribute('aria-pressed', 'true');
+    expect(listUseQueryMock).toHaveBeenLastCalledWith({
+      search: undefined,
+      tagIds: [1, 2],
+    });
+
+    await user.click(quick);
+    await user.click(screen.getByRole('button', { name: 'Vegetarian' }));
+    expect(listUseQueryMock).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('uses the no-match message when a tag filter finds nothing', async () => {
+    const user = userEvent.setup();
+    listTagsUseQueryMock.mockReturnValue({ data: [{ id: 1, name: 'Quick' }] });
+    setup({ items: [] });
+    render(<RecipesPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Quick' }));
+
+    expect(
+      screen.getByText(/no recipes match your search/i),
+    ).toBeInTheDocument();
   });
 
   it('renders an error message when the list query fails', () => {

@@ -129,6 +129,7 @@ function makeListResult(
       plantPointsCount: 0,
       averageRating: null,
       ratingCount: 0,
+      tags: [],
     })),
     nextCursor: null,
   };

@@ -5,6 +5,7 @@ import { PlanAheadSummary } from '@/components/plan-ahead-summary.tsx';
 import { PrepAheadBadge } from '@/components/prep-ahead-badge.tsx';
 import { RecipeComments } from '@/components/recipe-comments.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
+import { RecipeTagList } from '@/components/recipe-tag-list.tsx';
 import { RelatedRecipes } from '@/components/related-recipes.tsx';
 import { StepInstruction } from '@/components/step-instruction.tsx';
 import { StepNoteCallout } from '@/components/step-note-callout.tsx';
@@ -108,6 +109,7 @@ export function RecipeDetailPage(): React.ReactElement {
             </span>
           )}
         </p>
+        <RecipeTagList tags={recipe.tags} />
         <RecipeRating
           recipeId={recipe.id}
           yourRating={recipe.yourRating}

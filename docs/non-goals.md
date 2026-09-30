@@ -233,7 +233,7 @@ Adjacency note: the list is structured data and can be exported in future if a s
 ### Dietary filters and allergen tracking
 What it would be: tagging recipes vegan / vegetarian / gluten-free / nut-free, filtering the recipe picker by tag, warning on planned exposures.
 Why not part of this: two cooks know each other's dietary needs. Tagging is upkeep work that pays off only when the dataset is browsed by people who don't already know the recipes.
-Adjacency note: `is_plant` exists on ingredients and is computed into plant-points. That's a specific decision in service of a specific tracked metric, not the start of a tagging framework.
+Adjacency note: `is_plant` exists on ingredients and is computed into plant-points. That's a specific decision in service of a specific tracked metric, not the start of a tagging framework. DEC-97 adds free-form tags to recipes, and a household may use them for dietary labels ("vegetarian") as well as organising ones ("weeknight"), so the tagging and picker-filtering parts of this entry are no longer excluded. What DEC-97 does not build is allergen tracking: no curated dietary vocabulary, no ingredient-derived labels, no warnings on planned exposures.
 
 ### Cost optimisation and price tracking
 What it would be: comparing ingredient prices across stores, tracking price history, suggesting cheaper substitutes, optimising the shopping list against a budget.

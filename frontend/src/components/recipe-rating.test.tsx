@@ -90,6 +90,7 @@ const BASE_RECIPE: Recipe = {
   plantPointsCount: 0,
   averageRating: 3,
   ratingCount: 2,
+  tags: [],
   yourRating: 3,
   ingredients: [],
   method: [],

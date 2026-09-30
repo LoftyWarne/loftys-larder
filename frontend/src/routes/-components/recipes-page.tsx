@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
 import { RecipeCard } from '@/components/recipe-card.tsx';
+import { TagFilter } from '@/components/tag-filter.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { trpc } from '@/lib/trpc.ts';
@@ -11,6 +12,7 @@ const SEARCH_DEBOUNCE_MS = 200;
 export function RecipesPage(): React.ReactElement {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [tagIds, setTagIds] = useState<number[]>([]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -22,11 +24,16 @@ export function RecipesPage(): React.ReactElement {
   }, [searchInput]);
 
   const listQuery = trpc.recipes.list.useQuery(
-    debouncedSearch ? { search: debouncedSearch } : undefined,
+    debouncedSearch || tagIds.length > 0
+      ? {
+          search: debouncedSearch || undefined,
+          tagIds: tagIds.length > 0 ? tagIds : undefined,
+        }
+      : undefined,
   );
 
   const recipes = listQuery.data?.items ?? [];
-  const hasSearch = debouncedSearch.length > 0;
+  const hasSearch = debouncedSearch.length > 0 || tagIds.length > 0;
 
   return (
     <section className="mx-auto max-w-6xl space-y-6">
@@ -46,6 +53,8 @@ export function RecipesPage(): React.ReactElement {
         }}
         aria-label="Search recipes"
       />
+
+      <TagFilter selectedIds={tagIds} onChange={setTagIds} />
 
       {listQuery.isLoading && <p role="status">Loading recipes…</p>}
 

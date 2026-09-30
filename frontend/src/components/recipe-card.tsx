@@ -2,6 +2,7 @@ import type { RecipeListItem } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 import { Fragment } from 'react';
 
+import { RecipeTagList } from '@/components/recipe-tag-list.tsx';
 import { formatAverageRating } from '@/lib/format-rating.ts';
 
 export interface RecipeCardProps {
@@ -73,6 +74,7 @@ export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
             </>
           )}
         </div>
+        <RecipeTagList tags={recipe.tags} className="pt-1" />
       </div>
     </Link>
   );

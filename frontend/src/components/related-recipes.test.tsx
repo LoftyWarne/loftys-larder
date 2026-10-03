@@ -127,6 +127,7 @@ function makeListResult(
       baseRecipeId: null,
       isDeleted: false,
       plantPointsCount: 0,
+      healthScore: null,
       averageRating: null,
       ratingCount: 0,
       tags: [],

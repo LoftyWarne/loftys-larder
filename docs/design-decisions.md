@@ -1112,6 +1112,25 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** The bank or picker needs the same filters (reuse the filter bar), an exclude filter is asked for, or untimed recipes are common enough that hiding them under a time filter confuses people.
 - **Cross-refs:** DEC-10 (URL search params), DEC-14 (name search), DEC-17 (household scope), DEC-21 (soft-deleted recipes excluded via `pickable-recipes`), DEC-23 (variations match their base's ingredients), DEC-49 (plain text), DEC-51 (shadcn/ui), DEC-85 (bank `lg+` only), DEC-97 (amended: recipes-page tag filter UI and state); FEAT-19, FEAT-56; non-goals: "Dietary filters and allergen tracking" (no exclude filter), "Search upgrade path beyond ILIKE + pg_trgm" (unchanged: these are structured conditions, not search).
 
+### DEC-101 — Recipes can carry a stored AI health score from 1 to 10; storage and stale tracking come first, hidden from the UI until scoring is built
+
+- **Chosen:** A new table, `recipe_health_scores`, with one row per scored recipe: `recipe_id` (PK, FK → `recipes`, `ON DELETE RESTRICT`), `score smallint` (CHECK 1–10), `summary text NULL`, `model text`, `scored_at timestamptz` and `is_stale boolean DEFAULT false`. No row means "not scored". A later feature will produce scores by having an AI model read the recipe. This decision covers only the storage, the reads and the stale tracking.
+  - **Reads:** `recipes.list` returns `healthScore: { score, isStale } | null` on each item, and `recipes.get` adds `summary` and `scoredAt`. Nothing in the UI reads them yet. The badge ships with the scoring feature: on the recipe card and the recipe page, labelled as an AI estimate, and muted with "out of date" when stale.
+  - **Going stale:** an edit that changes what the score was based on marks it stale; it is never deleted. Those edits are:
+    - the ingredient lines (`replaceIngredients`)
+    - the step text (`replaceMethod`)
+    - `baseServings` or a nutrition value (`updateHeader`)
+    - the base a serving variation points at (`setServingVariationFields`)
+
+    Editing a base also marks its variations, which are scored with the base's ingredients and method. The writes compare old and new inside their transaction, because Save & Finish re-sends unchanged ingredients and method. Name, description, image, tags, times, cost, source, tips, safety notes, prep-ahead marks and per-step amounts don't mark it. The helper is `backend/src/lib/health-score-staleness.ts` (cross-cutting #21).
+  - **Writing scores:** no procedure yet. The scoring feature writes the row and clears `is_stale`.
+- **Alternatives:** (a) Compute the score on read, like plant points (DEC-32). A model call is slow, costs money and can give a different answer each time, so it can't run on every read. (b) Columns on `recipes`. Writing a score would bump `date_last_updated` through `$onUpdate` (DEC-16), so scoring would look like an edit, and the model's details don't belong on the recipe. (c) Clear the score on edit instead of marking it stale. The user chose to keep the old score, marked out of date. (d) A 0–100 scale. False precision for a model's judgement, and less consistent between runs. (e) A–E letters. They look like the official Nutri-Score, which is a fixed formula; this score isn't. (f) Store a hash of the scored content and compare it on read. Exact, but every list read would need each recipe's ingredients and method.
+- **Why it won:** The household wants a quick health signal per recipe, broader than plant points. Settling the storage and the stale rules first leaves the scoring feature with only the model call, the write and the badge.
+- **Consequences (+):** Additive migration with no backfill. No user FK, so account deletion (DEC-29) is unchanged. Household scope comes through the join to `recipes` (DEC-17), as for `recipe_tag_links`. Users see no change until scoring exists.
+- **Consequences (−):** Four write paths have to call the helper, and any new path that changes ingredients or method must too. Editing a household ingredient (renaming it, or changing `is_plant`) doesn't mark the recipes that use it. The score is an AI judgement and can be wrong; the summary is model-written plain text (DEC-49). There's no `updated_at`; `scored_at` covers it, as with the other recipe child tables. Sending recipe content to a model provider is a new external data flow, to be settled with the scoring feature.
+- **Revisit when:** The scoring feature is specced: provider, where it runs given auto-stop (DEC-64), prompt and rubric, cost, and the write procedure. Also revisit if stale flags fire on edits that don't matter, or miss ones that do.
+- **Cross-refs:** DEC-16 (`$onUpdate`), DEC-17 (household scope), DEC-21 (soft-deleted recipes keep their score), DEC-23 (variations), DEC-29 (account deletion), DEC-32 (contrast: plant points are computed, never stored), DEC-34 (`withTransaction`), DEC-49 (plain text), DEC-64 (auto-stop); FEAT-57; non-goals: "AI / LLM features" and "Nutrition tracking against goals" (adjacency notes amended).
+
 ---
 
 ## Most Worth Deep Consideration on Revisit

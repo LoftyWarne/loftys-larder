@@ -2,7 +2,10 @@ import { asc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { RECIPE_STEP_NOTE_MAX_LENGTH } from '../../shared/src/index.ts';
+import {
+  RECIPE_STEP_NOTE_MAX_LENGTH,
+  type ReplaceRecipeMethodStepInput,
+} from '../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../src/config.ts';
 import * as schema from '../src/db/schema/index.ts';
 import {
@@ -13,6 +16,7 @@ import {
 } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
+import { recipeHealthScores } from '../src/db/schema/recipe-health.ts';
 import {
   recipeComments,
   recipeRatings,
@@ -71,6 +75,7 @@ describe('recipes procedures', () => {
   beforeEach(async () => {
     await db.execute(sql`
       truncate table
+        ${recipeHealthScores},
         ${recipeRatings},
         ${recipeComments},
         ${relatedRecipes},
@@ -3260,6 +3265,192 @@ describe('recipes procedures', () => {
       expect(await listNames({ ingredientIds: [brisket] })).toEqual([
         'Brisket buns',
       ]);
+    });
+  });
+
+  describe('health scores', () => {
+    async function insertHealthScore(
+      recipeId: number,
+      options: { score?: number; summary?: string } = {},
+    ): Promise<void> {
+      await db.insert(recipeHealthScores).values({
+        recipeId,
+        score: options.score ?? 7,
+        summary: options.summary ?? null,
+        model: 'test-model',
+      });
+    }
+
+    async function isStale(recipeId: number): Promise<boolean | undefined> {
+      const rows = await db
+        .select({ isStale: recipeHealthScores.isStale })
+        .from(recipeHealthScores)
+        .where(eq(recipeHealthScores.recipeId, recipeId));
+      return rows[0]?.isStale;
+    }
+
+    function step(
+      instruction: string,
+      overrides: Partial<ReplaceRecipeMethodStepInput> = {},
+    ): ReplaceRecipeMethodStepInput {
+      return {
+        instruction,
+        safetyNote: null,
+        tip: null,
+        prepAhead: null,
+        ingredients: [],
+        ...overrides,
+      };
+    }
+
+    it('returns null for a recipe that has not been scored', async () => {
+      const recipeId = await insertRecipe({ name: 'Unscored' });
+      const caller = createCaller(makeContext());
+
+      const list = await caller.recipes.list();
+      expect(list.items.find((i) => i.id === recipeId)?.healthScore).toBeNull();
+      const detail = await caller.recipes.get({ id: recipeId });
+      expect(detail.healthScore).toBeNull();
+    });
+
+    it('returns the score from list and get, with the summary on get', async () => {
+      const recipeId = await insertRecipe({ name: 'Scored' });
+      await insertHealthScore(recipeId, { score: 8, summary: 'Lots of veg.' });
+      const caller = createCaller(makeContext());
+
+      const list = await caller.recipes.list();
+      expect(list.items.find((i) => i.id === recipeId)?.healthScore).toEqual({
+        score: 8,
+        isStale: false,
+      });
+      const detail = await caller.recipes.get({ id: recipeId });
+      expect(detail.healthScore).toMatchObject({
+        score: 8,
+        isStale: false,
+        summary: 'Lots of veg.',
+      });
+      expect(Number.isNaN(Date.parse(detail.healthScore?.scoredAt ?? ''))).toBe(
+        false,
+      );
+    });
+
+    it('updateHeader marks the score stale for servings or nutrition, not other fields', async () => {
+      const renamed = await insertRecipe({ name: 'Renamed' });
+      const salted = await insertRecipe({ name: 'Salted' });
+      const resized = await insertRecipe({ name: 'Resized' });
+      await insertHealthScore(renamed);
+      await insertHealthScore(salted);
+      await insertHealthScore(resized);
+      const caller = createCaller(makeContext());
+
+      await caller.recipes.updateHeader({
+        id: renamed,
+        patch: { name: 'Renamed again', totalTimeMins: 40 },
+      });
+      await caller.recipes.updateHeader({
+        id: salted,
+        patch: { saltPerServing: 1.25 },
+      });
+      await caller.recipes.updateHeader({
+        id: resized,
+        patch: { baseServings: 6 },
+      });
+
+      expect(await isStale(renamed)).toBe(false);
+      expect(await isStale(salted)).toBe(true);
+      expect(await isStale(resized)).toBe(true);
+    });
+
+    it('replaceIngredients marks the score stale only when the lines change', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const lentils = await insertIngredient({ name: 'Lentils' });
+      await insertRecipeIngredient(recipeId, lentils, { quantity: '200' });
+      await insertHealthScore(recipeId);
+      const caller = createCaller(makeContext());
+      const line = {
+        ingredientId: lentils,
+        quantity: '200',
+        unitId: unitG,
+        prepTypeId: null,
+        isOptional: false,
+      };
+
+      await caller.recipes.replaceIngredients({ recipeId, lines: [line] });
+      expect(await isStale(recipeId)).toBe(false);
+
+      await caller.recipes.replaceIngredients({
+        recipeId,
+        lines: [{ ...line, quantity: '250' }],
+      });
+      expect(await isStale(recipeId)).toBe(true);
+    });
+
+    it('replaceMethod marks the score stale only when the step text changes', async () => {
+      const recipeId = await insertRecipe({ name: 'Stir fry' });
+      await db
+        .insert(recipeMethod)
+        .values({ recipeId, stepNumber: 1, instruction: 'Fry the onions.' });
+      await insertHealthScore(recipeId);
+      const caller = createCaller(makeContext());
+
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [step('Fry the onions.', { tip: 'Use a wok.' })],
+      });
+      expect(await isStale(recipeId)).toBe(false);
+
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [step('Deep-fry the onions.')],
+      });
+      expect(await isStale(recipeId)).toBe(true);
+    });
+
+    it('an edit to a base recipe marks its serving variations stale too', async () => {
+      const base = await insertRecipe({ name: 'Chilli base', isBase: true });
+      const variation = await insertRecipe({
+        name: 'Chilli nachos',
+        baseRecipeId: base,
+      });
+      const unrelated = await insertRecipe({ name: 'Soup' });
+      await insertHealthScore(base);
+      await insertHealthScore(variation);
+      await insertHealthScore(unrelated);
+      const caller = createCaller(makeContext());
+
+      await caller.recipes.replaceMethod({
+        recipeId: base,
+        steps: [step('Brown the mince.')],
+      });
+
+      expect(await isStale(base)).toBe(true);
+      expect(await isStale(variation)).toBe(true);
+      expect(await isStale(unrelated)).toBe(false);
+    });
+
+    it('setServingVariationFields marks the score stale when the base changes', async () => {
+      const firstBase = await insertRecipe({ name: 'Rice', isBase: true });
+      const secondBase = await insertRecipe({ name: 'Noodles', isBase: true });
+      const variation = await insertRecipe({
+        name: 'Fried',
+        baseRecipeId: firstBase,
+      });
+      const standalone = await insertRecipe({ name: 'Stock' });
+      await insertHealthScore(variation);
+      await insertHealthScore(standalone);
+      const caller = createCaller(makeContext());
+
+      await caller.recipes.setServingVariationFields({
+        id: standalone,
+        isBase: true,
+      });
+      await caller.recipes.setServingVariationFields({
+        id: variation,
+        baseRecipeId: secondBase,
+      });
+
+      expect(await isStale(standalone)).toBe(false);
+      expect(await isStale(variation)).toBe(true);
     });
   });
 });

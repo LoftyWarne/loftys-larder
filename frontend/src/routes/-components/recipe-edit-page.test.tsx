@@ -195,6 +195,7 @@ const RECIPE: Recipe = {
   baseRecipeIsDeleted: null,
   isDeleted: false,
   plantPointsCount: 1,
+  healthScore: null,
   ingredients: [],
   method: [],
   averageRating: null,

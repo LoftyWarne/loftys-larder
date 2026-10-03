@@ -93,6 +93,7 @@ import {
   preparationTypes,
   unitsOfMeasurement,
 } from '../../db/schema/reference.ts';
+import { recipeHealthScores } from '../../db/schema/recipe-health.ts';
 import {
   recipeComments,
   recipeRatings,
@@ -107,6 +108,12 @@ import {
   recipeTags,
   recipes,
 } from '../../db/schema/recipes.ts';
+import {
+  headerPatchAffectsHealthScore,
+  ingredientLinesChanged,
+  markHealthScoreStale,
+  methodInstructionsChanged,
+} from '../../lib/health-score-staleness.ts';
 import {
   pickableRecipesWhere,
   type PickableRecipesOptions,
@@ -275,8 +282,14 @@ export const recipesRouter = router({
             from ${recipeRatings}
             where recipe_ratings.recipe_id = recipes.id
           )`,
+          healthScore: recipeHealthScores.score,
+          healthScoreIsStale: recipeHealthScores.isStale,
         })
         .from(recipes)
+        .leftJoin(
+          recipeHealthScores,
+          eq(recipeHealthScores.recipeId, recipes.id),
+        )
         .where(and(...conditions))
         .orderBy(asc(sql`lower(${recipes.name})`), asc(recipes.id))
         .limit(limit + 1);
@@ -309,6 +322,10 @@ export const recipesRouter = router({
             row.averageRating === null ? null : Number(row.averageRating),
           ratingCount: row.ratingCount,
           tags: tagsByRecipe.get(row.id) ?? [],
+          healthScore:
+            row.healthScore === null || row.healthScoreIsStale === null
+              ? null
+              : { score: row.healthScore, isStale: row.healthScoreIsStale },
         })),
         nextCursor,
       };
@@ -364,10 +381,18 @@ export const recipesRouter = router({
             baseRecipeIsDeleted: baseRecipe.isDeleted,
             isDeleted: recipes.isDeleted,
             plantPointsCount: recipePlantPointsExpr(sql`recipes.id`),
+            healthScore: recipeHealthScores.score,
+            healthScoreIsStale: recipeHealthScores.isStale,
+            healthScoreSummary: recipeHealthScores.summary,
+            healthScoredAt: recipeHealthScores.scoredAt,
           })
           .from(recipes)
           .leftJoin(recipeSources, eq(recipes.sourceId, recipeSources.id))
           .leftJoin(baseRecipe, eq(recipes.baseRecipeId, baseRecipe.id))
+          .leftJoin(
+            recipeHealthScores,
+            eq(recipeHealthScores.recipeId, recipes.id),
+          )
           .where(
             and(
               eq(recipes.id, recipeId),
@@ -438,6 +463,17 @@ export const recipesRouter = router({
         ratingCount: ratingRow.ratingCount,
         yourRating: ratingRow.yourRating,
         tags: tagsByRecipe.get(recipeId) ?? [],
+        healthScore:
+          header.healthScore === null ||
+          header.healthScoreIsStale === null ||
+          header.healthScoredAt === null
+            ? null
+            : {
+                score: header.healthScore,
+                isStale: header.healthScoreIsStale,
+                summary: header.healthScoreSummary,
+                scoredAt: header.healthScoredAt.toISOString(),
+              },
       };
     }),
 
@@ -529,18 +565,25 @@ export const recipesRouter = router({
       if (patch.saltPerServing !== undefined)
         patchValues.saltPerServing = patch.saltPerServing;
 
-      const updated = await ctx.db
-        .update(recipes)
-        .set(patchValues)
-        .where(
-          and(
-            eq(recipes.id, id),
-            eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-          ),
-        )
-        .returning({ id: recipes.id });
+      const withTransaction = makeWithTransaction(ctx.db);
+      const row = await withTransaction(async (tx) => {
+        const updated = await tx
+          .update(recipes)
+          .set(patchValues)
+          .where(
+            and(
+              eq(recipes.id, id),
+              eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .returning({ id: recipes.id });
+        const updatedRow = updated[0];
+        if (updatedRow && headerPatchAffectsHealthScore(patch)) {
+          await markHealthScoreStale(tx, updatedRow.id);
+        }
+        return updatedRow;
+      });
 
-      const row = updated[0];
       if (!row) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -604,6 +647,9 @@ export const recipesRouter = router({
 
         const withTransaction = makeWithTransaction(ctx.db);
         await withTransaction(async (tx) => {
+          if (await ingredientLinesChanged(tx, input.recipeId, input.lines)) {
+            await markHealthScoreStale(tx, input.recipeId);
+          }
           await tx
             .delete(recipeIngredients)
             .where(eq(recipeIngredients.recipeId, input.recipeId));
@@ -659,6 +705,9 @@ export const recipesRouter = router({
 
       const withTransaction = makeWithTransaction(ctx.db);
       await withTransaction(async (tx) => {
+        if (await methodInstructionsChanged(tx, input.recipeId, input.steps)) {
+          await markHealthScoreStale(tx, input.recipeId);
+        }
         await tx
           .delete(recipeMethodIngredients)
           .where(
@@ -922,15 +971,22 @@ export const recipesRouter = router({
         if (isBase !== undefined) patch.isBase = isBase;
         if (baseRecipeId !== undefined) patch.baseRecipeId = baseRecipeId;
         if (Object.keys(patch).length > 0) {
-          await ctx.db
-            .update(recipes)
-            .set(patch)
-            .where(
-              and(
-                eq(recipes.id, id),
-                eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-              ),
-            );
+          const withTransaction = makeWithTransaction(ctx.db);
+          await withTransaction(async (tx) => {
+            await tx
+              .update(recipes)
+              .set(patch)
+              .where(
+                and(
+                  eq(recipes.id, id),
+                  eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+                ),
+              );
+            // A variation is scored with its base's ingredients and method.
+            if (nextBaseRecipeId !== self.baseRecipeId) {
+              await markHealthScoreStale(tx, id);
+            }
+          });
         }
 
         return {

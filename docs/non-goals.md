@@ -219,7 +219,7 @@ Adjacency note: `source_url` is stored, but only as a reference link. No parsing
 ### AI / LLM features
 What it would be: meal-plan suggestions, recipe recommendations, ingredient substitution advice, "what can I cook with X."
 Why not part of this: scope, cost, and the fact that two cooks know what they want to eat better than any model does. The plan is a tool for cooks who already cook, not a recommender.
-Adjacency note: not a stylistic objection to AI features in general — a stylistic objection to bolting them onto a tool whose value is structured deterministic data.
+Adjacency note: not a stylistic objection to AI features in general — a stylistic objection to bolting them onto a tool whose value is structured deterministic data. DEC-101 makes one exception: a stored health score per recipe, produced by a model and labelled as an estimate. Suggestions, recommendations and substitution advice are still excluded, and the score never picks or changes anything.
 
 ### Recipe / meal-plan sharing across households
 What it would be: exporting a recipe (or a whole plan) for another household to import, or a discoverable public library.
@@ -259,7 +259,7 @@ Adjacency note: not a hostile decision — just a YAGNI one. If the app is ever 
 ### Nutrition tracking against goals
 What it would be: setting macro / calorie targets, tracking planned and actual intake, surfacing variance.
 Why not part of this: the plan stores per-serving macros for display. It does not store targets, does not compute against targets, does not track adherence. Nutrition tracking is a category of app, not a meal-planner feature.
-Adjacency note: plant-points are a specific, deliberately-narrow nutrition signal (variety, not adherence). Keeping the line drawn there is intentional.
+Adjacency note: plant-points are a specific, deliberately-narrow nutrition signal (variety, not adherence). DEC-101 adds a per-recipe health score, which describes a single recipe. There are still no targets, no intake tracking and no day or plan totals, and that line stays drawn.
 
 ### Photo recognition / OCR of cookbooks
 What it would be: snapping a photo of a cookbook page and extracting a recipe.

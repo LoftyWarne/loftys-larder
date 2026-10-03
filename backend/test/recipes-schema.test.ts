@@ -8,6 +8,7 @@ import { users } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
 import { recipeDrafts } from '../src/db/schema/recipe-drafts.ts';
+import { recipeHealthScores } from '../src/db/schema/recipe-health.ts';
 import {
   recipeComments,
   recipeRatings,
@@ -163,6 +164,7 @@ describe('recipes schema', () => {
         'related_recipes',
         'recipe_ratings',
         'recipe_comments',
+        'recipe_health_scores',
       ]) {
         expect(names.has(expected), `missing table ${expected}`).toBe(true);
       }
@@ -452,6 +454,42 @@ describe('recipes schema', () => {
           .insert(recipeRatings)
           .values({ recipeId, userId: USER_ID, rating: 3 }),
         'recipe_ratings_recipe_user_unique',
+      );
+    });
+  });
+
+  describe('recipe_health_scores', () => {
+    it('rejects a score outside 1 to 10', async () => {
+      await seedFixtures(db);
+      const low = await insertRecipe(db);
+      const high = await insertRecipe(db, { name: 'High' });
+      await expectConstraintViolation(
+        db
+          .insert(recipeHealthScores)
+          .values({ recipeId: low, score: 0, model: 'test-model' }),
+        'recipe_health_scores_score_range',
+      );
+      await expectConstraintViolation(
+        db
+          .insert(recipeHealthScores)
+          .values({ recipeId: high, score: 11, model: 'test-model' }),
+        'recipe_health_scores_score_range',
+      );
+    });
+
+    it('defaults to not stale and allows one score per recipe', async () => {
+      await seedFixtures(db);
+      const recipeId = await insertRecipe(db);
+      const inserted = await db
+        .insert(recipeHealthScores)
+        .values({ recipeId, score: 1, model: 'test-model' })
+        .returning();
+      expect(inserted[0]?.isStale).toBe(false);
+      await expectConstraintViolation(
+        db
+          .insert(recipeHealthScores)
+          .values({ recipeId, score: 10, model: 'test-model' }),
+        'recipe_health_scores_pkey',
       );
     });
   });

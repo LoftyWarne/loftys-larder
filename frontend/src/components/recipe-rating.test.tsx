@@ -88,6 +88,7 @@ const BASE_RECIPE: Recipe = {
   baseRecipeIsDeleted: null,
   isDeleted: false,
   plantPointsCount: 0,
+  healthScore: null,
   averageRating: 3,
   ratingCount: 2,
   tags: [],

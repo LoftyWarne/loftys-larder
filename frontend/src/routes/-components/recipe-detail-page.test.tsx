@@ -116,6 +116,7 @@ const FULL_RECIPE: Recipe = {
   baseRecipeIsDeleted: null,
   isDeleted: false,
   plantPointsCount: 1,
+  healthScore: null,
   ingredients: [
     {
       id: 1,

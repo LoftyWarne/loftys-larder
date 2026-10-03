@@ -2317,6 +2317,47 @@ Conventions:
 
 ---
 
+### FEAT-57 — Health score groundwork: storage, reads and stale tracking, hidden in the UI
+
+**Goal:** Store a 1–10 AI health score per recipe and mark it stale when the recipe changes, ready for a later feature that produces the scores. Nothing about the score shows in the UI yet. (DEC-101)
+
+**Estimate:** 0.5 day. **Depends on:** FEAT-11 (recipes schema), FEAT-20 (recipe writes), FEAT-23 (serving variations). **Enables:** the AI scoring feature (not yet specced).
+
+**Files:**
+- `backend/src/db/schema/recipe-health.ts` (new), `backend/src/db/schema/index.ts`, `backend/drizzle/0022_recipe_health_scores.sql` (new)
+- `backend/src/lib/health-score-staleness.ts` (new)
+- `backend/src/trpc/procedures/recipes.ts` (`list`, `get`, `updateHeader`, `replaceIngredients`, `replaceMethod`, `setServingVariationFields`)
+- `shared/src/schemas/recipes.ts`, `shared/src/index.ts`
+- Frontend test fixtures only (`healthScore: null`)
+
+**Acceptance criteria:**
+- [ ] `recipe_health_scores` holds at most one score per recipe, from 1 to 10, with a summary, the model, the time scored and a stale flag that defaults to false
+- [ ] `recipes.list` returns `healthScore` as `{ score, isStale }` or `null`; `recipes.get` also returns `summary` and `scoredAt`
+- [ ] A score is marked stale when the ingredient lines change, the step text changes, `baseServings` or a nutrition value changes, or a variation's base changes
+- [ ] Editing a base recipe also marks its serving variations' scores stale
+- [ ] Re-saving unchanged ingredients or method leaves the score as it was, and so does changing only the name, description, image, tags, times, cost, source, tips, safety notes, prep-ahead marks or step amounts
+- [ ] Nothing about the score appears in the UI
+
+**Implementation notes:**
+- The writes compare before they replace, because Save & Finish re-sends every section.
+- Ingredient quantities compare as numbers, since the DB pads them to 3 dp.
+
+**Manual verification:**
+1. Insert a score row for a recipe with SQL, then open the recipe. Nothing about the score shows.
+2. Save & Finish that recipe without changes: `is_stale` stays false. Change one ingredient amount and save: it turns true.
+
+**Common gotchas:**
+- A new write path that changes ingredients, method text, servings, nutrition or the base link must call `markHealthScoreStale` inside its transaction (cross-cutting #21).
+
+**Definition of done:**
+- Tests cover:
+  - Schema: the table, the 1–10 check, one row per recipe, and the stale flag defaulting to false.
+  - Procedures: `null` and populated scores from list and get; each write path marking stale on a real change and not on an unchanged re-save or an unrelated field; a base edit marking its variations; a variation's base changing.
+- Commit: `feat(recipes): store health scores and mark them stale when a recipe changes`
+- Gate check: the manual verification above against a local database.
+
+---
+
 ## Cross-feature concerns and reuse-from-day-one
 
 The 53 features above are sequenced for incremental delivery, but several concerns thread through many of them. Each item below is something where a *decision or pattern made in an early feature locks in costs or affordances for later ones*. Surfacing them now prevents the small inconsistencies that compound over a project of this size.
@@ -2446,6 +2487,12 @@ The rule is consistent across all these features but easy to forget. **Codify it
 
 Every dependency added must support ESM. Encountering a CJS-only package three months in is an expensive day. **Verify ESM support at the moment a dependency is proposed**, before pinning it. Particularly watch out for older auth/email/observability libraries — they're often CJS holdouts.
 
+### 21. Health-score staleness
+
+**Threads through:** FEAT-57 (the helper and the four current write paths), the AI scoring feature, and any future write that changes a recipe's ingredients, method text, servings, nutrition or base link.
+
+A stored health score (DEC-101) is only trustworthy if it's marked stale when its recipe changes. **Every such write calls `markHealthScoreStale` from `backend/src/lib/health-score-staleness.ts` inside its transaction**, comparing old and new first wherever the client re-sends unchanged data. A missed path leaves an out-of-date score looking current.
+
 ---
 
 ## Summary
@@ -2454,6 +2501,6 @@ Every dependency added must support ESM. Encountering a CJS-only package three m
 
 Phase 1 (infrastructure & CI) lays plumbing — 8 features, mostly small. Phase 2 (database & auth) is 8 features with one chunky schema split into three. Phase 3 (recipes & ingredients) is 10 features, the largest concentration because it includes the recipe editor's complexity. Phase 4 (meal planner) is 9 features including account deletion (placed here because all user-FK'd tables must exist first). Phase 5 (shopping list) is 7 features including the PWA and offline behaviour. Phase 6 (observability & deploy hardening) is 11 features, several of them documentation and measurement rather than code.
 
-The 20 cross-cutting concerns above are not extra features — they are *patterns and decisions that the early features establish on behalf of the later ones*. Investing slightly more time in FEAT-09, 17, 19, 21, and 31 to get the reusable shapes right pays back across the rest of the project.
+The 21 cross-cutting concerns above are not extra features — they are *patterns and decisions that the early features establish on behalf of the later ones*. Investing slightly more time in FEAT-09, 17, 19, 21, and 31 to get the reusable shapes right pays back across the rest of the project.
 
 The highest-value places to spend the first day or two of extra care are: (1) the `/shared` Zod schema layout (FEAT-01/04), (2) the `pickable-recipes` helper shape (FEAT-19), (3) the optimistic-update hook (FEAT-31), and (4) the shopping-list DTO (FEAT-36). Mistakes in any of these compound through five or more downstream features.

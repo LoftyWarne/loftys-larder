@@ -6,8 +6,8 @@ The doc set:
 
 - `README.md` — entry point, kept in sync with shipped features.
 - `docs/plan.md` — strategy. Source of hard constraints below.
-- `docs/feature-specs.md` — 56 executable units, FEAT-01 … FEAT-56.
-- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-100. Cross-refs to FEATs.
+- `docs/feature-specs.md` — 57 executable units, FEAT-01 … FEAT-57.
+- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-101. Cross-refs to FEATs.
 - `docs/non-goals.md` — deliberate exclusions. Useful to *prevent* work.
 - `docs/session-notes.md` — rolling working doc; pending questions, in-flight context.
 - `AGENTS.md` — this file.
@@ -171,6 +171,7 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 - **Errors:** `TRPCError` with a tRPC code on `code` and a domain code on `cause` of the form `{ code: string, ...metadata }`. (cross-cutting #11, DEC-35)
 - **Optimistic updates:** use the shared hook (`useOptimisticSlotUpdate`, FEAT-31). Don't reimplement `onMutate`/`onError`/`onSettled` per consumer. (cross-cutting #7)
 - **Pickable recipes:** use the helper. Don't filter recipes by hand. (cross-cutting #5)
+- **Health-score staleness:** a recipe write that changes ingredients, method text, servings, nutrition or a variation's base calls `markHealthScoreStale` inside its transaction. (cross-cutting #21, DEC-101)
 - **Searchable combobox primitive** (FEAT-21) is the only combobox. Don't fork it per picker. (cross-cutting #6)
 - **Slot card** (FEAT-31) has explicit slots for future content. Extend, don't rewrite. (cross-cutting #14)
 - **Date logic** imports from `dateUtils`. No `new Date()` in domain code. (cross-cutting #8)

@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
+import { NUTRITION_FIELDS } from '@/lib/nutrition.ts';
 
 type HeaderFormValues = CreateRecipeInput;
 
@@ -323,6 +324,28 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
           error={errors.sourceUrl?.message}
         />
 
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">Nutrition per serving</legend>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {NUTRITION_FIELDS.map((field) => (
+              <FieldNumber
+                key={field.key}
+                id={`recipe-${field.slug}`}
+                label={`${field.label} (${field.unit})`}
+                min={0}
+                step={field.unit === 'kcal' ? '1' : '0.01'}
+                inputMode={field.unit === 'kcal' ? 'numeric' : 'decimal'}
+                disabled={submitting}
+                register={register(field.key, {
+                  setValueAs: (value) =>
+                    value === '' || value === null ? null : Number(value),
+                })}
+                error={errors[field.key]?.message}
+              />
+            ))}
+          </div>
+        </fieldset>
+
         {mode === 'create' && (
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input
@@ -395,6 +418,8 @@ interface FieldNumberProps {
   id: string;
   label: string;
   min?: number;
+  step?: string;
+  inputMode?: 'numeric' | 'decimal';
   required?: boolean;
   disabled?: boolean;
   register: ReturnType<UseFormRegister<HeaderFormValues>>;
@@ -405,6 +430,8 @@ function FieldNumber({
   id,
   label,
   min,
+  step,
+  inputMode,
   required,
   disabled,
   register,
@@ -420,6 +447,8 @@ function FieldNumber({
         id={id}
         type="number"
         min={min}
+        step={step}
+        inputMode={inputMode}
         disabled={disabled}
         aria-invalid={error ? true : undefined}
         {...register}

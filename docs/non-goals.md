@@ -259,7 +259,7 @@ Adjacency note: not a hostile decision — just a YAGNI one. If the app is ever 
 ### Nutrition tracking against goals
 What it would be: setting macro / calorie targets, tracking planned and actual intake, surfacing variance.
 Why not part of this: the plan stores per-serving macros for display. It does not store targets, does not compute against targets, does not track adherence. Nutrition tracking is a category of app, not a meal-planner feature.
-Adjacency note: plant-points are a specific, deliberately-narrow nutrition signal (variety, not adherence). DEC-101 adds a per-recipe health score, which describes a single recipe. There are still no targets, no intake tracking and no day or plan totals, and that line stays drawn.
+Adjacency note: plant-points are a specific, deliberately-narrow nutrition signal (variety, not adherence). Per-serving nutrition is now shown and edited on each recipe (DEC-102), and DEC-101 adds a per-recipe health score. Both describe a single recipe. There are still no targets, no intake tracking and no day or plan totals, and that line stays drawn.
 
 ### Photo recognition / OCR of cookbooks
 What it would be: snapping a photo of a cookbook page and extracting a recipe.

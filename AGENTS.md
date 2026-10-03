@@ -6,8 +6,8 @@ The doc set:
 
 - `README.md` — entry point, kept in sync with shipped features.
 - `docs/plan.md` — strategy. Source of hard constraints below.
-- `docs/feature-specs.md` — 57 executable units, FEAT-01 … FEAT-57.
-- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-101. Cross-refs to FEATs.
+- `docs/feature-specs.md` — 58 executable units, FEAT-01 … FEAT-58.
+- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-102. Cross-refs to FEATs.
 - `docs/non-goals.md` — deliberate exclusions. Useful to *prevent* work.
 - `docs/session-notes.md` — rolling working doc; pending questions, in-flight context.
 - `AGENTS.md` — this file.

@@ -2358,6 +2358,47 @@ Conventions:
 
 ---
 
+### FEAT-58 — Nutrition per serving on the recipe page and in the editor
+
+**Goal:** Show a recipe's per-serving nutrition on its page and let the editor set it, with gram values to 2 decimal places. (DEC-102)
+
+**Estimate:** 0.5 day. **Depends on:** FEAT-19 (recipe page), FEAT-21 (editor). **Enables:** the AI scoring feature (DEC-101) reads these values.
+
+**Files:**
+- `backend/src/db/schema/recipes.ts`, `backend/drizzle/0021_macro_grams_decimal.sql` (gram columns to `numeric(6,2)`)
+- `shared/src/schemas/recipes.ts` (calories and gram validation)
+- `frontend/src/lib/nutrition.ts`, `frontend/src/components/recipe-nutrition.tsx` (both new)
+- `frontend/src/routes/-components/recipe-detail-page.tsx`
+- `frontend/src/components/recipe-editor/header-fields.tsx`
+
+**Acceptance criteria:**
+- [ ] The recipe page shows "Nutrition per serving" after the ingredients, listing only the recorded values, in the order calories, fat, saturates, carbs, sugars, fibre, protein, salt, each with kcal or g
+- [ ] A zero shows; the section is hidden when nothing is recorded; the portions stepper doesn't change the values
+- [ ] The editor's Details section has eight optional nutrition fields; saving sends only the changed values; a blank field saves as no value
+- [ ] Calories take whole numbers; gram values take up to 2 decimal places, and a third decimal place shows "Use at most 2 decimal places" and blocks the save
+- [ ] Gram values round-trip exactly (0.45 g saves and shows as 0.45 g)
+
+**Manual verification:**
+1. Edit a recipe, enter 410 kcal and 0.45 g salt, save, and open the recipe. Both show under "Nutrition per serving".
+2. Change the portions. The nutrition values stay the same.
+3. At phone width, the nutrition grid shows two columns and the editor fields fit.
+
+**Common gotchas:**
+- Values are per serving and never scaled.
+- Migration `0021` fails if a stored gram value is 10,000 or more.
+
+**Definition of done:**
+- Tests cover:
+  - Nutrition list: order, units, number formatting, a zero, and hidden when empty.
+  - Editor: decimal values submitted as numbers; a third decimal place rejected.
+  - Recipe page: the section shown and hidden.
+  - Edit page: a changed value sent as a one-field patch.
+  - Backend: the decimal round trip, the column types, and the calorie and gram limits.
+- Commit: `feat(recipes): show and edit nutrition per serving`
+- Gate check: manual verification step 1 against a local database.
+
+---
+
 ## Cross-feature concerns and reuse-from-day-one
 
 The 53 features above are sequenced for incremental delivery, but several concerns thread through many of them. Each item below is something where a *decision or pattern made in an early feature locks in costs or affordances for later ones*. Surfacing them now prevents the small inconsistencies that compound over a project of this size.

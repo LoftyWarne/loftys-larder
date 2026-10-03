@@ -103,6 +103,39 @@ describe('HeaderFields', () => {
     expect(submitted.isBase).toBe(false);
   });
 
+  it('submits nutrition values, keeping decimals for grams', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderHeader();
+
+    await user.type(screen.getByLabelText('Name'), 'Lentil Dal');
+    await user.type(screen.getByLabelText('Calories (kcal)'), '410');
+    await user.type(screen.getByLabelText('Salt (g)'), '0.45');
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    const submitted = onSubmit.mock.calls[0]?.[0];
+    if (!submitted) throw new Error('expected one submit call');
+    expect(submitted.caloriesPerServing).toBe(410);
+    expect(submitted.saltPerServing).toBe(0.45);
+    expect(submitted.fatPerServing).toBeNull();
+  });
+
+  it('blocks submit when a gram value has more than 2 decimal places', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderHeader();
+
+    await user.type(screen.getByLabelText('Name'), 'Lentil Dal');
+    await user.type(screen.getByLabelText('Salt (g)'), '0.125');
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    expect(
+      await screen.findByText('Use at most 2 decimal places'),
+    ).toBeVisible();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('shows the isBase checkbox only in create mode', () => {
     const { rerender } = render(
       <HeaderFields

@@ -354,6 +354,23 @@ describe('RecipeEditPage', () => {
     expect(replaceMethodMutateAsyncMock).not.toHaveBeenCalled();
   });
 
+  it('sends a changed nutrition value on header save', async () => {
+    updateHeaderMutateAsyncMock.mockResolvedValue({ id: 7 });
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    await user.type(screen.getByLabelText('Salt (g)'), '1.2');
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    await waitFor(() => {
+      expect(updateHeaderMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateHeaderMutateAsyncMock.mock.calls[0]?.[0]).toEqual({
+      id: 7,
+      patch: { saltPerServing: 1.2 },
+    });
+  });
+
   it('renders the saved notice and invalidates the get query on header save', async () => {
     updateHeaderMutateAsyncMock.mockResolvedValue({ id: 7 });
     const user = userEvent.setup();

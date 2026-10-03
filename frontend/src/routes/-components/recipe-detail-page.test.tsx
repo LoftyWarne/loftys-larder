@@ -401,6 +401,31 @@ describe('RecipeDetailPage', () => {
     expect(screen.queryByRole('list', { name: 'Tags' })).toBeNull();
   });
 
+  it('shows nutrition per serving only when some is recorded', () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, caloriesPerServing: 410, saltPerServing: 0.45 },
+      isLoading: false,
+      error: null,
+    });
+    const { unmount } = render(<RecipeDetailPage />);
+    const section = screen.getByRole('region', {
+      name: 'Nutrition per serving',
+    });
+    expect(section).toHaveTextContent('410 kcal');
+    expect(section).toHaveTextContent('0.45 g');
+    unmount();
+
+    getUseQueryMock.mockReturnValue({
+      data: FULL_RECIPE,
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    expect(
+      screen.queryByRole('region', { name: 'Nutrition per serving' }),
+    ).toBeNull();
+  });
+
   it('renders the average summary when there is at least one rating', () => {
     getUseQueryMock.mockReturnValue({
       data: { ...FULL_RECIPE, averageRating: 4.25, ratingCount: 4 },

@@ -59,6 +59,34 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — Health score groundwork and nutrition on recipes (DEC-101, DEC-102, FEAT-57, FEAT-58)
+
+**Status:** Committed to `main` as two commits, not pushed: `618691c` (health score), then the nutrition commit. Each was checked on its own: typecheck and lint clean, backend 592 tests green, frontend 648 after the first commit and 655 after the second. e2e not run. Not yet eyeballed in a browser. FEAT-57 and FEAT-58 checkboxes are left for the user to tick.
+
+**Agreed with the user:**
+- Promote an AI health score out of the "AI / LLM features" non-goal, scoped to one stored score per recipe. Both non-goal adjacency notes are amended.
+- Scale 1–10. An edit keeps the old score, marked out of date. Shown later on the recipe card and the recipe page.
+- Build the storage now and hide the score in the UI until a later feature fills the scores.
+- Show and edit the per-serving nutrition on recipes.
+
+**Changes:**
+- **Health score (FEAT-57):**
+  - Migration `0022_recipe_health_scores`: `recipe_health_scores`, one row per recipe, score 1–10, summary, model, `scored_at`, `is_stale`.
+  - `recipes.list` returns `healthScore: { score, isStale } | null`, and `recipes.get` adds `summary` and `scoredAt`. There's no write procedure and no UI.
+  - New `backend/src/lib/health-score-staleness.ts`, called from `updateHeader` (servings or nutrition), `replaceIngredients`, `replaceMethod` (step text only) and `setServingVariationFields` (base change). Editing a base marks its variations. `updateHeader` and `setServingVariationFields` now write inside `withTransaction`.
+  - Ingredients and method are compared before they're replaced, because Save & Finish re-sends every section.
+- **Nutrition (FEAT-58):**
+  - New `lib/nutrition.ts` (field order, labels and units) and `components/recipe-nutrition.tsx`.
+  - The recipe page shows "Nutrition per serving" after the ingredients; it's hidden when nothing is recorded and isn't scaled by the stepper.
+  - The editor's Details form gets eight optional fields. `FieldNumber` gains `step` and `inputMode`.
+- **Docs:** DEC-101, DEC-102, FEAT-57, FEAT-58, cross-cutting #21, the `recipe_health_scores` entry in `plan.md`, an `AGENTS.md` convention line, and the README.
+
+**Open:**
+- Scoring itself is unspecced: provider (a new dependency), API key in `config.ts`, where it runs given auto-stop, prompt and rubric, cost, and sending recipe content to a provider.
+- Editing a household ingredient doesn't mark the recipes using it as stale.
+
+---
+
 ## 2026-10-03 — Gram macros take 2 decimal places
 
 **Status:** Committed to `main`, not pushed. Committed on its own, without the recipe-filters work: typecheck and lint clean, backend 574 and frontend 629 tests green.

@@ -94,7 +94,7 @@ export async function buildAppWithLogger(
 
   await registerSecurity(app, config);
 
-  const db = options.db ?? getDb().db;
+  const db = options.db ?? getDb(app.log).db;
   app.decorate('db', db);
   app.decorate('cloudinary', {
     cloudName: config.CLOUDINARY_CLOUD_NAME,

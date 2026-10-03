@@ -1,14 +1,5 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-import {
-  PostgreSqlContainer,
-  type StartedPostgreSqlContainer,
-} from '@testcontainers/postgresql';
 import { eq, sql } from 'drizzle-orm';
-import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import pg from 'pg';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { CURRENT_HOUSEHOLD_ID } from '../src/config.ts';
@@ -34,15 +25,14 @@ import {
 } from '../src/db/schema/reference.ts';
 import { runSeeds } from '../src/db/seeds/index.ts';
 import { makeWithTransaction } from '../src/db/withTransaction.ts';
+import {
+  startTestDb,
+  stopTestDb,
+  TESTCONTAINER_BOOT_MS,
+  type TestDb,
+} from './helpers/test-db.ts';
 
 type Schema = typeof schema;
-
-const TESTCONTAINER_BOOT_MS = 120_000;
-const MIGRATIONS_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'drizzle',
-);
 
 const USER_ID = 'test-user-recipes-1';
 const OTHER_USER_ID = 'test-user-recipes-2';
@@ -132,23 +122,16 @@ async function insertRecipe(
 }
 
 describe('recipes schema', () => {
-  let container: StartedPostgreSqlContainer | undefined;
-  let pool: pg.Pool | undefined;
+  let testDb: TestDb | undefined;
   let db!: NodePgDatabase<Schema>;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:17.2-alpine').start();
-    pool = new pg.Pool({
-      connectionString: container.getConnectionUri(),
-      max: 4,
-    });
-    db = drizzle(pool, { schema, casing: 'snake_case' });
-    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+    testDb = await startTestDb({ poolMax: 4 });
+    db = testDb.db;
   }, TESTCONTAINER_BOOT_MS);
 
   afterAll(async () => {
-    if (pool) await pool.end();
-    if (container) await container.stop();
+    await stopTestDb(testDb);
   });
 
   beforeEach(async () => {

@@ -4,9 +4,23 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — Fixed a flaky backend teardown that failed CI; prod pool now survives dropped connections
+
+**Status:** Committed + pushed to `main`. Backend 571 tests green (28 files), no unhandled errors; typecheck, lint and format clean.
+
+**The flake:** CI for `4fb76fe` failed with every test passing: Vitest caught two uncaught `57P01` errors ("terminating connection due to administrator command") during `recipes-procedures.test.ts` teardown, and Deploy was skipped. Cause: `pg-pool`'s `end()` resolves before its clients finish closing (it drops them from its list and calls `client.end()` without waiting). `container.stop()` then shut Postgres down under a still-closing client, the server sent FATAL `57P01`, and `pg-pool`'s idle-client listener re-emitted it as `pool.emit('error')`. No pool had an `'error'` listener, so Node made it an uncaught exception. The `client` property on the logged error is the tell: only `pg-pool`'s idle listener sets it. All 14 Testcontainers files shared the teardown, so any could flake on a slow runner.
+
+**Fix (tests):** new `backend/test/helpers/test-db.ts` with `startTestDb({ poolMax, migrate? })` / `stopTestDb()`, replacing the copied setup in all 14 files (pool sizes unchanged; `db.smoke` keeps `migrate: false`). `stopTestDb` attaches a no-op pool error listener just before `pool.end()`, so idle-client errors mid-run still surface. `startTestDb` stops the container if migrations fail.
+
+**Fix (prod):** the same gap existed in `backend/src/db/index.ts`. With no pool listener, Postgres dropping an idle connection (restart, failover, maintenance) would have crashed the backend. `getDb(log)` now takes a logger and attaches `logIdleClientErrors`, which logs a Pino `warn`; the pool has already discarded the client and reconnects on next checkout. `server.ts` passes `app.log`; `scripts/seed.ts` passes its own Pino logger. `migrate.ts` and `seed-reference.ts` (short-lived, `max: 1`) are unchanged.
+
+**Evidence:** `pool-idle-errors.test.ts` kills an idle pooled backend with `pg_terminate_backend`, asserts the `57P01` warning is logged and the pool still answers queries. A throwaway copy without the listener reproduced the exact uncaught error from the CI log.
+
+---
+
 ## 2026-10-03 — Recipes page: infinite scroll
 
-**Status:** Committed to `main`, not pushed. Frontend 629 tests green; typecheck, lint and format clean. Backend untouched. Not yet eyeballed in a browser.
+**Status:** Committed + pushed to `main`; CI and Deploy green. Frontend 629 tests green; typecheck, lint and format clean. Backend untouched. Not yet eyeballed in a browser.
 
 **Change:** the recipes page loads more recipes as you scroll. Before this it called `recipes.list.useQuery` with no cursor, so it only ever showed the first 30 recipes (the backend default), and anything past that couldn't be reached from the page.
 

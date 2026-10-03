@@ -1,36 +1,29 @@
 import { sql } from 'drizzle-orm';
-import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import pg from 'pg';
-import {
-  PostgreSqlContainer,
-  type StartedPostgreSqlContainer,
-} from '@testcontainers/postgresql';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import * as schema from '../src/db/schema/index.ts';
 import { makeWithTransaction } from '../src/db/withTransaction.ts';
+import {
+  startTestDb,
+  stopTestDb,
+  TESTCONTAINER_BOOT_MS,
+  type TestDb,
+} from './helpers/test-db.ts';
 
 type Schema = typeof schema;
 
-const TESTCONTAINER_BOOT_MS = 120_000;
-
 describe('db smoke', () => {
-  let container: StartedPostgreSqlContainer | undefined;
-  let pool: pg.Pool | undefined;
+  let testDb: TestDb | undefined;
   let db!: NodePgDatabase<Schema>;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:17.2-alpine').start();
-    pool = new pg.Pool({
-      connectionString: container.getConnectionUri(),
-      max: 1,
-    });
-    db = drizzle(pool, { schema, casing: 'snake_case' });
+    testDb = await startTestDb({ poolMax: 1, migrate: false });
+    db = testDb.db;
   }, TESTCONTAINER_BOOT_MS);
 
   afterAll(async () => {
-    if (pool) await pool.end();
-    if (container) await container.stop();
+    await stopTestDb(testDb);
   });
 
   it('constructs a Drizzle instance against a real Postgres', () => {

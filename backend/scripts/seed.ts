@@ -1,14 +1,14 @@
 import { pino } from 'pino';
 
 import { getDb } from '../src/db/index.ts';
-
-const { pool, withTransaction } = getDb();
 import { runDevSeeds, runSeeds } from '../src/db/seeds/index.ts';
 
 // CLI entry. Domain code uses Fastify's request logger; this script lives
 // outside that lifecycle, so a small standalone Pino instance is fine
 // (AGENTS.md "Pino only; no `console.log`").
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
+
+const { pool, withTransaction } = getDb(log);
 
 async function main(): Promise<void> {
   log.info('seed: starting');

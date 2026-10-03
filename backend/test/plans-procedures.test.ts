@@ -1,14 +1,5 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-import {
-  PostgreSqlContainer,
-  type StartedPostgreSqlContainer,
-} from '@testcontainers/postgresql';
 import { and, eq, sql } from 'drizzle-orm';
-import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import pg from 'pg';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   afterAll,
   beforeAll,
@@ -39,15 +30,14 @@ import { mealOccasions } from '../src/db/schema/reference.ts';
 import { formatCivilDate, todayInLondon } from '../src/lib/date-utils.ts';
 import type { AppContext } from '../src/trpc/context.ts';
 import { appRouter } from '../src/trpc/router.ts';
+import {
+  startTestDb,
+  stopTestDb,
+  TESTCONTAINER_BOOT_MS,
+  type TestDb,
+} from './helpers/test-db.ts';
 
 type Schema = typeof schema;
-
-const TESTCONTAINER_BOOT_MS = 120_000;
-const MIGRATIONS_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'drizzle',
-);
 
 const USER_ID = 'user-plans-test-1';
 const USER_EMAIL = 'plans@example.com';
@@ -65,24 +55,17 @@ function addDays(date: Date, days: number): Date {
 }
 
 describe('plans procedures', () => {
-  let container: StartedPostgreSqlContainer | undefined;
-  let pool: pg.Pool | undefined;
+  let testDb: TestDb | undefined;
   let db!: NodePgDatabase<Schema>;
   let occasionIds!: number[];
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:17.2-alpine').start();
-    pool = new pg.Pool({
-      connectionString: container.getConnectionUri(),
-      max: 4,
-    });
-    db = drizzle(pool, { schema, casing: 'snake_case' });
-    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+    testDb = await startTestDb({ poolMax: 4 });
+    db = testDb.db;
   }, TESTCONTAINER_BOOT_MS);
 
   afterAll(async () => {
-    if (pool) await pool.end();
-    if (container) await container.stop();
+    await stopTestDb(testDb);
   });
 
   beforeEach(async () => {

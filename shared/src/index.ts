@@ -94,6 +94,12 @@ export {
   type RecipeReferenceItem,
   recipeReferencesSchema,
   type RecipeReferences,
+  RECIPE_FILTER_SOURCES_MAX,
+  RECIPE_FILTER_INGREDIENTS_MAX,
+  listRecipeSourcesResultSchema,
+  type ListRecipeSourcesResult,
+  listRecipeIngredientsResultSchema,
+  type ListRecipeIngredientsResult,
   ratingSchema,
   type Rating,
   rateRecipeInputSchema,
@@ -240,6 +246,8 @@ export {
   RECIPE_VIEW_SERVINGS_MAX,
   recipeSearchSchema,
   type RecipeSearch,
+  recipeListSearchSchema,
+  type RecipeListSearch,
 } from './schemas/recipe-search.ts';
 export {
   getDayPlantPointsInputSchema,

@@ -3,16 +3,47 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listUseInfiniteQueryMock, listTagsUseQueryMock } = vi.hoisted(() => ({
-  listUseInfiniteQueryMock: vi.fn(),
-  listTagsUseQueryMock: vi.fn(),
-}));
+const {
+  listUseInfiniteQueryMock,
+  listTagsUseQueryMock,
+  listSourcesUseQueryMock,
+  listIngredientsUseQueryMock,
+  navigateMock,
+  url,
+} = vi.hoisted(() => {
+  // A stand-in for the router's URL search: `useSearch` reads it, `navigate`
+  // writes it, and readers re-render on each write.
+  let search: Record<string, unknown> = {};
+  const listeners = new Set<() => void>();
+  return {
+    listUseInfiniteQueryMock: vi.fn(),
+    listTagsUseQueryMock: vi.fn(),
+    listSourcesUseQueryMock: vi.fn(),
+    listIngredientsUseQueryMock: vi.fn(),
+    navigateMock: vi.fn(),
+    url: {
+      get: (): Record<string, unknown> => search,
+      set: (next: Record<string, unknown>): void => {
+        search = next;
+        for (const listener of listeners) listener();
+      },
+      subscribe: (listener: () => void): (() => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    },
+  };
+});
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     recipes: {
       list: { useInfiniteQuery: listUseInfiniteQueryMock },
       listTags: { useQuery: listTagsUseQueryMock },
+      listSources: { useQuery: listSourcesUseQueryMock },
+      listIngredients: { useQuery: listIngredientsUseQueryMock },
     },
   },
 }));
@@ -21,8 +52,11 @@ vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-router')>(
     '@tanstack/react-router',
   );
+  const { useSyncExternalStore } = await import('react');
   return {
     ...actual,
+    useSearch: () => useSyncExternalStore(url.subscribe, url.get),
+    useNavigate: () => navigateMock,
     Link: ({
       children,
       to,
@@ -138,10 +172,26 @@ function scrollSentinelIntoView(): void {
   });
 }
 
+function lastListInput(): unknown {
+  return listUseInfiniteQueryMock.mock.lastCall?.[0];
+}
+
 beforeEach(() => {
   listUseInfiniteQueryMock.mockReset();
-  listTagsUseQueryMock.mockReset();
-  listTagsUseQueryMock.mockReturnValue({ data: [] });
+  listTagsUseQueryMock.mockReset().mockReturnValue({ data: [] });
+  listSourcesUseQueryMock.mockReset().mockReturnValue({ data: [] });
+  listIngredientsUseQueryMock.mockReset().mockReturnValue({ data: [] });
+  url.set({});
+  navigateMock
+    .mockReset()
+    .mockImplementation(
+      (options: {
+        search: (prev: Record<string, unknown>) => Record<string, unknown>;
+      }) => {
+        url.set(options.search(url.get()));
+        return Promise.resolve();
+      },
+    );
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
 });
 
@@ -199,19 +249,79 @@ describe('RecipesPage', () => {
     });
   });
 
-  it('forwards the debounced search term to the list query', async () => {
+  it('writes the debounced search to the URL in place, and lists by it', async () => {
     const user = userEvent.setup();
     setup();
     render(<RecipesPage />);
 
-    await user.type(screen.getByLabelText(/search recipes/i), 'pasta');
+    await user.type(screen.getByLabelText(/search recipes/i), '  pasta ');
 
     await waitFor(() => {
-      expect(listUseInfiniteQueryMock).toHaveBeenLastCalledWith(
-        { search: 'pasta', tagIds: undefined, limit: 30 },
-        expect.anything(),
-      );
+      expect(url.get()).toEqual({ q: 'pasta' });
     });
+    expect(navigateMock).toHaveBeenCalledTimes(1);
+    expect(navigateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ replace: true, resetScroll: false }),
+    );
+    expect(lastListInput()).toEqual(
+      expect.objectContaining({ search: 'pasta', limit: 30 }),
+    );
+  });
+
+  it('lists by the search and filters already in the URL', () => {
+    url.set({
+      q: 'pie',
+      tags: [1],
+      sources: [2],
+      ingredients: [3, 4],
+      maxTotal: 60,
+      maxActive: 15,
+    });
+    setup();
+    render(<RecipesPage />);
+
+    expect(screen.getByLabelText(/search recipes/i)).toHaveValue('pie');
+    expect(lastListInput()).toEqual({
+      search: 'pie',
+      tagIds: [1],
+      sourceIds: [2],
+      ingredientIds: [3, 4],
+      maxTotalTimeMins: 60,
+      maxActiveTimeMins: 15,
+      limit: 30,
+    });
+  });
+
+  it('leaves the box alone when its own trimmed search write lands', async () => {
+    const user = userEvent.setup();
+    setup();
+    render(<RecipesPage />);
+    const input = screen.getByLabelText(/search recipes/i);
+
+    await user.type(input, 'pasta ');
+    await waitFor(() => {
+      expect(url.get()).toEqual({ q: 'pasta' });
+    });
+    expect(input).toHaveValue('pasta ');
+    await user.type(input, 'bake');
+
+    expect(input).toHaveValue('pasta bake');
+    await waitFor(() => {
+      expect(url.get()).toEqual({ q: 'pasta bake' });
+    });
+  });
+
+  it('shows what the URL says when a link changes the search', () => {
+    url.set({ q: 'pasta' });
+    setup();
+    render(<RecipesPage />);
+
+    act(() => {
+      url.set({});
+    });
+
+    expect(screen.getByLabelText(/search recipes/i)).toHaveValue('');
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it('renders the plant-points chip on each card', () => {
@@ -252,16 +362,9 @@ describe('RecipesPage', () => {
     expect(tags).toHaveTextContent('weeknight');
   });
 
-  it('hides the tag filter when the household has no tags', () => {
-    setup();
-    render(<RecipesPage />);
-    expect(
-      screen.queryByRole('group', { name: /filter by tag/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('forwards every selected tag to the list query and clears on untoggle', async () => {
+  it('writes a filter change to the URL, keeping the search', async () => {
     const user = userEvent.setup();
+    url.set({ q: 'pasta' });
     listTagsUseQueryMock.mockReturnValue({
       data: [
         { id: 1, name: 'Quick' },
@@ -271,34 +374,40 @@ describe('RecipesPage', () => {
     setup();
     render(<RecipesPage />);
 
-    const quick = screen.getByRole('button', { name: 'Quick' });
-    await user.click(quick);
-    await user.click(screen.getByRole('button', { name: 'Vegetarian' }));
+    await user.click(screen.getByRole('button', { name: 'Tags' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Vegetarian' }));
 
-    expect(quick).toHaveAttribute('aria-pressed', 'true');
-    expect(listUseInfiniteQueryMock).toHaveBeenLastCalledWith(
-      { search: undefined, tagIds: [1, 2], limit: 30 },
-      expect.anything(),
-    );
-
-    await user.click(quick);
-    await user.click(screen.getByRole('button', { name: 'Vegetarian' }));
-    expect(listUseInfiniteQueryMock).toHaveBeenLastCalledWith(
-      { search: undefined, tagIds: undefined, limit: 30 },
-      expect.anything(),
+    expect(url.get()).toEqual({ q: 'pasta', tags: [2] });
+    expect(lastListInput()).toEqual(
+      expect.objectContaining({ search: 'pasta', tagIds: [2] }),
     );
   });
 
-  it('uses the no-match message when a tag filter finds nothing', async () => {
+  it('clears every filter but keeps the search', async () => {
     const user = userEvent.setup();
-    listTagsUseQueryMock.mockReturnValue({ data: [{ id: 1, name: 'Quick' }] });
+    url.set({ q: 'pasta', tags: [1], maxTotal: 30 });
+    setup();
+    render(<RecipesPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+
+    expect(lastListInput()).toEqual(
+      expect.objectContaining({
+        search: 'pasta',
+        tagIds: undefined,
+        maxTotalTimeMins: undefined,
+      }),
+    );
+    expect(screen.getByLabelText(/search recipes/i)).toHaveValue('pasta');
+  });
+
+  it('uses the no-match message when a filter finds nothing', () => {
+    url.set({ maxActive: 15 });
     setup({ items: [] });
     render(<RecipesPage />);
 
-    await user.click(screen.getByRole('button', { name: 'Quick' }));
-
     expect(
-      screen.getByText(/no recipes match your search/i),
+      screen.getByText('No recipes match your search and filters.'),
     ).toBeInTheDocument();
   });
 

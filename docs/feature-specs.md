@@ -2269,6 +2269,54 @@ Conventions:
 
 ---
 
+### FEAT-56 — Recipes page filters: source, times and ingredients, with the tag filter in the same format
+
+**Goal:** Filter the recipes page by source, total time, active time and ingredient, alongside tags, from one row of filter buttons. The search and filters live in the URL, so Back from a recipe restores them. (DEC-100)
+
+**Estimate:** 1 day. **Depends on:** FEAT-19 (browse view), DEC-97 (tags). **Enables:** none specifically.
+
+**Files:**
+- `shared/src/schemas/recipes.ts`, `shared/src/schemas/recipe-search.ts`
+- `backend/src/trpc/procedures/recipes.ts` (`list`; `listSources` and `listIngredients` are new)
+- `frontend/src/components/ui/popover.tsx`, `frontend/src/components/recipe-filters/*`, `frontend/src/lib/recipe-filters.ts` (all new)
+- `frontend/src/routes/_authed/recipes/index.tsx`, `routes/-components/recipes-page.tsx`
+- `e2e/fixtures/db.ts`, `e2e/specs/recipe-filters.spec.ts` (new), `recipe-tags.spec.ts`, `a11y.spec.ts`
+
+**Acceptance criteria:**
+- [ ] The recipes page shows filter buttons for Tags, Source, Total time, Active time and Ingredients; Tags, Source and Ingredients are hidden when there's nothing to pick
+- [ ] Source lists only sources on a listed recipe; picking several shows recipes from any of them
+- [ ] Total time and Active time are separate filters, each offering Any or up to 15, 30, 45, 60, 90 or 120 min (the limit itself included); a recipe with no time recorded is hidden while that filter is set
+- [ ] Ingredients offers only ingredients on a listed recipe and searches them as you type; a recipe must use every picked ingredient (up to 10); optional lines count; a serving variation also matches on its base recipe's ingredients
+- [ ] The tag filter is a checklist in the same popover format, and picking several tags still requires all of them
+- [ ] A set filter's button fills in and names its value; each panel has Clear; "Clear filters" resets every filter but keeps the name search
+- [ ] Filters combine with each other and with the name search, and infinite scroll works under any combination
+- [ ] The search and filters live in the URL; changes replace the history entry; opening a recipe and pressing Back restores them; a malformed value is dropped rather than failing the page
+- [ ] The Recipe Bank and slot-editor picker are unchanged
+
+**Implementation notes:**
+- Ingredient matching is one `EXISTS` per ingredient, with `recipe_id IN (recipes.id, recipes.base_recipe_id)`, so a variation matches its base's lines.
+- The two option reads use the default `pickableRecipesWhere()`, matching the recipes page's own list call. `listTags` uses `includePickerHidden` because it also serves the bank and picker.
+
+**Manual verification:**
+1. On the recipes page, pick an ingredient and a total time, open a recipe, then press Back. The same filters and results show.
+2. Pick an ingredient used only by a base recipe; its serving variations are listed too.
+3. At phone width, check the filter row wraps and each panel fits on screen.
+
+**Common gotchas:**
+- The search box writes to the URL after a debounce. The page tells its own write apart from a link changing the search, so the box isn't trimmed while you type.
+- A time radio is controlled by the URL, which updates a moment after the click. In Playwright, click and then wait for `toBeChecked()` rather than using `check()`.
+
+**Definition of done:**
+- Tests cover:
+  - Backend: each filter (inclusive limits, untimed recipes, a foreign source, ingredient AND, optional and duplicate lines, a variation matching via its base), all filters with search, tags and the cursor, both option reads, and the input limits.
+  - Filter bar: each panel, button summaries, Clear, "Clear filters" and the ingredient limit.
+  - Recipes page: reading the URL, writing it (replacing the entry), resetting when a link changes it, and not trimming the box on its own write.
+  - e2e: ingredient and time filters with Back, the source filter, and an axe scan with a panel open.
+- Commit: `feat(recipes): filter the recipes page by source, times and ingredients`
+- Gate check: from a filtered recipes page, open a recipe and press Back; the same filters and results show.
+
+---
+
 ## Cross-feature concerns and reuse-from-day-one
 
 The 53 features above are sequenced for incremental delivery, but several concerns thread through many of them. Each item below is something where a *decision or pattern made in an early feature locks in costs or affordances for later ones*. Surfacing them now prevents the small inconsistencies that compound over a project of this size.

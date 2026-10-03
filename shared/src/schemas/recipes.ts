@@ -13,6 +13,10 @@ const prepTypeIdSchema = z.number().int().positive();
 const sourceIdSchema = z.number().int().positive();
 export const ratingSchema = z.number().int().min(1).max(5);
 
+// `smallint` max — clamps the macros / serving / time inputs at the boundary
+// so out-of-range values never reach the database.
+const SMALLINT_MAX = 32767;
+
 export type Rating = z.infer<typeof ratingSchema>;
 
 export const recipeIngredientLineSchema = z.object({
@@ -154,6 +158,12 @@ export const listRecipesCursorSchema = z.object({
 
 export type ListRecipesCursor = z.infer<typeof listRecipesCursorSchema>;
 
+// Recipes-page filters (DEC-100).
+export const RECIPE_FILTER_SOURCES_MAX = 20;
+export const RECIPE_FILTER_INGREDIENTS_MAX = 10;
+
+export const recipeTimeLimitSchema = z.number().int().min(1).max(SMALLINT_MAX);
+
 // `includePickerHidden` now excludes serving variations whose base is
 // soft-deleted (the three-way model's "new picker" rule); `isBase` lets the
 // base picker filter to bases only. Both forward to `pickableRecipesWhere`.
@@ -165,6 +175,20 @@ export const listRecipesInputSchema = z
     isBase: z.boolean().optional(),
     // A recipe must carry every listed tag (AND).
     tagIds: z.array(recipeTagIdSchema).max(RECIPE_TAGS_MAX).optional(),
+    // A recipe has one source, so several listed means any of them.
+    sourceIds: z
+      .array(sourceIdSchema)
+      .max(RECIPE_FILTER_SOURCES_MAX)
+      .optional(),
+    // A recipe must use every listed ingredient (AND); a serving variation
+    // also matches on its base recipe's lines.
+    ingredientIds: z
+      .array(ingredientIdSchema)
+      .max(RECIPE_FILTER_INGREDIENTS_MAX)
+      .optional(),
+    // Inclusive upper bounds; a recipe with no time recorded never matches.
+    maxActiveTimeMins: recipeTimeLimitSchema.optional(),
+    maxTotalTimeMins: recipeTimeLimitSchema.optional(),
     cursor: listRecipesCursorSchema.optional(),
     limit: z.number().int().min(1).max(60).optional(),
   })
@@ -184,10 +208,6 @@ export const getRecipeInputSchema = z.object({
 });
 
 export type GetRecipeInput = z.infer<typeof getRecipeInputSchema>;
-
-// `smallint` max — clamps the macros / serving / time inputs at the boundary
-// so out-of-range values never reach the database.
-const SMALLINT_MAX = 32767;
 
 const recipeNameSchema = z
   .string()
@@ -494,6 +514,22 @@ export const recipeReferencesSchema = z.object({
 });
 
 export type RecipeReferences = z.infer<typeof recipeReferencesSchema>;
+
+// Recipes-page filter options (DEC-100): sources and ingredients on at least
+// one listed recipe, sorted by name.
+export const listRecipeSourcesResultSchema = z.array(recipeReferenceItemSchema);
+
+export type ListRecipeSourcesResult = z.infer<
+  typeof listRecipeSourcesResultSchema
+>;
+
+export const listRecipeIngredientsResultSchema = z.array(
+  recipeReferenceItemSchema,
+);
+
+export type ListRecipeIngredientsResult = z.infer<
+  typeof listRecipeIngredientsResultSchema
+>;
 
 export const rateRecipeInputSchema = z.object({
   recipeId: recipeIdSchema,

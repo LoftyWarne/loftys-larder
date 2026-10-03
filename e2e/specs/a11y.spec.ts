@@ -167,6 +167,18 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    // A filter set, so a filled button is scanned, with its panel open.
+    test(`recipe filters pass axe in ${theme} theme`, async ({ page }) => {
+      await page.goto('/recipes?maxTotal=30');
+      await page
+        .getByRole('button', { name: 'Total time: up to 30 min' })
+        .click();
+      await expect(
+        page.getByRole('radio', { name: 'Up to 30 min' }),
+      ).toBeChecked();
+      await runAxe(page, theme);
+    });
+
     test(`recipe editor passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto('/recipes/new');
       await expect(

@@ -1,11 +1,15 @@
-import type { ListRecipesCursor } from '@loftys-larder/shared';
-import { Link } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import type {
+  ListRecipesCursor,
+  RecipeListSearch,
+} from '@loftys-larder/shared';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { RecipeCard } from '@/components/recipe-card.tsx';
-import { TagFilter } from '@/components/tag-filter.tsx';
+import { RecipeFilterBar } from '@/components/recipe-filters/recipe-filter-bar.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { hasRecipeFilters, listInputFromSearch } from '@/lib/recipe-filters.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -15,26 +19,49 @@ const PAGE_SIZE = 30;
 const LOAD_MORE_ROOT_MARGIN = '600px';
 
 export function RecipesPage(): React.ReactElement {
-  const [searchInput, setSearchInput] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [tagIds, setTagIds] = useState<number[]>([]);
+  // The name search and filters live in the URL so they survive opening a
+  // recipe and pressing Back (DEC-100).
+  const search = useSearch({ from: '/_authed/recipes/' });
+  const navigate = useNavigate({ from: '/recipes/' });
+  const [searchInput, setSearchInput] = useState(search.q ?? '');
+  // The last name search this page wrote to the URL, so that write landing
+  // isn't mistaken for a link that changed the search.
+  const writtenQuery = useRef(search.q);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  const updateSearch = useCallback(
+    (patch: Partial<RecipeListSearch>) => {
+      void navigate({
+        search: (prev) => ({ ...prev, ...patch }),
+        replace: true,
+        resetScroll: false,
+      });
+    },
+    [navigate],
+  );
+
   useEffect(() => {
+    const next = searchInput.trim() || undefined;
+    if (next === search.q) return;
     const handle = window.setTimeout(() => {
-      setDebouncedSearch(searchInput.trim());
+      writtenQuery.current = next;
+      updateSearch({ q: next });
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       window.clearTimeout(handle);
     };
-  }, [searchInput]);
+  }, [searchInput, search.q, updateSearch]);
+
+  // A link to this page (e.g. the nav) can change the search while the page
+  // stays mounted; the box then shows what the URL says.
+  useEffect(() => {
+    if (search.q === writtenQuery.current) return;
+    writtenQuery.current = search.q;
+    setSearchInput(search.q ?? '');
+  }, [search.q]);
 
   const listQuery = trpc.recipes.list.useInfiniteQuery(
-    {
-      search: debouncedSearch || undefined,
-      tagIds: tagIds.length > 0 ? tagIds : undefined,
-      limit: PAGE_SIZE,
-    },
+    listInputFromSearch(search, PAGE_SIZE),
     {
       getNextPageParam: (lastPage): ListRecipesCursor | undefined =>
         lastPage.nextCursor ?? undefined,
@@ -76,7 +103,7 @@ export function RecipesPage(): React.ReactElement {
   }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   const recipes = listQuery.data?.pages.flatMap((page) => page.items) ?? [];
-  const hasSearch = debouncedSearch.length > 0 || tagIds.length > 0;
+  const isNarrowed = search.q !== undefined || hasRecipeFilters(search);
 
   return (
     <section className="mx-auto max-w-6xl space-y-6">
@@ -97,7 +124,7 @@ export function RecipesPage(): React.ReactElement {
         aria-label="Search recipes"
       />
 
-      <TagFilter selectedIds={tagIds} onChange={setTagIds} />
+      <RecipeFilterBar filters={search} onChange={updateSearch} />
 
       {listQuery.isLoading && <p role="status">Loading recipes…</p>}
 
@@ -109,8 +136,8 @@ export function RecipesPage(): React.ReactElement {
 
       {!listQuery.isLoading && !listQuery.error && recipes.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          {hasSearch
-            ? 'No recipes match your search.'
+          {isNarrowed
+            ? 'No recipes match your search and filters.'
             : 'No recipes yet. Recipes added via the editor will show up here.'}
         </p>
       )}

@@ -96,8 +96,33 @@ export interface CreateRecipeSpec {
   baseServings: number;
   isBase?: boolean;
   baseRecipeId?: number;
+  // A household source, created by name if it doesn't exist yet.
+  source?: string;
+  activeTimeMins?: number;
+  totalTimeMins?: number;
   ingredients: IngredientSpec[];
   method?: MethodStepSpec[];
+}
+
+async function ensureSource(
+  client: pg.PoolClient,
+  name: string,
+): Promise<number> {
+  const existing = await client.query<{ id: number }>(
+    `select id from recipe_sources where household_id = $1 and name = $2`,
+    [HOUSEHOLD_ID, name],
+  );
+  const existingId = existing.rows[0]?.id;
+  if (existingId !== undefined) return existingId;
+
+  const inserted = await client.query<{ id: number }>(
+    `insert into recipe_sources (household_id, name) values ($1, $2)
+     returning id`,
+    [HOUSEHOLD_ID, name],
+  );
+  const row = inserted.rows[0];
+  if (!row) throw new Error(`Failed to insert source ${name}`);
+  return row.id;
 }
 
 // Insert (or reuse) an ingredient row scoped to the household. The pre-existing
@@ -142,9 +167,16 @@ export async function createRecipe(
   try {
     await client.query('begin');
 
+    const sourceId =
+      spec.source === undefined
+        ? null
+        : await ensureSource(client, spec.source);
     const recipeInsert = await client.query<{ id: number }>(
-      `insert into recipes (household_id, name, base_servings, is_base, base_recipe_id)
-       values ($1, $2, $3, $4, $5)
+      `insert into recipes (
+         household_id, name, base_servings, is_base, base_recipe_id,
+         source_id, active_time_mins, total_time_mins
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
        returning id`,
       [
         HOUSEHOLD_ID,
@@ -152,6 +184,9 @@ export async function createRecipe(
         spec.baseServings,
         spec.isBase ?? false,
         spec.baseRecipeId ?? null,
+        sourceId,
+        spec.activeTimeMins ?? null,
+        spec.totalTimeMins ?? null,
       ],
     );
     const recipeRow = recipeInsert.rows[0];

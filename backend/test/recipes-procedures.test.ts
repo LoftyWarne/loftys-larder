@@ -211,6 +211,8 @@ describe('recipes procedures', () => {
     sourceDetail?: string;
     imageUrl?: string;
     baseRecipeId?: number;
+    activeTimeMins?: number;
+    totalTimeMins?: number;
   }
   async function insertRecipe(options: InsertRecipeOptions): Promise<number> {
     const inserted = await db
@@ -227,6 +229,8 @@ describe('recipes procedures', () => {
         sourceDetail: options.sourceDetail,
         imageUrl: options.imageUrl,
         baseRecipeId: options.baseRecipeId,
+        activeTimeMins: options.activeTimeMins,
+        totalTimeMins: options.totalTimeMins,
         addedByUserId: USER_ID,
       })
       .returning({ id: recipes.id });
@@ -3006,6 +3010,256 @@ describe('recipes procedures', () => {
 
       const caller = createCaller(makeContext());
       expect(await caller.recipes.listTags()).toEqual([]);
+    });
+  });
+
+  describe('filters', () => {
+    async function insertSource(
+      name: string,
+      householdId: string = CURRENT_HOUSEHOLD_ID,
+    ): Promise<number> {
+      const inserted = await db
+        .insert(recipeSources)
+        .values({ householdId, name })
+        .returning({ id: recipeSources.id });
+      const row = inserted[0];
+      if (!row) throw new Error('source insert failed');
+      return row.id;
+    }
+
+    async function listNames(
+      input: Parameters<ReturnType<typeof createCaller>['recipes']['list']>[0],
+    ): Promise<string[]> {
+      const caller = createCaller(makeContext());
+      const result = await caller.recipes.list(input);
+      return result.items.map((recipe) => recipe.name);
+    }
+
+    it('filters by source, matching any listed source', async () => {
+      const mob = await insertSource('Mob Kitchen');
+      const bbc = await insertSource('BBC Good Food');
+      const ottolenghi = await insertSource('Ottolenghi');
+      await insertRecipe({ name: 'Mob dal', sourceId: mob });
+      await insertRecipe({ name: 'BBC chilli', sourceId: bbc });
+      await insertRecipe({ name: 'Ottolenghi salad', sourceId: ottolenghi });
+      await insertRecipe({ name: 'Family stew' });
+
+      expect(await listNames({ sourceIds: [mob] })).toEqual(['Mob dal']);
+      expect(await listNames({ sourceIds: [mob, bbc, mob] })).toEqual([
+        'BBC chilli',
+        'Mob dal',
+      ]);
+    });
+
+    it('matches nothing for a source from another household', async () => {
+      const theirs = await insertSource('Theirs', OTHER_HOUSEHOLD_ID);
+      await insertRecipe({ name: 'Ours' });
+      await insertRecipe({
+        name: 'Their recipe',
+        householdId: OTHER_HOUSEHOLD_ID,
+        sourceId: theirs,
+      });
+
+      expect(await listNames({ sourceIds: [theirs] })).toEqual([]);
+    });
+
+    it('filters by maximum active and total time, inclusive, leaving out untimed recipes', async () => {
+      await insertRecipe({
+        name: 'Quick',
+        activeTimeMins: 10,
+        totalTimeMins: 20,
+      });
+      await insertRecipe({
+        name: 'Medium',
+        activeTimeMins: 20,
+        totalTimeMins: 45,
+      });
+      await insertRecipe({
+        name: 'Slow',
+        activeTimeMins: 30,
+        totalTimeMins: 120,
+      });
+      await insertRecipe({ name: 'Active only', activeTimeMins: 15 });
+      await insertRecipe({ name: 'Untimed' });
+
+      expect(await listNames({ maxTotalTimeMins: 45 })).toEqual([
+        'Medium',
+        'Quick',
+      ]);
+      expect(await listNames({ maxActiveTimeMins: 15 })).toEqual([
+        'Active only',
+        'Quick',
+      ]);
+      expect(
+        await listNames({ maxTotalTimeMins: 45, maxActiveTimeMins: 15 }),
+      ).toEqual(['Quick']);
+    });
+
+    it('filters to recipes using every listed ingredient, optional lines included', async () => {
+      const chicken = await insertIngredient({ name: 'Chicken' });
+      const leek = await insertIngredient({ name: 'Leek', isPlant: true });
+      const rice = await insertIngredient({ name: 'Rice', isPlant: true });
+      const pie = await insertRecipe({ name: 'Chicken and leek pie' });
+      await insertRecipeIngredient(pie, chicken);
+      await insertRecipeIngredient(pie, leek, { isOptional: true });
+      const roast = await insertRecipe({ name: 'Roast chicken' });
+      await insertRecipeIngredient(roast, chicken, { prepTypeId: prepChopped });
+      await insertRecipeIngredient(roast, chicken, { prepTypeId: prepDiced });
+      const risotto = await insertRecipe({ name: 'Risotto' });
+      await insertRecipeIngredient(risotto, rice);
+
+      expect(await listNames({ ingredientIds: [chicken] })).toEqual([
+        'Chicken and leek pie',
+        'Roast chicken',
+      ]);
+      expect(await listNames({ ingredientIds: [chicken, leek] })).toEqual([
+        'Chicken and leek pie',
+      ]);
+      expect(await listNames({ ingredientIds: [leek, rice] })).toEqual([]);
+    });
+
+    it("matches a serving variation on its base recipe's ingredients", async () => {
+      const chicken = await insertIngredient({ name: 'Chicken' });
+      const tortilla = await insertIngredient({ name: 'Tortilla' });
+      const base = await insertRecipe({ name: 'Pulled chicken', isBase: true });
+      await insertRecipeIngredient(base, chicken);
+      const variation = await insertRecipe({
+        name: 'Chicken tacos',
+        baseRecipeId: base,
+      });
+      await insertRecipeIngredient(variation, tortilla);
+      const wraps = await insertRecipe({ name: 'Veg wraps' });
+      await insertRecipeIngredient(wraps, tortilla);
+
+      expect(await listNames({ ingredientIds: [chicken] })).toEqual([
+        'Chicken tacos',
+        'Pulled chicken',
+      ]);
+      expect(await listNames({ ingredientIds: [chicken, tortilla] })).toEqual([
+        'Chicken tacos',
+      ]);
+      expect(await listNames({ ingredientIds: [tortilla] })).toEqual([
+        'Chicken tacos',
+        'Veg wraps',
+      ]);
+    });
+
+    it('combines every filter with search, tags and the keyset cursor', async () => {
+      const mob = await insertSource('Mob Kitchen');
+      const apple = await insertIngredient({ name: 'Apple', isPlant: true });
+      const caller = createCaller(makeContext());
+      const matching = ['Apple pie', 'Apple tart', 'Apple crumble'];
+      let tagId = 0;
+      for (const name of [...matching, 'Apple strudel', 'Banana bread']) {
+        const id = await insertRecipe({
+          name,
+          sourceId: mob,
+          activeTimeMins: 20,
+          // The strudel is the one recipe over the time limit.
+          totalTimeMins: name === 'Apple strudel' ? 90 : 60,
+        });
+        await insertRecipeIngredient(id, apple);
+        const tagged = await caller.recipes.replaceTags({
+          recipeId: id,
+          names: ['Pudding'],
+        });
+        tagId = tagged.tags[0]?.id ?? 0;
+      }
+      const filters = {
+        search: 'apple',
+        tagIds: [tagId],
+        sourceIds: [mob],
+        ingredientIds: [apple],
+        maxActiveTimeMins: 30,
+        maxTotalTimeMins: 60,
+        limit: 2,
+      };
+
+      const first = await caller.recipes.list(filters);
+      expect(first.items.map((r) => r.name)).toEqual([
+        'Apple crumble',
+        'Apple pie',
+      ]);
+      const second = await caller.recipes.list({
+        ...filters,
+        cursor: first.nextCursor ?? undefined,
+      });
+      expect(second.items.map((r) => r.name)).toEqual(['Apple tart']);
+      expect(second.nextCursor).toBeNull();
+    });
+
+    it('rejects filter lists over their limits and a time limit below 1', async () => {
+      const caller = createCaller(makeContext());
+      const ids = (count: number): number[] =>
+        Array.from({ length: count }, (_, index) => index + 1);
+
+      await expect(
+        caller.recipes.list({ ingredientIds: ids(11) }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        caller.recipes.list({ sourceIds: ids(21) }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        caller.recipes.list({ maxTotalTimeMins: 0 }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('listSources returns only sources on listed recipes, sorted by name', async () => {
+      const mob = await insertSource('mob kitchen');
+      const bbc = await insertSource('BBC Good Food');
+      await insertSource('Unused');
+      const gone = await insertSource('Gone');
+      const theirs = await insertSource('Theirs', OTHER_HOUSEHOLD_ID);
+      await insertRecipe({ name: 'Dal', sourceId: mob });
+      await insertRecipe({ name: 'Chilli', sourceId: bbc });
+      await insertRecipe({ name: 'Stew', sourceId: bbc });
+      await insertRecipe({ name: 'Old', sourceId: gone, isDeleted: true });
+      await insertRecipe({
+        name: 'Their recipe',
+        householdId: OTHER_HOUSEHOLD_ID,
+        sourceId: theirs,
+      });
+
+      const caller = createCaller(makeContext());
+      expect(await caller.recipes.listSources()).toEqual([
+        { id: bbc, name: 'BBC Good Food' },
+        { id: mob, name: 'mob kitchen' },
+      ]);
+    });
+
+    it('listIngredients returns ingredients that can match a listed recipe, sorted by name', async () => {
+      const onion = await insertIngredient({ name: 'onion', isPlant: true });
+      const beef = await insertIngredient({ name: 'Beef' });
+      const lamb = await insertIngredient({ name: 'Lamb' });
+      const brisket = await insertIngredient({ name: 'Brisket' });
+      await insertIngredient({ name: 'Unused' });
+      const live = await insertRecipe({ name: 'Chilli' });
+      await insertRecipeIngredient(live, onion);
+      await insertRecipeIngredient(live, beef);
+      const deleted = await insertRecipe({ name: 'Old', isDeleted: true });
+      await insertRecipeIngredient(deleted, lamb);
+      // A deleted base still shows on the recipes page through its variation,
+      // which the filter matches on the base's lines.
+      const deletedBase = await insertRecipe({
+        name: 'Smoked brisket',
+        isBase: true,
+      });
+      await insertRecipeIngredient(deletedBase, brisket);
+      await insertRecipe({ name: 'Brisket buns', baseRecipeId: deletedBase });
+      await db
+        .update(recipes)
+        .set({ isDeleted: true })
+        .where(eq(recipes.id, deletedBase));
+
+      const caller = createCaller(makeContext());
+      expect(await caller.recipes.listIngredients()).toEqual([
+        { id: beef, name: 'Beef' },
+        { id: brisket, name: 'Brisket' },
+        { id: onion, name: 'onion' },
+      ]);
+      expect(await listNames({ ingredientIds: [brisket] })).toEqual([
+        'Brisket buns',
+      ]);
     });
   });
 });

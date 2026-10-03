@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   inArray,
+  lte,
   notInArray,
   or,
   sql,
@@ -30,6 +31,8 @@ import {
   listRecipesInputSchema,
   listRecipesResultSchema,
   listRelatedRecipesInputSchema,
+  listRecipeIngredientsResultSchema,
+  listRecipeSourcesResultSchema,
   listRecipeTagsResultSchema,
   listRelatedRecipesResultSchema,
   rateRecipeInputSchema,
@@ -60,6 +63,8 @@ import {
   type DomainErrorCode,
   type EditRecipeCommentResult,
   type ListRecipeCommentsResult,
+  type ListRecipeIngredientsResult,
+  type ListRecipeSourcesResult,
   type ListRecipeTagsResult,
   type ListRecipesResult,
   type ListRelatedRecipesResult,
@@ -194,6 +199,31 @@ export const recipesRouter = router({
             select 1 from ${recipeTagLinks}
             where recipe_tag_links.recipe_id = recipes.id
               and recipe_tag_links.tag_id = ${tagId}
+          )`,
+        );
+      }
+
+      const sourceIds = [...new Set(input?.sourceIds ?? [])];
+      if (sourceIds.length > 0) {
+        conditions.push(inArray(recipes.sourceId, sourceIds));
+      }
+
+      if (input?.maxActiveTimeMins !== undefined) {
+        conditions.push(lte(recipes.activeTimeMins, input.maxActiveTimeMins));
+      }
+      if (input?.maxTotalTimeMins !== undefined) {
+        conditions.push(lte(recipes.totalTimeMins, input.maxTotalTimeMins));
+      }
+
+      // AND semantics, like tags: one EXISTS per ingredient (DEC-100). A
+      // serving variation also matches on its base's lines; for any other
+      // recipe `base_recipe_id` is null and the IN reduces to its own id.
+      for (const ingredientId of new Set(input?.ingredientIds ?? [])) {
+        conditions.push(
+          sql`exists (
+            select 1 from ${recipeIngredients}
+            where recipe_ingredients.ingredient_id = ${ingredientId}
+              and recipe_ingredients.recipe_id in (recipes.id, recipes.base_recipe_id)
           )`,
         );
       }
@@ -758,6 +788,63 @@ export const recipesRouter = router({
           ),
         )
         .orderBy(sql`lower(${recipeTags.name})`, asc(recipeTags.id))
+        .then((rows) => rows.map(({ id, name }) => ({ id, name })));
+    }),
+
+  // Recipes-page filter options (DEC-100). Visibility matches the recipes
+  // page's own list call (default `pickableRecipesWhere`), so every option
+  // can find at least one recipe there.
+  listSources: protectedProcedure
+    .output(listRecipeSourcesResultSchema)
+    .query(async ({ ctx }): Promise<ListRecipeSourcesResult> => {
+      return ctx.db
+        .selectDistinct({
+          id: recipeSources.id,
+          name: recipeSources.name,
+          lowerName: sql<string>`lower(${recipeSources.name})`,
+        })
+        .from(recipeSources)
+        .innerJoin(recipes, eq(recipes.sourceId, recipeSources.id))
+        .where(
+          and(
+            eq(recipeSources.householdId, CURRENT_HOUSEHOLD_ID),
+            pickableRecipesWhere(),
+          ),
+        )
+        .orderBy(sql`lower(${recipeSources.name})`, asc(recipeSources.id))
+        .then((rows) => rows.map(({ id, name }) => ({ id, name })));
+    }),
+
+  // The join mirrors the `list` ingredient filter: a line counts for its own
+  // recipe and for any serving variation of it.
+  listIngredients: protectedProcedure
+    .output(listRecipeIngredientsResultSchema)
+    .query(async ({ ctx }): Promise<ListRecipeIngredientsResult> => {
+      return ctx.db
+        .selectDistinct({
+          id: ingredients.id,
+          name: ingredients.name,
+          lowerName: sql<string>`lower(${ingredients.name})`,
+        })
+        .from(ingredients)
+        .innerJoin(
+          recipeIngredients,
+          eq(recipeIngredients.ingredientId, ingredients.id),
+        )
+        .innerJoin(
+          recipes,
+          or(
+            eq(recipes.id, recipeIngredients.recipeId),
+            eq(recipes.baseRecipeId, recipeIngredients.recipeId),
+          ),
+        )
+        .where(
+          and(
+            eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+            pickableRecipesWhere(),
+          ),
+        )
+        .orderBy(sql`lower(${ingredients.name})`, asc(ingredients.id))
         .then((rows) => rows.map(({ id, name }) => ({ id, name })));
     }),
 

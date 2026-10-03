@@ -7,8 +7,8 @@ import {
 } from '../fixtures/db.ts';
 
 // Tag a recipe in the editor by typing a new tag, then use that tag to narrow
-// the recipes page and the planner's Recipe Bank (DEC-97). The default
-// Desktop Chrome viewport is `lg+`, so the bank is rendered (DEC-85).
+// the recipes page (DEC-100) and the planner's Recipe Bank (DEC-97). The
+// default Desktop Chrome viewport is `lg+`, so the bank is rendered (DEC-85).
 test.describe('recipe tags', () => {
   test.beforeEach(async () => {
     await resetHouseholdData();
@@ -41,8 +41,15 @@ test.describe('recipe tags', () => {
 
     await page.goto('/recipes');
     await expect(page.getByText('Slow roast lamb')).toBeVisible();
-    const filter = page.getByRole('group', { name: 'Filter by tag' });
-    await filter.getByRole('button', { name: 'Weeknight' }).click();
+    await page.getByRole('button', { name: 'Tags' }).click();
+    await page
+      .getByRole('dialog', { name: 'Tags' })
+      .getByRole('checkbox', { name: 'Weeknight' })
+      .click();
+    await page.keyboard.press('Escape');
+    await expect(
+      page.getByRole('button', { name: 'Tags: Weeknight' }),
+    ).toBeVisible();
     await expect(page.getByText('Chickpea curry')).toBeVisible();
     await expect(page.getByText('Slow roast lamb')).toBeHidden();
 

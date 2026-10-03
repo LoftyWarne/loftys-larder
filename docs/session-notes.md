@@ -4,6 +4,61 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — Recipes page filters: source, times, ingredients; tag filter restyled (DEC-100, FEAT-56)
+
+**Status:** Committed + pushed to `main`. Typecheck, lint and format are clean in all four workspaces. Tests: backend 583 (with the gram-macros commit), frontend 648 and e2e 30, all green. One full e2e run failed `recipe filters pass axe in dark theme` once; the failure message wasn't captured, and it didn't come back in 4 more full runs or 15 runs of that test alone (see Open). No schema change. Not yet eyeballed in a browser. FEAT-56 checkboxes are left for the user to tick.
+
+**Scope confirmed with the user:**
+- The recipes page only. The Recipe Bank and slot-editor picker keep the tag toggle row.
+- Total time and active time are separate filters.
+- Sources: pick several, any match, and only sources in use are listed.
+- Ingredients: all must match (up to 10). Optional lines count, and a serving variation matches on its base's lines. No "without" filter.
+- The ingredient search offers only ingredients used in a recipe.
+- The search and filters live in the URL.
+- Docs: DEC-100 plus FEAT-56.
+
+**Changes:**
+- **Shared:**
+  - `listRecipesInputSchema` gains `sourceIds` (max `RECIPE_FILTER_SOURCES_MAX` = 20), `ingredientIds` (max `RECIPE_FILTER_INGREDIENTS_MAX` = 10), `maxActiveTimeMins` and `maxTotalTimeMins`. The times are checked by `recipeTimeLimitSchema`, 1 up to the smallint max. `SMALLINT_MAX` moved above its first use.
+  - New `listRecipeSourcesResultSchema` and `listRecipeIngredientsResultSchema`.
+  - New `recipeListSearchSchema` in `recipe-search.ts` (`q`, `tags`, `sources`, `ingredients`, `maxTotal`, `maxActive`, each `.catch(undefined)`).
+- **Backend:**
+  - `list`: `inArray` on `source_id`; `lte` on each time; one `EXISTS` per ingredient with `recipe_id in (recipes.id, recipes.base_recipe_id)`.
+  - `listSources` / `listIngredients`: `selectDistinct`, using the default `pickableRecipesWhere()` to match the recipes page (`listTags` uses `includePickerHidden` because it also serves the bank). The ingredient read joins recipes on `id OR base_recipe_id`, mirroring the filter.
+- **Frontend:**
+  - New `ui/popover.tsx` (shadcn, over the existing `@radix-ui/react-popover`).
+  - New `lib/recipe-filters.ts` (URL search → list input, `hasRecipeFilters`, `selectionSummary`, time limits).
+  - New `components/recipe-filters/`:
+    - `filter-popover.tsx`: the shared button and panel.
+    - `checklist-filter.tsx`: tags and sources.
+    - `time-filter.tsx`: native radios.
+    - `ingredient-filter.tsx`: the combobox, remounted by `key` after each pick, plus chips.
+    - `recipe-filter-bar.tsx`.
+  - `recipes-page.tsx` reads `useSearch` and writes with `navigate({ replace: true, resetScroll: false })`. A `writtenQuery` ref tells the page's own debounced `q` write apart from a link changing it, so a trailing space isn't trimmed mid-typing; a test confirms a naive sync fails it.
+  - `components/tag-filter.tsx` stays for the bank and picker.
+- **Tests:**
+  - Backend: 9 cases in a `filters` block.
+  - Frontend:
+    - `recipe-filters.test.ts`: 8 cases.
+    - `recipe-filter-bar.test.tsx`: 8 cases.
+    - `recipes-page.test.tsx`: tag tests replaced by URL-wiring tests, with a `useSyncExternalStore`-backed `useSearch` mock.
+  - e2e:
+    - `fixtures/db.ts`: `createRecipe` takes `source`, `activeTimeMins` and `totalTimeMins`.
+    - New `recipe-filters.spec.ts`.
+    - `recipe-tags.spec.ts`: recipes-page step uses the popover.
+    - `a11y.spec.ts`: new "recipe filters" scan with the Total time panel open.
+
+**Open:**
+- **Combobox a11y (pre-existing, not changed):** axe finds two violations in `SearchableCombobox` that no scan exercised before:
+  - When its list is open: `aria-required-children` and `aria-required-parent`, plus `list`, because the `<li role="option">`s sit in a plain `<ul>` inside the `role="listbox"` content.
+  - After its list closes: `aria-valid-attr-value`, because `aria-activedescendant` still points at an option that's no longer in the DOM.
+
+  Likely fixes are `role="presentation"` on the `<ul>`, and setting `aria-activedescendant` only while open. Both are in the shared primitive (cross-cutting #6), so they're waiting on the user. Until then the new a11y scan opens the time panel, not the ingredient panel.
+- **Dark-theme axe flake:** one failure in 5 full e2e runs, never reproduced alone. It may be the same thing as the 2026-09-29 ingredients-page dark `color-contrast` flake. An unverified guess: the filled filter button's `transition-colors` animation is caught mid-change after the theme switch. Worth watching in CI, since a flaky CI run skips the deploy.
+- A time radio shows its old choice for a moment after a click, until the URL update lands.
+
+---
+
 ## 2026-10-03 — Gram macros take 2 decimal places
 
 **Status:** Committed to `main`, not pushed. Committed on its own, without the recipe-filters work: typecheck and lint clean, backend 574 and frontend 629 tests green.

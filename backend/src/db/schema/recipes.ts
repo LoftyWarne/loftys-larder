@@ -45,7 +45,10 @@ export const recipeSources = pgTable(
 // (DEC-23): a recipe is either a base (`is_base = true`), a serving variation
 // pointing at one base (`base_recipe_id`), or standalone (neither), enforced
 // by the XOR CHECK. Eight per-serving macros (deviates from `docs/plan.md`
-// line 217's "six" — see session-notes 2026-05-21).
+// line 217's "six" — see session-notes 2026-05-21). Calories are whole kcal;
+// the seven gram macros are `numeric(6,2)` because UK labels give salt to
+// 0.01 g and the others to 0.1 g below 10 g. `mode: 'number'` keeps them
+// `number` on the wire, unlike cost and quantities, which travel as strings.
 //
 // Self-referential FKs use the documented `(): AnyPgColumn => recipes.id`
 // pattern; the lazy arrow lets Drizzle resolve the back-reference at table
@@ -70,13 +73,17 @@ export const recipes = pgTable(
     sourceUrl: text(),
     sourceDetail: text(),
     caloriesPerServing: smallint(),
-    proteinPerServing: smallint(),
-    carbsPerServing: smallint(),
-    fatPerServing: smallint(),
-    saturatedFatPerServing: smallint(),
-    fibrePerServing: smallint(),
-    sugarPerServing: smallint(),
-    saltPerServing: smallint(),
+    proteinPerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
+    carbsPerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
+    fatPerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
+    saturatedFatPerServing: numeric({
+      precision: 6,
+      scale: 2,
+      mode: 'number',
+    }),
+    fibrePerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
+    sugarPerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
+    saltPerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
     addedByUserId: text().references(() => users.id, { onDelete: 'set null' }),
     // `mode: 'date'` so `$onUpdate(() => new Date())` is type-correct; Drizzle
     // serializes the JS Date back to a SQL `date` literal.

@@ -4,6 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — Gram macros take 2 decimal places
+
+**Status:** Committed to `main`, not pushed. Committed on its own, without the recipe-filters work: typecheck and lint clean, backend 574 and frontend 629 tests green.
+
+**Change:** migration `0021_macro_grams_decimal` moves `protein`, `carbs`, `fat`, `saturated_fat`, `fibre`, `sugar` and `salt` `_per_serving` from `smallint` to `numeric(6,2)`. `calories_per_serving` stays `smallint` (whole kcal). *Why:* whole grams couldn't hold typical salt (0.5–2 g) or sub-gram saturated fat and fibre. UK labels give salt to 0.01 g below 1 g and the other gram values to 0.1 g below 10 g, so one 2-dp type covers all seven.
+
+- **Wire type unchanged:** Drizzle `numeric({ mode: 'number' })`, so the DTO stays `number | null`. This differs from cost and quantities, which travel as strings; macros are display values where float rounding at 2 dp doesn't matter, and keeping `number` meant no frontend change.
+- **Validation:** `recipeCaloriesSchema` (int, 0–32767) and `recipeMacroGramsSchema` (0–9999.99, `multipleOf(0.01)`) replace `recipeMacroSchema` in `shared/src/schemas/recipes.ts`. `recipeSchema`'s gram fields drop `.int()`.
+- **Migration risk:** the cast fails if any existing gram value is ≥ 10000. No UI writes these columns yet, so prod should only hold nulls.
+
+**Open:** units aren't stated anywhere in the UI because there is no macro UI yet. Whoever builds it should label calories as kcal and the rest as g.
+
+---
+
 ## 2026-10-03 — GitHub Actions moved to Node 24 versions
 
 **Status:** Committed + pushed to `main` (`166a825`). CI green with no Node 20 deprecation warning; a manual Backup run (`workflow_dispatch`) also passed.

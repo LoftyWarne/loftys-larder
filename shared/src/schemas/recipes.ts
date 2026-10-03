@@ -130,13 +130,13 @@ export const recipeSchema = recipeListItemSchema.extend({
   sourceDetail: z.string().nullable(),
   estimatedCostPerServing: z.string().nullable(),
   caloriesPerServing: z.number().int().nullable(),
-  proteinPerServing: z.number().int().nullable(),
-  carbsPerServing: z.number().int().nullable(),
-  fatPerServing: z.number().int().nullable(),
-  saturatedFatPerServing: z.number().int().nullable(),
-  fibrePerServing: z.number().int().nullable(),
-  sugarPerServing: z.number().int().nullable(),
-  saltPerServing: z.number().int().nullable(),
+  proteinPerServing: z.number().nullable(),
+  carbsPerServing: z.number().nullable(),
+  fatPerServing: z.number().nullable(),
+  saturatedFatPerServing: z.number().nullable(),
+  fibrePerServing: z.number().nullable(),
+  sugarPerServing: z.number().nullable(),
+  saltPerServing: z.number().nullable(),
   addedByUserId: z.string().nullable(),
   baseRecipeName: z.string().nullable(),
   baseRecipeIsDeleted: z.boolean().nullable(),
@@ -213,7 +213,19 @@ export const createSourceInputSchema = z.object({
 export type CreateSourceInput = z.infer<typeof createSourceInputSchema>;
 const recipeServingsSchema = z.number().int().min(1).max(SMALLINT_MAX);
 const recipeTimeSchema = z.number().int().min(0).max(SMALLINT_MAX).nullable();
-const recipeMacroSchema = z.number().int().min(0).max(SMALLINT_MAX).nullable();
+const recipeCaloriesSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(SMALLINT_MAX)
+  .nullable();
+// `numeric(6,2)` — two decimal places, max 9999.99 g per serving.
+const recipeMacroGramsSchema = z
+  .number()
+  .min(0)
+  .max(9999.99)
+  .multipleOf(0.01, 'Use at most 2 decimal places')
+  .nullable();
 const recipeMoneySchema = z
   .string()
   .regex(
@@ -265,14 +277,14 @@ const recipeHeaderWritableSchema = z.object({
   sourceId: sourceIdSchema.nullable(),
   sourceUrl: recipeSourceUrlSchema,
   sourceDetail: recipeSourceDetailSchema,
-  caloriesPerServing: recipeMacroSchema,
-  proteinPerServing: recipeMacroSchema,
-  carbsPerServing: recipeMacroSchema,
-  fatPerServing: recipeMacroSchema,
-  saturatedFatPerServing: recipeMacroSchema,
-  fibrePerServing: recipeMacroSchema,
-  sugarPerServing: recipeMacroSchema,
-  saltPerServing: recipeMacroSchema,
+  caloriesPerServing: recipeCaloriesSchema,
+  proteinPerServing: recipeMacroGramsSchema,
+  carbsPerServing: recipeMacroGramsSchema,
+  fatPerServing: recipeMacroGramsSchema,
+  saturatedFatPerServing: recipeMacroGramsSchema,
+  fibrePerServing: recipeMacroGramsSchema,
+  sugarPerServing: recipeMacroGramsSchema,
+  saltPerServing: recipeMacroGramsSchema,
 });
 
 export const createRecipeInputSchema = recipeHeaderWritableSchema

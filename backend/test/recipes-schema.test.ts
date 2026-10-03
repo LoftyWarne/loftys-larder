@@ -189,6 +189,39 @@ describe('recipes schema', () => {
       }
     });
 
+    it('stores calories as whole kcal and gram macros to 2 decimal places', async () => {
+      const result = await db.execute<{
+        column_name: string;
+        data_type: string;
+        numeric_precision: number | null;
+        numeric_scale: number | null;
+      }>(sql`
+        select column_name, data_type, numeric_precision, numeric_scale
+        from information_schema.columns
+        where table_schema = 'public' and table_name = 'recipes'
+          and column_name like '%\_per\_serving'
+          and column_name <> 'estimated_cost_per_serving'
+      `);
+      const types = Object.fromEntries(
+        result.rows.map((r) => [
+          r.column_name,
+          r.data_type === 'numeric'
+            ? `numeric(${String(r.numeric_precision)},${String(r.numeric_scale)})`
+            : r.data_type,
+        ]),
+      );
+      expect(types).toEqual({
+        calories_per_serving: 'smallint',
+        protein_per_serving: 'numeric(6,2)',
+        carbs_per_serving: 'numeric(6,2)',
+        fat_per_serving: 'numeric(6,2)',
+        saturated_fat_per_serving: 'numeric(6,2)',
+        fibre_per_serving: 'numeric(6,2)',
+        sugar_per_serving: 'numeric(6,2)',
+        salt_per_serving: 'numeric(6,2)',
+      });
+    });
+
     it('pg_trgm extension is installed', async () => {
       const result = await db.execute<{ extname: string }>(sql`
         select extname from pg_extension where extname = 'pg_trgm'

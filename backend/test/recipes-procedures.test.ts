@@ -706,6 +706,8 @@ describe('recipes procedures', () => {
         estimatedCostPerServing: '1.75',
         caloriesPerServing: 410,
         proteinPerServing: 18,
+        fibrePerServing: 7.5,
+        saltPerServing: 0.45,
         sourceUrl: 'https://example.test/lentil-dal',
         sourceDetail: 'p.142',
       });
@@ -722,8 +724,14 @@ describe('recipes procedures', () => {
       expect(row.estimatedCostPerServing).toBe('1.75');
       expect(row.caloriesPerServing).toBe(410);
       expect(row.proteinPerServing).toBe(18);
+      expect(row.fibrePerServing).toBe(7.5);
+      expect(row.saltPerServing).toBe(0.45);
       expect(row.sourceUrl).toBe('https://example.test/lentil-dal');
       expect(row.sourceDetail).toBe('p.142');
+
+      const fetched = await caller.recipes.get({ id: result.id });
+      expect(fetched.fibrePerServing).toBe(7.5);
+      expect(fetched.saltPerServing).toBe(0.45);
     });
 
     it('creates a base recipe when isBase is true', async () => {
@@ -745,6 +753,28 @@ describe('recipes procedures', () => {
       const caller = createCaller(makeContext());
       await expect(
         caller.recipes.create({ name: 'Bad', baseServings: 0 }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects a gram macro with more than 2 decimal places', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.create({
+          name: 'Bad',
+          baseServings: 2,
+          saltPerServing: 0.125,
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rejects fractional calories', async () => {
+      const caller = createCaller(makeContext());
+      await expect(
+        caller.recipes.create({
+          name: 'Bad',
+          baseServings: 2,
+          caloriesPerServing: 410.5,
+        }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });
 

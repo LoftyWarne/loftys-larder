@@ -4,6 +4,21 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — Recipes page: infinite scroll
+
+**Status:** Committed to `main`, not pushed. Frontend 629 tests green; typecheck, lint and format clean. Backend untouched. Not yet eyeballed in a browser.
+
+**Change:** the recipes page loads more recipes as you scroll. Before this it called `recipes.list.useQuery` with no cursor, so it only ever showed the first 30 recipes (the backend default), and anything past that couldn't be reached from the page.
+
+- **Query:** `recipes.list.useInfiniteQuery` with `limit: 30` and `getNextPageParam` reading `nextCursor`, the same shape as the Recipe Bank. The existing `(lower(name), id)` keyset cursor needed no procedure change. Search and tag changes start again from page one.
+- **Trigger:** a sentinel `<div>` under the grid, watched by a native `IntersectionObserver` with a `600px` root margin. No new dependency. The window is the scroll container (the authed layout has no `overflow` wrapper), so the margin does prefetch. The observer is recreated after each fetch, so a page that doesn't fill the viewport chains into the next.
+- **Errors:** a failed next page (`isFetchNextPageError`) stops the observer, so it can't keep re-requesting the same failing page. It shows "Could not load more recipes" plus a **Try again** button at the bottom. The top-of-page alert is now for a failed first load or a failed background refetch only. During a retry TanStack keeps `isFetchNextPageError` true while `isFetchingNextPage` is true, so the error block is hidden while a retry is in flight.
+- **Tests:** `recipes-page.test.tsx` mocks `useInfiniteQuery` and stubs `IntersectionObserver` in the file with a fake the test can trigger, not in `test/setup.ts`. There are 7 new cases: items from several pages in order, the cursor read, fetching on intersect, no fetch when out of view, no observer once every page is loaded, the loading line with no double fetch, and retry on a next-page error.
+
+**Open:** the Recipe Bank still uses its "Load more" button. If it moves to scroll loading too, the observer logic is the point to pull into a shared hook.
+
+---
+
 ## 2026-10-03 — Recipe portions stepper + ingredients under each method step (DEC-98, DEC-99, FEAT-55)
 
 **Status:** Committed + pushed to `main`. Typecheck, lint and format are clean in all four workspaces. Tests: backend 570, frontend 622 and e2e 26, all green. A one-off axe scan of the scaled recipe page and the editor with chips found no violations in either theme. Migration `0020_ordinary_liz_osborn` is applied to local dev and the e2e DB; prod gets it via `release_command` on this deploy. FEAT-55 checkboxes are left for the user to tick.

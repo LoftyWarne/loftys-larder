@@ -1,17 +1,17 @@
 import type { ListRecipesResult, RecipeListItem } from '@loftys-larder/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listUseQueryMock, listTagsUseQueryMock } = vi.hoisted(() => ({
-  listUseQueryMock: vi.fn(),
+const { listUseInfiniteQueryMock, listTagsUseQueryMock } = vi.hoisted(() => ({
+  listUseInfiniteQueryMock: vi.fn(),
   listTagsUseQueryMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     recipes: {
-      list: { useQuery: listUseQueryMock },
+      list: { useInfiniteQuery: listUseInfiniteQueryMock },
       listTags: { useQuery: listTagsUseQueryMock },
     },
   },
@@ -82,26 +82,72 @@ const ROAST: RecipeListItem = {
 
 interface SetupOptions {
   items?: RecipeListItem[];
+  pages?: ListRecipesResult[];
   isLoading?: boolean;
   error?: { message: string } | null;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  isFetchNextPageError?: boolean;
 }
 
-function setup(options: SetupOptions = {}): void {
-  const data: ListRecipesResult | undefined =
-    options.isLoading || options.error
-      ? undefined
-      : { items: options.items ?? [TOMATO, ROAST], nextCursor: null };
-  listUseQueryMock.mockReturnValue({
-    data,
+function setup(options: SetupOptions = {}): { fetchNextPage: () => void } {
+  const pages = options.pages ?? [
+    { items: options.items ?? [TOMATO, ROAST], nextCursor: null },
+  ];
+  const fetchNextPage = vi.fn();
+  listUseInfiniteQueryMock.mockReturnValue({
+    data:
+      options.isLoading || (options.error && !options.isFetchNextPageError)
+        ? undefined
+        : { pages },
     isLoading: options.isLoading ?? false,
     error: options.error ?? null,
+    hasNextPage: options.hasNextPage ?? false,
+    isFetchingNextPage: options.isFetchingNextPage ?? false,
+    isFetchNextPageError: options.isFetchNextPageError ?? false,
+    fetchNextPage,
+  });
+  return { fetchNextPage };
+}
+
+// jsdom has no IntersectionObserver. This fake records each live observer so
+// a test can scroll the sentinel into view by hand.
+const liveObservers = new Set<FakeIntersectionObserver>();
+
+class FakeIntersectionObserver {
+  constructor(private readonly callback: IntersectionObserverCallback) {
+    liveObservers.add(this);
+  }
+  observe(): void {
+    return undefined;
+  }
+  disconnect(): void {
+    liveObservers.delete(this);
+  }
+  trigger(isIntersecting: boolean): void {
+    this.callback(
+      [{ isIntersecting } as IntersectionObserverEntry],
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
+
+function scrollSentinelIntoView(): void {
+  act(() => {
+    for (const observer of liveObservers) observer.trigger(true);
   });
 }
 
 beforeEach(() => {
-  listUseQueryMock.mockReset();
+  listUseInfiniteQueryMock.mockReset();
   listTagsUseQueryMock.mockReset();
   listTagsUseQueryMock.mockReturnValue({ data: [] });
+  vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+});
+
+afterEach(() => {
+  liveObservers.clear();
+  vi.unstubAllGlobals();
 });
 
 describe('RecipesPage', () => {
@@ -161,7 +207,10 @@ describe('RecipesPage', () => {
     await user.type(screen.getByLabelText(/search recipes/i), 'pasta');
 
     await waitFor(() => {
-      expect(listUseQueryMock).toHaveBeenCalledWith({ search: 'pasta' });
+      expect(listUseInfiniteQueryMock).toHaveBeenLastCalledWith(
+        { search: 'pasta', tagIds: undefined, limit: 30 },
+        expect.anything(),
+      );
     });
   });
 
@@ -227,14 +276,17 @@ describe('RecipesPage', () => {
     await user.click(screen.getByRole('button', { name: 'Vegetarian' }));
 
     expect(quick).toHaveAttribute('aria-pressed', 'true');
-    expect(listUseQueryMock).toHaveBeenLastCalledWith({
-      search: undefined,
-      tagIds: [1, 2],
-    });
+    expect(listUseInfiniteQueryMock).toHaveBeenLastCalledWith(
+      { search: undefined, tagIds: [1, 2], limit: 30 },
+      expect.anything(),
+    );
 
     await user.click(quick);
     await user.click(screen.getByRole('button', { name: 'Vegetarian' }));
-    expect(listUseQueryMock).toHaveBeenLastCalledWith(undefined);
+    expect(listUseInfiniteQueryMock).toHaveBeenLastCalledWith(
+      { search: undefined, tagIds: undefined, limit: 30 },
+      expect.anything(),
+    );
   });
 
   it('uses the no-match message when a tag filter finds nothing', async () => {
@@ -254,5 +306,94 @@ describe('RecipesPage', () => {
     setup({ error: { message: 'boom' } });
     render(<RecipesPage />);
     expect(screen.getByRole('alert')).toHaveTextContent(/boom/i);
+  });
+
+  it('renders the recipes from every loaded page in order', () => {
+    setup({
+      pages: [
+        { items: [ROAST], nextCursor: { lowerName: 'roast chicken', id: 2 } },
+        { items: [TOMATO], nextCursor: null },
+      ],
+    });
+    render(<RecipesPage />);
+    const names = screen
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(names[0]).toContain('Roast chicken');
+    expect(names[1]).toContain('Tomato pasta');
+  });
+
+  it('reads the next cursor off the last page', () => {
+    setup();
+    render(<RecipesPage />);
+    const options = listUseInfiniteQueryMock.mock.calls[0]?.[1] as {
+      getNextPageParam: (page: ListRecipesResult) => unknown;
+    };
+    const cursor = { lowerName: 'tomato pasta', id: 1 };
+    expect(
+      options.getNextPageParam({ items: [TOMATO], nextCursor: cursor }),
+    ).toEqual(cursor);
+    expect(
+      options.getNextPageParam({ items: [TOMATO], nextCursor: null }),
+    ).toBeUndefined();
+  });
+
+  it('fetches the next page when the end of the list scrolls into view', () => {
+    const { fetchNextPage } = setup({ hasNextPage: true });
+    render(<RecipesPage />);
+
+    scrollSentinelIntoView();
+
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fetch while the end of the list is out of view', () => {
+    const { fetchNextPage } = setup({ hasNextPage: true });
+    render(<RecipesPage />);
+
+    act(() => {
+      for (const observer of liveObservers) observer.trigger(false);
+    });
+
+    expect(fetchNextPage).not.toHaveBeenCalled();
+  });
+
+  it('stops watching for scroll once every page is loaded', () => {
+    setup({ hasNextPage: false });
+    render(<RecipesPage />);
+    expect(liveObservers.size).toBe(0);
+  });
+
+  it('shows a loading line and does not double-fetch while the next page loads', () => {
+    const { fetchNextPage } = setup({
+      hasNextPage: true,
+      isFetchingNextPage: true,
+    });
+    render(<RecipesPage />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /loading more recipes/i,
+    );
+    expect(liveObservers.size).toBe(0);
+    expect(fetchNextPage).not.toHaveBeenCalled();
+  });
+
+  it('offers a retry instead of auto-fetching when the next page fails', async () => {
+    const user = userEvent.setup();
+    const { fetchNextPage } = setup({
+      hasNextPage: true,
+      isFetchNextPageError: true,
+      error: { message: 'boom' },
+    });
+    render(<RecipesPage />);
+
+    expect(screen.getByText('Tomato pasta')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /could not load more recipes: boom/i,
+    );
+    expect(liveObservers.size).toBe(0);
+
+    await user.click(screen.getByRole('button', { name: /try again/i }));
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
   });
 });

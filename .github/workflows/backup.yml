@@ -17,11 +17,6 @@ concurrency:
   group: backup
   cancel-in-progress: false
 
-env:
-  # Run @v4 JS actions on Node.js 24 instead of the deprecated Node 20.
-  # Mirror of the CI workflow; remove once actions default to Node 24.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   backup:
     name: pg_dump → R2

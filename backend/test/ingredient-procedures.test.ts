@@ -25,7 +25,12 @@ import {
   ingredientCategories,
   unitsOfMeasurement,
 } from '../src/db/schema/reference.ts';
-import { recipeIngredients, recipes } from '../src/db/schema/recipes.ts';
+import {
+  recipeIngredients,
+  recipeMethod,
+  recipeMethodIngredients,
+  recipes,
+} from '../src/db/schema/recipes.ts';
 import type { AppContext } from '../src/trpc/context.ts';
 import { appRouter } from '../src/trpc/router.ts';
 
@@ -497,6 +502,35 @@ describe('ingredients procedures', () => {
         code: 'CONFLICT',
         cause: { code: 'INGREDIENT_IN_USE' },
       });
+    });
+
+    it('deletes an ingredient whose only use is a step link left behind on a recipe that no longer lists it', async () => {
+      const id = await insertIngredient({ name: 'Garlic' });
+      const [recipe] = await db
+        .insert(recipes)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          name: 'Test Recipe',
+          baseServings: 2,
+        })
+        .returning({ id: recipes.id });
+      if (!recipe) throw new Error('recipe insert failed');
+      const [step] = await db
+        .insert(recipeMethod)
+        .values({ recipeId: recipe.id, stepNumber: 1, instruction: 'Add it.' })
+        .returning({ id: recipeMethod.id });
+      if (!step) throw new Error('step insert failed');
+      await db
+        .insert(recipeMethodIngredients)
+        .values({ methodStepId: step.id, ingredientId: id });
+      const caller = createCaller(makeContext());
+
+      await caller.ingredients.delete({ id });
+
+      expect(
+        await db.select().from(ingredients).where(eq(ingredients.id, id)),
+      ).toEqual([]);
+      expect(await db.select().from(recipeMethodIngredients)).toEqual([]);
     });
 
     it('returns NOT_FOUND for unknown id', async () => {

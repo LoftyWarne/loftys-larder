@@ -30,6 +30,7 @@ import {
 import {
   recipeIngredients,
   recipeMethod,
+  recipeMethodIngredients,
   recipeSources,
   recipeTagLinks,
   recipeTags,
@@ -1179,18 +1180,21 @@ describe('recipes procedures', () => {
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
           {
             instruction: 'second new step',
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
           {
             instruction: 'third new step',
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
         ],
       });
@@ -1256,6 +1260,7 @@ describe('recipes procedures', () => {
               safetyNote: null,
               tip: null,
               prepAhead: null,
+              ingredients: [],
             },
           ],
         }),
@@ -1273,18 +1278,21 @@ describe('recipes procedures', () => {
             safetyNote: '  Oil will spit — lay it away from you  ',
             tip: 'Pat it dry first',
             prepAhead: null,
+            ingredients: [],
           },
           {
             instruction: 'Simmer',
             safetyNote: null,
             tip: 'Lid on',
             prepAhead: null,
+            ingredients: [],
           },
           {
             instruction: 'Serve',
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
         ],
       });
@@ -1326,6 +1334,7 @@ describe('recipes procedures', () => {
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
         ],
       });
@@ -1349,6 +1358,7 @@ describe('recipes procedures', () => {
               safetyNote: '   ',
               tip: null,
               prepAhead: null,
+              ingredients: [],
             },
           ],
         }),
@@ -1367,6 +1377,7 @@ describe('recipes procedures', () => {
               safetyNote: null,
               tip: 'x'.repeat(RECIPE_STEP_NOTE_MAX_LENGTH + 1),
               prepAhead: null,
+              ingredients: [],
             },
           ],
         }),
@@ -1384,18 +1395,21 @@ describe('recipes procedures', () => {
             safetyNote: null,
             tip: null,
             prepAhead: 'required',
+            ingredients: [],
           },
           {
             instruction: 'Make the sauce',
             safetyNote: null,
             tip: null,
             prepAhead: 'optional',
+            ingredients: [],
           },
           {
             instruction: 'Grill',
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
         ],
       });
@@ -1419,12 +1433,14 @@ describe('recipes procedures', () => {
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
           {
             instruction: 'Marinate overnight',
             safetyNote: null,
             tip: null,
             prepAhead: 'required',
+            ingredients: [],
           },
         ],
       });
@@ -1458,10 +1474,315 @@ describe('recipes procedures', () => {
               safetyNote: null,
               tip: null,
               prepAhead: 'someday' as 'optional',
+              ingredients: [],
             },
           ],
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+  });
+
+  describe('step ingredients', () => {
+    function step(
+      instruction: string,
+      ingredients: { ingredientId: number; quantity: string | null }[] = [],
+    ) {
+      return {
+        instruction,
+        safetyNote: null,
+        tip: null,
+        prepAhead: null,
+        ingredients,
+      };
+    }
+
+    it('saves step links with optional amounts and returns them from get', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const butterId = await insertIngredient({ name: 'Butter' });
+      const carrotId = await insertIngredient({ name: 'Carrot' });
+      await insertRecipeIngredient(recipeId, butterId, { quantity: '100' });
+      await insertRecipeIngredient(recipeId, carrotId, { quantity: '300' });
+
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          step('Melt half the butter.', [
+            { ingredientId: butterId, quantity: '50' },
+          ]),
+          step('Toss the carrots in the rest.', [
+            { ingredientId: carrotId, quantity: null },
+            { ingredientId: butterId, quantity: null },
+          ]),
+          step('Serve.'),
+        ],
+      });
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(result.method.map((s) => s.ingredients)).toEqual([
+        [{ ingredientId: butterId, quantity: '50.000' }],
+        [
+          { ingredientId: butterId, quantity: null },
+          { ingredientId: carrotId, quantity: null },
+        ],
+        [],
+      ]);
+    });
+
+    it('replaces the links along with the steps', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const butterId = await insertIngredient({ name: 'Butter' });
+      await insertRecipeIngredient(recipeId, butterId);
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          step('Melt the butter.', [
+            { ingredientId: butterId, quantity: null },
+          ]),
+        ],
+      });
+
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          step('Stir.'),
+          step('Melt the butter.', [
+            { ingredientId: butterId, quantity: '20' },
+          ]),
+        ],
+      });
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(result.method.map((s) => s.ingredients)).toEqual([
+        [],
+        [{ ingredientId: butterId, quantity: '20.000' }],
+      ]);
+      expect(await db.select().from(recipeMethodIngredients)).toHaveLength(1);
+    });
+
+    it('keeps links when ingredients are saved, but drops links to a removed ingredient', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const butterId = await insertIngredient({ name: 'Butter' });
+      const carrotId = await insertIngredient({ name: 'Carrot' });
+      await insertRecipeIngredient(recipeId, butterId);
+      await insertRecipeIngredient(recipeId, carrotId);
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          step('Toss the carrots in butter.', [
+            { ingredientId: butterId, quantity: '40' },
+            { ingredientId: carrotId, quantity: null },
+          ]),
+        ],
+      });
+
+      await caller.recipes.replaceIngredients({
+        recipeId,
+        lines: [
+          {
+            ingredientId: butterId,
+            quantity: '60',
+            unitId: unitG,
+            prepTypeId: null,
+            isOptional: false,
+          },
+        ],
+      });
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(result.method[0]?.ingredients).toEqual([
+        { ingredientId: butterId, quantity: '40.000' },
+      ]);
+
+      await caller.recipes.replaceIngredients({ recipeId, lines: [] });
+      const emptied = await caller.recipes.get({ id: recipeId });
+      expect(emptied.method[0]?.ingredients).toEqual([]);
+    });
+
+    it('does not block an ingredient save that drops the total below the step amounts', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const butterId = await insertIngredient({ name: 'Butter' });
+      await insertRecipeIngredient(recipeId, butterId, { quantity: '100' });
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          step('Melt the butter.', [
+            { ingredientId: butterId, quantity: '80' },
+          ]),
+        ],
+      });
+
+      await expect(
+        caller.recipes.replaceIngredients({
+          recipeId,
+          lines: [
+            {
+              ingredientId: butterId,
+              quantity: '50',
+              unitId: unitG,
+              prepTypeId: null,
+              isOptional: false,
+            },
+          ],
+        }),
+      ).resolves.toMatchObject({ count: 1 });
+    });
+
+    it('rejects stated amounts that add up to more than the recipe total', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const butterId = await insertIngredient({ name: 'Butter' });
+      // Two lines of the same ingredient pool into one 100 g total.
+      await insertRecipeIngredient(recipeId, butterId, { quantity: '60' });
+      await insertRecipeIngredient(recipeId, butterId, { quantity: '40' });
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [
+            step('Melt some butter.', [
+              { ingredientId: butterId, quantity: '70' },
+            ]),
+            step('Add more butter.', [
+              { ingredientId: butterId, quantity: '30.001' },
+            ]),
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: {
+          code: 'RECIPE_STEP_AMOUNT_EXCEEDS_TOTAL',
+          ingredientId: butterId,
+        },
+      });
+
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [
+            step('Melt some butter.', [
+              { ingredientId: butterId, quantity: '70' },
+            ]),
+            step('Add more butter.', [
+              { ingredientId: butterId, quantity: '30' },
+            ]),
+          ],
+        }),
+      ).resolves.toMatchObject({ count: 2 });
+    });
+
+    it('accepts a link, with an amount, to an ingredient not yet in the saved lines', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const garlicId = await insertIngredient({ name: 'Garlic' });
+      const caller = createCaller(makeContext());
+
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [
+          step('Add the garlic.', [{ ingredientId: garlicId, quantity: '2' }]),
+        ],
+      });
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(result.method[0]?.ingredients).toEqual([
+        { ingredientId: garlicId, quantity: '2.000' },
+      ]);
+    });
+
+    it("rejects another household's ingredient", async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const [foreign] = await db
+        .insert(ingredients)
+        .values({
+          householdId: OTHER_HOUSEHOLD_ID,
+          name: 'Foreign butter',
+          categoryId,
+          defaultUnitId: unitG,
+        })
+        .returning({ id: ingredients.id });
+      if (!foreign) throw new Error('ingredient insert failed');
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [
+            step('Melt it.', [{ ingredientId: foreign.id, quantity: null }]),
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        cause: { code: 'RECIPE_INGREDIENT_NOT_FOUND' },
+      });
+    });
+
+    it('rejects the same ingredient twice on one step, and a zero amount', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const butterId = await insertIngredient({ name: 'Butter' });
+      await insertRecipeIngredient(recipeId, butterId);
+      const caller = createCaller(makeContext());
+
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [
+            step('Melt it.', [
+              { ingredientId: butterId, quantity: null },
+              { ingredientId: butterId, quantity: '10' },
+            ]),
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        caller.recipes.replaceMethod({
+          recipeId,
+          steps: [
+            step('Melt it.', [{ ingredientId: butterId, quantity: '0' }]),
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('rolls back steps and links together when the link insert fails', async () => {
+      const recipeId = await insertRecipe({ name: 'Buttered veg' });
+      const butterId = await insertIngredient({ name: 'Butter' });
+      await insertRecipeIngredient(recipeId, butterId);
+      const caller = createCaller(makeContext());
+      await caller.recipes.replaceMethod({
+        recipeId,
+        steps: [step('Keep me.', [{ ingredientId: butterId, quantity: null }])],
+      });
+
+      // A NOT VALID check leaves the existing link alone but rejects every new
+      // one, so the failure lands after both DELETEs inside the transaction.
+      await db.execute(
+        sql`alter table recipe_method_ingredients add constraint block_new_links check (ingredient_id < 0) not valid`,
+      );
+      try {
+        await expect(
+          caller.recipes.replaceMethod({
+            recipeId,
+            steps: [
+              step('Replace me.', [{ ingredientId: butterId, quantity: null }]),
+            ],
+          }),
+        ).rejects.toBeDefined();
+      } finally {
+        await db.execute(
+          sql`alter table recipe_method_ingredients drop constraint block_new_links`,
+        );
+      }
+
+      const result = await caller.recipes.get({ id: recipeId });
+      expect(result.method).toMatchObject([
+        {
+          instruction: 'Keep me.',
+          ingredients: [{ ingredientId: butterId, quantity: null }],
+        },
+      ]);
     });
   });
 

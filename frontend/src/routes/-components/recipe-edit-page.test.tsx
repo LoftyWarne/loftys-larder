@@ -1,6 +1,7 @@
 import type { Recipe } from '@loftys-larder/shared';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { TRPCClientError } from '@trpc/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -699,6 +700,102 @@ describe('RecipeEditPage', () => {
         recipeId: 7,
         names: [],
       });
+    });
+  });
+  describe('step ingredients', () => {
+    const WITH_STEP_LINKS: Recipe = {
+      ...RECIPE,
+      ingredients: [
+        {
+          id: 1,
+          ingredientId: 200,
+          ingredientName: 'Butter',
+          quantity: '100.000',
+          unitId: 10,
+          unitName: 'g',
+          prepTypeId: null,
+          prepTypeName: null,
+          isPlant: false,
+          isOptional: false,
+        },
+      ],
+      method: [
+        {
+          id: 1,
+          stepNumber: 1,
+          instruction: 'Melt the butter.',
+          safetyNote: null,
+          tip: null,
+          prepAhead: null,
+          ingredients: [{ ingredientId: 200, quantity: '80.000' }],
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      recipeGetUseQueryMock.mockReturnValue({
+        data: WITH_STEP_LINKS,
+        isLoading: false,
+        error: null,
+      });
+    });
+
+    it('seeds saved step chips and sends them with the method', async () => {
+      replaceMethodMutateAsyncMock.mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      expect(screen.getByLabelText('Step 1 Butter amount')).toHaveValue('80');
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(replaceMethodMutateAsyncMock).toHaveBeenCalledWith({
+          recipeId: 7,
+          steps: [
+            expect.objectContaining({
+              ingredients: [{ ingredientId: 200, quantity: '80' }],
+            }),
+          ],
+        });
+      });
+    });
+
+    it('checks step amounts against unsaved edits on the Ingredients section', async () => {
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+      expect(screen.queryByRole('alert')).toBeNull();
+
+      const quantity = screen.getByLabelText('Quantity for row 1');
+      await user.clear(quantity);
+      await user.type(quantity, '50');
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Butter: the steps use 80 g, but the recipe has 50 g.',
+      );
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      expect(replaceMethodMutateAsyncMock).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: 'Remove row 1' }));
+      expect(screen.queryByLabelText('Step 1 Butter amount')).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('explains a server-side over-total rejection', async () => {
+      const error = new TRPCClientError('Step amounts add up to more');
+      Object.assign(error, {
+        shape: {
+          data: { cause: { code: 'RECIPE_STEP_AMOUNT_EXCEEDS_TOTAL' } },
+        },
+      });
+      replaceMethodMutateAsyncMock.mockRejectedValue(error);
+      const user = userEvent.setup();
+      render(<RecipeEditPage />);
+
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      expect(
+        await screen.findByText(/save the ingredients first, then the method/i),
+      ).toBeVisible();
     });
   });
 });

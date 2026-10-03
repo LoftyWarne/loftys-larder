@@ -4,6 +4,64 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — Recipe portions stepper + ingredients under each method step (DEC-98, DEC-99, FEAT-55)
+
+**Status:** Committed + pushed to `main`. Typecheck, lint and format are clean in all four workspaces. Tests: backend 570, frontend 622 and e2e 26, all green. A one-off axe scan of the scaled recipe page and the editor with chips found no violations in either theme. Migration `0020_ordinary_liz_osborn` is applied to local dev and the e2e DB; prod gets it via `release_command` on this deploy. FEAT-55 checkboxes are left for the user to tick.
+
+**Scope confirmed with the user:**
+- Portions are display-only and held in `?servings=` (1–50). Planner links use `prepared`.
+- Step links are keyed by household ingredient (option B1), with optional per-step amounts.
+- Over-total amounts block the Method save only; Ingredients saves are never blocked.
+- The one-off fill sets links only, with amounts blank.
+- The stepper and the chips ship together.
+- Spec work: a FEAT entry was added (FEAT-55).
+
+**Changes by area:**
+- **Schema:** `recipe_method_ingredients` (`method_step_id`, `ingredient_id`, `quantity numeric(10,3) NULL`, CHECK `> 0`; PK `(method_step_id, ingredient_id)`; index on `ingredient_id`; both FKs `restrict`). The migration ends with a PL/pgSQL `DO` block that fills links for existing steps: whole names first (longest first, so "black pepper" doesn't also tag "Pepper"), then a last-word fallback when no other ingredient on the recipe shares the word.
+- **Shared:**
+  - New in `recipes.ts`: `recipeStepIngredientSchema`, plus `ingredients` on `recipeMethodStepSchema`.
+  - Also in `recipes.ts`: `replaceRecipeMethodStepIngredientSchema` (amount > 0; unique per step; max `RECIPE_STEP_INGREDIENTS_MAX` = 50).
+  - New in `recipe-search.ts`: `recipeSearchSchema` (`servings` `.catch(undefined)`).
+  - New in `errors.ts`: domain code `RECIPE_STEP_AMOUNT_EXCEEDS_TOTAL`.
+- **Backend:**
+  - `get` loads links per step.
+  - `replaceMethod`, before any write: checks household ownership (`RECIPE_INGREDIENT_NOT_FOUND`), then compares stated sums with the saved-line totals in integer thousandths. An ingredient with no saved line is skipped.
+  - `replaceMethod`, inside the transaction: deletes links, then steps, then inserts steps and links.
+  - `replaceIngredients` deletes links to ingredients no longer on the recipe.
+  - `ingredients.delete` clears leftover step links for that household ingredient in the same transaction. The delete is household-scoped, so a foreign id can't clear another household's links.
+  - The dev seed gives its two recipes step links.
+- **Frontend libraries:**
+  - `scale-quantity.ts`: DEC-98 rounding. At factor 1 it uses `formatQuantity` unchanged.
+  - `step-ingredient-amounts.ts`: the chip rule (stated, or what's left when it's the only blank step, or name only).
+  - `step-ingredient-suggestions.ts`: same matching as the migration fill, plus amounts read next to the name, "half the", and ranges left blank.
+  - `step-highlights.ts`: exports its pattern pieces, gains `boldQuantities` and adds `mentionsQuantity`.
+- **Frontend components:**
+  - `portions-stepper.tsx`.
+  - `step-ingredient-chips.tsx`.
+  - `RecipeNameLink`: passes `servings` when `0 < prepared ≤ 50`.
+- **Stepper fixes (after the user tried it):**
+  - The Reset button is always rendered, hidden and disabled at the recipe's own servings. Before, it appeared at the end of the right-aligned group, which slid − and + left and put Reset under a second tap on +.
+  - The stepper reports a step (±1) rather than a target number. The page applies it with a search updater on the URL as it is at navigation time, because a fast double-click fires twice before `servings` re-renders.
+  - A browser check confirmed − and + stay pixel-identical at 1280 px and 375 px, and a double-click goes from 2 to 4.
+- **Recipe page:** the stepper sits in a row with the Ingredients heading. Navigation uses `replace` and `resetScroll: false`. The list and chips scale. Step text loses quantity bold while scaled, and a note appears when a step states an amount.
+- **Editor:**
+  - Each step has chips with an amount field, dashed suggestions, and a "+ Ingredient" select.
+  - `followsText` stays true until the user edits the chips by hand. Steps loaded with no links start following their text again.
+  - A live over-total alert blocks saving.
+  - The edit page tracks the Ingredients section's on-screen lines via `onLinesChange` and maps the server's over-total error to "save the ingredients first".
+  - Drafts carry `ingredients` and `followsText`, with a tolerant parser.
+- **e2e:** `fixtures/db.ts` gains `method` on `createRecipe` and truncates the new table. New spec `recipe-portions.spec.ts`.
+
+**Checks run:**
+- Dry run of the migration on local dev data (14 recipes) inside a transaction that was rolled back. Links came out as expected. Steps that mention garlic, peppers, olive oil or mayo got no link because those ingredients aren't on those recipes.
+
+**Open:**
+- **Prod check:** verify the one-off fill against a restored prod backup (FEAT-51 drill) before or right after deploy.
+- **a11y coverage:** the a11y spec doesn't cover the recipe detail or edit page with chips; adding them to it would make the axe check permanent.
+- **Old drafts:** a Method draft autosaved before this change restores with no chips. Saving it would drop that recipe's step links.
+
+---
+
 ## 2026-09-30 — Recipe tags: free-form, create-on-type, filter on list / bank / picker (DEC-97)
 
 **Status:** Committed + pushed to `main`. Backend 555, frontend 544 and e2e 24 tests green; typecheck, lint and format clean. Migration `0019_salty_whirlwind` applied to local dev and the e2e DB; prod gets it via `release_command` on this deploy. Not yet eyeballed in a browser.

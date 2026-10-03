@@ -53,6 +53,7 @@ export async function resetHouseholdData(): Promise<void> {
         meal_plan_slot_items,
         meal_plan_slots,
         meal_plans,
+        recipe_method_ingredients,
         recipe_method,
         recipe_ingredients,
         recipe_tag_links,
@@ -83,12 +84,20 @@ export interface IngredientSpec {
   isPlant?: boolean;
 }
 
+// A method step and the recipe ingredients it uses, by name. A missing
+// quantity is stored as NULL ("not stated").
+export interface MethodStepSpec {
+  instruction: string;
+  ingredients?: { name: string; quantity?: string }[];
+}
+
 export interface CreateRecipeSpec {
   name: string;
   baseServings: number;
   isBase?: boolean;
   baseRecipeId?: number;
   ingredients: IngredientSpec[];
+  method?: MethodStepSpec[];
 }
 
 // Insert (or reuse) an ingredient row scoped to the household. The pre-existing
@@ -148,13 +157,36 @@ export async function createRecipe(
     const recipeRow = recipeInsert.rows[0];
     if (!recipeRow) throw new Error(`Failed to insert recipe ${spec.name}`);
 
+    const ingredientIdByName = new Map<string, number>();
     for (const ingredient of spec.ingredients) {
       const ingredientId = await ensureIngredient(client, ingredient);
+      ingredientIdByName.set(ingredient.name, ingredientId);
       await client.query(
         `insert into recipe_ingredients (recipe_id, ingredient_id, quantity)
          values ($1, $2, $3)`,
         [recipeRow.id, ingredientId, ingredient.quantity],
       );
+    }
+
+    for (const [index, step] of (spec.method ?? []).entries()) {
+      const stepInsert = await client.query<{ id: number }>(
+        `insert into recipe_method (recipe_id, step_number, instruction)
+         values ($1, $2, $3) returning id`,
+        [recipeRow.id, index + 1, step.instruction],
+      );
+      const stepRow = stepInsert.rows[0];
+      if (!stepRow) throw new Error(`Failed to insert step ${String(index)}`);
+      for (const link of step.ingredients ?? []) {
+        const ingredientId = ingredientIdByName.get(link.name);
+        if (ingredientId === undefined) {
+          throw new Error(`Step ingredient ${link.name} is not on the recipe`);
+        }
+        await client.query(
+          `insert into recipe_method_ingredients (method_step_id, ingredient_id, quantity)
+           values ($1, $2, $3)`,
+          [stepRow.id, ingredientId, link.quantity ?? null],
+        );
+      }
     }
 
     await client.query('commit');

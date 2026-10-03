@@ -43,6 +43,8 @@ export {
   type RecipeIngredientLine,
   recipeMethodStepSchema,
   type RecipeMethodStep,
+  recipeStepIngredientSchema,
+  type RecipeStepIngredient,
   recipeListItemSchema,
   type RecipeListItem,
   recipeSchema,
@@ -71,6 +73,9 @@ export {
   type ReplaceRecipeIngredientsInput,
   replaceRecipeIngredientsResultSchema,
   type ReplaceRecipeIngredientsResult,
+  RECIPE_STEP_INGREDIENTS_MAX,
+  replaceRecipeMethodStepIngredientSchema,
+  type ReplaceRecipeMethodStepIngredient,
   replaceRecipeMethodStepInputSchema,
   type ReplaceRecipeMethodStepInput,
   replaceRecipeMethodInputSchema,
@@ -231,6 +236,11 @@ export {
   type PlannerSearch,
 } from './schemas/planner-search.ts';
 export { plansSearchSchema, type PlansSearch } from './schemas/plans-search.ts';
+export {
+  RECIPE_VIEW_SERVINGS_MAX,
+  recipeSearchSchema,
+  type RecipeSearch,
+} from './schemas/recipe-search.ts';
 export {
   getDayPlantPointsInputSchema,
   type GetDayPlantPointsInput,

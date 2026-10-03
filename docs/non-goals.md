@@ -31,6 +31,7 @@ Revisit: only if entry friction from manual conversion (e.g., recipes habitually
 What it is: storing recipe quantities as "X per serving" rather than "X for `baseServings` servings".
 Why not: recipes in the wild are written "serves 4," not per-portion. Whole-recipe entry matches source material, lowers data-entry friction, and lets `baseServings` be a single denominator for shopping-list scaling.
 Revisit: not anticipated; would be a foundational data-model change.
+Not covered by this exclusion: viewing a recipe scaled to a chosen number of portions (DEC-98), or per-step amounts on method-step ingredient links (DEC-99). Both work from the whole-recipe quantities; entry stays whole-recipe.
 
 ### Nested base recipes
 What it is: a serving-variation recipe being itself the base for another serving variation.

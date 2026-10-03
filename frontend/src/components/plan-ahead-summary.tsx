@@ -8,6 +8,7 @@ interface PlanAheadSummaryProps {
   method: readonly RecipeMethodStep[];
   ingredientNames: readonly string[];
   unitNames: readonly string[];
+  boldQuantities?: boolean;
 }
 
 const GROUP_ORDER: readonly StepPrepAhead[] = ['required', 'optional'];
@@ -16,6 +17,7 @@ export function PlanAheadSummary({
   method,
   ingredientNames,
   unitNames,
+  boldQuantities,
 }: PlanAheadSummaryProps): React.ReactElement | null {
   const groups = GROUP_ORDER.map((prepAhead) => ({
     prepAhead,
@@ -54,6 +56,7 @@ export function PlanAheadSummary({
                     text={step.instruction}
                     ingredientNames={ingredientNames}
                     unitNames={unitNames}
+                    boldQuantities={boldQuantities}
                   />
                 </li>
               ))}

@@ -10,6 +10,9 @@ export interface StepSegment {
 export interface StepHighlightContext {
   ingredientNames: readonly string[];
   unitNames: readonly string[];
+  // Off while the recipe page is scaled (DEC-98): step text still states the
+  // original portions, so its amounts shouldn't draw the eye.
+  boldQuantities?: boolean;
 }
 
 interface Span {
@@ -19,12 +22,12 @@ interface Span {
 
 const COMMON_UNITS = ['g', 'kg', 'ml', 'l', 'tsp', 'tbsp', 'cup', 'pinch'];
 
-const NUMBER = String.raw`(?:\d+\/\d+|\d+(?:\.\d+)?(?:\s?[½¼¾⅓⅔⅛])?|[½¼¾⅓⅔⅛])`;
+export const NUMBER = String.raw`(?:\d+\/\d+|\d+(?:\.\d+)?(?:\s?[½¼¾⅓⅔⅛])?|[½¼¾⅓⅔⅛])`;
 const AMOUNT = String.raw`${NUMBER}(?:\s*[-–]\s*${NUMBER}|\s+to\s+${NUMBER})?`;
 // A capture group rather than a lookbehind: lookbehind needs Safari 16.4+.
 // Excluding `.` stops a match starting inside a decimal.
-const BEFORE = String.raw`(^|[^\p{L}\p{N}.])`;
-const AFTER = String.raw`(?![\p{L}\p{N}])`;
+export const BEFORE = String.raw`(^|[^\p{L}\p{N}.])`;
+export const AFTER = String.raw`(?![\p{L}\p{N}])`;
 
 const TIME_PATTERN = new RegExp(
   String.raw`${BEFORE}${AMOUNT}\s?(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)${AFTER}`,
@@ -39,7 +42,7 @@ const GAS_MARK_PATTERN = new RegExp(
   'giu',
 );
 
-function escapeRegExp(value: string): string {
+export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -94,6 +97,16 @@ function resolveOverlaps(spans: Span[]): Span[] {
   return kept.sort((a, b) => a.start - b.start);
 }
 
+// Whether step text states an amount, e.g. "200 g" or "2 tbsp" (DEC-98: the
+// scaled recipe page notes that such amounts are for the original portions).
+export function mentionsQuantity(
+  text: string,
+  unitNames: readonly string[],
+): boolean {
+  const pattern = quantityPattern(unitNames);
+  return pattern?.test(text) ?? false;
+}
+
 export function highlightStep(
   text: string,
   context: StepHighlightContext,
@@ -102,7 +115,9 @@ export function highlightStep(
     TIME_PATTERN,
     TEMPERATURE_PATTERN,
     GAS_MARK_PATTERN,
-    quantityPattern(context.unitNames),
+    context.boldQuantities === false
+      ? null
+      : quantityPattern(context.unitNames),
     ingredientPattern(context.ingredientNames),
   ];
   const spans: Span[] = [];

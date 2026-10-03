@@ -2,7 +2,12 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import { ingredients } from '../schema/ingredients.ts';
-import { recipeIngredients, recipeMethod, recipes } from '../schema/recipes.ts';
+import {
+  recipeIngredients,
+  recipeMethod,
+  recipeMethodIngredients,
+  recipes,
+} from '../schema/recipes.ts';
 import {
   ingredientCategories,
   preparationTypes,
@@ -27,6 +32,12 @@ interface RecipeIngredientSpec {
   prepType?: string;
 }
 
+// The ingredients a step uses (DEC-99); no quantity means "not stated".
+interface MethodStepSpec {
+  instruction: string;
+  ingredients?: { ingredientName: string; quantity?: string }[];
+}
+
 interface RecipeSpec {
   name: string;
   description: string;
@@ -35,7 +46,7 @@ interface RecipeSpec {
   totalTimeMins: number;
   imageUrl?: string;
   ingredients: RecipeIngredientSpec[];
-  method: string[];
+  method: MethodStepSpec[];
 }
 
 const INGREDIENT_FIXTURES: IngredientSpec[] = [
@@ -63,9 +74,25 @@ const RECIPE_FIXTURES: RecipeSpec[] = [
       { ingredientName: 'Olive Oil', quantity: '2' },
     ],
     method: [
-      'Boil a pan of salted water and cook the pasta.',
-      'Warm the olive oil and soften the garlic.',
-      'Add the chopped tomato, reduce, and toss with the drained pasta.',
+      {
+        instruction: 'Boil a pan of salted water and cook the pasta.',
+        ingredients: [{ ingredientName: 'Pasta' }],
+      },
+      {
+        instruction: 'Warm 1 tbsp of the olive oil and soften the garlic.',
+        ingredients: [
+          { ingredientName: 'Olive Oil', quantity: '1' },
+          { ingredientName: 'Garlic' },
+        ],
+      },
+      {
+        instruction:
+          'Add the chopped tomato and the rest of the oil, reduce, and toss with the drained pasta.',
+        ingredients: [
+          { ingredientName: 'Tomato' },
+          { ingredientName: 'Olive Oil' },
+        ],
+      },
     ],
   },
   {
@@ -81,9 +108,24 @@ const RECIPE_FIXTURES: RecipeSpec[] = [
       { ingredientName: 'Butter', quantity: '20' },
     ],
     method: [
-      'Heat the oven to 200°C.',
-      'Toss vegetables in butter and roast for 15 minutes.',
-      'Add the chicken thighs and roast until cooked through, about 25 minutes.',
+      { instruction: 'Heat the oven to 200°C.' },
+      {
+        instruction:
+          'Toss the carrots and onion in half the butter and roast for 15 minutes.',
+        ingredients: [
+          { ingredientName: 'Carrot' },
+          { ingredientName: 'Onion' },
+          { ingredientName: 'Butter', quantity: '10' },
+        ],
+      },
+      {
+        instruction:
+          'Add the chicken thighs, dot with the remaining butter and roast until cooked through, about 25 minutes.',
+        ingredients: [
+          { ingredientName: 'Chicken Thigh' },
+          { ingredientName: 'Butter' },
+        ],
+      },
     ],
   },
 ];
@@ -167,12 +209,30 @@ export async function seedDevRecipes(tx: Tx): Promise<void> {
       await tx.insert(recipeIngredients).values(lineValues);
     }
 
-    await tx.insert(recipeMethod).values(
-      recipe.method.map((instruction, index) => ({
-        recipeId,
-        stepNumber: index + 1,
-        instruction,
-      })),
-    );
+    const stepRows = await tx
+      .insert(recipeMethod)
+      .values(
+        recipe.method.map((step, index) => ({
+          recipeId,
+          stepNumber: index + 1,
+          instruction: step.instruction,
+        })),
+      )
+      .returning({ id: recipeMethod.id, stepNumber: recipeMethod.stepNumber });
+    const stepIdByNumber = new Map(stepRows.map((r) => [r.stepNumber, r.id]));
+    const linkValues = recipe.method.flatMap((step, index) => {
+      const methodStepId = stepIdByNumber.get(index + 1);
+      if (methodStepId === undefined) return [];
+      return (step.ingredients ?? []).flatMap((link) => {
+        const ingredientId = ingredientByName.get(link.ingredientName);
+        if (ingredientId === undefined) return [];
+        return [
+          { methodStepId, ingredientId, quantity: link.quantity ?? null },
+        ];
+      });
+    });
+    if (linkValues.length > 0) {
+      await tx.insert(recipeMethodIngredients).values(linkValues);
+    }
   }
 }

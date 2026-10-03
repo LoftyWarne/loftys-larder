@@ -1,5 +1,15 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, avg, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  avg,
+  desc,
+  eq,
+  inArray,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
@@ -56,11 +66,13 @@ import {
   type RateRecipeResult,
   type Recipe,
   type RecipeReferenceItem,
+  type RecipeStepIngredient,
   type RecipeTag,
   type RecipeReferences,
   type RemoveRelatedRecipeResult,
   type ReplaceRecipeIngredientsResult,
   type ReplaceRecipeMethodResult,
+  type ReplaceRecipeMethodStepInput,
   type ReplaceRecipeTagsResult,
   type SetRecipeServingVariationFieldsResult,
   type SetRecipeDeletionResult,
@@ -84,6 +96,7 @@ import {
 import {
   recipeIngredients,
   recipeMethod,
+  recipeMethodIngredients,
   recipeSources,
   recipeTagLinks,
   recipeTags,
@@ -284,64 +297,71 @@ export const recipesRouter = router({
       // via an aliased self-join so the editor can render the base affordance
       // + a "(deleted)" hint without a second request.
       const baseRecipe = alias(recipes, 'base_recipe');
-      const [headerRows, ingredientRows, methodRows, ratingRow, tagsByRecipe] =
-        await Promise.all([
-          ctx.db
-            .select({
-              id: recipes.id,
-              name: recipes.name,
-              description: recipes.description,
-              imageUrl: recipes.imageUrl,
-              baseServings: recipes.baseServings,
-              activeTimeMins: recipes.activeTimeMins,
-              totalTimeMins: recipes.totalTimeMins,
-              estimatedCostPerServing: recipes.estimatedCostPerServing,
-              sourceId: recipes.sourceId,
-              sourceUrl: recipes.sourceUrl,
-              sourceDetail: recipes.sourceDetail,
-              sourceName: recipeSources.name,
-              caloriesPerServing: recipes.caloriesPerServing,
-              proteinPerServing: recipes.proteinPerServing,
-              carbsPerServing: recipes.carbsPerServing,
-              fatPerServing: recipes.fatPerServing,
-              saturatedFatPerServing: recipes.saturatedFatPerServing,
-              fibrePerServing: recipes.fibrePerServing,
-              sugarPerServing: recipes.sugarPerServing,
-              saltPerServing: recipes.saltPerServing,
-              addedByUserId: recipes.addedByUserId,
-              isBase: recipes.isBase,
-              baseRecipeId: recipes.baseRecipeId,
-              baseRecipeName: baseRecipe.name,
-              baseRecipeIsDeleted: baseRecipe.isDeleted,
-              isDeleted: recipes.isDeleted,
-              plantPointsCount: recipePlantPointsExpr(sql`recipes.id`),
-            })
-            .from(recipes)
-            .leftJoin(recipeSources, eq(recipes.sourceId, recipeSources.id))
-            .leftJoin(baseRecipe, eq(recipes.baseRecipeId, baseRecipe.id))
-            .where(
-              and(
-                eq(recipes.id, recipeId),
-                eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
-              ),
-            )
-            .limit(1),
-          loadIngredientLines(ctx.db, recipeId),
-          ctx.db
-            .select({
-              id: recipeMethod.id,
-              stepNumber: recipeMethod.stepNumber,
-              instruction: recipeMethod.instruction,
-              safetyNote: recipeMethod.safetyNote,
-              tip: recipeMethod.tip,
-              prepAhead: recipeMethod.prepAhead,
-            })
-            .from(recipeMethod)
-            .where(eq(recipeMethod.recipeId, recipeId))
-            .orderBy(asc(recipeMethod.stepNumber)),
-          loadRatingAggregate(ctx.db, recipeId, userId),
-          loadTagsByRecipe(ctx.db, [recipeId]),
-        ]);
+      const [
+        headerRows,
+        ingredientRows,
+        methodRows,
+        stepIngredientsByStep,
+        ratingRow,
+        tagsByRecipe,
+      ] = await Promise.all([
+        ctx.db
+          .select({
+            id: recipes.id,
+            name: recipes.name,
+            description: recipes.description,
+            imageUrl: recipes.imageUrl,
+            baseServings: recipes.baseServings,
+            activeTimeMins: recipes.activeTimeMins,
+            totalTimeMins: recipes.totalTimeMins,
+            estimatedCostPerServing: recipes.estimatedCostPerServing,
+            sourceId: recipes.sourceId,
+            sourceUrl: recipes.sourceUrl,
+            sourceDetail: recipes.sourceDetail,
+            sourceName: recipeSources.name,
+            caloriesPerServing: recipes.caloriesPerServing,
+            proteinPerServing: recipes.proteinPerServing,
+            carbsPerServing: recipes.carbsPerServing,
+            fatPerServing: recipes.fatPerServing,
+            saturatedFatPerServing: recipes.saturatedFatPerServing,
+            fibrePerServing: recipes.fibrePerServing,
+            sugarPerServing: recipes.sugarPerServing,
+            saltPerServing: recipes.saltPerServing,
+            addedByUserId: recipes.addedByUserId,
+            isBase: recipes.isBase,
+            baseRecipeId: recipes.baseRecipeId,
+            baseRecipeName: baseRecipe.name,
+            baseRecipeIsDeleted: baseRecipe.isDeleted,
+            isDeleted: recipes.isDeleted,
+            plantPointsCount: recipePlantPointsExpr(sql`recipes.id`),
+          })
+          .from(recipes)
+          .leftJoin(recipeSources, eq(recipes.sourceId, recipeSources.id))
+          .leftJoin(baseRecipe, eq(recipes.baseRecipeId, baseRecipe.id))
+          .where(
+            and(
+              eq(recipes.id, recipeId),
+              eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .limit(1),
+        loadIngredientLines(ctx.db, recipeId),
+        ctx.db
+          .select({
+            id: recipeMethod.id,
+            stepNumber: recipeMethod.stepNumber,
+            instruction: recipeMethod.instruction,
+            safetyNote: recipeMethod.safetyNote,
+            tip: recipeMethod.tip,
+            prepAhead: recipeMethod.prepAhead,
+          })
+          .from(recipeMethod)
+          .where(eq(recipeMethod.recipeId, recipeId))
+          .orderBy(asc(recipeMethod.stepNumber)),
+        loadStepIngredientsByStep(ctx.db, recipeId),
+        loadRatingAggregate(ctx.db, recipeId, userId),
+        loadTagsByRecipe(ctx.db, [recipeId]),
+      ]);
 
       const header = headerRows[0];
       if (!header) {
@@ -380,7 +400,10 @@ export const recipesRouter = router({
         isDeleted: header.isDeleted,
         plantPointsCount: header.plantPointsCount,
         ingredients: ingredientRows,
-        method: methodRows,
+        method: methodRows.map((step) => ({
+          ...step,
+          ingredients: stepIngredientsByStep.get(step.id) ?? [],
+        })),
         averageRating: ratingRow.averageRating,
         ratingCount: ratingRow.ratingCount,
         yourRating: ratingRow.yourRating,
@@ -565,6 +588,32 @@ export const recipesRouter = router({
               })),
             );
           }
+          // An ingredient removed from the recipe takes its step links with it
+          // (DEC-99). Never blocked by step amounts: Save & Finish saves
+          // ingredients before the method, so the method save is where an
+          // over-total amount gets caught.
+          const keptIngredientIds = input.lines.map(
+            (line) => line.ingredientId,
+          );
+          await tx
+            .delete(recipeMethodIngredients)
+            .where(
+              and(
+                inArray(
+                  recipeMethodIngredients.methodStepId,
+                  tx
+                    .select({ id: recipeMethod.id })
+                    .from(recipeMethod)
+                    .where(eq(recipeMethod.recipeId, input.recipeId)),
+                ),
+                keptIngredientIds.length > 0
+                  ? notInArray(
+                      recipeMethodIngredients.ingredientId,
+                      keptIngredientIds,
+                    )
+                  : undefined,
+              ),
+            );
         });
 
         return { recipeId: input.recipeId, count: input.lines.length };
@@ -576,9 +625,21 @@ export const recipesRouter = router({
     .output(replaceRecipeMethodResultSchema)
     .mutation(async ({ ctx, input }): Promise<ReplaceRecipeMethodResult> => {
       await assertRecipeInHousehold(ctx.db, input.recipeId);
+      await assertStepIngredientsValid(ctx.db, input.recipeId, input.steps);
 
       const withTransaction = makeWithTransaction(ctx.db);
       await withTransaction(async (tx) => {
+        await tx
+          .delete(recipeMethodIngredients)
+          .where(
+            inArray(
+              recipeMethodIngredients.methodStepId,
+              tx
+                .select({ id: recipeMethod.id })
+                .from(recipeMethod)
+                .where(eq(recipeMethod.recipeId, input.recipeId)),
+            ),
+          );
         await tx
           .delete(recipeMethod)
           .where(eq(recipeMethod.recipeId, input.recipeId));
@@ -586,16 +647,37 @@ export const recipesRouter = router({
           // Numbering is authoritative server-side — the unique
           // `(recipe_id, step_number)` index would otherwise expose a footgun
           // if clients sent duplicate step numbers.
-          await tx.insert(recipeMethod).values(
-            input.steps.map((step, index) => ({
-              recipeId: input.recipeId,
-              stepNumber: index + 1,
-              instruction: step.instruction,
-              safetyNote: step.safetyNote,
-              tip: step.tip,
-              prepAhead: step.prepAhead,
-            })),
+          const inserted = await tx
+            .insert(recipeMethod)
+            .values(
+              input.steps.map((step, index) => ({
+                recipeId: input.recipeId,
+                stepNumber: index + 1,
+                instruction: step.instruction,
+                safetyNote: step.safetyNote,
+                tip: step.tip,
+                prepAhead: step.prepAhead,
+              })),
+            )
+            .returning({
+              id: recipeMethod.id,
+              stepNumber: recipeMethod.stepNumber,
+            });
+          const stepIdByNumber = new Map(
+            inserted.map((row) => [row.stepNumber, row.id]),
           );
+          const links = input.steps.flatMap((step, index) => {
+            const methodStepId = stepIdByNumber.get(index + 1);
+            if (methodStepId === undefined) return [];
+            return step.ingredients.map((link) => ({
+              methodStepId,
+              ingredientId: link.ingredientId,
+              quantity: link.quantity,
+            }));
+          });
+          if (links.length > 0) {
+            await tx.insert(recipeMethodIngredients).values(links);
+          }
         }
       });
 
@@ -1240,6 +1322,111 @@ async function setRecipeDeletion(
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipe not found' });
   }
   return { id: row.id, isDeleted: row.isDeleted };
+}
+
+// Step links for one recipe, keyed by method step id (DEC-99).
+async function loadStepIngredientsByStep(
+  db: Db,
+  recipeId: number,
+): Promise<Map<number, RecipeStepIngredient[]>> {
+  const rows = await db
+    .select({
+      methodStepId: recipeMethodIngredients.methodStepId,
+      ingredientId: recipeMethodIngredients.ingredientId,
+      quantity: recipeMethodIngredients.quantity,
+    })
+    .from(recipeMethodIngredients)
+    .innerJoin(
+      recipeMethod,
+      eq(recipeMethod.id, recipeMethodIngredients.methodStepId),
+    )
+    .where(eq(recipeMethod.recipeId, recipeId))
+    .orderBy(
+      asc(recipeMethodIngredients.methodStepId),
+      asc(recipeMethodIngredients.ingredientId),
+    );
+  const byStep = new Map<number, RecipeStepIngredient[]>();
+  for (const row of rows) {
+    const list = byStep.get(row.methodStepId) ?? [];
+    list.push({ ingredientId: row.ingredientId, quantity: row.quantity });
+    byStep.set(row.methodStepId, list);
+  }
+  return byStep;
+}
+
+// Pre-flight for `replaceMethod`'s step links (DEC-99): every linked
+// ingredient must belong to the household, and an ingredient's stated step
+// amounts can't add up to more than its total across the recipe's saved
+// lines. An ingredient with no saved line yet has no total to check against.
+async function assertStepIngredientsValid(
+  db: Db,
+  recipeId: number,
+  steps: readonly ReplaceRecipeMethodStepInput[],
+): Promise<void> {
+  const links = steps.flatMap((step) => step.ingredients);
+  if (links.length === 0) return;
+
+  const ingredientIds = Array.from(
+    new Set(links.map((link) => link.ingredientId)),
+  );
+  const known = await db
+    .select({ id: ingredients.id })
+    .from(ingredients)
+    .where(
+      and(
+        inArray(ingredients.id, ingredientIds),
+        eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    );
+  const knownIds = new Set(known.map((row) => row.id));
+  const unknownId = ingredientIds.find((id) => !knownIds.has(id));
+  if (unknownId !== undefined) {
+    throw domainBadRequest(
+      'RECIPE_INGREDIENT_NOT_FOUND',
+      'One or more ingredients are not available to this household',
+      { ingredientId: unknownId },
+    );
+  }
+
+  const statedMilli = new Map<number, number>();
+  for (const link of links) {
+    if (link.quantity === null) continue;
+    statedMilli.set(
+      link.ingredientId,
+      (statedMilli.get(link.ingredientId) ?? 0) + toMilli(link.quantity),
+    );
+  }
+  if (statedMilli.size === 0) return;
+
+  const totals = await db
+    .select({
+      ingredientId: recipeIngredients.ingredientId,
+      total: sql<string>`sum(${recipeIngredients.quantity})`,
+    })
+    .from(recipeIngredients)
+    .where(
+      and(
+        eq(recipeIngredients.recipeId, recipeId),
+        inArray(recipeIngredients.ingredientId, [...statedMilli.keys()]),
+      ),
+    )
+    .groupBy(recipeIngredients.ingredientId);
+  for (const { ingredientId, total } of totals) {
+    const stated = statedMilli.get(ingredientId) ?? 0;
+    if (stated > toMilli(total)) {
+      throw domainBadRequest(
+        'RECIPE_STEP_AMOUNT_EXCEEDS_TOTAL',
+        'Step amounts add up to more than the recipe uses',
+        { ingredientId, stated: stated / 1000, total: Number(total) },
+      );
+    }
+  }
+}
+
+// `numeric(10,3)` values compared as integer thousandths, so float error
+// can't tip a sum over its total.
+function toMilli(quantity: string): number {
+  return Math.round(Number(quantity) * 1000);
 }
 
 async function loadTagsByRecipe(

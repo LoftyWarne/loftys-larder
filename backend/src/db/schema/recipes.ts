@@ -166,6 +166,31 @@ export const recipeMethod = pgTable(
   ],
 );
 
+// The ingredients a method step uses (DEC-99). Linked by household ingredient,
+// not by `recipe_ingredients` row: both the ingredient and method writes are
+// full replaces that renumber row ids on every save. `quantity` is the amount
+// used in this step, in the ingredient's one unit; NULL means not stated.
+export const recipeMethodIngredients = pgTable(
+  'recipe_method_ingredients',
+  {
+    methodStepId: integer()
+      .notNull()
+      .references(() => recipeMethod.id, { onDelete: 'restrict' }),
+    ingredientId: integer()
+      .notNull()
+      .references(() => ingredients.id, { onDelete: 'restrict' }),
+    quantity: numeric({ precision: 10, scale: 3 }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.methodStepId, table.ingredientId] }),
+    index('recipe_method_ingredients_ingredient_id_idx').on(table.ingredientId),
+    check(
+      'recipe_method_ingredients_quantity_positive',
+      sql`${table.quantity} IS NULL OR ${table.quantity} > 0`,
+    ),
+  ],
+);
+
 // Free-form organising tags (DEC-97). The household's vocabulary lives here,
 // one row per tag; `lower(name)` uniqueness makes "Weeknight" and "weeknight"
 // the same tag. Rows are never deleted — unlinked tags just drop out of the

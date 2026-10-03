@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MethodEditor } from './method-editor.tsx';
+import { MethodEditor, type MethodIngredient } from './method-editor.tsx';
 
 function step(
   id: number,
@@ -12,6 +12,7 @@ function step(
     safetyNote?: string;
     tip?: string;
     prepAhead?: RecipeMethodStep['prepAhead'];
+    ingredients?: RecipeMethodStep['ingredients'];
   } = {},
 ): RecipeMethodStep {
   return {
@@ -21,6 +22,7 @@ function step(
     safetyNote: notes.safetyNote ?? null,
     tip: notes.tip ?? null,
     prepAhead: notes.prepAhead ?? null,
+    ingredients: notes.ingredients ?? [],
   };
 }
 
@@ -46,12 +48,19 @@ describe('MethodEditor', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { instruction: 'Heat oil', safetyNote: null, tip: null, prepAhead: null },
+      {
+        instruction: 'Heat oil',
+        safetyNote: null,
+        tip: null,
+        prepAhead: null,
+        ingredients: [],
+      },
       {
         instruction: 'Add onions',
         safetyNote: null,
         tip: null,
         prepAhead: null,
+        ingredients: [],
       },
     ]);
   });
@@ -120,9 +129,27 @@ describe('MethodEditor', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit.mock.calls[0]?.[0]).toEqual([
-      { instruction: 'B', safetyNote: null, tip: null, prepAhead: null },
-      { instruction: 'A', safetyNote: null, tip: null, prepAhead: null },
-      { instruction: 'C', safetyNote: null, tip: null, prepAhead: null },
+      {
+        instruction: 'B',
+        safetyNote: null,
+        tip: null,
+        prepAhead: null,
+        ingredients: [],
+      },
+      {
+        instruction: 'A',
+        safetyNote: null,
+        tip: null,
+        prepAhead: null,
+        ingredients: [],
+      },
+      {
+        instruction: 'C',
+        safetyNote: null,
+        tip: null,
+        prepAhead: null,
+        ingredients: [],
+      },
     ]);
   });
 
@@ -141,7 +168,13 @@ describe('MethodEditor', () => {
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith([
-        { instruction: 'B', safetyNote: null, tip: null, prepAhead: null },
+        {
+          instruction: 'B',
+          safetyNote: null,
+          tip: null,
+          prepAhead: null,
+          ingredients: [],
+        },
       ]);
     });
   });
@@ -174,6 +207,7 @@ describe('MethodEditor', () => {
           safetyNote: null,
           tip: null,
           prepAhead: null,
+          ingredients: [],
         },
       ]);
     });
@@ -235,6 +269,7 @@ describe('MethodEditor', () => {
             safetyNote: 'Oil will spit',
             tip: 'Pat dry first',
             prepAhead: null,
+            ingredients: [],
           },
         ]);
       });
@@ -255,7 +290,13 @@ describe('MethodEditor', () => {
 
       await waitFor(() => {
         expect(onSubmit).toHaveBeenCalledWith([
-          { instruction: 'Fry', safetyNote: null, tip: null, prepAhead: null },
+          {
+            instruction: 'Fry',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+            ingredients: [],
+          },
         ]);
       });
     });
@@ -293,6 +334,7 @@ describe('MethodEditor', () => {
             safetyNote: null,
             tip: 'Dry it',
             prepAhead: null,
+            ingredients: [],
           },
         ]);
       });
@@ -314,8 +356,20 @@ describe('MethodEditor', () => {
       await user.click(screen.getByRole('button', { name: 'Save method' }));
       await waitFor(() => {
         expect(onSubmit).toHaveBeenCalledWith([
-          { instruction: 'B', safetyNote: null, tip: 'B tip', prepAhead: null },
-          { instruction: 'A', safetyNote: null, tip: null, prepAhead: null },
+          {
+            instruction: 'B',
+            safetyNote: null,
+            tip: 'B tip',
+            prepAhead: null,
+            ingredients: [],
+          },
+          {
+            instruction: 'A',
+            safetyNote: null,
+            tip: null,
+            prepAhead: null,
+            ingredients: [],
+          },
         ]);
       });
     });
@@ -340,6 +394,7 @@ describe('MethodEditor', () => {
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
         ]);
       });
@@ -379,7 +434,14 @@ describe('MethodEditor', () => {
       await user.type(screen.getByLabelText('Step 1 tip'), 'X');
 
       expect(onStepsChange).toHaveBeenLastCalledWith([
-        { instruction: 'Fry', safetyNote: null, tip: 'X', prepAhead: null },
+        {
+          instruction: 'Fry',
+          safetyNote: null,
+          tip: 'X',
+          prepAhead: null,
+          ingredients: [],
+          followsText: true,
+        },
       ]);
     });
   });
@@ -407,12 +469,14 @@ describe('MethodEditor', () => {
             safetyNote: null,
             tip: null,
             prepAhead: 'required',
+            ingredients: [],
           },
           {
             instruction: 'Grill',
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
         ]);
       });
@@ -440,6 +504,7 @@ describe('MethodEditor', () => {
             safetyNote: null,
             tip: null,
             prepAhead: null,
+            ingredients: [],
           },
         ]);
       });
@@ -503,8 +568,299 @@ describe('MethodEditor', () => {
           safetyNote: null,
           tip: null,
           prepAhead: 'required',
+          ingredients: [],
+          followsText: true,
         },
       ]);
+    });
+  });
+  describe('step ingredients', () => {
+    const BUTTER: MethodIngredient = {
+      ingredientId: 1,
+      name: 'Butter',
+      unitName: 'g',
+      total: 100,
+    };
+    const ONION: MethodIngredient = {
+      ingredientId: 2,
+      name: 'Onion',
+      unitName: 'piece',
+      total: 2,
+    };
+    const GARLIC: MethodIngredient = {
+      ingredientId: 3,
+      name: 'Garlic',
+      unitName: 'piece',
+      total: 3,
+    };
+    const INGREDIENTS = [BUTTER, ONION, GARLIC];
+
+    function savedSteps(onSubmit: ReturnType<typeof vi.fn>): unknown {
+      return onSubmit.mock.calls[0]?.[0];
+    }
+
+    it('fills an untouched step from its text as it is typed', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(true);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[]}
+          onSubmit={onSubmit}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Add step' }));
+      await user.type(
+        screen.getByLabelText('Step 1 text'),
+        'Melt 50 g butter and add the onions',
+      );
+
+      expect(screen.getByLabelText('Step 1 Butter amount')).toHaveValue('50');
+      expect(screen.getByLabelText('Step 1 Onion amount')).toHaveValue('');
+
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      });
+      expect(savedSteps(onSubmit)).toEqual([
+        expect.objectContaining({
+          ingredients: [
+            { ingredientId: 1, quantity: '50' },
+            { ingredientId: 2, quantity: null },
+          ],
+        }),
+      ]);
+    });
+
+    it('stops following the text once chips are edited, offering new mentions as suggestions', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(true);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[
+            step(1, 'Melt the butter', {
+              ingredients: [{ ingredientId: 1, quantity: '25.000' }],
+            }),
+          ]}
+          onSubmit={onSubmit}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+      expect(screen.getByLabelText('Step 1 Butter amount')).toHaveValue('25');
+
+      await user.type(screen.getByLabelText('Step 1 text'), ', add 2 onions');
+      expect(screen.queryByLabelText('Step 1 Onion amount')).toBeNull();
+
+      await user.click(
+        screen.getByRole('button', { name: 'Add Onion to step 1' }),
+      );
+      expect(screen.getByLabelText('Step 1 Onion amount')).toHaveValue('2');
+
+      await user.selectOptions(
+        screen.getByLabelText('Add an ingredient to step 1'),
+        'Garlic',
+      );
+      await user.click(
+        screen.getByRole('button', { name: 'Remove Butter from step 1' }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      });
+      expect(savedSteps(onSubmit)).toEqual([
+        expect.objectContaining({
+          ingredients: [
+            { ingredientId: 2, quantity: '2' },
+            { ingredientId: 3, quantity: null },
+          ],
+        }),
+      ]);
+    });
+
+    it('converts a fraction amount and sends a blank one as null', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(true);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[
+            step(1, 'Add garlic and onion', {
+              ingredients: [
+                { ingredientId: 3, quantity: '1.000' },
+                { ingredientId: 2, quantity: '1.000' },
+              ],
+            }),
+          ]}
+          onSubmit={onSubmit}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+
+      const garlic = screen.getByLabelText('Step 1 Garlic amount');
+      await user.clear(garlic);
+      await user.type(garlic, '3/2');
+      await user.clear(screen.getByLabelText('Step 1 Onion amount'));
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      });
+      expect(savedSteps(onSubmit)).toEqual([
+        expect.objectContaining({
+          ingredients: [
+            { ingredientId: 3, quantity: '1.5' },
+            { ingredientId: 2, quantity: null },
+          ],
+        }),
+      ]);
+    });
+
+    it('blocks saving while stated amounts add up to more than the recipe total', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(true);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[
+            step(1, 'Melt butter', {
+              ingredients: [{ ingredientId: 1, quantity: '70.000' }],
+            }),
+            step(2, 'More butter', {
+              ingredients: [{ ingredientId: 1, quantity: '40.000' }],
+            }),
+          ]}
+          onSubmit={onSubmit}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Butter: the steps use 110 g, but the recipe has 100 g.',
+      );
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      const second = screen.getByLabelText('Step 2 Butter amount');
+      await user.clear(second);
+      await user.type(second, '30');
+      expect(screen.queryByRole('alert')).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('rejects an amount that is not a number', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(true);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[
+            step(1, 'Add garlic', {
+              ingredients: [{ ingredientId: 3, quantity: null }],
+            }),
+          ]}
+          onSubmit={onSubmit}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+
+      await user.type(screen.getByLabelText('Step 1 Garlic amount'), '1/0');
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /number or simple fraction/,
+      );
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('hides and leaves out a link to an ingredient no longer on the recipe', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(true);
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[
+            step(1, 'Fry', {
+              ingredients: [
+                { ingredientId: 1, quantity: null },
+                { ingredientId: 99, quantity: '5.000' },
+              ],
+            }),
+          ]}
+          onSubmit={onSubmit}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+
+      const group = screen.getByRole('group', { name: 'Step 1 ingredients' });
+      expect(group.querySelectorAll('input')).toHaveLength(1);
+      await user.click(screen.getByRole('button', { name: 'Save method' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      });
+      expect(savedSteps(onSubmit)).toEqual([
+        expect.objectContaining({
+          ingredients: [{ ingredientId: 1, quantity: null }],
+        }),
+      ]);
+    });
+
+    it('restores chips from a draft, and treats a legacy draft step as following its text', async () => {
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[]}
+          initialDraftSteps={[
+            {
+              instruction: 'Melt the butter',
+              ingredients: [{ ingredientId: 1, quantity: '10' }],
+              followsText: false,
+            },
+            { instruction: 'Stir' },
+          ]}
+          onSubmit={vi.fn()}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+
+      expect(screen.getByLabelText('Step 1 Butter amount')).toHaveValue('10');
+      await user.type(screen.getByLabelText('Step 2 text'), ' in the garlic');
+      expect(screen.getByLabelText('Step 2 Garlic amount')).toHaveValue('');
+    });
+
+    it('includes chips in the autosave payload', async () => {
+      const onStepsChange = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[step(1, 'Fry')]}
+          onSubmit={vi.fn()}
+          onStepsChange={onStepsChange}
+          recipeIngredients={INGREDIENTS}
+        />,
+      );
+
+      await user.selectOptions(
+        screen.getByLabelText('Add an ingredient to step 1'),
+        'Butter',
+      );
+
+      expect(onStepsChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({
+          ingredients: [{ ingredientId: 1, quantity: '' }],
+          followsText: false,
+        }),
+      ]);
+    });
+
+    it('shows no ingredient controls when the recipe has no ingredients', () => {
+      render(
+        <MethodEditor initialSteps={[step(1, 'Fry')]} onSubmit={vi.fn()} />,
+      );
+      expect(
+        screen.queryByRole('group', { name: 'Step 1 ingredients' }),
+      ).toBeNull();
     });
   });
 });

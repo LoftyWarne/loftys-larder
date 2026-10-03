@@ -40,6 +40,17 @@ export const stepPrepAheadSchema = z.enum(['optional', 'required']);
 
 export type StepPrepAhead = z.infer<typeof stepPrepAheadSchema>;
 
+// An ingredient a method step uses (DEC-99). Linked by the household
+// ingredient, not by a recipe line. `quantity` is the amount used in this
+// step, in the ingredient's one unit, as a `numeric(10,3)` string; `null`
+// means not stated.
+export const recipeStepIngredientSchema = z.object({
+  ingredientId: ingredientIdSchema,
+  quantity: z.string().nullable(),
+});
+
+export type RecipeStepIngredient = z.infer<typeof recipeStepIngredientSchema>;
+
 export const recipeMethodStepSchema = z.object({
   id: z.number().int().positive(),
   stepNumber: z.number().int().positive(),
@@ -47,6 +58,7 @@ export const recipeMethodStepSchema = z.object({
   safetyNote: z.string().nullable(),
   tip: z.string().nullable(),
   prepAhead: stepPrepAheadSchema.nullable(),
+  ingredients: z.array(recipeStepIngredientSchema),
 });
 
 export type RecipeMethodStep = z.infer<typeof recipeMethodStepSchema>;
@@ -330,11 +342,32 @@ export type ReplaceRecipeIngredientsResult = z.infer<
   typeof replaceRecipeIngredientsResultSchema
 >;
 
+export const RECIPE_STEP_INGREDIENTS_MAX = 50;
+
+export const replaceRecipeMethodStepIngredientSchema = z.object({
+  ingredientId: ingredientIdSchema,
+  quantity: recipeQuantitySchema
+    .refine((value) => Number(value) > 0, 'Amount must be more than 0')
+    .nullable(),
+});
+
+export type ReplaceRecipeMethodStepIngredient = z.infer<
+  typeof replaceRecipeMethodStepIngredientSchema
+>;
+
 export const replaceRecipeMethodStepInputSchema = z.object({
   instruction: recipeInstructionSchema,
   safetyNote: recipeStepNoteSchema.nullable(),
   tip: recipeStepNoteSchema.nullable(),
   prepAhead: stepPrepAheadSchema.nullable(),
+  ingredients: z
+    .array(replaceRecipeMethodStepIngredientSchema)
+    .max(RECIPE_STEP_INGREDIENTS_MAX)
+    .refine(
+      (links) =>
+        new Set(links.map((link) => link.ingredientId)).size === links.length,
+      'Each ingredient can only be listed once per step',
+    ),
 });
 
 export type ReplaceRecipeMethodStepInput = z.infer<

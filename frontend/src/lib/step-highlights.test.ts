@@ -87,6 +87,16 @@ describe('highlightStep', () => {
     ]);
   });
 
+  it('leaves quantities plain when quantity bold is off, but still bolds the rest', () => {
+    expect(
+      bolded('Add 2 tbsp butter and simmer for 20 mins at 180°C.', {
+        ingredientNames: ['Butter'],
+        unitNames: [],
+        boldQuantities: false,
+      }),
+    ).toEqual(['butter', '20 mins', '180°C']);
+  });
+
   describe('ingredient names', () => {
     it('matches case-insensitively as whole words', () => {
       const context = { ingredientNames: ['Onion'], unitNames: [] };

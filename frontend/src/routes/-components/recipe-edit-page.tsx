@@ -35,6 +35,7 @@ import {
 import {
   MethodEditor,
   type MethodDraftStep,
+  type MethodIngredient,
 } from '@/components/recipe-editor/method-editor.tsx';
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
 import { TagFields } from '@/components/recipe-editor/tag-fields.tsx';
@@ -42,7 +43,10 @@ import type { SearchableComboboxOption } from '@/components/searchable-combobox.
 import { Button } from '@/components/ui/button.tsx';
 import { useRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
-import { trimTrailingZeros } from '@/lib/quantity-input.ts';
+import {
+  parseQuantityToDecimal,
+  trimTrailingZeros,
+} from '@/lib/quantity-input.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 type Patch = UpdateRecipeHeaderInput['patch'];
@@ -99,6 +103,11 @@ export function RecipeEditPage(): React.ReactElement {
   );
   const [topLevelError, setTopLevelError] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
+  // The Ingredients section's lines as last edited, so the method editor can
+  // offer them to steps before they're saved. `null` until the first edit.
+  const [editedIngredientLines, setEditedIngredientLines] = useState<
+    IngredientDraftLine[] | null
+  >(null);
 
   const headerRef = useRef<RecipeSectionHandle>(null);
   const servingVariationRef = useRef<RecipeSectionHandle>(null);
@@ -130,6 +139,12 @@ export function RecipeEditPage(): React.ReactElement {
         safetyNote: step.safetyNote,
         tip: step.tip,
         prepAhead: step.prepAhead,
+        ingredients: step.ingredients.map((link) => ({
+          ingredientId: link.ingredientId,
+          quantity:
+            link.quantity === null ? '' : trimTrailingZeros(link.quantity),
+        })),
+        followsText: step.ingredients.length === 0,
       })),
       tags: recipe.tags.map((tag) => tag.name),
     };
@@ -140,6 +155,14 @@ export function RecipeEditPage(): React.ReactElement {
     enabled: idIsValid && recipe !== null,
     serverDefaults: serverDefaults ?? EMPTY_DRAFT_SHAPE,
   });
+
+  const methodIngredients = useMemo(
+    () =>
+      toMethodIngredients(
+        editedIngredientLines ?? draft.mergedDefaults.ingredients,
+      ),
+    [editedIngredientLines, draft.mergedDefaults.ingredients],
+  );
 
   // Arriving from "Save & continue" on a new recipe, the URL carries a hash
   // pointing at the section to start on. The target only exists once the recipe
@@ -311,7 +334,11 @@ export function RecipeEditPage(): React.ReactElement {
       draft.clearSection('method');
       return true;
     } catch (err) {
-      setTopLevelError(extractMessage(err));
+      setTopLevelError(
+        getDomainErrorCode(err) === 'RECIPE_STEP_AMOUNT_EXCEEDS_TOTAL'
+          ? 'The step amounts add up to more than the saved recipe uses. Save the ingredients first, then the method.'
+          : extractMessage(err),
+      );
       return false;
     }
   }
@@ -476,6 +503,7 @@ export function RecipeEditPage(): React.ReactElement {
         createIngredient={createIngredient}
         onSubmit={handleIngredientsSubmit}
         onLinesChange={(lines) => {
+          setEditedIngredientLines(lines);
           draft.queueAutosave('ingredients', lines);
         }}
         serverErrors={ingredientErrors}
@@ -491,6 +519,7 @@ export function RecipeEditPage(): React.ReactElement {
           draft.queueAutosave('method', steps);
         }}
         savedNoticeKey={methodSavedKey}
+        recipeIngredients={methodIngredients}
       />
 
       <TagFields
@@ -631,6 +660,44 @@ function diffHeader(before: HeaderFormValues, after: HeaderFormValues): Patch {
 function parseDraftTags(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.every((item) => typeof item === 'string') ? value : undefined;
+}
+
+// One entry per ingredient on the Ingredients section, unsaved edits
+// included. A total pools the ingredient's lines and is `null` while any of
+// them has no valid quantity. Draft lines are untyped JSON, so a malformed
+// one is skipped.
+function toMethodIngredients(
+  lines: readonly IngredientDraftLine[],
+): MethodIngredient[] {
+  const byId = new Map<number, MethodIngredient>();
+  for (const line of lines) {
+    const ingredient = line.ingredient as Partial<
+      NonNullable<IngredientDraftLine['ingredient']>
+    > | null;
+    if (
+      typeof ingredient?.id !== 'number' ||
+      typeof ingredient.label !== 'string' ||
+      typeof ingredient.unitName !== 'string'
+    ) {
+      continue;
+    }
+    const parsed =
+      typeof line.quantity === 'string'
+        ? parseQuantityToDecimal(line.quantity)
+        : null;
+    const existing = byId.get(ingredient.id);
+    const priorTotal = existing ? existing.total : 0;
+    byId.set(ingredient.id, {
+      ingredientId: ingredient.id,
+      name: ingredient.label,
+      unitName: ingredient.unitName,
+      total:
+        priorTotal === null || parsed === null
+          ? null
+          : priorTotal + Number(parsed),
+    });
+  }
+  return [...byId.values()];
 }
 
 function extractMessage(err: unknown): string {

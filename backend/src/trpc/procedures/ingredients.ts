@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import {
   createIngredientInputSchema,
@@ -18,7 +18,11 @@ import {
   ingredientCategories,
   unitsOfMeasurement,
 } from '../../db/schema/reference.ts';
-import { recipeIngredients } from '../../db/schema/recipes.ts';
+import {
+  recipeIngredients,
+  recipeMethodIngredients,
+} from '../../db/schema/recipes.ts';
+import { makeWithTransaction } from '../../db/withTransaction.ts';
 import { protectedProcedure, router } from '../init.ts';
 import { z } from 'zod';
 
@@ -229,15 +233,34 @@ export const ingredientsRouter = router({
         );
       }
 
-      const deleted = await ctx.db
-        .delete(ingredients)
-        .where(
-          and(
-            eq(ingredients.id, input.id),
-            eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+      // A step link to an ingredient that's in no recipe line is invisible
+      // (DEC-99), so it shouldn't block deletion; clear it first.
+      const withTransaction = makeWithTransaction(ctx.db);
+      const deleted = await withTransaction(async (tx) => {
+        await tx.delete(recipeMethodIngredients).where(
+          inArray(
+            recipeMethodIngredients.ingredientId,
+            tx
+              .select({ id: ingredients.id })
+              .from(ingredients)
+              .where(
+                and(
+                  eq(ingredients.id, input.id),
+                  eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+                ),
+              ),
           ),
-        )
-        .returning({ id: ingredients.id });
+        );
+        return tx
+          .delete(ingredients)
+          .where(
+            and(
+              eq(ingredients.id, input.id),
+              eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .returning({ id: ingredients.id });
+      });
 
       const row = deleted[0];
       if (!row) {

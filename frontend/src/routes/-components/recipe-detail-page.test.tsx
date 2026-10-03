@@ -1,12 +1,16 @@
 import type { Recipe } from '@loftys-larder/shared';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getUseQueryMock, useParamsMock } = vi.hoisted(() => ({
-  getUseQueryMock: vi.fn(),
-  useParamsMock: vi.fn(),
-}));
+const { getUseQueryMock, useParamsMock, useSearchMock, navigateMock } =
+  vi.hoisted(() => ({
+    getUseQueryMock: vi.fn(),
+    useParamsMock: vi.fn(),
+    useSearchMock: vi.fn(),
+    navigateMock: vi.fn(),
+  }));
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
@@ -77,6 +81,8 @@ vi.mock('@tanstack/react-router', async () => {
       </a>
     ),
     useParams: useParamsMock,
+    useSearch: useSearchMock,
+    useNavigate: () => navigateMock,
   };
 });
 
@@ -144,6 +150,7 @@ const FULL_RECIPE: Recipe = {
       safetyNote: null,
       tip: null,
       prepAhead: null,
+      ingredients: [],
     },
     {
       id: 2,
@@ -152,6 +159,7 @@ const FULL_RECIPE: Recipe = {
       safetyNote: null,
       tip: null,
       prepAhead: null,
+      ingredients: [],
     },
   ],
   averageRating: null,
@@ -170,6 +178,9 @@ beforeEach(() => {
   getUseQueryMock.mockReset();
   useParamsMock.mockReset();
   useParamsMock.mockReturnValue({ recipeId: '7' });
+  useSearchMock.mockReset();
+  useSearchMock.mockReturnValue({});
+  navigateMock.mockReset();
 });
 
 describe('RecipeDetailPage', () => {
@@ -211,7 +222,8 @@ describe('RecipeDetailPage', () => {
 
     const items = screen
       .getByRole('heading', { name: /ingredients/i })
-      .parentElement?.querySelectorAll('ul li');
+      .closest('section')
+      ?.querySelectorAll('ul li');
     expect(items?.[0]).not.toHaveTextContent('(optional)');
     expect(items?.[1]).toHaveTextContent('Butter (optional)');
   });
@@ -439,6 +451,7 @@ describe('RecipeDetailPage', () => {
               safetyNote: null,
               tip: null,
               prepAhead: 'optional',
+              ingredients: [],
             },
             {
               id: 2,
@@ -447,6 +460,7 @@ describe('RecipeDetailPage', () => {
               safetyNote: null,
               tip: null,
               prepAhead: 'required',
+              ingredients: [],
             },
             {
               id: 3,
@@ -455,6 +469,7 @@ describe('RecipeDetailPage', () => {
               safetyNote: null,
               tip: null,
               prepAhead: null,
+              ingredients: [],
             },
           ],
         },
@@ -500,6 +515,228 @@ describe('RecipeDetailPage', () => {
         .parentElement?.querySelectorAll('ol li');
       expect(methodItems?.[0]).toHaveTextContent('Must be done ahead');
       expect(methodItems?.[1]).not.toHaveTextContent('done ahead');
+    });
+  });
+  describe('portions', () => {
+    function renderRecipe(
+      recipe: Recipe = FULL_RECIPE,
+      search: { servings?: number } = {},
+    ): void {
+      useSearchMock.mockReturnValue(search);
+      getUseQueryMock.mockReturnValue({
+        data: recipe,
+        isLoading: false,
+        error: null,
+      });
+      render(<RecipeDetailPage />);
+    }
+
+    function ingredientTexts(): string[] {
+      const items =
+        screen
+          .getByRole('heading', { name: /ingredients/i })
+          .closest('section')
+          ?.querySelectorAll('ul li') ?? [];
+      return [...items].map((item) => item.textContent);
+    }
+
+    it("shows the recipe's own servings by default, with no reset", () => {
+      renderRecipe();
+
+      const stepper = screen.getByRole('group', { name: 'Servings' });
+      expect(stepper).toHaveTextContent('2');
+      expect(screen.queryByRole('button', { name: /reset/i })).toBeNull();
+      expect(ingredientTexts()).toEqual([
+        '300 g Onion, chopped',
+        '50 g Butter',
+      ]);
+    });
+
+    it('scales ingredient amounts to the servings in the URL', () => {
+      renderRecipe(FULL_RECIPE, { servings: 3 });
+
+      expect(screen.getByRole('group', { name: 'Servings' })).toHaveTextContent(
+        '3',
+      );
+      expect(ingredientTexts()).toEqual([
+        '450 g Onion, chopped',
+        '75 g Butter',
+      ]);
+      expect(
+        screen.getByRole('button', { name: 'Reset to 2' }),
+      ).toBeInTheDocument();
+    });
+
+    // The page navigates with a search updater so each tap applies to the
+    // URL as it is at that moment; run the last one against a given URL.
+    function lastSearchFrom(prev: { servings?: number }): unknown {
+      const options = navigateMock.mock.lastCall?.[0] as {
+        search: (prev: { servings?: number }) => unknown;
+      };
+      return options.search(prev);
+    }
+
+    it('changes servings through the URL, replacing history and keeping scroll', async () => {
+      const user = userEvent.setup();
+      renderRecipe(FULL_RECIPE, { servings: 4 });
+
+      await user.click(screen.getByRole('button', { name: 'More servings' }));
+      expect(navigateMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          from: '/recipes/$recipeId/',
+          replace: true,
+          resetScroll: false,
+        }),
+      );
+      expect(lastSearchFrom({ servings: 4 })).toEqual({ servings: 5 });
+
+      await user.click(screen.getByRole('button', { name: 'Fewer servings' }));
+      expect(lastSearchFrom({ servings: 4 })).toEqual({ servings: 3 });
+
+      await user.click(screen.getByRole('button', { name: 'Reset to 2' }));
+      expect(lastSearchFrom({ servings: 4 })).toEqual({});
+    });
+
+    it('applies each step to the latest URL, so a double-click adds two servings', async () => {
+      const user = userEvent.setup();
+      renderRecipe();
+
+      await user.dblClick(
+        screen.getByRole('button', { name: 'More servings' }),
+      );
+
+      const updaters = navigateMock.mock.calls.map(
+        ([options]) =>
+          (options as { search: (prev: { servings?: number }) => unknown })
+            .search,
+      );
+      expect(updaters).toHaveLength(2);
+      const afterFirst = updaters[0]?.({}) as { servings?: number };
+      expect(updaters[1]?.(afterFirst)).toEqual({ servings: 4 });
+    });
+
+    it("clears the URL param when stepping back to the recipe's own servings", async () => {
+      const user = userEvent.setup();
+      renderRecipe(FULL_RECIPE, { servings: 3 });
+
+      await user.click(screen.getByRole('button', { name: 'Fewer servings' }));
+      expect(lastSearchFrom({ servings: 3 })).toEqual({});
+    });
+
+    it('keeps a stepped value within 1 and the maximum', async () => {
+      const user = userEvent.setup();
+      renderRecipe(FULL_RECIPE, { servings: 3 });
+
+      await user.click(screen.getByRole('button', { name: 'More servings' }));
+      expect(lastSearchFrom({ servings: 50 })).toEqual({ servings: 50 });
+      await user.click(screen.getByRole('button', { name: 'Fewer servings' }));
+      expect(lastSearchFrom({ servings: 1 })).toEqual({ servings: 1 });
+    });
+
+    it('stops at one serving', () => {
+      renderRecipe(FULL_RECIPE, { servings: 1 });
+      expect(
+        screen.getByRole('button', { name: 'Fewer servings' }),
+      ).toBeDisabled();
+    });
+
+    it('stops at the maximum', () => {
+      renderRecipe(FULL_RECIPE, { servings: 50 });
+      expect(
+        screen.getByRole('button', { name: 'More servings' }),
+      ).toBeDisabled();
+    });
+
+    describe('step ingredients', () => {
+      const WITH_LINKS: Recipe = {
+        ...FULL_RECIPE,
+        method: [
+          {
+            ...FULL_RECIPE.method[0],
+            instruction: 'Sauté the onions in some of the butter.',
+            ingredients: [
+              { ingredientId: 200, quantity: '20.000' },
+              { ingredientId: 100, quantity: null },
+            ],
+          },
+          {
+            ...FULL_RECIPE.method[1],
+            instruction: 'Stir in the rest of the butter.',
+            ingredients: [{ ingredientId: 200, quantity: null }],
+          },
+        ],
+      } as Recipe;
+
+      function chipTexts(stepNumber: number): string[] {
+        const list = screen.getByRole('list', {
+          name: `Step ${String(stepNumber)} ingredients`,
+        });
+        return [...list.querySelectorAll('li')].map((item) => item.textContent);
+      }
+
+      it("lists each step's ingredients in ingredient-list order, with what's left for a blank amount", () => {
+        renderRecipe(WITH_LINKS);
+
+        expect(chipTexts(1)).toEqual(['300 g Onion', '20 g Butter']);
+        expect(chipTexts(2)).toEqual(['30 g Butter']);
+      });
+
+      it('scales chip amounts with the servings', () => {
+        renderRecipe(WITH_LINKS, { servings: 4 });
+
+        expect(chipTexts(1)).toEqual(['600 g Onion', '40 g Butter']);
+        expect(chipTexts(2)).toEqual(['60 g Butter']);
+      });
+
+      it('omits the chip list for a step with no ingredients', () => {
+        renderRecipe();
+        expect(
+          screen.queryByRole('list', { name: 'Step 1 ingredients' }),
+        ).toBeNull();
+      });
+    });
+
+    describe('amounts written in step text', () => {
+      const STATES_AMOUNT: Recipe = {
+        ...FULL_RECIPE,
+        method: [
+          {
+            ...FULL_RECIPE.method[0],
+            instruction: 'Fry the onions in 50 g butter.',
+          },
+          FULL_RECIPE.method[1],
+        ],
+      } as Recipe;
+      const NOTE =
+        /amounts written in the steps are for the original 2 servings/i;
+
+      function boldInFirstStep(): string[] {
+        const step = screen
+          .getByRole('heading', { name: /method/i })
+          .parentElement?.querySelector('ol > li');
+        return [...(step?.querySelectorAll('strong') ?? [])].map(
+          (element) => element.textContent,
+        );
+      }
+
+      it('bolds them and adds no note at the original servings', () => {
+        renderRecipe(STATES_AMOUNT);
+
+        expect(screen.queryByText(NOTE)).toBeNull();
+        expect(boldInFirstStep()).toContain('50 g');
+      });
+
+      it('notes they are for the original servings, and drops their bold, when scaled', () => {
+        renderRecipe(STATES_AMOUNT, { servings: 4 });
+
+        expect(screen.getByText(NOTE)).toBeInTheDocument();
+        expect(boldInFirstStep()).toEqual(['onions', 'butter']);
+      });
+
+      it('adds no note when scaled but no step states an amount', () => {
+        renderRecipe(FULL_RECIPE, { servings: 4 });
+        expect(screen.queryByText(NOTE)).toBeNull();
+      });
     });
   });
 });

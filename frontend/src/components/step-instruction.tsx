@@ -4,14 +4,20 @@ interface StepInstructionProps {
   text: string;
   ingredientNames: readonly string[];
   unitNames: readonly string[];
+  boldQuantities?: boolean;
 }
 
 export function StepInstruction({
   text,
   ingredientNames,
   unitNames,
+  boldQuantities,
 }: StepInstructionProps): React.ReactElement {
-  const segments = highlightStep(text, { ingredientNames, unitNames });
+  const segments = highlightStep(text, {
+    ingredientNames,
+    unitNames,
+    boldQuantities,
+  });
   return (
     <>
       {segments.map((segment, index) =>

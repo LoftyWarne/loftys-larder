@@ -2220,6 +2220,53 @@ Conventions:
 
 ---
 
+## Post-v1 additions
+
+### FEAT-55 — Recipe portions stepper and ingredients under each method step
+
+**Goal:** On the recipe page, show ingredient amounts for a chosen number of portions, and list under each method step the ingredients that step uses, with optional per-step amounts that scale too. Planner dish links open a recipe at the portions being cooked. (DEC-98, DEC-99)
+
+**Estimate:** 1–2 days. **Depends on:** FEAT-21 (recipe editor), FEAT-31 (planner dish links). **Enables:** none specifically.
+
+**Files:**
+- `shared/src/schemas/recipe-search.ts` (new), `shared/src/schemas/recipes.ts`, `shared/src/schemas/errors.ts`
+- `backend/src/db/schema/recipes.ts`, `backend/drizzle/0020_ordinary_liz_osborn.sql` (table + one-off fill)
+- `backend/src/trpc/procedures/recipes.ts` (`get`, `replaceMethod`, `replaceIngredients`), `backend/src/trpc/procedures/ingredients.ts` (`delete`)
+- `frontend/src/lib/scale-quantity.ts`, `step-ingredient-amounts.ts`, `step-ingredient-suggestions.ts` (new); `step-highlights.ts`
+- `frontend/src/components/portions-stepper.tsx`, `step-ingredient-chips.tsx` (new); `recipe-name-link.tsx`, `recipe-editor/method-editor.tsx`
+- `frontend/src/routes/_authed/recipes/$recipeId.index.tsx`, `routes/-components/recipe-detail-page.tsx`, `recipe-edit-page.tsx`
+
+**Acceptance criteria:**
+- [ ] The recipe page has a servings stepper beside the Ingredients heading (1–50, "Reset to N"); the number lives in `?servings=` and a malformed or out-of-range value falls back to the recipe's own servings
+- [ ] Stepper changes replace the history entry and keep the scroll position
+- [ ] At the recipe's own servings, amounts render exactly as before; scaled amounts follow the DEC-98 rounding rules and are never unit-converted
+- [ ] A planner or home-page dish with `prepared > 0` links to its recipe at `?servings=<prepared>`; a leftovers dish links unscaled
+- [ ] While scaled, quantities in step text aren't bolded, and if any step states an amount a note says those amounts are for the original servings
+- [ ] Each method step lists the ingredients it uses as chips below its text, in ingredient-list order, scaled with the stepper
+- [ ] A chip shows a stated amount as entered; a blank amount shows what's left of the total when it's the only blank step for that ingredient, otherwise just the name
+- [ ] The editor suggests a step's ingredients and amounts from its text; an unedited step follows its text, an edited one gets dashed suggestions only
+- [ ] Saving Method is blocked, in the editor and on the server, when an ingredient's stated step amounts exceed its recipe total; saving Ingredients is never blocked by step amounts
+- [ ] Removing an ingredient from the recipe removes its step links; deleting a household ingredient isn't blocked by a leftover step link
+- [ ] Existing recipes get links filled once by the migration (names only, amounts blank)
+
+**Implementation notes:**
+- Links are keyed by household ingredient, not `recipe_ingredients` row, because both section saves are full replaces (DEC-99).
+- The one-off fill is SQL and the editor's suggestions are TypeScript; they follow the same rules but are separate code, which is acceptable for a one-off.
+
+**Manual verification:**
+1. Restore last night's prod backup locally (FEAT-51 drill), run the migration, and check the filled links on a handful of real recipes.
+2. Open a planner dish cooked for more than the recipe's servings; check the amounts and chips, then step down and reset.
+3. In the editor, write a new step mentioning two ingredients with an amount; check the chips, save, and view the recipe.
+
+**Common gotchas:**
+- Step text amounts are never rewritten; only the chips and ingredient list scale.
+- A stale client bundle fails `replaceMethod` validation until it reloads (the new `ingredients` field is required).
+
+**Definition of done:**
+- Tests cover: rounding table and the identity rule; the chip amount rule; suggestions (names, last-word fallback, longest-first, amounts, ranges); backend link writes, over-total rejection, cleanup on ingredient save and delete, rollback; the migration's fill block against seeded rows; detail page stepper/chips/note; method editor chips and blocking; dish link params; e2e planner → scaled recipe and editor suggestions.
+- Commit: `feat(recipes): scale amounts by portions and list ingredients under each method step`
+- Gate check: from a planner slot cooking 4 portions of a 2-serving recipe, the recipe page shows doubled amounts in the list and in the step chips.
+
 ---
 
 ## Cross-feature concerns and reuse-from-day-one

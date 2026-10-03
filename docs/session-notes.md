@@ -4,9 +4,22 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — GitHub Actions moved to Node 24 versions
+
+**Status:** Committed + pushed to `main` (`166a825`). CI green with no Node 20 deprecation warning; a manual Backup run (`workflow_dispatch`) also passed.
+
+**Change:** `ci.yml` bumps `pnpm/action-setup` v4 → v6, `actions/setup-node` v4 → v7, `actions/cache` v4 → v6 and `actions/upload-artifact` v4 → v7. No breaking change in those majors touches our usage: we set `cache: pnpm` explicitly (setup-node's caching changes don't apply), and `pnpm/action-setup` still reads `packageManager`. The `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` flag is removed from `ci.yml` and `backup.yml`, since every action in both now runs on Node 24 (including `actions/checkout@v5` and `superfly/flyctl-actions/setup-flyctl@master`).
+
+**Open:**
+- `upload-artifact@v7` only runs when e2e fails, so it hasn't run on CI yet.
+- `ubuntu-latest` starts moving to Ubuntu 26 on 2026-10-19. Likely a no-op for us; pin `ubuntu-24.04` if we want to choose when.
+- `actions/checkout` is still v5 in all three workflows (v7 exists). Already Node 24, so optional.
+
+---
+
 ## 2026-10-03 — Fixed a flaky backend teardown that failed CI; prod pool now survives dropped connections
 
-**Status:** Committed + pushed to `main`. Backend 571 tests green (28 files), no unhandled errors; typecheck, lint and format clean.
+**Status:** Committed + pushed to `main` (`9ee0cbf`); CI and Deploy green. Backend 571 tests green (28 files), no unhandled errors; typecheck, lint and format clean.
 
 **The flake:** CI for `4fb76fe` failed with every test passing: Vitest caught two uncaught `57P01` errors ("terminating connection due to administrator command") during `recipes-procedures.test.ts` teardown, and Deploy was skipped. Cause: `pg-pool`'s `end()` resolves before its clients finish closing (it drops them from its list and calls `client.end()` without waiting). `container.stop()` then shut Postgres down under a still-closing client, the server sent FATAL `57P01`, and `pg-pool`'s idle-client listener re-emitted it as `pool.emit('error')`. No pool had an `'error'` listener, so Node made it an uncaught exception. The `client` property on the logged error is the tell: only `pg-pool`'s idle listener sets it. All 14 Testcontainers files shared the teardown, so any could flake on a slow runner.
 

@@ -4,6 +4,42 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-04 — Import page and Import Review (FEAT-61)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format clean. Frontend 735 tests (45 new) green; backend untouched. e2e: the new `recipe-import.spec.ts` (6) and the new axe cases (Import page, Import Review at desktop and at 375 px, both themes) pass. Across three full a11y runs, one unrelated case failed once each (recipe filters dark, settings dark contrast on `#name`, plan list timeout) and passed on re-run: looks like existing flakiness, not chased. Manual verification not run. FEAT-61 checkboxes left for the user to tick.
+
+**Agreed at kick-off:**
+- "Create …" in Import Review proposes a new ingredient or source (held by key or name in the draft) instead of creating it (DEC-105(c)).
+- Swapping a proposed ingredient for an existing one moves its step links, unless another row still uses the proposed one (`MethodEditorHandle.remapIngredient`).
+- The nutrition "Estimated" box stays in Import Review: ticked while any nutrition mark is left; unticking clears them, ticking marks every filled nutrition value again. `nutritionIsEstimated` at create = any nutrition mark left.
+- Mark wording: "Estimated", "Converted — check the amount", "Not in the original — amount guessed".
+- Layout: original pinned beside the proposal at `lg`+, folded into a `<details>` above it below `lg`. No prototype.
+- Import Review leaves out the serving-variation section and the image uploader (an upload before the recipe exists would be orphaned on discard); the sections' own Save buttons are hidden.
+- The in-progress list shows the reader's proposed name, not the cook's edit (`list` reads only the proposal, DEC-108).
+- New `useOnlineStatus` gates Import (recipes-page menu and `/recipes/import`); `useOfflineQueue` uses it now.
+- `IMPORT_RATE_LIMITED` gets its own message; no Cancel during the working state.
+- Row and step keys persist in every mode, the edit page's drafts included.
+
+**Changes:**
+- Routes `/recipes/import` and `/recipes/import/$draftId` (thin shells); pages in `routes/-components/recipe-import-page.tsx` and `recipe-import-review-page.tsx`; `components/recipe-import/` (original input, reader notes, discard button).
+- Editor components: `IngredientList` (persisted `key`, `newKey` rows with the proposed-ingredient fields in place, original lines, quantity notes, `hideSaveButton`), `MethodEditor` (`{ ingredientId } | { newKey }` links, persisted `key`, step notes, `remapIngredient`), `HeaderFields` (`mode: 'import'`, field notes, proposed source, controlled nutrition box), `TagFields` (`hideSaveButton`), `review-badges.tsx`.
+- `useRecipeDraft` split into a shared autosave core plus `useImportRecipeDraft` (loads by id, keeps the first load, sends `fields.proposal` back on every save, `discard`).
+- `lib/`: `recipe-import-sections.ts` (proposal → sections, stored sections over them), `recipe-import-create-input.ts`, `recipe-import-estimates.ts`, `method-ingredients.ts` (moved out of the edit page, now handles proposed ingredients). `suggestStepIngredients` takes number or string keys.
+- Recipes page: "New recipe" is a Popover with Start blank and Import.
+- e2e: `recipe-import.spec.ts`, axe cases in `a11y.spec.ts`, `createIngredient` fixture. README.
+
+**Drift from the kick-off plan:**
+- A mark clears when its field's value changes (not by comparison with the proposal). Typing the old value back doesn't restore it, but retyping the same value does clear it, the opposite of what was said at kick-off. It's what lets ticking "Estimated" add marks back.
+- Typing an unknown ingredient name proposes one on an explicit pick of "New ingredient …" only, not on blur as the edit page's create dialog does.
+- Two small guards: a name already proposed reuses that proposal, and two proposed ingredients with the same name get a sentence before create rather than a validation error from the server.
+- Three existing tests changed: their exact autosave-payload assertions now expect the row key.
+
+**Open:**
+- **Proposed ingredient that already exists** (from FEAT-60): still caught only at "Create recipe" (`INGREDIENT_NAME_TAKEN` on the row). Import Review could flag it earlier against the ingredient list it already loads.
+- **Phone layout** passed axe and the no-sideways-scroll check at 375 px, but manual verification step 5 is the real test; the ingredient row grid is the existing 12-column one and is tight at that width.
+
+---
+
 ## 2026-10-04 — Recipe Import backend: reader seam and import procedures (FEAT-60)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format clean in all four workspaces. Backend 692 tests (89 new) and frontend 662 green. e2e not run. Manual verification step 3 (a real key against the local app) not run, so nothing has called the live API yet. FEAT-60 checkboxes left for the user to tick.

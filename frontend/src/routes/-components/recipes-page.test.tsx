@@ -1,5 +1,5 @@
 import type { ListRecipesResult, RecipeListItem } from '@loftys-larder/shared';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -202,7 +202,57 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function setOnline(value: boolean): void {
+  Object.defineProperty(navigator, 'onLine', {
+    configurable: true,
+    get: () => value,
+  });
+}
+
 describe('RecipesPage', () => {
+  describe('New recipe', () => {
+    afterEach(() => {
+      setOnline(true);
+    });
+
+    it('offers Start blank and Import', async () => {
+      setup();
+      const user = userEvent.setup();
+      render(<RecipesPage />);
+
+      await user.click(screen.getByRole('button', { name: 'New recipe' }));
+
+      const menu = await screen.findByRole('navigation', {
+        name: 'New recipe',
+      });
+      expect(
+        within(menu).getByRole('link', { name: 'Start blank' }),
+      ).toHaveAttribute('href', '/recipes/new');
+      expect(
+        within(menu).getByRole('link', { name: 'Import' }),
+      ).toHaveAttribute('href', '/recipes/import');
+    });
+
+    it('disables Import while offline', async () => {
+      setOnline(false);
+      setup();
+      const user = userEvent.setup();
+      render(<RecipesPage />);
+
+      await user.click(screen.getByRole('button', { name: 'New recipe' }));
+
+      const menu = await screen.findByRole('navigation', {
+        name: 'New recipe',
+      });
+      expect(
+        within(menu).queryByRole('link', { name: 'Import' }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(menu).getByText('Import (needs a connection)'),
+      ).toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
   it('renders a card per recipe', () => {
     setup();
     render(<RecipesPage />);

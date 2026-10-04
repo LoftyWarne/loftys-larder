@@ -35,7 +35,7 @@ import {
 import {
   MethodEditor,
   type MethodDraftStep,
-  type MethodIngredient,
+  type MethodEditorHandle,
 } from '@/components/recipe-editor/method-editor.tsx';
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
 import { TagFields } from '@/components/recipe-editor/tag-fields.tsx';
@@ -43,10 +43,8 @@ import type { SearchableComboboxOption } from '@/components/searchable-combobox.
 import { Button } from '@/components/ui/button.tsx';
 import { useRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
-import {
-  parseQuantityToDecimal,
-  trimTrailingZeros,
-} from '@/lib/quantity-input.ts';
+import { toMethodIngredients } from '@/lib/method-ingredients.ts';
+import { trimTrailingZeros } from '@/lib/quantity-input.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 type Patch = UpdateRecipeHeaderInput['patch'];
@@ -112,7 +110,7 @@ export function RecipeEditPage(): React.ReactElement {
   const headerRef = useRef<RecipeSectionHandle>(null);
   const servingVariationRef = useRef<RecipeSectionHandle>(null);
   const ingredientsRef = useRef<RecipeSectionHandle>(null);
-  const methodRef = useRef<RecipeSectionHandle>(null);
+  const methodRef = useRef<MethodEditorHandle>(null);
   const tagsRef = useRef<RecipeSectionHandle>(null);
 
   const recipe = recipeQuery.data ?? null;
@@ -674,44 +672,6 @@ function diffHeader(before: HeaderFormValues, after: HeaderFormValues): Patch {
 function parseDraftTags(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.every((item) => typeof item === 'string') ? value : undefined;
-}
-
-// One entry per ingredient on the Ingredients section, unsaved edits
-// included. A total pools the ingredient's lines and is `null` while any of
-// them has no valid quantity. Draft lines are untyped JSON, so a malformed
-// one is skipped.
-function toMethodIngredients(
-  lines: readonly IngredientDraftLine[],
-): MethodIngredient[] {
-  const byId = new Map<number, MethodIngredient>();
-  for (const line of lines) {
-    const ingredient = line.ingredient as Partial<
-      NonNullable<IngredientDraftLine['ingredient']>
-    > | null;
-    if (
-      typeof ingredient?.id !== 'number' ||
-      typeof ingredient.label !== 'string' ||
-      typeof ingredient.unitName !== 'string'
-    ) {
-      continue;
-    }
-    const parsed =
-      typeof line.quantity === 'string'
-        ? parseQuantityToDecimal(line.quantity)
-        : null;
-    const existing = byId.get(ingredient.id);
-    const priorTotal = existing ? existing.total : 0;
-    byId.set(ingredient.id, {
-      ingredientId: ingredient.id,
-      name: ingredient.label,
-      unitName: ingredient.unitName,
-      total:
-        priorTotal === null || parsed === null
-          ? null
-          : priorTotal + Number(parsed),
-    });
-  }
-  return [...byId.values()];
 }
 
 function extractMessage(err: unknown): string {

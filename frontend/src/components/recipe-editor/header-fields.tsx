@@ -1,5 +1,6 @@
 import {
   createRecipeInputSchema,
+  recipeSourceNameSchema,
   type CreateRecipeInput,
   type RecipeReferenceItem,
 } from '@loftys-larder/shared';
@@ -11,9 +12,11 @@ import {
   useImperativeHandle,
   useMemo,
   useState,
+  type ReactNode,
 } from 'react';
 import { useForm, type UseFormRegister } from 'react-hook-form';
 
+import { NewBadge } from '@/components/recipe-editor/review-badges.tsx';
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
 import {
   SearchableCombobox,
@@ -29,7 +32,9 @@ type HeaderFormValues = CreateRecipeInput;
 const headerResolverSchema = createRecipeInputSchema;
 
 export interface HeaderFieldsProps {
-  mode: 'create' | 'edit';
+  // `import` is Import Review: no base-recipe toggle (DEC-103) and no
+  // autofocus, so the cook starts at the top of the page.
+  mode: 'create' | 'edit' | 'import';
   defaultValues: HeaderFormValues;
   sources: readonly RecipeReferenceItem[];
   // Resolves `true` when the recipe was saved (or had no changes to save) and
@@ -45,6 +50,20 @@ export interface HeaderFieldsProps {
   // Fires on every form value change. Used by the draft autosave hook —
   // omit it and the form behaves exactly as before.
   onValuesChange?: (values: HeaderFormValues) => void;
+  // A note under a field (an Estimate mark in Import Review).
+  fieldNotes?: Partial<Record<keyof HeaderFormValues, ReactNode>>;
+  // Import Review: a proposed new source, held by name and created with the
+  // recipe (DEC-105). When `onProposedSourceNameChange` is set, "Create …"
+  // proposes a source instead of creating one.
+  proposedSourceName?: string | null;
+  onProposedSourceNameChange?: (name: string | null) => void;
+  // Import Review: the nutrition "Estimated" box follows the Estimate marks
+  // rather than the form field (DEC-106).
+  nutritionEstimated?: {
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+  };
+  hideSaveButton?: boolean;
 }
 
 type SourceOption = SearchableComboboxOption;
@@ -60,6 +79,11 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
       submitLabel,
       savedNoticeKey,
       onValuesChange,
+      fieldNotes,
+      proposedSourceName = null,
+      onProposedSourceNameChange,
+      nutritionEstimated,
+      hideSaveButton = false,
     },
     ref,
   ): React.ReactElement {
@@ -165,6 +189,24 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
       [createSource, form],
     );
 
+    const proposeSource = useCallback(
+      (name: string): void => {
+        if (!onProposedSourceNameChange) return;
+        setSourceCreateError(undefined);
+        setSavedVisible(false);
+        form.setValue('sourceId', null, { shouldDirty: true });
+        onProposedSourceNameChange(name);
+      },
+      [form, onProposedSourceNameChange],
+    );
+
+    const proposedSourceProblem = useCallback((): string | null => {
+      if (proposedSourceName === null) return null;
+      const parsed = recipeSourceNameSchema.safeParse(proposedSourceName);
+      if (parsed.success) return null;
+      return parsed.error.issues[0]?.message ?? 'Check the source name';
+    }, [proposedSourceName]);
+
     const submit = form.handleSubmit(async (values) => {
       await onSubmit(values);
     });
@@ -174,8 +216,14 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
     const runSubmit = useCallback(
       () =>
         new Promise<boolean>((resolve) => {
+          const sourceProblem = proposedSourceProblem();
+          setSourceCreateError(sourceProblem ?? undefined);
           void form.handleSubmit(
             async (values) => {
+              if (sourceProblem !== null) {
+                resolve(false);
+                return;
+              }
               resolve(await onSubmit(values));
             },
             () => {
@@ -183,7 +231,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
             },
           )();
         }),
-      [form, onSubmit],
+      [form, onSubmit, proposedSourceProblem],
     );
 
     useImperativeHandle(ref, () => ({ submit: runSubmit }), [runSubmit]);
@@ -204,10 +252,11 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
         <FieldText
           id="recipe-name"
           label="Name"
-          autoFocus
+          autoFocus={mode !== 'import'}
           disabled={submitting}
           register={register('name')}
           error={errors.name?.message}
+          note={fieldNotes?.name}
         />
 
         <div className="space-y-1">
@@ -219,11 +268,17 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
             rows={3}
             disabled={submitting}
             className="flex w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            aria-describedby={
+              fieldNotes?.description ? 'recipe-description-note' : undefined
+            }
             {...register('description', {
               setValueAs: (value) =>
                 value === '' || value === null ? null : String(value),
             })}
           />
+          {fieldNotes?.description && (
+            <div id="recipe-description-note">{fieldNotes.description}</div>
+          )}
           {errors.description?.message && (
             <p role="alert" className="text-sm text-destructive">
               {errors.description.message}
@@ -243,6 +298,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
                 value === '' || value === null ? null : Number(value),
             })}
             error={errors.baseServings?.message}
+            note={fieldNotes?.baseServings}
           />
           <FieldNumber
             id="recipe-active-time"
@@ -254,6 +310,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
                 value === '' || value === null ? null : Number(value),
             })}
             error={errors.activeTimeMins?.message}
+            note={fieldNotes?.activeTimeMins}
           />
           <FieldNumber
             id="recipe-total-time"
@@ -265,6 +322,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
                 value === '' || value === null ? null : Number(value),
             })}
             error={errors.totalTimeMins?.message}
+            note={fieldNotes?.totalTimeMins}
           />
         </div>
 
@@ -272,27 +330,78 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
           <label htmlFor="recipe-source" className="text-sm font-medium">
             Source
           </label>
-          <SearchableCombobox<SourceOption>
-            key={sourceComboboxKey}
-            id="recipe-source"
-            value={selectedSource}
-            onChange={(option) => {
-              setSourceCreateError(undefined);
-              // `setValue` doesn't emit a `'change'` watch event, so clear the
-              // saved notice here as the watch subscription won't.
-              setSavedVisible(false);
-              form.setValue('sourceId', option?.id ?? null, {
-                shouldDirty: true,
-              });
-            }}
-            searchQuery={searchSources}
-            placeholder="Cookbook, website, person…"
-            ariaLabel="Source"
-            disabled={submitting}
-            emptyMessage="No matching sources"
-            onCreate={createSource ? handleSourceCreate : undefined}
-            createLabel={(query) => `Create source “${query}”`}
-          />
+          {proposedSourceName !== null && onProposedSourceNameChange ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <NewBadge />
+                <Input
+                  id="recipe-source"
+                  type="text"
+                  autoComplete="off"
+                  aria-describedby="recipe-source-new-hint"
+                  disabled={submitting}
+                  value={proposedSourceName}
+                  onChange={(event) => {
+                    setSourceCreateError(undefined);
+                    onProposedSourceNameChange(event.target.value);
+                  }}
+                />
+              </div>
+              <p
+                id="recipe-source-new-hint"
+                className="text-xs text-muted-foreground"
+              >
+                Added to your sources when you create the recipe.
+              </p>
+              <SearchableCombobox<SourceOption>
+                value={null}
+                onChange={(option) => {
+                  if (!option) return;
+                  setSourceCreateError(undefined);
+                  setSavedVisible(false);
+                  form.setValue('sourceId', option.id, { shouldDirty: true });
+                  onProposedSourceNameChange(null);
+                }}
+                searchQuery={searchSources}
+                placeholder="Or use an existing source"
+                ariaLabel="Use an existing source"
+                disabled={submitting}
+                emptyMessage="No matching sources"
+              />
+            </div>
+          ) : (
+            <SearchableCombobox<SourceOption>
+              key={sourceComboboxKey}
+              id="recipe-source"
+              value={selectedSource}
+              onChange={(option) => {
+                setSourceCreateError(undefined);
+                // `setValue` doesn't emit a `'change'` watch event, so clear
+                // the saved notice here as the watch subscription won't.
+                setSavedVisible(false);
+                form.setValue('sourceId', option?.id ?? null, {
+                  shouldDirty: true,
+                });
+              }}
+              searchQuery={searchSources}
+              placeholder="Cookbook, website, person…"
+              ariaLabel="Source"
+              disabled={submitting}
+              emptyMessage="No matching sources"
+              onCreate={
+                onProposedSourceNameChange
+                  ? proposeSource
+                  : createSource
+                    ? handleSourceCreate
+                    : undefined
+              }
+              createLabel={(query) =>
+                onProposedSourceNameChange
+                  ? `New source “${query}”`
+                  : `Create source “${query}”`
+              }
+            />
+          )}
           {sourceCreateError && (
             <p role="alert" className="text-sm text-destructive">
               {sourceCreateError}
@@ -310,6 +419,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
               value === '' || value === null ? null : String(value),
           })}
           error={errors.sourceDetail?.message}
+          note={fieldNotes?.sourceDetail}
         />
 
         <FieldText
@@ -322,6 +432,7 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
               value === '' || value === null ? null : String(value),
           })}
           error={errors.sourceUrl?.message}
+          note={fieldNotes?.sourceUrl}
         />
 
         <fieldset className="space-y-2">
@@ -341,15 +452,27 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
                     value === '' || value === null ? null : Number(value),
                 })}
                 error={errors[field.key]?.message}
+                note={fieldNotes?.[field.key]}
               />
             ))}
           </div>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              disabled={submitting}
-              {...register('nutritionIsEstimated')}
-            />
+            {nutritionEstimated ? (
+              <input
+                type="checkbox"
+                disabled={submitting}
+                checked={nutritionEstimated.checked}
+                onChange={(event) => {
+                  nutritionEstimated.onChange(event.target.checked);
+                }}
+              />
+            ) : (
+              <input
+                type="checkbox"
+                disabled={submitting}
+                {...register('nutritionIsEstimated')}
+              />
+            )}
             <span>Estimated</span>
           </label>
         </fieldset>
@@ -367,11 +490,13 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
 
         <SavedNotice key={savedNoticeKey} show={savedVisible} />
 
-        <div className="flex justify-end">
-          <Button type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : (submitLabel ?? 'Save details')}
-          </Button>
-        </div>
+        {!hideSaveButton && (
+          <div className="flex justify-end">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving…' : (submitLabel ?? 'Save details')}
+            </Button>
+          </div>
+        )}
       </form>
     );
   },
@@ -386,6 +511,7 @@ interface FieldTextProps {
   disabled?: boolean;
   register: ReturnType<UseFormRegister<HeaderFormValues>>;
   error?: string;
+  note?: ReactNode;
 }
 
 function FieldText({
@@ -397,6 +523,7 @@ function FieldText({
   disabled,
   register,
   error,
+  note,
 }: FieldTextProps): React.ReactElement {
   return (
     <div className="space-y-1">
@@ -411,8 +538,10 @@ function FieldText({
         autoComplete="off"
         disabled={disabled}
         aria-invalid={error ? true : undefined}
+        aria-describedby={note ? `${id}-note` : undefined}
         {...register}
       />
+      {note && <div id={`${id}-note`}>{note}</div>}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -432,6 +561,7 @@ interface FieldNumberProps {
   disabled?: boolean;
   register: ReturnType<UseFormRegister<HeaderFormValues>>;
   error?: string;
+  note?: ReactNode;
 }
 
 function FieldNumber({
@@ -444,6 +574,7 @@ function FieldNumber({
   disabled,
   register,
   error,
+  note,
 }: FieldNumberProps): React.ReactElement {
   return (
     <div className="space-y-1">
@@ -459,8 +590,10 @@ function FieldNumber({
         inputMode={inputMode}
         disabled={disabled}
         aria-invalid={error ? true : undefined}
+        aria-describedby={note ? `${id}-note` : undefined}
         {...register}
       />
+      {note && <div id={`${id}-note`}>{note}</div>}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

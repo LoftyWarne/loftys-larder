@@ -158,6 +158,19 @@ async function ensureIngredient(
   return row.id;
 }
 
+// A household ingredient on its own, for specs that need one to match
+// against (the `fake` import reader matches the household's first one).
+export async function createIngredient(
+  spec: Omit<IngredientSpec, 'quantity'>,
+): Promise<number> {
+  const client = await getPool().connect();
+  try {
+    return await ensureIngredient(client, { ...spec, quantity: '0' });
+  } finally {
+    client.release();
+  }
+}
+
 // Create a recipe + its ingredient rows in one transaction. Returns the recipe
 // id so specs can build slot assignments by referring back to it.
 export async function createRecipe(

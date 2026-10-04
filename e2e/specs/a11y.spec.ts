@@ -187,6 +187,37 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    test(`recipe import passes axe in ${theme} theme`, async ({ page }) => {
+      await page.goto('/recipes/import');
+      await expect(
+        page.getByRole('heading', { name: 'Import a recipe' }),
+      ).toBeVisible();
+      await runAxe(page, theme);
+    });
+
+    test(`import review passes axe in ${theme} theme`, async ({ page }) => {
+      await openImportReview(page);
+      await runAxe(page, theme);
+    });
+
+    // The original folds away above the proposal below `lg`; the review must
+    // fit the width without sideways scrolling.
+    test(`import review passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await openImportReview(page);
+      await page.getByText('Original text').click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            'document.documentElement.scrollWidth <= window.innerWidth',
+          ),
+        )
+        .toBe(true);
+      await runAxe(page, theme);
+    });
+
     test(`plan list passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto('/plans');
       await expect(page.getByRole('heading', { name: /plans/i })).toBeVisible();
@@ -224,6 +255,18 @@ test.describe('a11y — authed views', () => {
     });
   }
 });
+
+// Starts an import through the UI; the backend's `fake` reader answers.
+async function openImportReview(page: Page): Promise<void> {
+  await page.goto('/recipes/import');
+  await page
+    .getByLabel('Recipe text')
+    .fill('Curry for four\n2 tbsp oil\nPepper to taste');
+  await page.getByRole('button', { name: 'Import' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Review import' }),
+  ).toBeVisible();
+}
 
 function ymd(d: Date): string {
   return d.toISOString().slice(0, 10);

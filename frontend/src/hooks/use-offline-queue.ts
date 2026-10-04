@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { useOnlineStatus } from '@/hooks/use-online-status.ts';
 import {
   getOfflineQueueStore,
   type OfflineQueueStore,
   type QueuedToggle,
 } from '@/lib/offline-queue.ts';
 
-// Bridges the offline queue store + `navigator.onLine` into React. The store
+// Bridges the offline queue store + the online flag into React. The store
 // is the singleton from `getOfflineQueueStore()` by default; tests inject an
-// in-memory implementation. We track `isOnline` from the global `online` /
-// `offline` events — `navigator.onLine` can lie under captive portals, so the
-// drain helper handles failures, but the flag is still useful to gate the
-// initial drain on mount.
+// in-memory implementation. `navigator.onLine` can lie under captive portals,
+// so the drain helper handles failures, but the flag is still useful to gate
+// the initial drain on mount.
 
 export interface UseOfflineQueueResult {
   store: OfflineQueueStore;
@@ -23,11 +23,6 @@ export interface UseOfflineQueueResult {
 export interface UseOfflineQueueOptions {
   planId: number;
   store?: OfflineQueueStore;
-}
-
-function readOnlineFlag(): boolean {
-  if (typeof navigator === 'undefined') return true;
-  return navigator.onLine;
 }
 
 function sameEntries(
@@ -57,7 +52,7 @@ export function useOfflineQueue({
 }: UseOfflineQueueOptions): UseOfflineQueueResult {
   const store = useMemo(() => injected ?? getOfflineQueueStore(), [injected]);
   const [entries, setEntries] = useState<readonly QueuedToggle[]>([]);
-  const [isOnline, setIsOnline] = useState<boolean>(readOnlineFlag);
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
     let cancelled = false;
@@ -74,22 +69,6 @@ export function useOfflineQueue({
       unsubscribe();
     };
   }, [store]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    function handleOnline(): void {
-      setIsOnline(true);
-    }
-    function handleOffline(): void {
-      setIsOnline(false);
-    }
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
 
   const queuedIngredientIds = useMemo(() => {
     const ids = new Set<number>();

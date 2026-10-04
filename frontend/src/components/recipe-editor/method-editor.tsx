@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
@@ -42,21 +43,35 @@ import {
   suggestStepIngredients,
 } from '@/lib/step-ingredient-suggestions.ts';
 
+// A household ingredient by id, or (in Import Review) a proposed new one by
+// its key in the draft.
+type IngredientRef = { ingredientId: number } | { newKey: string };
+
 // An ingredient on the recipe as the Ingredients section currently shows it,
 // one entry per ingredient. `total` pools its lines and is `null` while any of
 // them has no valid quantity.
-export interface MethodIngredient {
-  ingredientId: number;
+export type MethodIngredient = IngredientRef & {
   name: string;
   unitName: string;
   total: number | null;
-}
+};
 
 // A step's link to an ingredient (DEC-99). `quantity` is as typed; `''` means
 // not stated.
-interface DraftStepIngredient {
-  ingredientId: number;
-  quantity: string;
+type DraftStepIngredient = IngredientRef & { quantity: string };
+
+// One key for both kinds of reference: ids stay numbers, so suggestions keep
+// their id order.
+type IngredientKey = number | string;
+
+function ingredientKey(ref: IngredientRef): IngredientKey {
+  return 'ingredientId' in ref ? ref.ingredientId : `new:${ref.newKey}`;
+}
+
+function linkTo(ref: IngredientRef, quantity: string): DraftStepIngredient {
+  return 'ingredientId' in ref
+    ? { ingredientId: ref.ingredientId, quantity }
+    : { newKey: ref.newKey, quantity };
 }
 
 // `null` means the note is closed; an open-but-empty note is `''` and is sent
@@ -64,6 +79,7 @@ interface DraftStepIngredient {
 // are edited by hand; until then they're re-suggested from the text as it's
 // typed.
 interface DraftStep {
+  // Kept in the draft: Import Review holds Estimate marks by it.
   rowKey: string;
   instruction: string;
   safetyNote: string | null;
@@ -76,6 +92,8 @@ interface DraftStep {
 }
 
 export interface MethodDraftStep {
+  // Absent on drafts persisted before steps kept their keys.
+  key?: string;
   instruction: string;
   // Optional because autosaved drafts from before step notes don't carry them.
   safetyNote?: string | null;
@@ -123,32 +141,49 @@ function parsePrepAhead(value: unknown): StepPrepAhead | null {
 // Autosaved drafts are untyped JSON; anything malformed reads as no chips.
 function parseDraftIngredients(value: unknown): DraftStepIngredient[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((item: unknown) => {
+  return value.flatMap((item: unknown): DraftStepIngredient[] => {
     if (typeof item !== 'object' || item === null) return [];
-    const { ingredientId, quantity } = item as Record<string, unknown>;
+    const { ingredientId, newKey, quantity } = item as Record<string, unknown>;
+    const amount = typeof quantity === 'string' ? quantity : '';
     if (
-      typeof ingredientId !== 'number' ||
-      !Number.isInteger(ingredientId) ||
-      ingredientId <= 0
+      typeof ingredientId === 'number' &&
+      Number.isInteger(ingredientId) &&
+      ingredientId > 0
     ) {
-      return [];
+      return [{ ingredientId, quantity: amount }];
     }
-    return [
-      {
-        ingredientId,
-        quantity: typeof quantity === 'string' ? quantity : '',
-      },
-    ];
+    if (typeof newKey === 'string' && newKey.length > 0) {
+      return [{ newKey, quantity: amount }];
+    }
+    return [];
   });
 }
 
+// Suggestions from the step text, keyed like `ingredientKey`.
+function suggestFor(
+  text: string,
+  ingredients: readonly MethodIngredient[],
+): StepIngredientSuggestion<IngredientKey>[] {
+  return suggestStepIngredients(
+    text,
+    ingredients.map((item) => ({
+      ingredientId: ingredientKey(item),
+      name: item.name,
+      unitName: item.unitName,
+      total: item.total,
+    })),
+  );
+}
+
 function toDraftIngredients(
-  suggestions: readonly StepIngredientSuggestion[],
+  suggestions: readonly StepIngredientSuggestion<IngredientKey>[],
+  ingredients: readonly MethodIngredient[],
 ): DraftStepIngredient[] {
-  return suggestions.map(({ ingredientId, quantity }) => ({
-    ingredientId,
-    quantity: quantity ?? '',
-  }));
+  const byKey = new Map(ingredients.map((item) => [ingredientKey(item), item]));
+  return suggestions.flatMap(({ ingredientId, quantity }) => {
+    const item = byKey.get(ingredientId);
+    return item ? [linkTo(item, quantity ?? '')] : [];
+  });
 }
 
 function toMilli(quantity: string): number {
@@ -176,6 +211,17 @@ export interface MethodEditorProps {
   // The recipe's ingredients as the Ingredients section shows them, unsaved
   // edits included. Steps can only link to these.
   recipeIngredients?: readonly MethodIngredient[];
+  // Import Review: notes on a step's fields (Estimate marks), by step key.
+  stepNotes?: ReadonlyMap<string, Partial<Record<StepNoteField, ReactNode>>>;
+  hideSaveButton?: boolean;
+}
+
+export type StepNoteField = 'safetyNote' | 'tip' | 'prepAhead' | 'ingredients';
+
+export interface MethodEditorHandle extends RecipeSectionHandle {
+  // Moves step links from a proposed ingredient to an existing one, when the
+  // cook swaps one for the other in Import Review.
+  remapIngredient: (fromNewKey: string, toIngredientId: number) => void;
 }
 
 const NO_INGREDIENTS: readonly MethodIngredient[] = [];
@@ -184,6 +230,21 @@ let nextRowSeed = 0;
 function newRowKey(): string {
   nextRowSeed += 1;
   return `new-${String(nextRowSeed)}`;
+}
+
+// Keys come back from a saved draft, so a key made later must not repeat
+// one: move the counter past any saved `new-N`, and replace a repeated key.
+function seedRowKeys(keys: readonly (string | undefined)[]): string[] {
+  for (const key of keys) {
+    const match = key ? /^new-(\d+)$/.exec(key) : null;
+    if (match) nextRowSeed = Math.max(nextRowSeed, Number(match[1]));
+  }
+  const seen = new Set<string>();
+  return keys.map((key) => {
+    const rowKey = key && !seen.has(key) ? key : newRowKey();
+    seen.add(rowKey);
+    return rowKey;
+  });
 }
 
 // Shared by the "Add step" gate and the submit validation so the two never
@@ -207,7 +268,7 @@ function toDraft(step: RecipeMethodStep): DraftStep {
   };
 }
 
-export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
+export const MethodEditor = forwardRef<MethodEditorHandle, MethodEditorProps>(
   function MethodEditor(
     {
       initialSteps,
@@ -216,15 +277,18 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       onStepsChange,
       savedNoticeKey,
       recipeIngredients = NO_INGREDIENTS,
+      stepNotes,
+      hideSaveButton = false,
     },
     ref,
   ): React.ReactElement {
     const [steps, setSteps] = useState<DraftStep[]>(() => {
       if (initialDraftSteps) {
-        return initialDraftSteps.map((step) => {
+        const rowKeys = seedRowKeys(initialDraftSteps.map((step) => step.key));
+        return initialDraftSteps.map((step, index) => {
           const ingredients = parseDraftIngredients(step.ingredients);
           return {
-            rowKey: newRowKey(),
+            rowKey: rowKeys[index] ?? newRowKey(),
             instruction: step.instruction,
             safetyNote: step.safetyNote ?? null,
             tip: step.tip ?? null,
@@ -243,8 +307,9 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     // Read from the step mutators below, which stay referentially stable.
     const recipeIngredientsRef = useRef(recipeIngredients);
     recipeIngredientsRef.current = recipeIngredients;
-    const ingredientById = useMemo(
-      () => new Map(recipeIngredients.map((item) => [item.ingredientId, item])),
+    const ingredientByKey = useMemo(
+      () =>
+        new Map(recipeIngredients.map((item) => [ingredientKey(item), item])),
       [recipeIngredients],
     );
     const suggestionsByRow = useMemo(
@@ -252,7 +317,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
         new Map(
           steps.map((step) => [
             step.rowKey,
-            suggestStepIngredients(step.instruction, recipeIngredients),
+            suggestFor(step.instruction, recipeIngredients),
           ]),
         ),
       [steps, recipeIngredients],
@@ -261,28 +326,26 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     // Stated amounts can't add up to more than the recipe total (DEC-99).
     // Checked against the Ingredients section as shown, so it updates live.
     const overTotalMessages = useMemo(() => {
-      const statedMilli = new Map<number, number>();
+      const statedMilli = new Map<IngredientKey, number>();
       for (const step of steps) {
         for (const link of step.ingredients) {
+          const key = ingredientKey(link);
           const parsed = parseQuantityToDecimal(link.quantity);
-          if (parsed === null || !ingredientById.has(link.ingredientId)) {
+          if (parsed === null || !ingredientByKey.has(key)) {
             continue;
           }
-          statedMilli.set(
-            link.ingredientId,
-            (statedMilli.get(link.ingredientId) ?? 0) + toMilli(parsed),
-          );
+          statedMilli.set(key, (statedMilli.get(key) ?? 0) + toMilli(parsed));
         }
       }
       return recipeIngredients.flatMap((item) => {
-        const stated = statedMilli.get(item.ingredientId);
+        const stated = statedMilli.get(ingredientKey(item));
         if (stated === undefined || item.total === null) return [];
         if (stated <= Math.round(item.total * 1000)) return [];
         return [
           `${item.name}: the steps use ${String(stated / 1000)} ${item.unitName}, but the recipe has ${String(item.total)} ${item.unitName}.`,
         ];
       });
-    }, [steps, recipeIngredients, ingredientById]);
+    }, [steps, recipeIngredients, ingredientByKey]);
 
     // Autosave only on real edits. Emitting on mount (or on a bare re-render —
     // onStepsChange is an inline prop, so its identity changes each render)
@@ -292,6 +355,7 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
     useEffect(() => {
       if (!onStepsChange) return;
       const payload = steps.map((step) => ({
+        key: step.rowKey,
         instruction: step.instruction,
         safetyNote: step.safetyNote,
         tip: step.tip,
@@ -353,10 +417,8 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
           if (step.rowKey !== rowKey) return step;
           const ingredients = step.followsText
             ? toDraftIngredients(
-                suggestStepIngredients(
-                  instruction,
-                  recipeIngredientsRef.current,
-                ),
+                suggestFor(instruction, recipeIngredientsRef.current),
+                recipeIngredientsRef.current,
               )
             : step.ingredients;
           return { ...step, instruction, ingredients, error: undefined };
@@ -520,25 +582,30 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       if (overTotalMessages.length > 0) return false;
 
       // Links to an ingredient no longer on the Ingredients section are left
-      // out; the step keeps them in case the ingredient comes back.
+      // out; the step keeps them in case the ingredient comes back. Links to a
+      // proposed ingredient only exist in Import Review, which builds its own
+      // create input from the sections.
       const payload: ReplaceRecipeMethodStepInput[] = steps.map((step) => ({
         instruction: step.instruction.trim(),
         safetyNote: toNotePayload(step.safetyNote),
         tip: toNotePayload(step.tip),
         prepAhead: step.prepAhead,
-        ingredients: step.ingredients
-          .filter((link) =>
-            recipeIngredientsRef.current.some(
-              (item) => item.ingredientId === link.ingredientId,
-            ),
+        ingredients: step.ingredients.flatMap((link) =>
+          'ingredientId' in link &&
+          recipeIngredientsRef.current.some(
+            (item) => ingredientKey(item) === link.ingredientId,
           )
-          .map((link) => ({
-            ingredientId: link.ingredientId,
-            quantity:
-              link.quantity.trim() === ''
-                ? null
-                : parseQuantityToDecimal(link.quantity),
-          })),
+            ? [
+                {
+                  ingredientId: link.ingredientId,
+                  quantity:
+                    link.quantity.trim() === ''
+                      ? null
+                      : parseQuantityToDecimal(link.quantity),
+                },
+              ]
+            : [],
+        ),
       }));
 
       setSubmitting(true);
@@ -549,7 +616,36 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
       }
     }, [steps, onSubmit, overTotalMessages]);
 
-    useImperativeHandle(ref, () => ({ submit: runSubmit }), [runSubmit]);
+    const remapIngredient = useCallback(
+      (fromNewKey: string, toIngredientId: number) => {
+        setSteps((current) =>
+          current.map((step) => {
+            const isFrom = (link: DraftStepIngredient): boolean =>
+              'newKey' in link && link.newKey === fromNewKey;
+            if (!step.ingredients.some(isFrom)) return step;
+            const hasTarget = step.ingredients.some(
+              (link) =>
+                'ingredientId' in link && link.ingredientId === toIngredientId,
+            );
+            return {
+              ...step,
+              ingredients: step.ingredients.flatMap((link) => {
+                if (!isFrom(link)) return [link];
+                return hasTarget
+                  ? []
+                  : [{ ingredientId: toIngredientId, quantity: link.quantity }];
+              }),
+            };
+          }),
+        );
+      },
+      [],
+    );
+
+    useImperativeHandle(ref, () => ({ submit: runSubmit, remapIngredient }), [
+      runSubmit,
+      remapIngredient,
+    ]);
 
     const canAddStep = steps.every(isStepValid);
 
@@ -580,176 +676,186 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
             </p>
           ) : (
             <ol className="space-y-3">
-              {steps.map((step, index) => (
-                <li
-                  key={step.rowKey}
-                  className="flex items-start gap-2 rounded-md border border-input p-2"
-                >
-                  <span
-                    className="mt-2 w-6 text-center text-sm font-medium text-muted-foreground"
-                    aria-hidden
+              {steps.map((step, index) => {
+                const notes = stepNotes?.get(step.rowKey);
+                return (
+                  <li
+                    key={step.rowKey}
+                    className="flex items-start gap-2 rounded-md border border-input p-2"
                   >
-                    {index + 1}.
-                  </span>
-                  <div className="flex-1 space-y-1">
-                    <textarea
-                      ref={(el) => {
-                        registerTextarea(step.rowKey, el);
-                      }}
-                      aria-label={`Step ${String(index + 1)} text`}
-                      rows={2}
-                      maxLength={RECIPE_INSTRUCTION_MAX_LENGTH}
-                      className="flex min-h-16 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      value={step.instruction}
-                      onChange={(event) => {
-                        updateStep(step.rowKey, event.target.value);
-                        autosize(event.currentTarget);
-                      }}
-                    />
-                    {step.error && (
-                      <p role="alert" className="text-sm text-destructive">
-                        {step.error}
-                      </p>
-                    )}
-                    {step.instruction.length >=
-                      RECIPE_INSTRUCTION_MAX_LENGTH - 500 && (
-                      <p className="text-right text-xs text-muted-foreground">
-                        {step.instruction.length} /{' '}
-                        {RECIPE_INSTRUCTION_MAX_LENGTH}
-                      </p>
-                    )}
-                    {recipeIngredients.length > 0 && (
-                      <StepIngredientsField
-                        stepNumber={index + 1}
-                        links={step.ingredients}
-                        suggestions={suggestionsByRow.get(step.rowKey) ?? []}
-                        recipeIngredients={recipeIngredients}
-                        ingredientById={ingredientById}
-                        error={step.ingredientsError}
-                        onEdit={(edit) => {
-                          editIngredients(step.rowKey, edit);
+                    <span
+                      className="mt-2 w-6 text-center text-sm font-medium text-muted-foreground"
+                      aria-hidden
+                    >
+                      {index + 1}.
+                    </span>
+                    <div className="flex-1 space-y-1">
+                      <textarea
+                        ref={(el) => {
+                          registerTextarea(step.rowKey, el);
+                        }}
+                        aria-label={`Step ${String(index + 1)} text`}
+                        rows={2}
+                        maxLength={RECIPE_INSTRUCTION_MAX_LENGTH}
+                        className="flex min-h-16 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        value={step.instruction}
+                        onChange={(event) => {
+                          updateStep(step.rowKey, event.target.value);
+                          autosize(event.currentTarget);
                         }}
                       />
-                    )}
-                    {NOTE_FIELDS.map(({ field, kind, noun }) => {
-                      const note = step[field];
-                      if (note === null) return null;
-                      const noteKey = `${step.rowKey}:${field}`;
-                      return (
-                        <StepNoteCallout
-                          key={field}
-                          kind={kind}
-                          action={
+                      {step.error && (
+                        <p role="alert" className="text-sm text-destructive">
+                          {step.error}
+                        </p>
+                      )}
+                      {step.instruction.length >=
+                        RECIPE_INSTRUCTION_MAX_LENGTH - 500 && (
+                        <p className="text-right text-xs text-muted-foreground">
+                          {step.instruction.length} /{' '}
+                          {RECIPE_INSTRUCTION_MAX_LENGTH}
+                        </p>
+                      )}
+                      {recipeIngredients.length > 0 && (
+                        <StepIngredientsField
+                          stepNumber={index + 1}
+                          links={step.ingredients}
+                          suggestions={suggestionsByRow.get(step.rowKey) ?? []}
+                          recipeIngredients={recipeIngredients}
+                          ingredientByKey={ingredientByKey}
+                          error={step.ingredientsError}
+                          note={notes?.ingredients}
+                          onEdit={(edit) => {
+                            editIngredients(step.rowKey, edit);
+                          }}
+                        />
+                      )}
+                      {NOTE_FIELDS.map(({ field, kind, noun }) => {
+                        const note = step[field];
+                        if (note === null) return null;
+                        const noteKey = `${step.rowKey}:${field}`;
+                        return (
+                          <StepNoteCallout
+                            key={field}
+                            kind={kind}
+                            action={
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                aria-label={`Remove ${noun} from step ${String(index + 1)}`}
+                                onClick={() => {
+                                  setNote(step.rowKey, field, null);
+                                }}
+                              >
+                                ×
+                              </Button>
+                            }
+                          >
+                            <textarea
+                              ref={(el) => {
+                                registerNoteTextarea(noteKey, el);
+                              }}
+                              aria-label={`Step ${String(index + 1)} ${noun}`}
+                              rows={1}
+                              maxLength={RECIPE_STEP_NOTE_MAX_LENGTH}
+                              className="flex min-h-9 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              value={note}
+                              onChange={(event) => {
+                                setNote(step.rowKey, field, event.target.value);
+                                autosize(event.currentTarget);
+                              }}
+                            />
+                            {notes?.[field]}
+                          </StepNoteCallout>
+                        );
+                      })}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {NOTE_FIELDS.map(({ field, noun, addLabel }) =>
+                          step[field] === null ? (
                             <Button
+                              key={field}
                               type="button"
-                              size="icon"
+                              size="sm"
                               variant="ghost"
-                              className="h-6 w-6"
-                              aria-label={`Remove ${noun} from step ${String(index + 1)}`}
+                              className="h-7 px-2 text-muted-foreground"
+                              aria-label={`Add ${noun} to step ${String(index + 1)}`}
                               onClick={() => {
-                                setNote(step.rowKey, field, null);
+                                openNote(step.rowKey, field);
                               }}
                             >
-                              ×
+                              + {addLabel}
                             </Button>
-                          }
+                          ) : null,
+                        )}
+                        <select
+                          aria-label={`Step ${String(index + 1)} prep ahead`}
+                          className="ml-auto h-7 rounded-md border border-input bg-background px-2 text-sm text-muted-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          value={step.prepAhead ?? ''}
+                          onChange={(event) => {
+                            setPrepAhead(
+                              step.rowKey,
+                              parsePrepAhead(event.target.value),
+                            );
+                          }}
                         >
-                          <textarea
-                            ref={(el) => {
-                              registerNoteTextarea(noteKey, el);
-                            }}
-                            aria-label={`Step ${String(index + 1)} ${noun}`}
-                            rows={1}
-                            maxLength={RECIPE_STEP_NOTE_MAX_LENGTH}
-                            className="flex min-h-9 w-full resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            value={note}
-                            onChange={(event) => {
-                              setNote(step.rowKey, field, event.target.value);
-                              autosize(event.currentTarget);
-                            }}
-                          />
-                        </StepNoteCallout>
-                      );
-                    })}
-                    <div className="flex flex-wrap items-center gap-1">
-                      {NOTE_FIELDS.map(({ field, noun, addLabel }) =>
-                        step[field] === null ? (
-                          <Button
-                            key={field}
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-muted-foreground"
-                            aria-label={`Add ${noun} to step ${String(index + 1)}`}
-                            onClick={() => {
-                              openNote(step.rowKey, field);
-                            }}
-                          >
-                            + {addLabel}
-                          </Button>
-                        ) : null,
+                          {PREP_AHEAD_OPTIONS.map(({ value, label }) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {notes?.prepAhead && (
+                        <div className="flex justify-end">
+                          {notes.prepAhead}
+                        </div>
                       )}
-                      <select
-                        aria-label={`Step ${String(index + 1)} prep ahead`}
-                        className="ml-auto h-7 rounded-md border border-input bg-background px-2 text-sm text-muted-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        value={step.prepAhead ?? ''}
-                        onChange={(event) => {
-                          setPrepAhead(
-                            step.rowKey,
-                            parsePrepAhead(event.target.value),
-                          );
+                    </div>
+                    <div className="flex flex-col">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        aria-label={`Move step ${String(index + 1)} up`}
+                        disabled={index === 0}
+                        onClick={() => {
+                          moveStep(index, -1);
                         }}
                       >
-                        {PREP_AHEAD_OPTIONS.map(({ value, label }) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
+                        ↑
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        aria-label={`Move step ${String(index + 1)} down`}
+                        disabled={index === steps.length - 1}
+                        onClick={() => {
+                          moveStep(index, 1);
+                        }}
+                      >
+                        ↓
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        aria-label={`Remove step ${String(index + 1)}`}
+                        onClick={() => {
+                          removeStep(step.rowKey);
+                        }}
+                      >
+                        ×
+                      </Button>
                     </div>
-                  </div>
-                  <div className="flex flex-col">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      aria-label={`Move step ${String(index + 1)} up`}
-                      disabled={index === 0}
-                      onClick={() => {
-                        moveStep(index, -1);
-                      }}
-                    >
-                      ↑
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      aria-label={`Move step ${String(index + 1)} down`}
-                      disabled={index === steps.length - 1}
-                      onClick={() => {
-                        moveStep(index, 1);
-                      }}
-                    >
-                      ↓
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      aria-label={`Remove step ${String(index + 1)}`}
-                      onClick={() => {
-                        removeStep(step.rowKey);
-                      }}
-                    >
-                      ×
-                    </Button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ol>
           )}
 
@@ -796,9 +902,11 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
                   Saved.
                 </p>
               )}
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Saving…' : 'Save method'}
-              </Button>
+              {!hideSaveButton && (
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? 'Saving…' : 'Save method'}
+                </Button>
+              )}
             </div>
           </div>
         </form>
@@ -810,10 +918,11 @@ export const MethodEditor = forwardRef<RecipeSectionHandle, MethodEditorProps>(
 interface StepIngredientsFieldProps {
   stepNumber: number;
   links: readonly DraftStepIngredient[];
-  suggestions: readonly StepIngredientSuggestion[];
+  suggestions: readonly StepIngredientSuggestion<IngredientKey>[];
   recipeIngredients: readonly MethodIngredient[];
-  ingredientById: ReadonlyMap<number, MethodIngredient>;
+  ingredientByKey: ReadonlyMap<IngredientKey, MethodIngredient>;
   error?: string;
+  note?: ReactNode;
   onEdit: (
     edit: (links: DraftStepIngredient[]) => DraftStepIngredient[],
   ) => void;
@@ -828,29 +937,31 @@ function StepIngredientsField({
   links,
   suggestions,
   recipeIngredients,
-  ingredientById,
+  ingredientByKey,
   error,
+  note,
   onEdit,
 }: StepIngredientsFieldProps): React.ReactElement {
   const step = String(stepNumber);
-  const linkedIds = new Set(links.map((link) => link.ingredientId));
+  const linkedKeys = new Set(links.map(ingredientKey));
   const visibleLinks = links.filter((link) =>
-    ingredientById.has(link.ingredientId),
+    ingredientByKey.has(ingredientKey(link)),
   );
   const pending = suggestions.filter(
-    (suggestion) => !linkedIds.has(suggestion.ingredientId),
+    (suggestion) => !linkedKeys.has(suggestion.ingredientId),
   );
-  const pendingIds = new Set(pending.map((s) => s.ingredientId));
-  const others = recipeIngredients.filter(
-    (item) =>
-      !linkedIds.has(item.ingredientId) && !pendingIds.has(item.ingredientId),
-  );
+  const pendingKeys = new Set(pending.map((s) => s.ingredientId));
+  const others = recipeIngredients.filter((item) => {
+    const key = ingredientKey(item);
+    return !linkedKeys.has(key) && !pendingKeys.has(key);
+  });
 
-  const add = (ingredientId: number, quantity: string): void => {
+  const add = (item: MethodIngredient, quantity: string): void => {
+    const key = ingredientKey(item);
     onEdit((current) =>
-      current.some((link) => link.ingredientId === ingredientId)
+      current.some((link) => ingredientKey(link) === key)
         ? current
-        : [...current, { ingredientId, quantity }],
+        : [...current, linkTo(item, quantity)],
     );
   };
 
@@ -862,11 +973,12 @@ function StepIngredientsField({
         className="flex flex-wrap items-center gap-1.5"
       >
         {visibleLinks.map((link) => {
-          const item = ingredientById.get(link.ingredientId);
+          const key = ingredientKey(link);
+          const item = ingredientByKey.get(key);
           if (!item) return null;
           return (
             <span
-              key={link.ingredientId}
+              key={key}
               className="inline-flex items-center gap-1 rounded-full border border-input bg-background py-0.5 pl-2.5 pr-1 text-xs"
             >
               <span>{item.name}</span>
@@ -880,7 +992,7 @@ function StepIngredientsField({
                   const quantity = sanitizeQuantityInput(event.target.value);
                   onEdit((current) =>
                     current.map((entry) =>
-                      entry.ingredientId === link.ingredientId
+                      ingredientKey(entry) === key
                         ? { ...entry, quantity }
                         : entry,
                     ),
@@ -896,9 +1008,7 @@ function StepIngredientsField({
                 aria-label={`Remove ${item.name} from step ${step}`}
                 onClick={() => {
                   onEdit((current) =>
-                    current.filter(
-                      (entry) => entry.ingredientId !== link.ingredientId,
-                    ),
+                    current.filter((entry) => ingredientKey(entry) !== key),
                   );
                 }}
               >
@@ -908,7 +1018,7 @@ function StepIngredientsField({
           );
         })}
         {pending.map((suggestion) => {
-          const item = ingredientById.get(suggestion.ingredientId);
+          const item = ingredientByKey.get(suggestion.ingredientId);
           if (!item) return null;
           const amount =
             suggestion.quantity === null
@@ -921,7 +1031,7 @@ function StepIngredientsField({
               aria-label={`Add ${item.name} to step ${step}`}
               className="rounded-full border border-dashed border-input px-2.5 py-0.5 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
               onClick={() => {
-                add(suggestion.ingredientId, suggestion.quantity ?? '');
+                add(item, suggestion.quantity ?? '');
               }}
             >
               + {item.name}
@@ -935,19 +1045,25 @@ function StepIngredientsField({
             className="h-7 rounded-md border border-input bg-background px-2 text-xs text-muted-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             value=""
             onChange={(event) => {
-              const ingredientId = Number(event.target.value);
-              if (ingredientId > 0) add(ingredientId, '');
+              const item = others.find(
+                (other) => String(ingredientKey(other)) === event.target.value,
+              );
+              if (item) add(item, '');
             }}
           >
             <option value="">+ Ingredient</option>
-            {others.map((item) => (
-              <option key={item.ingredientId} value={item.ingredientId}>
-                {item.name}
-              </option>
-            ))}
+            {others.map((item) => {
+              const key = String(ingredientKey(item));
+              return (
+                <option key={key} value={key}>
+                  {item.name}
+                </option>
+              );
+            })}
           </select>
         )}
       </div>
+      {note}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

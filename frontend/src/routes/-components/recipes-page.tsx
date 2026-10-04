@@ -9,6 +9,12 @@ import { RecipeCard } from '@/components/recipe-card.tsx';
 import { RecipeFilterBar } from '@/components/recipe-filters/recipe-filter-bar.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover.tsx';
+import { useOnlineStatus } from '@/hooks/use-online-status.ts';
 import { hasRecipeFilters, listInputFromSearch } from '@/lib/recipe-filters.ts';
 import { trpc } from '@/lib/trpc.ts';
 
@@ -109,9 +115,7 @@ export function RecipesPage(): React.ReactElement {
     <section className="mx-auto max-w-6xl space-y-6">
       <header className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Recipes</h1>
-        <Button asChild>
-          <Link to="/recipes/new">New recipe</Link>
-        </Button>
+        <NewRecipeMenu />
       </header>
 
       <Input
@@ -179,5 +183,40 @@ export function RecipesPage(): React.ReactElement {
         </div>
       )}
     </section>
+  );
+}
+
+const MENU_ITEM_CLASS =
+  'rounded-sm px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:outline-none';
+
+// Start blank (the manual flow, unchanged) or Import (DEC-108). Import needs
+// a connection (DEC-103).
+function NewRecipeMenu(): React.ReactElement {
+  const isOnline = useOnlineStatus();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button type="button">New recipe</Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-60 p-1">
+        <nav aria-label="New recipe" className="flex flex-col">
+          <Link to="/recipes/new" className={MENU_ITEM_CLASS}>
+            Start blank
+          </Link>
+          {isOnline ? (
+            <Link to="/recipes/import" className={MENU_ITEM_CLASS}>
+              Import
+            </Link>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="px-3 py-2 text-sm text-muted-foreground"
+            >
+              Import (needs a connection)
+            </span>
+          )}
+        </nav>
+      </PopoverContent>
+    </Popover>
   );
 }

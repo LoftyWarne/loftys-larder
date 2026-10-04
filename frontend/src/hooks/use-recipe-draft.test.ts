@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
+import { TRPCClientError } from '@trpc/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -10,6 +11,9 @@ const {
   deleteMutateMock,
   getForRecipeInvalidateMock,
   getNewDraftsInvalidateMock,
+  importGetUseQueryMock,
+  importDiscardMutateAsyncMock,
+  importListInvalidateMock,
 } = vi.hoisted(() => ({
   getForRecipeUseQueryMock: vi.fn(),
   getNewDraftsUseQueryMock: vi.fn(),
@@ -19,6 +23,9 @@ const {
   deleteMutateMock: vi.fn(),
   getForRecipeInvalidateMock: vi.fn(),
   getNewDraftsInvalidateMock: vi.fn(),
+  importGetUseQueryMock: vi.fn(),
+  importDiscardMutateAsyncMock: vi.fn(),
+  importListInvalidateMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
@@ -28,6 +35,7 @@ vi.mock('@/lib/trpc.ts', () => ({
         getForRecipe: { invalidate: getForRecipeInvalidateMock },
         getNewDrafts: { invalidate: getNewDraftsInvalidateMock },
       },
+      recipeImports: { list: { invalidate: importListInvalidateMock } },
     }),
     recipeDrafts: {
       getForRecipe: { useQuery: getForRecipeUseQueryMock },
@@ -35,10 +43,19 @@ vi.mock('@/lib/trpc.ts', () => ({
       upsert: { useMutation: upsertUseMutationMock },
       delete: { useMutation: deleteUseMutationMock },
     },
+    recipeImports: {
+      get: { useQuery: importGetUseQueryMock },
+      discard: {
+        useMutation: () => ({
+          mutate: vi.fn(),
+          mutateAsync: importDiscardMutateAsyncMock,
+        }),
+      },
+    },
   },
 }));
 
-import { useRecipeDraft } from './use-recipe-draft.ts';
+import { useImportRecipeDraft, useRecipeDraft } from './use-recipe-draft.ts';
 
 const SERVER_DEFAULTS = {
   header: { name: 'Server name', description: null },
@@ -376,5 +393,109 @@ describe('useRecipeDraft', () => {
 
     expect(result.current.draftPresent).toBe(false);
     expect(getForRecipeInvalidateMock).toHaveBeenCalledWith({ recipeId: 7 });
+  });
+});
+
+describe('useImportRecipeDraft', () => {
+  const PROPOSAL = { header: { name: 'Imported' } };
+  const IMPORT = {
+    id: 41,
+    proposal: PROPOSAL,
+    draftData: {
+      version: 1,
+      fields: { proposal: PROPOSAL, tags: ['Quick'] },
+    },
+    lastUpdatedAt: 1700000000000,
+  };
+
+  beforeEach(() => {
+    importGetUseQueryMock.mockReturnValue({ data: IMPORT, error: null });
+    importDiscardMutateAsyncMock.mockResolvedValue({ deleted: true });
+    importListInvalidateMock.mockResolvedValue(undefined);
+  });
+
+  it('loads the import draft by id', () => {
+    const { result } = renderHook(() => useImportRecipeDraft({ draftId: 41 }));
+
+    expect(importGetUseQueryMock).toHaveBeenCalledWith(
+      { draftId: 41 },
+      expect.any(Object),
+    );
+    expect(result.current.status).toBe('ready');
+    expect(result.current.draft).toBe(IMPORT);
+    expect(result.current.savedAt).toBe(1700000000000);
+  });
+
+  it('autosaves into the same row, sending the proposal back', () => {
+    const { result } = renderHook(() =>
+      useImportRecipeDraft({ draftId: 41, debounceMs: 1000 }),
+    );
+
+    act(() => {
+      result.current.queueAutosave('header', { name: 'Edited' });
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(upsertMutateMock).toHaveBeenCalledWith(
+      {
+        draftId: 41,
+        recipeId: null,
+        draftData: {
+          version: 1,
+          fields: {
+            proposal: PROPOSAL,
+            tags: ['Quick'],
+            header: { name: 'Edited' },
+          },
+        },
+      },
+      expect.any(Object),
+    );
+  });
+
+  it('keeps the first load when the query refetches', () => {
+    const { result, rerender } = renderHook(() =>
+      useImportRecipeDraft({ draftId: 41 }),
+    );
+    importGetUseQueryMock.mockReturnValue({
+      data: { ...IMPORT, lastUpdatedAt: 1800000000000 },
+      error: null,
+    });
+    rerender();
+
+    expect(result.current.draft).toBe(IMPORT);
+  });
+
+  it('discard cancels a pending save, deletes the import and refreshes the list', async () => {
+    const { result } = renderHook(() =>
+      useImportRecipeDraft({ draftId: 41, debounceMs: 1000 }),
+    );
+
+    act(() => {
+      result.current.queueAutosave('header', { name: 'Edited' });
+    });
+    await act(async () => {
+      await result.current.discard();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(importDiscardMutateAsyncMock).toHaveBeenCalledWith({ draftId: 41 });
+    expect(importListInvalidateMock).toHaveBeenCalled();
+    expect(upsertMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('reports an import that has gone', () => {
+    const error = new TRPCClientError('Import not found');
+    Object.assign(error, { data: { code: 'NOT_FOUND' } });
+    importGetUseQueryMock.mockReturnValue({ data: undefined, error });
+
+    const { result } = renderHook(() => useImportRecipeDraft({ draftId: 41 }));
+
+    expect(result.current.status).toBe('not-found');
+    expect(result.current.draft).toBeNull();
   });
 });

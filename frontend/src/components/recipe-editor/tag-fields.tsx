@@ -35,6 +35,7 @@ export interface TagFieldsProps {
   onSubmit: (names: string[]) => Promise<boolean>;
   onNamesChange?: (names: string[]) => void;
   savedNoticeKey?: number;
+  hideSaveButton?: boolean;
 }
 
 export const TagFields = forwardRef<RecipeSectionHandle, TagFieldsProps>(
@@ -46,6 +47,7 @@ export const TagFields = forwardRef<RecipeSectionHandle, TagFieldsProps>(
       onSubmit,
       onNamesChange,
       savedNoticeKey,
+      hideSaveButton = false,
     },
     ref,
   ): React.ReactElement {
@@ -199,11 +201,13 @@ export const TagFields = forwardRef<RecipeSectionHandle, TagFieldsProps>(
           </p>
         )}
 
-        <div className="flex justify-end">
-          <Button type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save tags'}
-          </Button>
-        </div>
+        {!hideSaveButton && (
+          <div className="flex justify-end">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save tags'}
+            </Button>
+          </div>
+        )}
       </form>
     );
   },

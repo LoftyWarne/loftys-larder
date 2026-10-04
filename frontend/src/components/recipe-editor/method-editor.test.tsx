@@ -1,9 +1,14 @@
 import type { RecipeMethodStep } from '@loftys-larder/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MethodEditor, type MethodIngredient } from './method-editor.tsx';
+import {
+  MethodEditor,
+  type MethodEditorHandle,
+  type MethodIngredient,
+} from './method-editor.tsx';
 
 function step(
   id: number,
@@ -435,6 +440,7 @@ describe('MethodEditor', () => {
 
       expect(onStepsChange).toHaveBeenLastCalledWith([
         {
+          key: 'existing-1',
           instruction: 'Fry',
           safetyNote: null,
           tip: 'X',
@@ -564,6 +570,7 @@ describe('MethodEditor', () => {
 
       expect(onStepsChange).toHaveBeenLastCalledWith([
         {
+          key: 'existing-1',
           instruction: 'Soak beans',
           safetyNote: null,
           tip: null,
@@ -861,6 +868,153 @@ describe('MethodEditor', () => {
       expect(
         screen.queryByRole('group', { name: 'Step 1 ingredients' }),
       ).toBeNull();
+    });
+  });
+  // Import Review: steps can link to an ingredient proposed by the import,
+  // held by key until the recipe is created.
+  describe('proposed ingredients', () => {
+    const OIL: MethodIngredient = {
+      ingredientId: 7,
+      name: 'Olive oil',
+      unitName: 'ml',
+      total: 30,
+    };
+    const PEPPER: MethodIngredient = {
+      newKey: 'n1',
+      name: 'Black pepper',
+      unitName: 'g',
+      total: 2,
+    };
+
+    it('shows and saves links to a proposed ingredient, and keeps the step key', async () => {
+      const onStepsChange = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[]}
+          initialDraftSteps={[
+            {
+              key: 's1',
+              instruction: 'Season the oil',
+              ingredients: [{ newKey: 'n1', quantity: '1' }],
+              followsText: false,
+            },
+          ]}
+          onSubmit={vi.fn()}
+          onStepsChange={onStepsChange}
+          recipeIngredients={[OIL, PEPPER]}
+        />,
+      );
+
+      expect(screen.getByLabelText('Step 1 Black pepper amount')).toHaveValue(
+        '1',
+      );
+      await user.click(
+        screen.getByRole('button', { name: 'Add Olive oil to step 1' }),
+      );
+
+      expect(onStepsChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({
+          key: 's1',
+          ingredients: [
+            { newKey: 'n1', quantity: '1' },
+            { ingredientId: 7, quantity: '' },
+          ],
+        }),
+      ]);
+    });
+
+    it('suggests a proposed ingredient from the step text', async () => {
+      const user = userEvent.setup();
+      render(
+        <MethodEditor
+          initialSteps={[]}
+          onSubmit={vi.fn()}
+          recipeIngredients={[OIL, PEPPER]}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Add step' }));
+      await user.type(
+        screen.getByLabelText('Step 1 text'),
+        'Add 1 g black pepper',
+      );
+
+      expect(screen.getByLabelText('Step 1 Black pepper amount')).toHaveValue(
+        '1',
+      );
+    });
+
+    it('moves links to an existing ingredient when the proposed one is swapped', () => {
+      const onStepsChange = vi.fn();
+      const ref = createRef<MethodEditorHandle>();
+      const SALT: MethodIngredient = {
+        ingredientId: 9,
+        name: 'Pepper',
+        unitName: 'g',
+        total: 2,
+      };
+      const { rerender } = render(
+        <MethodEditor
+          ref={ref}
+          initialSteps={[]}
+          initialDraftSteps={[
+            {
+              key: 's1',
+              instruction: 'Season',
+              ingredients: [{ newKey: 'n1', quantity: '1' }],
+              followsText: false,
+            },
+          ]}
+          onSubmit={vi.fn()}
+          onStepsChange={onStepsChange}
+          recipeIngredients={[OIL, PEPPER]}
+        />,
+      );
+
+      rerender(
+        <MethodEditor
+          ref={ref}
+          initialSteps={[]}
+          onSubmit={vi.fn()}
+          onStepsChange={onStepsChange}
+          recipeIngredients={[OIL, SALT]}
+        />,
+      );
+      act(() => {
+        ref.current?.remapIngredient('n1', 9);
+      });
+
+      expect(screen.getByLabelText('Step 1 Pepper amount')).toHaveValue('1');
+      expect(onStepsChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({
+          ingredients: [{ ingredientId: 9, quantity: '1' }],
+        }),
+      ]);
+    });
+
+    it('shows a note beside a step field, and can hide the save button', () => {
+      render(
+        <MethodEditor
+          initialSteps={[]}
+          initialDraftSteps={[
+            {
+              key: 's1',
+              instruction: 'Rest',
+              tip: 'Cover it',
+              followsText: true,
+            },
+          ]}
+          onSubmit={vi.fn()}
+          stepNotes={new Map([['s1', { tip: <span>Estimated tip</span> }]])}
+          hideSaveButton
+        />,
+      );
+
+      expect(screen.getByText('Estimated tip')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Save method' }),
+      ).not.toBeInTheDocument();
     });
   });
 });

@@ -1,6 +1,8 @@
 import {
+  createIngredientInputSchema,
   type CreateIngredientInput,
   type IngredientReferences,
+  type RecipeImportProposedIngredient,
   type RecipeIngredientLine,
   type RecipeReferenceItem,
   type ReplaceRecipeIngredientsLine,
@@ -13,9 +15,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 
 import { IngredientForm } from '@/components/ingredient-form.tsx';
+import { NewBadge } from '@/components/recipe-editor/review-badges.tsx';
 import type { RecipeSectionHandle } from '@/components/recipe-editor/section-handle.ts';
 import {
   SearchableCombobox,
@@ -55,14 +59,18 @@ interface IngredientPickerOption extends SearchableComboboxOption {
 }
 
 interface DraftLine {
-  // A stable client-side row id so React can key list mutations.
+  // A stable row id: React keys list mutations by it, and Import Review holds
+  // Estimate marks and original lines by it, so it's kept in the draft.
   rowKey: string;
   ingredient: IngredientPickerOption | null;
+  // Import Review: the row points at a proposed new ingredient instead.
+  newKey?: string;
   quantity: string;
   prepTypeId: number | null;
   isOptional: boolean;
   quantityError?: string;
   ingredientError?: string;
+  pendingError?: string;
   // Set on blur; cleared while typing. Gates the live quantity error so a
   // partially-typed value (`1/`, `1.`) doesn't flash an error mid-entry.
   quantityTouched?: boolean;
@@ -77,7 +85,11 @@ export interface ServerLineError {
 // state has a `rowKey` and per-row error strings that are React-only — a
 // snapshot omits them so the persisted blob stays stable across mounts.
 export interface IngredientDraftLine {
+  // Absent on drafts persisted before rows kept their keys.
+  key?: string;
   ingredient: IngredientPickerOption | null;
+  // Import Review: a proposed new ingredient's key, with `ingredient` null.
+  newKey?: string;
   quantity: string;
   prepTypeId: number | null;
   // Absent on drafts persisted before optional ingredients existed.
@@ -112,6 +124,28 @@ export interface IngredientListProps {
   onLinesChange?: (lines: IngredientDraftLine[]) => void;
   serverErrors?: readonly ServerLineError[];
   savedNoticeKey?: number;
+  // Import Review (DEC-105). Proposed new ingredients by key, edited in place
+  // on the rows that point at them and created with the recipe.
+  proposedIngredients?: ReadonlyMap<string, RecipeImportProposedIngredient>;
+  onProposedIngredientChange?: (
+    key: string,
+    patch: Partial<Omit<RecipeImportProposedIngredient, 'key'>>,
+  ) => void;
+  // When set, typing a name that isn't in the list proposes a new ingredient
+  // instead of creating one, and resolves to its key.
+  proposeIngredient?: (name: string) => string;
+  // A row pointing at a proposed ingredient switched to an existing one.
+  // `stillUsed` says whether another row still points at the proposed one.
+  onProposedReplaced?: (
+    newKey: string,
+    ingredientId: number,
+    stillUsed: boolean,
+  ) => void;
+  // By row key: the line as the import input wrote it, and a note on the
+  // quantity (an Estimate mark).
+  originalLines?: ReadonlyMap<string, string>;
+  quantityNotes?: ReadonlyMap<string, ReactNode>;
+  hideSaveButton?: boolean;
 }
 
 function toDraft(line: RecipeIngredientLine, index: number): DraftLine {
@@ -137,11 +171,47 @@ function newRowKey(): string {
   return `new-${String(nextRowSeed)}`;
 }
 
-// A line is complete once it has an ingredient picked and a well-formed
-// quantity. Shared by the "Add ingredient" gate and the submit validation so
-// the two never drift.
+// Keys come back from a saved draft, so a key made later must not repeat
+// one: move the counter past any saved `new-N`, and replace a repeated key.
+function seedRowKeys(keys: readonly (string | undefined)[]): string[] {
+  for (const key of keys) {
+    const match = key ? /^new-(\d+)$/.exec(key) : null;
+    if (match) nextRowSeed = Math.max(nextRowSeed, Number(match[1]));
+  }
+  const seen = new Set<string>();
+  return keys.map((key) => {
+    const rowKey = key && !seen.has(key) ? key : newRowKey();
+    seen.add(rowKey);
+    return rowKey;
+  });
+}
+
+// A line is complete once it has an ingredient picked (or a proposed one)
+// and a well-formed quantity. Shared by the "Add ingredient" gate and the
+// submit validation so the two never drift.
 function isLineValid(line: DraftLine): boolean {
-  return line.ingredient !== null && isValidQuantityEntry(line.quantity);
+  return (
+    (line.ingredient !== null || line.newKey !== undefined) &&
+    isValidQuantityEntry(line.quantity)
+  );
+}
+
+// What's missing from a proposed new ingredient before it can be created.
+function proposedIngredientProblem(
+  proposed: RecipeImportProposedIngredient,
+): string | null {
+  if (proposed.name.trim() === '') return 'Give the new ingredient a name';
+  if (proposed.categoryId === null) return 'Choose a category';
+  if (proposed.defaultUnitId === null) return 'Choose a unit';
+  const parsed = createIngredientInputSchema.safeParse({
+    name: proposed.name,
+    categoryId: proposed.categoryId,
+    defaultUnitId: proposed.defaultUnitId,
+    isPlant: proposed.isPlant,
+    averageShelfLifeDays: proposed.averageShelfLifeDays,
+  });
+  if (parsed.success) return null;
+  return parsed.error.issues[0]?.message ?? 'Check the new ingredient';
 }
 
 // Row keys of lines that repeat an earlier line's (ingredient, prep type)
@@ -152,8 +222,13 @@ function findDuplicateRowKeys(lines: readonly DraftLine[]): Set<string> {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
   for (const line of lines) {
-    if (!line.ingredient) continue;
-    const key = `${String(line.ingredient.id)}:${String(line.prepTypeId ?? '')}`;
+    const ingredientKey = line.ingredient
+      ? String(line.ingredient.id)
+      : line.newKey !== undefined
+        ? `new:${line.newKey}`
+        : null;
+    if (ingredientKey === null) continue;
+    const key = `${ingredientKey}:${String(line.prepTypeId ?? '')}`;
     if (seen.has(key)) duplicates.add(line.rowKey);
     else seen.add(key);
   }
@@ -175,6 +250,13 @@ export const IngredientList = forwardRef<
     savedNoticeKey,
     references,
     createIngredient,
+    proposedIngredients,
+    onProposedIngredientChange,
+    proposeIngredient,
+    onProposedReplaced,
+    originalLines,
+    quantityNotes,
+    hideSaveButton = false,
   },
   ref,
 ): React.ReactElement {
@@ -197,12 +279,16 @@ export const IngredientList = forwardRef<
   const [comboboxResetKey, setComboboxResetKey] = useState<
     Record<string, number>
   >({});
-  const canCreate = references !== undefined && createIngredient !== undefined;
+  const canCreate =
+    proposeIngredient !== undefined ||
+    (references !== undefined && createIngredient !== undefined);
   const [lines, setLines] = useState<DraftLine[]>(() => {
     if (initialDraftLines) {
-      return initialDraftLines.map((line) => ({
-        rowKey: newRowKey(),
+      const rowKeys = seedRowKeys(initialDraftLines.map((line) => line.key));
+      return initialDraftLines.map((line, index) => ({
+        rowKey: rowKeys[index] ?? newRowKey(),
         ingredient: line.ingredient,
+        ...(line.newKey === undefined ? {} : { newKey: line.newKey }),
         quantity: line.quantity,
         prepTypeId: line.prepTypeId,
         isOptional: line.isOptional ?? false,
@@ -210,6 +296,10 @@ export const IngredientList = forwardRef<
     }
     return initialLines.map(toDraft);
   });
+  // Read by the propose handler, which a blur can fire after the row has
+  // already switched to a proposed ingredient.
+  const linesRef = useRef(lines);
+  linesRef.current = lines;
   const [submitting, setSubmitting] = useState(false);
 
   // The "Saved." notice is shown after a save, then cleared the moment the user
@@ -246,7 +336,9 @@ export const IngredientList = forwardRef<
   useEffect(() => {
     if (!onLinesChange) return;
     const payload = lines.map((line) => ({
+      key: line.rowKey,
       ingredient: line.ingredient,
+      ...(line.newKey === undefined ? {} : { newKey: line.newKey }),
       quantity: line.quantity,
       prepTypeId: line.prepTypeId,
       isOptional: line.isOptional,
@@ -300,6 +392,48 @@ export const IngredientList = forwardRef<
     setPendingFocusRowKey(rowKey);
   }, []);
 
+  function proposeForRow(rowKey: string, name: string): void {
+    if (!proposeIngredient) return;
+    const key = proposeIngredient(name);
+    updateLine(rowKey, {
+      ingredient: null,
+      newKey: key,
+      ingredientError: undefined,
+    });
+  }
+
+  function changeProposed(
+    key: string,
+    patch: Partial<Omit<RecipeImportProposedIngredient, 'key'>>,
+  ): void {
+    setSavedVisible(false);
+    setLines((current) =>
+      current.map((line) =>
+        line.newKey === key ? { ...line, pendingError: undefined } : line,
+      ),
+    );
+    onProposedIngredientChange?.(key, patch);
+  }
+
+  function replaceProposed(
+    line: DraftLine,
+    option: IngredientPickerOption | null,
+  ): void {
+    if (!option) return;
+    updateLine(line.rowKey, {
+      ingredient: option,
+      newKey: undefined,
+      ingredientError: undefined,
+      pendingError: undefined,
+    });
+    const fromKey = line.newKey;
+    if (fromKey === undefined) return;
+    const stillUsed = linesRef.current.some(
+      (other) => other.rowKey !== line.rowKey && other.newKey === fromKey,
+    );
+    onProposedReplaced?.(fromKey, option.id, stillUsed);
+  }
+
   // Close the create dialog without creating: clear the unmatched text from
   // the originating row's combobox by remounting it.
   function dismissCreate(): void {
@@ -342,9 +476,19 @@ export const IngredientList = forwardRef<
         ...line,
         quantityError: undefined,
         ingredientError: undefined,
+        pendingError: undefined,
       };
-      if (!line.ingredient) {
+      const proposed =
+        line.newKey === undefined
+          ? undefined
+          : proposedIngredients?.get(line.newKey);
+      if (!line.ingredient && !proposed) {
         updated.ingredientError = 'Pick an ingredient';
+        if (firstInvalid < 0) firstInvalid = index;
+      }
+      const problem = proposed ? proposedIngredientProblem(proposed) : null;
+      if (problem !== null) {
+        updated.pendingError = problem;
         if (firstInvalid < 0) firstInvalid = index;
       }
       if (!isValidQuantityEntry(line.quantity)) {
@@ -362,25 +506,25 @@ export const IngredientList = forwardRef<
       return false;
     }
 
-    const payload: ReplaceRecipeIngredientsLine[] = lines.map((line) => {
+    // Rows pointing at a proposed ingredient only exist in Import Review,
+    // which builds its own create input from the sections.
+    const payload: ReplaceRecipeIngredientsLine[] = lines.flatMap((line) => {
       const ingredient = line.ingredient;
-      if (!ingredient) {
-        // Unreachable — the validation loop above guarantees every line has
-        // an ingredient picked before we get here.
-        throw new Error('ingredient missing after validation');
-      }
+      if (!ingredient) return [];
       const quantity = parseQuantityToDecimal(line.quantity);
       if (quantity === null) {
         // Unreachable — validation above rejects anything unparseable.
         throw new Error('quantity invalid after validation');
       }
-      return {
-        ingredientId: ingredient.id,
-        quantity,
-        unitId: ingredient.defaultUnitId,
-        prepTypeId: line.prepTypeId,
-        isOptional: line.isOptional,
-      };
+      return [
+        {
+          ingredientId: ingredient.id,
+          quantity,
+          unitId: ingredient.defaultUnitId,
+          prepTypeId: line.prepTypeId,
+          isOptional: line.isOptional,
+        },
+      ];
     });
 
     setSubmitting(true);
@@ -389,7 +533,7 @@ export const IngredientList = forwardRef<
     } finally {
       setSubmitting(false);
     }
-  }, [lines, onSubmit]);
+  }, [lines, onSubmit, proposedIngredients]);
 
   useImperativeHandle(ref, () => ({ submit: runSubmit }), [runSubmit]);
 
@@ -436,46 +580,83 @@ export const IngredientList = forwardRef<
                 (line.quantityTouched === true &&
                   line.quantity.trim() !== '' &&
                   !isValidQuantityEntry(line.quantity));
+              const row = String(index + 1);
+              const proposed =
+                line.newKey === undefined
+                  ? undefined
+                  : proposedIngredients?.get(line.newKey);
+              const originalLine = originalLines?.get(line.rowKey);
+              const quantityNote = quantityNotes?.get(line.rowKey);
+              const quantityNoteId = `ingredient-row-${line.rowKey}-quantity-note`;
               return (
                 <li
                   key={line.rowKey}
                   className="grid grid-cols-12 items-start gap-2"
                 >
                   <div className="col-span-5 space-y-1">
-                    <SearchableCombobox<IngredientPickerOption>
-                      key={`${line.rowKey}-${String(
-                        comboboxResetKey[line.rowKey] ?? 0,
-                      )}`}
-                      ref={(handle) => {
-                        comboboxRefs.current.set(line.rowKey, handle);
-                      }}
-                      value={line.ingredient}
-                      onChange={(option) => {
-                        updateLine(line.rowKey, {
-                          ingredient: option,
-                          ingredientError: undefined,
-                        });
-                      }}
-                      searchQuery={searchIngredients}
-                      placeholder="Search ingredients"
-                      ariaLabel={`Ingredient for row ${String(index + 1)}`}
-                      createOnBlur={canCreate}
-                      onCreate={
-                        canCreate
-                          ? (query) => {
-                              // Drop the blur echo that opening the dialog
-                              // triggers (see createStateRef): the dialog is
-                              // already open for this row.
-                              if (createStateRef.current) return;
-                              setCreateNameError(undefined);
-                              setCreateState({
-                                rowKey: line.rowKey,
-                                name: query,
-                              });
-                            }
-                          : undefined
-                      }
-                    />
+                    {proposed ? (
+                      <div className="flex items-center gap-2">
+                        <NewBadge />
+                        <Input
+                          type="text"
+                          autoComplete="off"
+                          aria-label={`New ingredient name for row ${row}`}
+                          value={proposed.name}
+                          onChange={(event) => {
+                            changeProposed(proposed.key, {
+                              name: event.target.value,
+                            });
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <SearchableCombobox<IngredientPickerOption>
+                        key={`${line.rowKey}-${String(
+                          comboboxResetKey[line.rowKey] ?? 0,
+                        )}`}
+                        ref={(handle) => {
+                          comboboxRefs.current.set(line.rowKey, handle);
+                        }}
+                        value={line.ingredient}
+                        onChange={(option) => {
+                          updateLine(line.rowKey, {
+                            ingredient: option,
+                            newKey: undefined,
+                            ingredientError: undefined,
+                          });
+                        }}
+                        searchQuery={searchIngredients}
+                        placeholder="Search ingredients"
+                        ariaLabel={`Ingredient for row ${row}`}
+                        // Proposing happens on an explicit pick only: a
+                        // proposed ingredient is easy to miss once made.
+                        createOnBlur={canCreate && !proposeIngredient}
+                        onCreate={
+                          canCreate
+                            ? (query) => {
+                                if (proposeIngredient) {
+                                  proposeForRow(line.rowKey, query);
+                                  return;
+                                }
+                                // Drop the blur echo that opening the dialog
+                                // triggers (see createStateRef): the dialog is
+                                // already open for this row.
+                                if (createStateRef.current) return;
+                                setCreateNameError(undefined);
+                                setCreateState({
+                                  rowKey: line.rowKey,
+                                  name: query,
+                                });
+                              }
+                            : undefined
+                        }
+                        createLabel={
+                          proposeIngredient
+                            ? (query) => `New ingredient “${query}”`
+                            : undefined
+                        }
+                      />
+                    )}
                     {line.ingredientError && (
                       <p role="alert" className="text-sm text-destructive">
                         {line.ingredientError}
@@ -495,7 +676,7 @@ export const IngredientList = forwardRef<
                             isOptional: value === true,
                           });
                         }}
-                        aria-label={`Optional for row ${String(index + 1)}`}
+                        aria-label={`Optional for row ${row}`}
                         className="h-4 w-4"
                       />
                       Optional
@@ -509,7 +690,10 @@ export const IngredientList = forwardRef<
                       // a single `.` or `/`.
                       inputMode="text"
                       placeholder="Qty"
-                      aria-label={`Quantity for row ${String(index + 1)}`}
+                      aria-label={`Quantity for row ${row}`}
+                      aria-describedby={
+                        quantityNote ? quantityNoteId : undefined
+                      }
                       value={line.quantity}
                       onChange={(event) => {
                         updateLine(line.rowKey, {
@@ -529,11 +713,15 @@ export const IngredientList = forwardRef<
                     )}
                   </div>
                   <div className="col-span-2 text-sm text-muted-foreground">
-                    {line.ingredient?.unitName ?? '—'}
+                    {proposed
+                      ? (references?.units.find(
+                          (unit) => unit.id === proposed.defaultUnitId,
+                        )?.name ?? '—')
+                      : (line.ingredient?.unitName ?? '—')}
                   </div>
                   <div className="col-span-2">
                     <select
-                      aria-label={`Prep type for row ${String(index + 1)}`}
+                      aria-label={`Prep type for row ${row}`}
                       value={line.prepTypeId ?? ''}
                       onChange={(event) => {
                         updateLine(line.rowKey, {
@@ -558,7 +746,7 @@ export const IngredientList = forwardRef<
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label={`Remove row ${String(index + 1)}`}
+                      aria-label={`Remove row ${row}`}
                       onClick={() => {
                         removeLine(line.rowKey);
                       }}
@@ -566,6 +754,33 @@ export const IngredientList = forwardRef<
                       ×
                     </Button>
                   </div>
+                  {proposed && (
+                    <ProposedIngredientFields
+                      row={row}
+                      proposed={proposed}
+                      references={references}
+                      error={line.pendingError}
+                      searchIngredients={searchIngredients}
+                      onChange={(patch) => {
+                        changeProposed(proposed.key, patch);
+                      }}
+                      onReplace={(option) => {
+                        replaceProposed(line, option);
+                      }}
+                    />
+                  )}
+                  {(originalLine !== undefined || quantityNote) && (
+                    <div className="col-span-12 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      {originalLine !== undefined && (
+                        <span>
+                          Original: <q>{originalLine}</q>
+                        </span>
+                      )}
+                      {quantityNote && (
+                        <span id={quantityNoteId}>{quantityNote}</span>
+                      )}
+                    </div>
+                  )}
                   {serverError && (
                     <p
                       role="alert"
@@ -613,9 +828,11 @@ export const IngredientList = forwardRef<
                 Saved.
               </p>
             )}
-            <Button type="submit" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Save ingredients'}
-            </Button>
+            {!hideSaveButton && (
+              <Button type="submit" disabled={submitting}>
+                {submitting ? 'Saving…' : 'Save ingredients'}
+              </Button>
+            )}
           </div>
         </div>
       </form>
@@ -656,5 +873,128 @@ export const IngredientList = forwardRef<
     </TooltipProvider>
   );
 });
+
+const SELECT_CLASS =
+  'flex h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
+interface ProposedIngredientFieldsProps {
+  row: string;
+  proposed: RecipeImportProposedIngredient;
+  references: IngredientReferences | undefined;
+  error: string | undefined;
+  searchIngredients: IngredientListProps['searchIngredients'];
+  onChange: (
+    patch: Partial<Omit<RecipeImportProposedIngredient, 'key'>>,
+  ) => void;
+  onReplace: (option: IngredientPickerOption | null) => void;
+}
+
+// A proposed new ingredient's details, edited in place, and the combobox to
+// use an existing ingredient instead (DEC-105).
+function ProposedIngredientFields({
+  row,
+  proposed,
+  references,
+  error,
+  searchIngredients,
+  onChange,
+  onReplace,
+}: ProposedIngredientFieldsProps): React.ReactElement {
+  return (
+    <fieldset className="col-span-12 space-y-2 rounded-md border border-dashed border-input p-2">
+      <legend className="px-1 text-xs text-muted-foreground">
+        New ingredient, added to your ingredients when you create the recipe
+      </legend>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <label className="space-y-1">
+          <span className="text-xs font-medium">Category</span>
+          <select
+            aria-label={`Category for the new ingredient in row ${row}`}
+            className={SELECT_CLASS}
+            value={proposed.categoryId ?? ''}
+            onChange={(event) => {
+              onChange({
+                categoryId:
+                  event.target.value === '' ? null : Number(event.target.value),
+              });
+            }}
+          >
+            <option value="">Choose…</option>
+            {references?.categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium">Unit</span>
+          <select
+            aria-label={`Unit for the new ingredient in row ${row}`}
+            className={SELECT_CLASS}
+            value={proposed.defaultUnitId ?? ''}
+            onChange={(event) => {
+              onChange({
+                defaultUnitId:
+                  event.target.value === '' ? null : Number(event.target.value),
+              });
+            }}
+          >
+            <option value="">Choose…</option>
+            {references?.units.map((unit) => (
+              <option key={unit.id} value={unit.id}>
+                {unit.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium">Shelf life (days)</span>
+          <Input
+            type="number"
+            min={1}
+            max={3650}
+            aria-label={`Shelf life in days for the new ingredient in row ${row}`}
+            value={proposed.averageShelfLifeDays ?? ''}
+            onChange={(event) => {
+              onChange({
+                averageShelfLifeDays:
+                  event.target.value === '' ? null : Number(event.target.value),
+              });
+            }}
+          />
+        </label>
+        <label className="flex cursor-pointer items-center gap-2 self-end pb-2 text-sm">
+          <Checkbox
+            checked={proposed.isPlant}
+            onCheckedChange={(value) => {
+              onChange({ isPlant: value === true });
+            }}
+            aria-label={`Plant for the new ingredient in row ${row}`}
+            className="h-4 w-4"
+          />
+          Plant
+        </label>
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <div className="space-y-1">
+        <span className="text-xs text-muted-foreground">
+          Or use an existing ingredient
+        </span>
+        <SearchableCombobox<IngredientPickerOption>
+          value={null}
+          onChange={onReplace}
+          searchQuery={searchIngredients}
+          placeholder="Search ingredients"
+          ariaLabel={`Use an existing ingredient for row ${row}`}
+        />
+      </div>
+    </fieldset>
+  );
+}
 
 export type { IngredientPickerOption };

@@ -1,9 +1,16 @@
 import type {
   IngredientReferences,
+  RecipeImportProposedIngredient,
   RecipeIngredientLine,
   RecipeReferenceItem,
 } from '@loftys-larder/shared';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { describe, expect, it, vi } from 'vitest';
@@ -12,6 +19,7 @@ import { suppressActNoise } from '@/test/act-noise.ts';
 
 import {
   IngredientList,
+  type IngredientDraftLine,
   type IngredientListProps,
   type IngredientPickerOption,
 } from './ingredient-list.tsx';
@@ -160,7 +168,12 @@ describe('IngredientList', () => {
     );
 
     expect(onLinesChange).toHaveBeenLastCalledWith([
-      { ingredient: ONION, quantity: '50', prepTypeId: null, isOptional: true },
+      expect.objectContaining({
+        ingredient: ONION,
+        quantity: '50',
+        prepTypeId: null,
+        isOptional: true,
+      }),
     ]);
   });
 
@@ -657,5 +670,154 @@ describe('IngredientList', () => {
     await user.clear(screen.getByLabelText('Quantity for row 1'));
     await user.type(screen.getByLabelText('Quantity for row 1'), '75');
     expect(screen.queryByText('Saved.')).toBeNull();
+  });
+  it('keeps a saved row key, and never gives a new row a saved key', async () => {
+    const user = userEvent.setup();
+    const onLinesChange = vi.fn();
+    setup({
+      initialDraftLines: [
+        {
+          key: 'new-50',
+          ingredient: ONION,
+          quantity: '50',
+          prepTypeId: null,
+          isOptional: false,
+        },
+      ],
+      onLinesChange,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+
+    const [lines] = onLinesChange.mock.lastCall as [IngredientDraftLine[]];
+    expect(lines[0]?.key).toBe('new-50');
+    expect(lines[1]?.key).toBeDefined();
+    expect(lines[1]?.key).not.toBe('new-50');
+  });
+
+  // Import Review (DEC-105): a row can point at a proposed new ingredient.
+  describe('proposed ingredients', () => {
+    const PROPOSED: RecipeImportProposedIngredient = {
+      key: 'n1',
+      name: 'Black pepper',
+      categoryId: null,
+      defaultUnitId: 1,
+      isPlant: true,
+      averageShelfLifeDays: null,
+    };
+    const PROPOSED_REFERENCES: IngredientReferences = {
+      categories: [{ id: 3, name: 'Spices' }],
+      units: [{ id: 1, name: 'g' }],
+    };
+
+    function setupProposed(overrides: Partial<IngredientListProps> = {}): {
+      onSubmit: ReturnType<typeof vi.fn>;
+    } {
+      return setup({
+        initialDraftLines: [
+          {
+            key: 'i2',
+            ingredient: null,
+            newKey: 'n1',
+            quantity: '2',
+            prepTypeId: null,
+            isOptional: false,
+          },
+        ],
+        proposedIngredients: new Map([['n1', PROPOSED]]),
+        references: PROPOSED_REFERENCES,
+        proposeIngredient: vi.fn(() => 'c1'),
+        ...overrides,
+      });
+    }
+
+    it('shows the row as new, with its details editable in place', async () => {
+      const onProposedIngredientChange = vi.fn();
+      const user = userEvent.setup();
+      setupProposed({ onProposedIngredientChange });
+
+      expect(screen.getByText('New')).toBeInTheDocument();
+      expect(
+        screen.getByLabelText('New ingredient name for row 1'),
+      ).toHaveValue('Black pepper');
+      expect(
+        screen.getByLabelText('Unit for the new ingredient in row 1'),
+      ).toHaveValue('1');
+
+      await user.selectOptions(
+        screen.getByLabelText('Category for the new ingredient in row 1'),
+        'Spices',
+      );
+      expect(onProposedIngredientChange).toHaveBeenCalledWith('n1', {
+        categoryId: 3,
+      });
+    });
+
+    it('blocks submit until the proposed ingredient is complete', async () => {
+      const { onSubmit } = setupProposed({ hideSaveButton: true });
+
+      expect(
+        screen.queryByRole('button', { name: 'Save ingredients' }),
+      ).not.toBeInTheDocument();
+      fireEvent.submit(screen.getByRole('form', { name: 'Ingredients' }));
+
+      expect(await screen.findByText('Choose a category')).toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('switches the row to an existing ingredient through the combobox', async () => {
+      const onProposedReplaced = vi.fn();
+      const onLinesChange = vi.fn();
+      const user = userEvent.setup();
+      setupProposed({ onProposedReplaced, onLinesChange });
+
+      await user.click(
+        screen.getByLabelText('Use an existing ingredient for row 1'),
+      );
+      await user.click(await screen.findByRole('option', { name: 'Onion' }));
+
+      expect(onProposedReplaced).toHaveBeenCalledWith('n1', ONION.id, false);
+      expect(screen.getByLabelText('Ingredient for row 1')).toHaveValue(
+        'Onion',
+      );
+      const [lines] = onLinesChange.mock.lastCall as [IngredientDraftLine[]];
+      expect(lines[0]?.newKey).toBeUndefined();
+      expect(lines[0]?.ingredient).toEqual(ONION);
+    });
+
+    it('proposes an ingredient for a name that isn’t in the list', async () => {
+      const proposeIngredient = vi.fn(() => 'c1');
+      const user = userEvent.setup();
+      setup({
+        proposedIngredients: new Map([
+          ['c1', { ...PROPOSED, key: 'c1', name: 'Basil' }],
+        ]),
+        references: PROPOSED_REFERENCES,
+        proposeIngredient,
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+      await user.type(screen.getByLabelText('Ingredient for row 1'), 'Basil');
+      await user.click(
+        await screen.findByRole('option', { name: 'New ingredient “Basil”' }),
+      );
+
+      expect(proposeIngredient).toHaveBeenCalledWith('Basil');
+      expect(
+        screen.getByLabelText('New ingredient name for row 1'),
+      ).toHaveValue('Basil');
+    });
+
+    it('shows the original line and a note on the quantity', () => {
+      setupProposed({
+        originalLines: new Map([['i2', 'Black pepper to taste']]),
+        quantityNotes: new Map([['i2', <span key="n">Amount guessed</span>]]),
+      });
+
+      expect(screen.getByText('Black pepper to taste')).toBeInTheDocument();
+      expect(
+        screen.getByLabelText('Quantity for row 1'),
+      ).toHaveAccessibleDescription('Amount guessed');
+    });
   });
 });

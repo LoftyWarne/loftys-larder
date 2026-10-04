@@ -1,16 +1,20 @@
 import { AFTER, BEFORE, NUMBER, escapeRegExp } from '@/lib/step-highlights.ts';
 import { trimTrailingZeros } from '@/lib/quantity-input.ts';
 
-export interface SuggestableIngredient {
-  ingredientId: number;
+// `ingredientId` is a household ingredient's id, or a string key for an
+// ingredient that doesn't exist yet (a proposed one in Import Review).
+export type SuggestionKey = number | string;
+
+export interface SuggestableIngredient<K extends SuggestionKey = number> {
+  ingredientId: K;
   name: string;
   unitName: string;
   // The recipe total, for "half the butter"; `null` when it isn't known.
   total: number | null;
 }
 
-export interface StepIngredientSuggestion {
-  ingredientId: number;
+export interface StepIngredientSuggestion<K extends SuggestionKey = number> {
+  ingredientId: K;
   // A `numeric(10,3)`-style decimal string, or `null` when the text states no
   // amount (which the recipe page then reads as "what's left").
   quantity: string | null;
@@ -38,11 +42,11 @@ const FRACTION_GLYPHS: Readonly<Record<string, number>> = {
 // word. Amounts come from a number and the ingredient's own unit written
 // next to the name ("50 g butter", "butter (50 g)", "2 onions" for `piece`),
 // or "half the X". Suggestions follow the order of first mention.
-export function suggestStepIngredients(
+export function suggestStepIngredients<K extends SuggestionKey = number>(
   text: string,
-  ingredients: readonly SuggestableIngredient[],
-): StepIngredientSuggestion[] {
-  const unique = new Map<number, SuggestableIngredient & { clean: string }>();
+  ingredients: readonly SuggestableIngredient<K>[],
+): StepIngredientSuggestion<K>[] {
+  const unique = new Map<K, SuggestableIngredient<K> & { clean: string }>();
   for (const ingredient of ingredients) {
     const clean = cleanName(ingredient.name);
     if (clean.length > 0 && !unique.has(ingredient.ingredientId)) {
@@ -52,8 +56,8 @@ export function suggestStepIngredients(
   const candidates = [...unique.values()];
 
   let remaining = text;
-  const spansById = new Map<number, NameSpan[]>();
-  const claim = (ingredientId: number, term: string): void => {
+  const spansById = new Map<K, NameSpan[]>();
+  const claim = (ingredientId: K, term: string): void => {
     const pattern = new RegExp(
       String.raw`${BEFORE}(?:${termSource(term)})(?:e?s)?${AFTER}`,
       'giu',
@@ -75,7 +79,8 @@ export function suggestStepIngredients(
 
   const byLength = (a: string, b: string): number => b.length - a.length;
   for (const candidate of [...candidates].sort(
-    (a, b) => byLength(a.clean, b.clean) || a.ingredientId - b.ingredientId,
+    (a, b) =>
+      byLength(a.clean, b.clean) || compareKeys(a.ingredientId, b.ingredientId),
   )) {
     claim(candidate.ingredientId, candidate.clean);
   }
@@ -94,7 +99,8 @@ export function suggestStepIngredients(
   });
   for (const { ingredientId, lastWord } of fallbacks.sort(
     (a, b) =>
-      byLength(a.lastWord, b.lastWord) || a.ingredientId - b.ingredientId,
+      byLength(a.lastWord, b.lastWord) ||
+      compareKeys(a.ingredientId, b.ingredientId),
   )) {
     claim(ingredientId, lastWord);
   }
@@ -106,6 +112,12 @@ export function suggestStepIngredients(
       if (!ingredient) return [];
       return [{ ingredientId, quantity: amountFor(text, spans, ingredient) }];
     });
+}
+
+// Ids compare by value, so household ingredients keep their id order.
+function compareKeys(a: SuggestionKey, b: SuggestionKey): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b));
 }
 
 function cleanName(name: string): string {
@@ -126,7 +138,7 @@ function termSource(term: string): string {
 function amountFor(
   text: string,
   spans: readonly NameSpan[],
-  ingredient: SuggestableIngredient,
+  ingredient: SuggestableIngredient<SuggestionKey>,
 ): string | null {
   for (const { start, end } of spans) {
     const value =
@@ -145,7 +157,7 @@ function unitSource(unitName: string): string {
 
 function amountBefore(
   prefix: string,
-  ingredient: SuggestableIngredient,
+  ingredient: SuggestableIngredient<SuggestionKey>,
 ): number | null {
   if (/\bhalf\s+(?:of\s+)?(?:the\s+)?$/iu.test(prefix)) {
     return ingredient.total === null ? null : ingredient.total / 2;

@@ -1,4 +1,11 @@
-import type { RecipeImportDraftSummary } from '@loftys-larder/shared';
+import {
+  RECIPE_IMPORT_IMAGE_ALLOWED_FORMATS,
+  RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
+  RECIPE_IMPORT_IMAGE_FOLDER,
+  RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
+  type RecipeImportDraftSummary,
+  type RecipeImportImageUploadCredentials,
+} from '@loftys-larder/shared';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
@@ -11,6 +18,7 @@ const {
   listInvalidateMock,
   discardMutateAsyncMock,
   navigateMock,
+  credentialsRefetchMock,
 } = vi.hoisted(() => ({
   startMutateAsyncMock: vi.fn(),
   startUseMutationMock: vi.fn(),
@@ -18,6 +26,7 @@ const {
   listInvalidateMock: vi.fn(),
   discardMutateAsyncMock: vi.fn(),
   navigateMock: vi.fn(),
+  credentialsRefetchMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
@@ -30,6 +39,11 @@ vi.mock('@/lib/trpc.ts', () => ({
       list: { useQuery: listUseQueryMock },
       discard: {
         useMutation: () => ({ mutateAsync: discardMutateAsyncMock }),
+      },
+    },
+    uploads: {
+      getRecipeImportImageCredentials: {
+        useQuery: () => ({ refetch: credentialsRefetchMock }),
       },
     },
   },
@@ -97,8 +111,52 @@ const IMPORTS: RecipeImportDraftSummary[] = [
   },
 ];
 
+const CREDENTIALS: RecipeImportImageUploadCredentials = {
+  cloudName: 'test-cloud',
+  apiKey: 'test-key',
+  timestamp: 1_700_000_000,
+  signature: '0123456789abcdef0123456789abcdef01234567',
+  folder: RECIPE_IMPORT_IMAGE_FOLDER,
+  allowedFormats: [...RECIPE_IMPORT_IMAGE_ALLOWED_FORMATS],
+  maxFileSize: RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
+  transformation: RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
+};
+
+const PAGE_1 = new File(['one'], 'page-1.heic', { type: 'image/heic' });
+const PAGE_2 = new File(['two'], 'page-2.jpg', { type: 'image/jpeg' });
+
+// Answers each Cloudinary upload with a public id named after the file.
+function mockCloudinary() {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
+    const file = (init?.body as FormData).get('file') as File;
+    const id = file.name.replace(/\..*$/, '');
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          secure_url: `https://res.cloudinary.com/test-cloud/${id}.jpg`,
+          public_id: `loftys-larder/imports/${id}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+  });
+}
+
+async function chooseImagesAndImport(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Photos' }));
+  await user.upload(screen.getByLabelText('Choose images to import'), [
+    PAGE_1,
+    PAGE_2,
+  ]);
+  await user.click(screen.getByRole('button', { name: 'Import' }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  credentialsRefetchMock.mockResolvedValue({ data: CREDENTIALS });
   setOnline(true);
   startUseMutationMock.mockReturnValue({
     mutateAsync: startMutateAsyncMock,
@@ -272,6 +330,150 @@ describe('RecipeImportPage', () => {
       expect(discardMutateAsyncMock).toHaveBeenCalledWith({ draftId: 42 });
     });
     expect(listInvalidateMock).toHaveBeenCalled();
+  });
+
+  describe('from images', () => {
+    it('uploads the images to Cloudinary, then imports them in page order', async () => {
+      const fetchSpy = mockCloudinary();
+      startMutateAsyncMock.mockResolvedValue({ kind: 'draft', draftId: 45 });
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await chooseImagesAndImport(user);
+
+      await waitFor(() => {
+        expect(startMutateAsyncMock).toHaveBeenCalledWith({
+          input: {
+            kind: 'images',
+            publicIds: [
+              'loftys-larder/imports/page-1',
+              'loftys-larder/imports/page-2',
+            ],
+          },
+        });
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const [url, init] = fetchSpy.mock.calls[0] ?? [];
+      expect(url).toBe(
+        'https://api.cloudinary.com/v1_1/test-cloud/image/upload',
+      );
+      expect((init?.body as FormData).get('folder')).toBe(
+        'loftys-larder/imports',
+      );
+      await waitFor(() => {
+        expect(navigateMock).toHaveBeenCalledWith({
+          to: '/recipes/import/$draftId',
+          params: { draftId: '45' },
+        });
+      });
+    });
+
+    it('shows that the images are uploading', async () => {
+      vi.spyOn(globalThis, 'fetch').mockReturnValue(
+        new Promise<Response>(() => undefined),
+      );
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await chooseImagesAndImport(user);
+
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        'Uploading the images…',
+      );
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    });
+
+    it('picks one of several recipes from the same images without uploading them again', async () => {
+      const fetchSpy = mockCloudinary();
+      startMutateAsyncMock
+        .mockResolvedValueOnce({
+          kind: 'several',
+          names: ['Lemon Tart', 'Shortcrust Pastry'],
+        })
+        .mockResolvedValueOnce({ kind: 'draft', draftId: 46 });
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await chooseImagesAndImport(user);
+      expect(
+        await screen.findByRole('heading', {
+          name: 'Those images have more than one recipe. Which one?',
+        }),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Lemon Tart' }));
+
+      expect(startMutateAsyncMock).toHaveBeenLastCalledWith({
+        input: {
+          kind: 'images',
+          publicIds: [
+            'loftys-larder/imports/page-1',
+            'loftys-larder/imports/page-2',
+          ],
+        },
+        pick: 'Lemon Tart',
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the images after a failed import, and tries again without uploading them again', async () => {
+      const fetchSpy = mockCloudinary();
+      startMutateAsyncMock
+        .mockRejectedValueOnce(domainError('IMPORT_NOT_A_RECIPE'))
+        .mockResolvedValueOnce({ kind: 'draft', draftId: 47 });
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await chooseImagesAndImport(user);
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Couldn’t find a recipe in that.',
+      );
+      expect(
+        within(
+          screen.getByRole('list', { name: 'Chosen images' }),
+        ).getAllByRole('listitem'),
+      ).toHaveLength(2);
+
+      await user.click(screen.getByRole('button', { name: 'Import' }));
+
+      await waitFor(() => {
+        expect(startMutateAsyncMock).toHaveBeenCalledTimes(2);
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('says when the upload fails, keeping the images and starting nothing', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('Server error', { status: 500 }),
+      );
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await chooseImagesAndImport(user);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Couldn’t upload the images. Try again.',
+      );
+      expect(startMutateAsyncMock).not.toHaveBeenCalled();
+      expect(screen.getByText('page-1.heic')).toBeInTheDocument();
+    });
+
+    it('disables Import until an image is chosen, and while offline', async () => {
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+      await user.click(screen.getByRole('button', { name: 'Photos' }));
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+
+      await user.upload(screen.getByLabelText('Choose images to import'), [
+        PAGE_1,
+      ]);
+      expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+
+      act(() => {
+        setOnline(false);
+        window.dispatchEvent(new Event('offline'));
+      });
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    });
   });
 
   it('shows no list when nothing is in progress', () => {

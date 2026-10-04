@@ -4,6 +4,7 @@ export * from './ingredients.ts';
 export * from './meal-plans.ts';
 export * from './recipe-drafts.ts';
 export * from './recipe-health.ts';
+export * from './recipe-import-originals.ts';
 export * from './recipe-social.ts';
 export * from './recipes.ts';
 export * from './reference.ts';

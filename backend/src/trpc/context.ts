@@ -2,7 +2,7 @@ import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
 import type { FastifyBaseLogger } from 'fastify';
 import type { Auth } from '../auth/index.ts';
 import type { Db } from '../db/index.ts';
-import type { CloudinaryCredentials } from '../lib/cloudinary.ts';
+import type { CloudinaryCredentials, DestroyImage } from '../lib/cloudinary.ts';
 import type { RecipeReader } from '../lib/recipe-reader/types.ts';
 import type { ImportRateLimitVerdict } from '../plugins/rate-limit.ts';
 
@@ -25,6 +25,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     db: Db;
     cloudinary: CloudinaryCredentials;
+    destroyImage: DestroyImage;
     recipeReader: RecipeReader;
   }
 }
@@ -40,6 +41,8 @@ export interface AppContext {
   reqId: string;
   db: Db;
   cloudinary: CloudinaryCredentials;
+  // Deletes discarded import images (DEC-107).
+  destroyImage: DestroyImage;
   session: AuthSession | null;
   user: AuthUser | null;
   // The request logger, which carries `reqId` (DEC-77).
@@ -57,6 +60,7 @@ export function createContext({
     reqId: req.id,
     db: req.server.db,
     cloudinary: req.server.cloudinary,
+    destroyImage: req.server.destroyImage,
     // Populated by the auth pre-handler (backend/src/plugins/auth.ts); both
     // are null on unauthenticated routes.
     session: req.session,

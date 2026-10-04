@@ -31,10 +31,16 @@ afterEach(() => {
 describe('ImageUploader', () => {
   it('uploads with snake_case multipart field names and calls onUploaded with secure_url', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ secure_url: 'https://cdn/img.jpg' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          secure_url: 'https://cdn/img.jpg',
+          public_id: 'loftys-larder/recipes/img',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
     );
     const onUploaded = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();

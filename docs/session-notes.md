@@ -4,6 +4,48 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-04 — Recipe Import from images, keeping the originals (FEAT-62)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format clean. Backend 725 tests and frontend 752 green. e2e: `recipe-import.spec.ts` and the Import axe cases pass (12 of 12 on two reruns; the first run had the new table missing from the e2e DB until `prepare-db` ran, and one dark-theme axe case failed once and passed on rerun). Manual verification not run, so no real image has been through Cloudinary or the model yet. FEAT-62 checkboxes left for the user to tick.
+
+**Before running locally or deploying:** migration `0024_recipe_import_originals` adds the table. Run `pnpm --filter backend db:migrate` against the dev database: `recipes.get` reads the table, so recipe pages fail until it exists. Production gets it from `release_command`.
+
+**Agreed at kick-off:**
+- New table `recipe_import_originals`: `(recipe_id, position)` PK, `public_id` unique, `ON DELETE RESTRICT` to `recipes`, no user FK (so the deletion sequence is unchanged), no `updated_at`.
+- Import upload limit 10 MB, checked in the browser (credential, not signature, as for recipe images).
+- One eager JPEG rendition at upload, `c_limit,w_2576,h_2576,f_jpg,q_auto`, sent to the reader and shown to the cook.
+- Create recipe reads the image ids from the server-written proposal in the draft it claims (DEC-108 amended).
+- Ids limited to `loftys-larder/imports/`; images upload on Import and are reused for "Try again" and the several-recipes pick; order as picked; account deletion awaits its destroy calls after commit.
+- Two-page spread and HEIC became manual verification steps 4 and 5. No new e2e spec.
+
+**Changes:**
+- **Shared:** import upload constants and `recipeImportImageUploadCredentialsSchema`; the import input gains `{ kind: 'images', publicIds }` (1–4, unique, imports folder only); `get` returns `images`; recipe `get` returns `originals`; `recipeImageViewSchema`.
+- **Backend:**
+  - `lib/cloudinary.ts`: `importImageUrl` and `createDestroyImage` (signed `image/destroy` with `invalidate`, "not found" counts as done). `destroyImage` is on the context, so tests swap in a recording fake.
+  - `lib/recipe-import/import-images.ts`: `importImagePublicIds` (reads only `fields.proposal.input`, so an unreadable proposal still gives up its images) and `destroyImportImages` (skips ids kept as Originals, logs failures, never throws).
+  - `uploads.getRecipeImportImageCredentials`.
+  - Reader seam: `RecipeReaderInput` gains `{ kind: 'images', urls }`; the Anthropic prompt covers images (pages in order, a spread is one recipe, say what's unreadable in a note) and sends URL image blocks before the household; the `fake` adapter reads `fake-several` etc. from image ids.
+  - `recipeImports`: `start` builds delivery URLs and logs `imageCount`; `get` returns image URLs; `discard` destroys after the delete; `createRecipe` writes Originals in the transaction.
+  - `recipes.get` returns Originals (joined to `recipes` for household scope). `user.deleteAccount` collects import-draft images in step 6 and destroys them after commit.
+- **Frontend:**
+  - `lib/cloudinary-upload.ts` (moved out of `ImageUploader`, which now uses it; it also returns `publicId`).
+  - Import page: "Paste text | Photos" toggle, `ImportImagePicker` (1–4, formats by MIME or extension, size, remove), upload on Import with an "Uploading the images…" state.
+  - `components/original-images.tsx`: `OriginalImages`, `OriginalImagesDialog` (page by page, "Open full size") and `ViewOriginalButton`. Import Review's original panel shows images; the recipe page has "View original".
+- **Docs:** FEAT-62 amended (kick-off notes, manual verification steps 4–5, gate check); DEC-107 and DEC-108 amended; `plan.md` (table, image flow, deletion); README.
+
+**Drift from the kick-off plan:**
+- New guard not in the plan: `destroyImportImages` never destroys an id a saved recipe keeps as an Original. The prefix check alone would still let a tampered draft name another recipe's Original. If that lookup fails, nothing is destroyed and a warning is logged.
+- Image previews in the picker were left out: HEIC doesn't render in most browsers, and object URLs fight StrictMode's double effects. The picker lists file names and page numbers, and Import Review shows the images.
+- `ImageUploader`'s test fixture now includes `public_id`, because the shared upload helper requires it.
+- `recipes.get`'s comment ("Four parallel queries") was stale and now lists all of them.
+
+**Open:**
+- **Not checked against Cloudinary or the live API:** the eager rendition's delivery URL (built without version or extension), HEIC upload, Anthropic fetching the URL, and the signed destroy. Manual verification steps 1–5 are the first real run.
+- **Orphans:** images from a failed or abandoned image import, or removed from the picker after uploading, stay in Cloudinary (DEC-50).
+- **CONTEXT.md** has no entry for "Original" yet, though DEC-107 and the UI use it.
+
+---
+
 ## 2026-10-04 — Import page and Import Review (FEAT-61)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format clean. Frontend 735 tests (45 new) green; backend untouched. e2e: the new `recipe-import.spec.ts` (6) and the new axe cases (Import page, Import Review at desktop and at 375 px, both themes) pass. Across three full a11y runs, one unrelated case failed once each (recipe filters dark, settings dark contrast on `#name`, plan list timeout) and passed on re-run: looks like existing flakiness, not chased. Manual verification not run. FEAT-61 checkboxes left for the user to tick.

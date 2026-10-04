@@ -168,6 +168,7 @@ const FULL_RECIPE: Recipe = {
   ratingCount: 0,
   tags: [],
   yourRating: null,
+  originals: [],
 };
 
 function makeNotFoundError(): TRPCClientError<never> {
@@ -450,6 +451,72 @@ describe('RecipeDetailPage', () => {
       'data-disabled',
       'true',
     );
+  });
+
+  it('offers View original only for a recipe imported from images', () => {
+    getUseQueryMock.mockReturnValue({
+      data: FULL_RECIPE,
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    expect(
+      screen.queryByRole('button', { name: 'View original' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens the Originals in page order from View original', async () => {
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...FULL_RECIPE,
+        originals: [
+          { url: 'https://img.test/p1' },
+          { url: 'https://img.test/p2' },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<RecipeDetailPage />);
+
+    await user.click(screen.getByRole('button', { name: 'View original' }));
+
+    const first = await screen.findByRole('dialog', { name: 'Page 1 of 2' });
+    expect(within(first).getByRole('img')).toHaveAttribute(
+      'src',
+      'https://img.test/p1',
+    );
+    expect(
+      within(first).getByRole('button', { name: 'Previous page' }),
+    ).toBeDisabled();
+    await user.click(within(first).getByRole('button', { name: 'Next page' }));
+    const second = await screen.findByRole('dialog', { name: 'Page 2 of 2' });
+    expect(within(second).getByRole('img')).toHaveAttribute(
+      'src',
+      'https://img.test/p2',
+    );
+    expect(
+      within(second).getByRole('button', { name: 'Next page' }),
+    ).toBeDisabled();
+  });
+
+  it('calls a single Original just that', async () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, originals: [{ url: 'https://img.test/p1' }] },
+      isLoading: false,
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<RecipeDetailPage />);
+
+    await user.click(screen.getByRole('button', { name: 'View original' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Original' });
+    expect(
+      within(dialog).queryByRole('button', { name: 'Next page' }),
+    ).not.toBeInTheDocument();
   });
 
   describe('plan ahead', () => {

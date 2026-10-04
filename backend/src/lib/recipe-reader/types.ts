@@ -14,11 +14,12 @@ export interface RecipeReaderHousehold {
   sources: { id: number; name: string }[];
 }
 
-// Prepared before the seam. Images and web pages will join text here.
-export interface RecipeReaderInput {
-  kind: 'text';
-  text: string;
-}
+// Prepared before the seam. Web pages will join these.
+export type RecipeReaderInput =
+  | { kind: 'text'; text: string }
+  // Delivery URLs in page order, built by the import procedure. Adapters
+  // never build or sign image URLs (DEC-109).
+  | { kind: 'images'; urls: string[] };
 
 export interface RecipeReadRequest {
   input: RecipeReaderInput;

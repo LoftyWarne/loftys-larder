@@ -186,6 +186,45 @@ describe('anthropic recipe reader', () => {
     expect(messages[0]?.content).toContain('"Fake Salad"');
   });
 
+  it('sends images as URLs in page order, ahead of the household', async () => {
+    const fake = fakeFetch(() => textResponse('{"outcome":"not_a_recipe"}'));
+    const reader = createRecipeReader(anthropicConfig, { fetch: fake.fetch });
+    await reader.read(
+      {
+        ...request,
+        input: {
+          kind: 'images',
+          urls: ['https://img.test/page-1', 'https://img.test/page-2'],
+        },
+        pick: 'Fake Salad',
+      },
+      new AbortController().signal,
+    );
+
+    const messages = fake.requests[0]?.body.messages as {
+      content: Record<string, unknown>[];
+    }[];
+    const content = messages[0]?.content ?? [];
+    expect(content.slice(0, 2)).toEqual([
+      {
+        type: 'image',
+        source: { type: 'url', url: 'https://img.test/page-1' },
+      },
+      {
+        type: 'image',
+        source: { type: 'url', url: 'https://img.test/page-2' },
+      },
+    ]);
+    expect(content[2]?.type).toBe('text');
+    const text = String(content[2]?.text);
+    expect(text).toContain('{"id":10,"name":"Olive Oil","unit":"ml"}');
+    expect(text).toContain('in the 2 images above, in page order');
+    expect(text).toContain(
+      'The images hold several recipes. Import only the one named: "Fake Salad"',
+    );
+    expect(text).not.toContain('<recipe_text>');
+  });
+
   it('returns the recipe as an unvalidated candidate, with usage', async () => {
     const { read } = readWith(() =>
       textResponse('{"outcome":"recipe","recipe":{"header":{"name":"Soup"}}}', {

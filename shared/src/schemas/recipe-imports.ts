@@ -9,6 +9,7 @@ import { recipeDraftEnvelopeSchema } from './recipe-drafts.ts';
 import {
   RECIPE_TAGS_MAX,
   recipeHeaderWritableSchema,
+  recipeImageViewSchema,
   recipeInstructionSchema,
   recipeQuantitySchema,
   recipeSourceNameSchema,
@@ -17,6 +18,7 @@ import {
   recipeTagNameSchema,
   stepPrepAheadSchema,
 } from './recipes.ts';
+import { RECIPE_IMPORT_IMAGE_FOLDER } from './uploads.ts';
 
 // Recipe Import (DEC-103 to DEC-109). Three shapes with one owner each
 // (DEC-108): the proposal, written into an import draft once by the server;
@@ -28,6 +30,7 @@ const idSchema = z.number().int().positive();
 const draftIdSchema = z.number().int().positive();
 
 export const RECIPE_IMPORT_TEXT_MAX_LENGTH = 20_000;
+export const RECIPE_IMPORT_IMAGES_MAX = 4;
 export const RECIPE_IMPORT_NOTES_MAX = 5;
 export const RECIPE_IMPORT_NOTE_MAX_LENGTH = 300;
 export const RECIPE_IMPORT_SEVERAL_MAX = 10;
@@ -39,17 +42,44 @@ const recipeImportPickSchema = z.string().trim().min(1).max(200);
 
 // --- Import input -----------------------------------------------------------
 
-// Images and web links will join this union.
+// Only images in the imports folder, so discarding an import can never
+// delete a recipe image (DEC-107). The cook's autosave sends the proposal
+// back, so this is checked wherever the ids are read.
+const IMPORT_IMAGE_PREFIX = `${RECIPE_IMPORT_IMAGE_FOLDER}/`;
+
+export const recipeImportImagePublicIdSchema = z
+  .string()
+  .max(255)
+  .refine(
+    (publicId) =>
+      publicId.startsWith(IMPORT_IMAGE_PREFIX) &&
+      /^[A-Za-z0-9_-]+$/.test(publicId.slice(IMPORT_IMAGE_PREFIX.length)),
+    'Not an import image',
+  );
+
+// Web links will join this union.
 export const recipeImportInputSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('text'),
     text: z.string().trim().min(1).max(RECIPE_IMPORT_TEXT_MAX_LENGTH),
   }),
+  // In page order.
+  z.object({
+    kind: z.literal('images'),
+    publicIds: z
+      .array(recipeImportImagePublicIdSchema)
+      .min(1)
+      .max(RECIPE_IMPORT_IMAGES_MAX)
+      .refine(
+        (publicIds) => new Set(publicIds).size === publicIds.length,
+        'Each image can only be used once',
+      ),
+  }),
 ]);
 
 export type RecipeImportInput = z.infer<typeof recipeImportInputSchema>;
 
-export const recipeImportInputKindSchema = z.enum(['text']);
+export const recipeImportInputKindSchema = z.enum(['text', 'images']);
 
 export type RecipeImportInputKind = z.infer<typeof recipeImportInputKindSchema>;
 
@@ -351,6 +381,8 @@ export type RecipeImportDraftIdInput = z.infer<
 export const getRecipeImportResultSchema = z.object({
   id: draftIdSchema,
   proposal: recipeImportProposalSchema.nullable(),
+  // An image import's images, in page order. Empty for any other input.
+  images: z.array(recipeImageViewSchema),
   draftData: recipeDraftEnvelopeSchema,
   lastUpdatedAt: z.number().int().nonnegative(),
 });

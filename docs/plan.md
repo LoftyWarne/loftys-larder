@@ -91,6 +91,8 @@ User profile includes a `themePreference` (`system` / `light` / `dark`, default 
 6. Deletes the user's rows in `recipe_drafts` (drafts are personal and not preserved).
 7. Removes the user row.
 
+Once that transaction commits, the images of the user's import drafts are deleted from Cloudinary, best effort: a failure is logged and doesn't fail the deletion. Originals kept by saved recipes are household data and stay (DEC-107).
+
 This preserves household data integrity when a member leaves or rage-quits.
 
 ### Non-functional requirements
@@ -170,7 +172,7 @@ This preserves household data integrity when a member leaves or rage-quits.
 - No `getCurrentScope()` resolver, no scope parameters threaded through repositories. The future tenancy mechanism (RLS? subdomain routing? membership join table?) is unknown enough that pre-building an abstraction risks fitting none of them.
 - `addedBy` / `createdBy` are informational, never authorisation predicates.
 
-**Image flow.** A tRPC procedure issues signed Cloudinary upload credentials with constraints baked into the signing parameters: `allowed_formats: ['jpg','jpeg','png','webp']`, `max_file_size: 5 MB`, fixed transformation preset (resize, auto-format). The browser uploads directly to Cloudinary. The returned URL is stored on the recipe via the standard recipe-update procedure. Backend never proxies binary data.
+**Image flow.** A tRPC procedure issues signed Cloudinary upload credentials with constraints baked into the signing parameters: `allowed_formats: ['jpg','jpeg','png','webp']`, `max_file_size: 5 MB`, fixed transformation preset (resize, auto-format). The browser uploads directly to Cloudinary. The returned URL is stored on the recipe via the standard recipe-update procedure. Backend never proxies binary data. Recipe Import images use a second preset (DEC-107): the `loftys-larder/imports` folder, HEIC allowed, a 10 MB limit checked in the browser, and a JPEG rendition capped at 2,576 px made at upload, which is what the model is sent and what the cook sees. The backend deletes a discarded import's images with a signed destroy call.
 
 **Date & timezone handling.** All "today"-relative logic — meal-plan status filtering, the date-overlap rule, shelf-life calculations — uses Europe/London time. v1 has no per-user timezone preference. The choice is centralised in a single date utility module so a multi-timezone future is a localised change.
 
@@ -229,6 +231,8 @@ Standard timestamps (`createdAt`, `updatedAt`) on all domain tables; `updatedAt`
 **`recipe_comments`** — `comment_id int PK`, `recipe_id FK`, `user_id FK NULL` (nullable for tombstoning), `comment text`, `created_at timestamptz`, `last_updated_at timestamptz NULL`.
 
 **`recipe_health_scores`** — `recipe_id int PK FK` (`ON DELETE RESTRICT`), `score smallint NOT NULL CHECK (score BETWEEN 1 AND 10)`, `summary text NULL`, `model text NOT NULL`, `scored_at timestamptz NOT NULL DEFAULT now()`, `is_stale boolean NOT NULL DEFAULT false`. One AI-produced score per recipe; no row means not scored. Recipe edits that change ingredients, method text, servings, nutrition or a variation's base set `is_stale` (DEC-101).
+
+**`recipe_import_originals`** — `recipe_id int FK` (`ON DELETE RESTRICT`), `position smallint NOT NULL CHECK (position >= 0)`, `public_id text NOT NULL`, `created_at timestamptz NOT NULL DEFAULT now()`. Composite PK `(recipe_id, position)`; `UNIQUE (public_id)`. The images a recipe was imported from, in page order, behind the recipe page's "View original" (DEC-107). Household-scoped through the join to `recipes`, like `recipe_tag_links`. Kept through soft delete and account deletion; rows never change.
 
 **`meal_plans`** — `plan_id int PK`, `household_id FK`, `name varchar NOT NULL`, `start_date date`, `end_date date`, `created_by_user_id FK NULL` (nullable for tombstoning), `is_deleted boolean DEFAULT false`. `CHECK (start_date <= end_date)`.
 

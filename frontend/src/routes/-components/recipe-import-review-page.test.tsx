@@ -1,6 +1,7 @@
 import type {
   CreateRecipeFromImportInput,
   IngredientListItem,
+  RecipeImportProposal,
 } from '@loftys-larder/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -186,6 +187,61 @@ describe('RecipeImportReviewPage', () => {
     expect(original).toHaveTextContent(
       'Weeknight Pasta 2 tbsp olive oil Black pepper to taste',
     );
+  });
+
+  it('shows an image import’s images alongside the proposal, each of which can be enlarged', async () => {
+    const proposal: RecipeImportProposal = {
+      ...PROPOSAL,
+      input: {
+        kind: 'images',
+        publicIds: ['loftys-larder/imports/p1', 'loftys-larder/imports/p2'],
+      },
+    };
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...importDraft(),
+        proposal,
+        images: [
+          { url: 'https://img.test/p1' },
+          { url: 'https://img.test/p2' },
+        ],
+        draftData: { version: 1, fields: { proposal } },
+      },
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<RecipeImportReviewPage />);
+
+    await user.click(screen.getByText('Original images'));
+    const original = screen.getByText('Original images').closest('details');
+    if (!original) throw new Error('no original');
+    expect(
+      within(original)
+        .getAllByRole('img')
+        .map((img) => [img.getAttribute('alt'), img.getAttribute('src')]),
+    ).toEqual([
+      ['Page 1 of 2', 'https://img.test/p1'],
+      ['Page 2 of 2', 'https://img.test/p2'],
+    ]);
+
+    await user.click(
+      within(original).getByRole('button', { name: 'Enlarge page 2 of 2' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Page 2 of 2' });
+    expect(within(dialog).getByRole('img')).toHaveAttribute(
+      'src',
+      'https://img.test/p2',
+    );
+    expect(
+      within(dialog).getByRole('link', { name: 'Open full size' }),
+    ).toHaveAttribute('href', 'https://img.test/p2');
+
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Previous page' }),
+    );
+    expect(
+      await screen.findByRole('dialog', { name: 'Page 1 of 2' }),
+    ).toBeInTheDocument();
   });
 
   it('fills every section with the editor’s own controls', () => {

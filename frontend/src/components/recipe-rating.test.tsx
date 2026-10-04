@@ -96,6 +96,7 @@ const BASE_RECIPE: Recipe = {
   yourRating: 3,
   ingredients: [],
   method: [],
+  originals: [],
 };
 
 beforeEach(() => {

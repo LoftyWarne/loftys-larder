@@ -23,6 +23,10 @@ import {
 } from '../../db/schema/recipe-social.ts';
 import { recipes } from '../../db/schema/recipes.ts';
 import { makeWithTransaction } from '../../db/withTransaction.ts';
+import {
+  destroyImportImages,
+  importImagePublicIds,
+} from '../../lib/recipe-import/import-images.ts';
 import { protectedProcedure, router } from '../init.ts';
 
 const RECENT_SIGN_IN_HOURS = 24;
@@ -187,7 +191,7 @@ export const userRouter = router({
       const email = ctx.user.email;
 
       const withTransaction = makeWithTransaction(ctx.db);
-      await withTransaction(async (tx) => {
+      const importImageIds = await withTransaction(async (tx) => {
         // 1. Hard-delete personal ratings (RESTRICT FK).
         await tx.delete(recipeRatings).where(eq(recipeRatings.userId, userId));
 
@@ -216,8 +220,15 @@ export const userRouter = router({
           .set({ chefUserId: null })
           .where(eq(mealPlanSlots.chefUserId, userId));
 
-        // 6. Hard-delete in-progress recipe drafts (RESTRICT FK).
-        await tx.delete(recipeDrafts).where(eq(recipeDrafts.userId, userId));
+        // 6. Hard-delete in-progress recipe drafts (RESTRICT FK), noting
+        //    the images of any image imports among them.
+        const drafts = await tx
+          .delete(recipeDrafts)
+          .where(eq(recipeDrafts.userId, userId))
+          .returning({
+            kind: recipeDrafts.kind,
+            draftData: recipeDrafts.draftData,
+          });
 
         // Sweep unused magic links for this address, or one clicked after
         // deletion would sign the user straight back up. The magic-link plugin
@@ -232,7 +243,15 @@ export const userRouter = router({
 
         // 7. Delete the user row. `sessions` and `accounts` cascade.
         await tx.delete(users).where(eq(users.id, userId));
+
+        return drafts.flatMap((draft) =>
+          draft.kind === 'import' ? importImagePublicIds(draft.draftData) : [],
+        );
       });
+
+      // Only once the deletion has committed, and best effort: Originals of
+      // saved recipes are household data and stay (DEC-29, DEC-107).
+      await destroyImportImages(ctx, importImageIds);
 
       return { deleted: true };
     }),

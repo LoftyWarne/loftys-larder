@@ -83,6 +83,7 @@ import {
   unitsOfMeasurement,
 } from '../../db/schema/reference.ts';
 import { recipeHealthScores } from '../../db/schema/recipe-health.ts';
+import { recipeImportOriginals } from '../../db/schema/recipe-import-originals.ts';
 import {
   recipeComments,
   recipeRatings,
@@ -107,6 +108,7 @@ import {
   pickableRecipesWhere,
   type PickableRecipesOptions,
 } from '../../lib/pickable-recipes.ts';
+import { importImageUrl } from '../../lib/cloudinary.ts';
 import { recipePlantPointsExpr } from '../../lib/plant-points.ts';
 import {
   assertIngredientLinesValid,
@@ -338,8 +340,9 @@ export const recipesRouter = router({
       const userId = ctx.user.id;
       const recipeId = input.id;
 
-      // Four parallel queries — header+source, ingredients (joined),
-      // ordered method, ratings aggregate including the caller's own row.
+      // Parallel queries — header+source, ingredients (joined), ordered
+      // method, ratings aggregate including the caller's own row, tags and
+      // Originals.
       // Soft-deleted recipes are returned (DEC-21). The base recipe is joined
       // via an aliased self-join so the editor can render the base affordance
       // + a "(deleted)" hint without a second request.
@@ -351,6 +354,7 @@ export const recipesRouter = router({
         stepIngredientsByStep,
         ratingRow,
         tagsByRecipe,
+        originalRows,
       ] = await Promise.all([
         ctx.db
           .select({
@@ -417,6 +421,18 @@ export const recipesRouter = router({
         loadStepIngredientsByStep(ctx.db, recipeId),
         loadRatingAggregate(ctx.db, recipeId, userId),
         loadTagsByRecipe(ctx.db, [recipeId]),
+        // Kept through soft delete, like the recipe (DEC-107).
+        ctx.db
+          .select({ publicId: recipeImportOriginals.publicId })
+          .from(recipeImportOriginals)
+          .innerJoin(recipes, eq(recipes.id, recipeImportOriginals.recipeId))
+          .where(
+            and(
+              eq(recipeImportOriginals.recipeId, recipeId),
+              eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .orderBy(asc(recipeImportOriginals.position)),
       ]);
 
       const header = headerRows[0];
@@ -465,6 +481,9 @@ export const recipesRouter = router({
         ratingCount: ratingRow.ratingCount,
         yourRating: ratingRow.yourRating,
         tags: tagsByRecipe.get(recipeId) ?? [],
+        originals: originalRows.map((row) => ({
+          url: importImageUrl(ctx.cloudinary.cloudName, row.publicId),
+        })),
         healthScore:
           header.healthScore === null ||
           header.healthScoreIsStale === null ||

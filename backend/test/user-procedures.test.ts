@@ -21,12 +21,14 @@ import {
 import { households } from '../src/db/schema/household.ts';
 import { mealPlans, mealPlanSlots } from '../src/db/schema/meal-plans.ts';
 import { recipeDrafts } from '../src/db/schema/recipe-drafts.ts';
+import { recipeImportOriginals } from '../src/db/schema/recipe-import-originals.ts';
 import {
   recipeComments,
   recipeRatings,
 } from '../src/db/schema/recipe-social.ts';
 import { recipes } from '../src/db/schema/recipes.ts';
 import { mealOccasions } from '../src/db/schema/reference.ts';
+import type { DestroyImage } from '../src/lib/cloudinary.ts';
 import type { AppContext } from '../src/trpc/context.ts';
 import { appRouter } from '../src/trpc/router.ts';
 import {
@@ -63,6 +65,7 @@ describe('user procedures', () => {
         ${recipeRatings},
         ${recipeComments},
         ${recipeDrafts},
+        ${recipeImportOriginals},
         ${mealPlanSlots},
         ${mealPlans},
         ${recipes},
@@ -86,14 +89,16 @@ describe('user procedures', () => {
   });
 
   function makeContext(
-    overrides: { authenticated?: boolean } = {},
+    overrides: { authenticated?: boolean; destroyImage?: DestroyImage } = {},
   ): AppContext {
     const authenticated = overrides.authenticated ?? true;
+    const deps = contextDeps();
     return {
       req: {} as AppContext['req'],
       reply: {} as AppContext['reply'],
       reqId: 'rid-test',
-      ...contextDeps(),
+      ...deps,
+      destroyImage: overrides.destroyImage ?? deps.destroyImage,
       db,
       cloudinary: {
         cloudName: 'test-cloud',
@@ -767,6 +772,128 @@ describe('user procedures', () => {
       await expect(
         caller.user.deleteAccount({ emailConfirmation: USER_EMAIL }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+
+    describe('import images', () => {
+      const MINE = [
+        'loftys-larder/imports/mine-1',
+        'loftys-larder/imports/mine-2',
+      ];
+      const THEIRS = 'loftys-larder/imports/theirs';
+      const KEPT = 'loftys-larder/imports/kept';
+
+      async function insertImportDraft(
+        userId: string,
+        input: Record<string, unknown>,
+      ): Promise<void> {
+        await db.insert(recipeDrafts).values({
+          userId,
+          recipeId: null,
+          kind: 'import',
+          draftData: { version: 1, fields: { proposal: { input } } },
+        });
+      }
+
+      async function seedImports(): Promise<void> {
+        await seedOtherUser();
+        await db.insert(sessions).values({
+          id: SESSION_ID,
+          userId: USER_ID,
+          token: 'tok',
+          expiresAt: new Date(Date.now() + 60_000),
+        });
+        await insertImportDraft(USER_ID, { kind: 'images', publicIds: MINE });
+        await insertImportDraft(USER_ID, { kind: 'text', text: 'Soup' });
+        await insertImportDraft(OTHER_USER_ID, {
+          kind: 'images',
+          publicIds: [THEIRS],
+        });
+        // An Original the user imported is household data and stays.
+        const recipeId = await insertRecipe('Imported', {
+          addedByUserId: USER_ID,
+        });
+        await db
+          .insert(recipeImportOriginals)
+          .values({ recipeId, position: 0, publicId: KEPT });
+      }
+
+      it("deletes the images of the user's import drafts once the deletion has committed", async () => {
+        await seedImports();
+        const destroyed: { publicId: string; userRows: number }[] = [];
+        const destroyImage: DestroyImage = async (publicId) => {
+          const userRows = await db
+            .select()
+            .from(users)
+            .where(eq(users.id, USER_ID));
+          destroyed.push({ publicId, userRows: userRows.length });
+        };
+
+        await createCaller(makeContext({ destroyImage })).user.deleteAccount({
+          emailConfirmation: USER_EMAIL,
+        });
+
+        // Destroy calls run concurrently, so their order isn't fixed.
+        expect(
+          [...destroyed].sort((a, b) => a.publicId.localeCompare(b.publicId)),
+        ).toEqual([
+          { publicId: MINE[0], userRows: 0 },
+          { publicId: MINE[1], userRows: 0 },
+        ]);
+        const originals = await db.select().from(recipeImportOriginals);
+        expect(originals.map((row) => row.publicId)).toEqual([KEPT]);
+      });
+
+      it('still deletes the account when Cloudinary fails', async () => {
+        await seedImports();
+        const destroyImage: DestroyImage = () =>
+          Promise.reject(new Error('Cloudinary is down'));
+
+        const result = await createCaller(
+          makeContext({ destroyImage }),
+        ).user.deleteAccount({ emailConfirmation: USER_EMAIL });
+
+        expect(result).toEqual({ deleted: true });
+        const userRows = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, USER_ID));
+        expect(userRows).toHaveLength(0);
+      });
+
+      it('deletes no images when the deletion rolls back', async () => {
+        await seedImports();
+        const destroyed: string[] = [];
+        const destroyImage: DestroyImage = (publicId) => {
+          destroyed.push(publicId);
+          return Promise.resolve();
+        };
+        const originalTransaction = db.transaction.bind(db);
+        const spy = vi
+          .spyOn(db, 'transaction')
+          .mockImplementationOnce((fn: Parameters<typeof db.transaction>[0]) =>
+            originalTransaction(async (tx) => {
+              await fn(tx);
+              throw new Error('synthetic mid-transaction failure');
+            }),
+          );
+
+        try {
+          await expect(
+            createCaller(makeContext({ destroyImage })).user.deleteAccount({
+              emailConfirmation: USER_EMAIL,
+            }),
+          ).rejects.toThrow();
+        } finally {
+          spy.mockRestore();
+        }
+
+        expect(destroyed).toEqual([]);
+        const drafts = await db
+          .select()
+          .from(recipeDrafts)
+          .where(eq(recipeDrafts.userId, USER_ID));
+        expect(drafts).toHaveLength(2);
+      });
     });
   });
 });

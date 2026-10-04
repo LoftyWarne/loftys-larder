@@ -29,6 +29,7 @@ import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
 import { recipeDrafts } from '../src/db/schema/recipe-drafts.ts';
 import { recipeHealthScores } from '../src/db/schema/recipe-health.ts';
+import { recipeImportOriginals } from '../src/db/schema/recipe-import-originals.ts';
 import {
   recipeIngredients,
   recipeMethod,
@@ -43,8 +44,10 @@ import {
   preparationTypes,
   unitsOfMeasurement,
 } from '../src/db/schema/reference.ts';
+import type { DestroyImage } from '../src/lib/cloudinary.ts';
 import {
   createFakeRecipeReader,
+  FAKE_READER_IMAGE_MARKERS,
   FAKE_READER_MARKERS,
 } from '../src/lib/recipe-reader/fake.ts';
 import {
@@ -73,6 +76,11 @@ const OTHER_HOUSEHOLD_ID = '00000000-0000-4000-8000-0000000009bb';
 
 const RECIPE_TEXT = 'Tomato Soup\n2 tbsp olive oil\nSimmer for 20 minutes.';
 
+const PAGE_1 = 'loftys-larder/imports/page1';
+const PAGE_2 = 'loftys-larder/imports/page2';
+const IMPORT_URL_PREFIX =
+  'https://res.cloudinary.com/test-cloud/image/upload/c_limit,w_2576,h_2576,f_jpg,q_auto/';
+
 describe('recipe imports procedures', () => {
   let testDb: TestDb | undefined;
   let db!: NodePgDatabase<Schema>;
@@ -97,6 +105,7 @@ describe('recipe imports procedures', () => {
     await db.execute(sql`
       truncate table
         ${recipeDrafts},
+        ${recipeImportOriginals},
         ${recipeHealthScores},
         ${recipeTagLinks},
         ${recipeTags},
@@ -200,6 +209,7 @@ describe('recipe imports procedures', () => {
     reader?: RecipeReader;
     allowStart?: () => Promise<ImportRateLimitVerdict>;
     log?: AppContext['log'];
+    destroyImage?: DestroyImage;
   }
 
   function makeContext(options: ContextOptions = {}): AppContext {
@@ -215,6 +225,7 @@ describe('recipe imports procedures', () => {
         apiKey: 'test-key',
         apiSecret: 'test-secret',
       },
+      destroyImage: options.destroyImage ?? (() => Promise.resolve()),
       session: authenticated
         ? {
             id: SESSION_ID,
@@ -281,6 +292,29 @@ describe('recipe imports procedures', () => {
     );
     if (result.kind !== 'draft') throw new Error('expected a draft');
     return result.draftId;
+  }
+
+  async function startImageImport(
+    publicIds: string[] = [PAGE_1, PAGE_2],
+    options: ContextOptions = {},
+  ): Promise<number> {
+    const result = await createCaller(makeContext(options)).recipeImports.start(
+      { input: { kind: 'images', publicIds } },
+    );
+    if (result.kind !== 'draft') throw new Error('expected a draft');
+    return result.draftId;
+  }
+
+  // Records each destroy call; ids in `failing` reject.
+  function destroySpy(failing: readonly string[] = []) {
+    const destroyed: string[] = [];
+    const destroyImage: DestroyImage = (publicId) => {
+      destroyed.push(publicId);
+      return failing.includes(publicId)
+        ? Promise.reject(new Error('Cloudinary is down'))
+        : Promise.resolve();
+    };
+    return { destroyImage, destroyed };
   }
 
   async function draftRows() {
@@ -558,6 +592,87 @@ describe('recipe imports procedures', () => {
         }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
+
+    it('sends the reader each image as a delivery URL, in page order', async () => {
+      const { reader, requests } = spyReader();
+      const draftId = await startImageImport([PAGE_2, PAGE_1], { reader });
+
+      expect(requests[0]?.input).toEqual({
+        kind: 'images',
+        urls: [
+          `${IMPORT_URL_PREFIX}${PAGE_2}`,
+          `${IMPORT_URL_PREFIX}${PAGE_1}`,
+        ],
+      });
+      const proposal = await storedProposal(draftId);
+      expect(proposal.input).toEqual({
+        kind: 'images',
+        publicIds: [PAGE_2, PAGE_1],
+      });
+      expect(proposal.header.imageUrl).toBeNull();
+    });
+
+    it.each([
+      ['an image outside the imports folder', ['loftys-larder/recipes/abc']],
+      ['a path that climbs out of the folder', ['loftys-larder/imports/../x']],
+      ['no images', []],
+      [
+        'five images',
+        ['a', 'b', 'c', 'd', 'e'].map((id) => `loftys-larder/imports/${id}`),
+      ],
+      ['the same image twice', [PAGE_1, PAGE_1]],
+    ])('refuses %s without calling the reader', async (_label, publicIds) => {
+      const { reader, requests } = spyReader();
+      await expect(
+        createCaller(makeContext({ reader })).recipeImports.start({
+          input: { kind: 'images', publicIds },
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect(requests).toHaveLength(0);
+      expect(await draftRows()).toHaveLength(0);
+    });
+
+    it('imports the picked recipe from the same images', async () => {
+      const several = `loftys-larder/imports/${FAKE_READER_IMAGE_MARKERS.several}`;
+      const { reader, requests } = spyReader();
+      const caller = createCaller(makeContext({ reader }));
+      const input = { kind: 'images' as const, publicIds: [several, PAGE_2] };
+
+      expect(await caller.recipeImports.start({ input })).toEqual({
+        kind: 'several',
+        names: ['Fake Soup', 'Fake Salad'],
+      });
+      const picked = await caller.recipeImports.start({
+        input,
+        pick: 'Fake Salad',
+      });
+
+      expect(picked.kind).toBe('draft');
+      expect(requests[1]?.input).toEqual(requests[0]?.input);
+      expect(requests[1]?.pick).toBe('Fake Salad');
+    });
+
+    it('logs how many images, and never their URLs', async () => {
+      const lines: string[] = [];
+      const log = pino(
+        { level: 'info' },
+        { write: (line) => lines.push(line) },
+      );
+
+      await startImageImport([PAGE_1, PAGE_2], { log });
+
+      const entry = lines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((logged) => 'modelUsage' in logged);
+      expect(entry?.modelUsage).toMatchObject({
+        inputKind: 'images',
+        imageCount: 2,
+        outcome: 'draft',
+      });
+      const output = lines.join('');
+      expect(output).not.toContain('res.cloudinary.com');
+      expect(output).not.toContain(PAGE_1);
+    });
   });
 
   async function insertManualDraft(): Promise<number> {
@@ -666,6 +781,103 @@ describe('recipe imports procedures', () => {
 
       const remaining = (await draftRows()).map((row) => row.id);
       expect(remaining).toEqual([theirs, manual]);
+    });
+
+    it('lists and gets an image import with its images in page order', async () => {
+      const draftId = await startImageImport([PAGE_2, PAGE_1]);
+      const caller = createCaller(makeContext());
+
+      expect((await caller.recipeImports.list())[0]).toMatchObject({
+        id: draftId,
+        inputKind: 'images',
+      });
+      expect((await caller.recipeImports.get({ draftId })).images).toEqual([
+        { url: `${IMPORT_URL_PREFIX}${PAGE_2}` },
+        { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
+      ]);
+    });
+
+    it('gets a text import with no images', async () => {
+      const draftId = await startImport();
+      const result = await createCaller(makeContext()).recipeImports.get({
+        draftId,
+      });
+      expect(result.images).toEqual([]);
+    });
+
+    it("deletes a discarded import's images from Cloudinary", async () => {
+      const draftId = await startImageImport();
+      const { destroyImage, destroyed } = destroySpy();
+
+      const result = await createCaller(
+        makeContext({ destroyImage }),
+      ).recipeImports.discard({ draftId });
+
+      expect(result).toEqual({ deleted: true });
+      expect(destroyed).toEqual([PAGE_1, PAGE_2]);
+      expect(await draftRows()).toHaveLength(0);
+    });
+
+    it('discards an import even when Cloudinary fails, and logs it', async () => {
+      const draftId = await startImageImport();
+      const { destroyImage, destroyed } = destroySpy([PAGE_1]);
+      const lines: string[] = [];
+      const log = pino(
+        { level: 'info' },
+        { write: (line) => lines.push(line) },
+      );
+
+      const result = await createCaller(
+        makeContext({ destroyImage, log }),
+      ).recipeImports.discard({ draftId });
+
+      expect(result).toEqual({ deleted: true });
+      expect(destroyed).toEqual([PAGE_1, PAGE_2]);
+      expect(await draftRows()).toHaveLength(0);
+      const warning = lines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find(
+          (entry) => entry.msg === 'Import image not deleted from Cloudinary',
+        );
+      expect(warning).toMatchObject({ level: 40, publicId: PAGE_1 });
+    });
+
+    it('destroys nothing for a text import or an import that is not theirs', async () => {
+      const text = await startImport();
+      const theirs = await startImageImport([PAGE_1], {
+        userId: OTHER_USER_ID,
+      });
+      const { destroyImage, destroyed } = destroySpy();
+      const caller = createCaller(makeContext({ destroyImage }));
+
+      await caller.recipeImports.discard({ draftId: text });
+      await caller.recipeImports.discard({ draftId: theirs });
+
+      expect(destroyed).toEqual([]);
+    });
+
+    it('never destroys an image a saved recipe keeps as an Original', async () => {
+      const [recipe] = await db
+        .insert(recipes)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          name: 'Kept',
+          baseServings: 2,
+        })
+        .returning({ id: recipes.id });
+      if (!recipe) throw new Error('recipe seed failed');
+      await db
+        .insert(recipeImportOriginals)
+        .values({ recipeId: recipe.id, position: 0, publicId: PAGE_1 });
+      // The cook's autosave can send any ids back in the proposal.
+      const draftId = await startImageImport([PAGE_1, PAGE_2]);
+      const { destroyImage, destroyed } = destroySpy();
+
+      await createCaller(makeContext({ destroyImage })).recipeImports.discard({
+        draftId,
+      });
+
+      expect(destroyed).toEqual([PAGE_2]);
     });
   });
 
@@ -1030,6 +1242,98 @@ describe('recipe imports procedures', () => {
       await expect(
         createCaller(makeContext()).recipeImports.createRecipe(input),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it("keeps an image import's images as Originals in page order, never as the recipe image", async () => {
+      const draftId = await startImageImport([PAGE_2, PAGE_1]);
+      const { destroyImage, destroyed } = destroySpy();
+      const caller = createCaller(makeContext({ destroyImage }));
+
+      const { recipeId } = await caller.recipeImports.createRecipe(
+        createInput(draftId),
+      );
+
+      const originals = await db
+        .select()
+        .from(recipeImportOriginals)
+        .orderBy(asc(recipeImportOriginals.position));
+      expect(
+        originals.map(({ recipeId: id, position, publicId }) => ({
+          id,
+          position,
+          publicId,
+        })),
+      ).toEqual([
+        { id: recipeId, position: 0, publicId: PAGE_2 },
+        { id: recipeId, position: 1, publicId: PAGE_1 },
+      ]);
+      const recipe = await caller.recipes.get({ id: recipeId });
+      expect(recipe.imageUrl).toBeNull();
+      expect(recipe.originals).toEqual([
+        { url: `${IMPORT_URL_PREFIX}${PAGE_2}` },
+        { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
+      ]);
+      expect(destroyed).toEqual([]);
+    });
+
+    it('keeps Originals through soft delete and restore', async () => {
+      const draftId = await startImageImport([PAGE_1]);
+      const caller = createCaller(makeContext());
+      const { recipeId } = await caller.recipeImports.createRecipe(
+        createInput(draftId),
+      );
+
+      await caller.recipes.softDelete({ id: recipeId });
+      expect((await caller.recipes.get({ id: recipeId })).originals).toEqual([
+        { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
+      ]);
+      await caller.recipes.restore({ id: recipeId });
+      expect((await caller.recipes.get({ id: recipeId })).originals).toEqual([
+        { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
+      ]);
+    });
+
+    it('keeps no Originals for a text import', async () => {
+      const draftId = await startImport();
+      const caller = createCaller(makeContext());
+      const { recipeId } = await caller.recipeImports.createRecipe(
+        createInput(draftId),
+      );
+
+      expect(await db.select().from(recipeImportOriginals)).toHaveLength(0);
+      expect((await caller.recipes.get({ id: recipeId })).originals).toEqual(
+        [],
+      );
+    });
+
+    it('rolls the whole recipe back when an Original cannot be written', async () => {
+      const [kept] = await db
+        .insert(recipes)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          name: 'Kept',
+          baseServings: 2,
+        })
+        .returning({ id: recipes.id });
+      if (!kept) throw new Error('recipe seed failed');
+      await db
+        .insert(recipeImportOriginals)
+        .values({ recipeId: kept.id, position: 0, publicId: PAGE_2 });
+      const draftId = await startImageImport([PAGE_1, PAGE_2]);
+
+      await expect(
+        createCaller(makeContext()).recipeImports.createRecipe(
+          createInput(draftId),
+        ),
+      ).rejects.toBeDefined();
+
+      const recipeNames = (await db.select().from(recipes)).map(
+        (row) => row.name,
+      );
+      expect(recipeNames).toEqual(['Kept']);
+      expect(await householdSourceNames()).toEqual(['BBC Good Food']);
+      expect(await db.select().from(recipeImportOriginals)).toHaveLength(1);
+      expect((await draftRows()).map((row) => row.id)).toEqual([draftId]);
     });
   });
 });

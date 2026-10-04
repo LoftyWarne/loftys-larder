@@ -118,6 +118,14 @@ export type RecipeHealthScoreDetail = z.infer<
   typeof recipeHealthScoreDetailSchema
 >;
 
+// An image to look at: an import's image in Import Review, or one of a
+// recipe's Originals (DEC-107).
+export const recipeImageViewSchema = z.object({
+  url: z.string(),
+});
+
+export type RecipeImageView = z.infer<typeof recipeImageViewSchema>;
+
 // Browse card / picker row.
 export const recipeListItemSchema = z.object({
   id: recipeIdSchema,
@@ -169,6 +177,8 @@ export const recipeSchema = recipeListItemSchema.extend({
   method: z.array(recipeMethodStepSchema),
   yourRating: ratingSchema.nullable(),
   healthScore: recipeHealthScoreDetailSchema.nullable(),
+  // The images an imported recipe was read from, in page order.
+  originals: z.array(recipeImageViewSchema),
 });
 
 export type Recipe = z.infer<typeof recipeSchema>;

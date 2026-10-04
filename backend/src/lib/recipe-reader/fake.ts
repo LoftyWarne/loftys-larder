@@ -8,9 +8,10 @@ import {
 } from './types.ts';
 
 // Canned outcomes for backend tests and e2e, chosen by markers in the input
-// text. Any other text gets a small candidate built from the household it
-// was sent, with one matched ingredient, one proposed new ingredient, and a
-// converted and a nominal Estimate.
+// text, or in an image's URL for an image import. Any other input gets a
+// small candidate built from the household it was sent, with one matched
+// ingredient, one proposed new ingredient, and a converted and a nominal
+// Estimate.
 export const FAKE_READER_MARKERS = {
   several: '[fake:several]',
   notARecipe: '[fake:not-a-recipe]',
@@ -18,6 +19,17 @@ export const FAKE_READER_MARKERS = {
   unavailable: '[fake:unavailable]',
   invalid: '[fake:invalid]',
 } as const;
+
+// Image public ids can't hold brackets or colons.
+export const FAKE_READER_IMAGE_MARKERS = {
+  several: 'fake-several',
+  notARecipe: 'fake-not-a-recipe',
+  timeout: 'fake-timeout',
+  unavailable: 'fake-unavailable',
+  invalid: 'fake-invalid',
+} as const satisfies Record<keyof typeof FAKE_READER_MARKERS, string>;
+
+type FakeMarker = keyof typeof FAKE_READER_MARKERS;
 
 export const FAKE_READER_MODEL = 'fake';
 export const FAKE_SEVERAL_NAMES = ['Fake Soup', 'Fake Salad'];
@@ -39,23 +51,29 @@ function readFake(
   signal: AbortSignal,
 ): RecipeReading {
   if (signal.aborted) throw new RecipeReaderTimeoutError();
-  const text = request.input.text;
-  if (text.includes(FAKE_READER_MARKERS.timeout)) {
+  const { input } = request;
+  const has = (marker: FakeMarker) =>
+    input.kind === 'text'
+      ? input.text.includes(FAKE_READER_MARKERS[marker])
+      : input.urls.some((url) =>
+          url.includes(FAKE_READER_IMAGE_MARKERS[marker]),
+        );
+  if (has('timeout')) {
     throw new RecipeReaderTimeoutError();
   }
-  if (text.includes(FAKE_READER_MARKERS.unavailable)) {
+  if (has('unavailable')) {
     throw new RecipeReaderUnavailableError(529);
   }
-  if (text.includes(FAKE_READER_MARKERS.notARecipe)) {
+  if (has('notARecipe')) {
     return { outcome: { kind: 'not_a_recipe' }, usage };
   }
-  if (text.includes(FAKE_READER_MARKERS.invalid)) {
+  if (has('invalid')) {
     return {
       outcome: { kind: 'candidate', candidate: { header: { name: '' } } },
       usage,
     };
   }
-  if (text.includes(FAKE_READER_MARKERS.several) && request.pick === null) {
+  if (has('several') && request.pick === null) {
     return {
       outcome: { kind: 'several', names: [...FAKE_SEVERAL_NAMES] },
       usage,
@@ -68,12 +86,14 @@ function readFake(
 }
 
 function fakeCandidate(request: RecipeReadRequest): RecipeImportCandidate {
-  const { household } = request;
+  const { household, input } = request;
   const firstLine =
-    request.input.text
-      .split('\n')
-      .map((line) => line.replaceAll(/\[fake:[a-z-]+\]/g, '').trim())
-      .find((line) => line.length > 0) ?? 'Imported Recipe';
+    input.kind === 'text'
+      ? (input.text
+          .split('\n')
+          .map((line) => line.replaceAll(/\[fake:[a-z-]+\]/g, '').trim())
+          .find((line) => line.length > 0) ?? 'Imported Recipe')
+      : 'Photographed Recipe';
   const name = request.pick ?? firstLine.slice(0, 200);
   const known = household.ingredients[0];
   const category = household.categories[0];

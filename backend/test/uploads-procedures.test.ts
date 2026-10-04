@@ -5,6 +5,10 @@ import {
   RECIPE_IMAGE_EAGER_TRANSFORMATION,
   RECIPE_IMAGE_FOLDER,
   RECIPE_IMAGE_MAX_FILE_SIZE,
+  RECIPE_IMPORT_IMAGE_ALLOWED_FORMATS,
+  RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
+  RECIPE_IMPORT_IMAGE_FOLDER,
+  RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
 } from '../../shared/src/index.ts';
 import { signUploadParams } from '../src/lib/cloudinary.ts';
 import type { AppContext } from '../src/trpc/context.ts';
@@ -111,6 +115,55 @@ describe('uploads procedures', () => {
       );
       await expect(
         caller.uploads.getRecipeImageCredentials(),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+  });
+
+  describe('getRecipeImportImageCredentials', () => {
+    it('returns the import constraints: own folder, HEIC, a larger size limit', async () => {
+      const caller = appRouter.createCaller(makeContext());
+      const creds = await caller.uploads.getRecipeImportImageCredentials();
+
+      expect(creds.cloudName).toBe('test-cloud');
+      expect(creds.apiKey).toBe('test-key');
+      expect(creds.folder).toBe('loftys-larder/imports');
+      expect(creds.allowedFormats).toEqual([
+        'jpg',
+        'jpeg',
+        'png',
+        'webp',
+        'heic',
+      ]);
+      expect(creds.maxFileSize).toBe(RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE);
+      expect(creds.maxFileSize).toBeGreaterThan(RECIPE_IMAGE_MAX_FILE_SIZE);
+      expect(creds.transformation).toBe('c_limit,w_2576,h_2576,f_jpg,q_auto');
+    });
+
+    it('signs the folder, formats and JPEG rendition, leaving the size limit to the client', async () => {
+      const caller = appRouter.createCaller(makeContext());
+      const creds = await caller.uploads.getRecipeImportImageCredentials();
+
+      // `max_file_size` can't be signed below Cloudinary's Pro plan, as for
+      // recipe images; the credential carries it for the client to check.
+      const expected = signUploadParams(
+        {
+          allowed_formats: RECIPE_IMPORT_IMAGE_ALLOWED_FORMATS.join(','),
+          eager: RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
+          folder: RECIPE_IMPORT_IMAGE_FOLDER,
+          timestamp: creds.timestamp,
+        },
+        cloudinary.apiSecret,
+      );
+
+      expect(creds.signature).toBe(expected);
+    });
+
+    it('rejects unauthenticated callers', async () => {
+      const caller = appRouter.createCaller(
+        makeContext({ authenticated: false }),
+      );
+      await expect(
+        caller.uploads.getRecipeImportImageCredentials(),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });

@@ -1233,6 +1233,11 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** A new household-scoped table, scoped through the join to `recipes` as `recipe_tag_links` is. Cloudinary storage grows with every image import. The backend makes outbound requests to URLs users supply, so the SSRF guard is security-critical and needs its own tests. Some sites will always refuse a server fetch.
 - **Revisit when:** Cloudinary storage becomes noticeable, or a site the household uses often blocks fetches.
 - **Cross-refs:** DEC-17, DEC-21, DEC-29 (amended), DEC-50 (amended), DEC-68, DEC-103, DEC-104, DEC-108; FEAT-35, FEAT-62, FEAT-63; non-goals: "Backend proxying of image uploads" and "Cloudinary orphan cleanup job" (unchanged).
+- **Amended (2026-10-04) at FEAT-62 kick-off.**
+  - Import images may be up to 10 MB, checked in the browser, because `max_file_size` can't be signed below Cloudinary's Pro plan.
+  - The import preset makes one JPEG rendition at upload, capped at 2,576 px on the long edge (the reader model's maximum). The reader is sent its delivery URL, and Import Review and "View original" show it, so a HEIC photo works in every browser.
+  - Image ids are accepted only from the `loftys-larder/imports` folder, and an image a saved recipe keeps as an Original is never destroyed, whatever a draft says. Autosave sends the proposal back, so its ids can't be trusted further than that.
+  - Images upload when the cook presses Import, and the page reuses them for "Try again" and the several-recipes pick. A failed import's images are left as orphans, as DEC-50 accepts.
 
 ### DEC-108 — Import Review drafts live in `recipe_drafts` with `kind = 'import'`, and "Create recipe" writes the whole recipe in one transaction
 
@@ -1253,6 +1258,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Cross-refs:** DEC-16, DEC-29 (drafts are deleted on account deletion), DEC-34, DEC-99, DEC-103, DEC-105, DEC-107, DEC-109; FEAT-21, FEAT-59, FEAT-60, FEAT-61; cross-cutting #4.
 - **Amended (2026-10-04) at FEAT-59 kick-off.** A CHECK constraint, `recipe_drafts_import_has_no_recipe`, refuses an import draft with a `recipe_id`. Such a row would load into the edit page as the cook's edits and could block their own draft for that recipe.
 - **Amended (2026-10-04) at FEAT-60 kick-off.** Create recipe deletes the draft first inside its transaction, so a second "Create recipe" for the same import waits on that row, finds it gone and rolls back. An existing ingredient's row carries the unit the cook saw and gets the same unit-mismatch check as `replaceIngredients`. A source proposed by name that exists by the time of the save is linked rather than refused. The shared write code lives in `backend/src/lib/recipe-writes.ts`.
+- **Amended (2026-10-04) at FEAT-62 kick-off.** Create recipe reads an image import's image ids from `fields.proposal.input` in the draft it deletes, and keeps them as Originals (DEC-107). The proposal is the server's shape, not the editor's, so the rule that the server never reads fields the editor owns still holds.
 
 ### DEC-109 — Recipe Import reads through a swappable `RecipeReader` seam, with adapters chosen by config and the rules applied outside the seam
 

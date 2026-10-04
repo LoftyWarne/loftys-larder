@@ -2635,11 +2635,22 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 - "Several recipes" reuses the uploaded images for the second call.
 - Decide the import upload size limit at kick-off: phone photos can exceed the 5 MB recipe-image limit.
 - Household scope for Originals comes through the join to `recipes` (DEC-17).
+- Amended at kick-off (2026-10-04):
+  - The import upload limit is 10 MB per image, checked in the browser. As for recipe images, `max_file_size` can't be signed below Cloudinary's Pro plan, so the credential carries the limit and the Definition of Done's "size limit in the signature" reads as "size limit on the credential".
+  - The import preset makes one JPEG rendition at upload (`c_limit,w_2576,h_2576,f_jpg,q_auto`; 2,576 px is the reader model's long-edge maximum). It's what the reader is sent and what Import Review and "View original" show.
+  - Create recipe reads the image ids from the import's proposal, which the server wrote, rather than from the create input (DEC-108 amended). The ids are limited to the imports folder wherever they're read, because autosave sends the proposal back, and an image a saved recipe keeps is never destroyed.
+  - Images upload when the cook presses Import, not when they're picked. The page keeps the uploaded ids, so "Try again" and the several-recipes pick don't upload them again. A failed import's images are orphans, as DEC-50 accepts.
+  - Images stay in the order picked; to change it, remove one and add it again.
+  - Account deletion waits for its destroy calls, each with a timeout, after the commit.
+  - The reader files (`backend/src/lib/recipe-reader/`) change too: the request gains image URLs, and the `fake` adapter reads its markers from image ids.
+  - "A two-page spread gives one proposal" and "an iPhone HEIC photo imports" need a real model, so they're manual verification steps 4 and 5. No new e2e spec: one would need Playwright to stand in for Cloudinary.
 
 **Manual verification:**
 1. On a phone, photograph a cookbook page and import it. Import Review shows the photo beside the proposal.
 2. Create the recipe and tap "View original".
 3. Start an image import and discard it. The image is gone from the Cloudinary media library.
+4. Import a recipe that runs across a two-page spread as two images. Import Review shows one proposal drawn from both pages. (Added at kick-off.)
+5. On an iPhone, import a HEIC photo straight from the camera roll. It uploads, and the proposal reads it. (Added at kick-off.)
 
 **Common gotchas:**
 - Never send images through tRPC as base64 (DEC-50).
@@ -2653,7 +2664,7 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
   - Discard and account deletion calling destroy, with a failed destroy failing neither.
   - Frontend: the picker's limits, images in Import Review, "View original".
 - Commit: `feat(recipes): import a recipe from photos and keep the originals`
-- Gate check: manual verification steps 1–2.
+- Gate check: manual verification steps 1–2, and 4–5 (added at kick-off).
 
 ---
 

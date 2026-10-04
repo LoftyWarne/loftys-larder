@@ -203,6 +203,7 @@ const RECIPE: Recipe = {
   ratingCount: 0,
   tags: [],
   yourRating: null,
+  originals: [],
 };
 
 beforeEach(() => {

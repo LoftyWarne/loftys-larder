@@ -2,18 +2,13 @@ import type { RecipeImageUploadCredentials } from '@loftys-larder/shared';
 import { useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button.tsx';
+import { uploadToCloudinary } from '@/lib/cloudinary-upload.ts';
 
 export interface ImageUploaderProps {
   imageUrl: string | null;
   getCredentials: () => Promise<RecipeImageUploadCredentials>;
   onUploaded: (secureUrl: string | null) => Promise<void> | void;
 }
-
-interface CloudinaryUploadResponse {
-  secure_url?: unknown;
-}
-
-const CLOUDINARY_HOST = 'https://api.cloudinary.com';
 
 export function ImageUploader({
   imageUrl,
@@ -29,49 +24,7 @@ export function ImageUploader({
     setUploading(true);
     try {
       const creds = await getCredentials();
-
-      // Enforce the file-size cap client-side. Cloudinary's `max_file_size`
-      // upload param is Pro-plan-only; on lower plans it gets stripped before
-      // signature verification, which produces a 401 if we include it in the
-      // signed body. So the credential carries the cap and we check here.
-      if (file.size > creds.maxFileSize) {
-        const mb = (creds.maxFileSize / 1_048_576).toFixed(1);
-        throw new Error(`Image must be ${mb} MB or smaller`);
-      }
-
-      const url = `${CLOUDINARY_HOST}/v1_1/${creds.cloudName}/image/upload`;
-
-      // Cloudinary's wire-side parameter names are snake_case (the signature
-      // is computed over those exact names). Building the body in camelCase
-      // would produce a signature mismatch and a 401 on every upload.
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('api_key', creds.apiKey);
-      formData.append('timestamp', String(creds.timestamp));
-      formData.append('signature', creds.signature);
-      formData.append('folder', creds.folder);
-      formData.append('allowed_formats', creds.allowedFormats.join(','));
-      formData.append('eager', creds.transformation);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        body: formData,
-      });
-      if (!response.ok) {
-        // Cloudinary surfaces the real cause (invalid signature, stale
-        // timestamp, plan-restricted param, etc.) in the response body —
-        // capture it so the user / logs see what failed instead of a bare
-        // status code.
-        const body = await response.text();
-        throw new Error(
-          `Cloudinary returned ${String(response.status)}: ${body}`,
-        );
-      }
-      const payload = (await response.json()) as CloudinaryUploadResponse;
-      const secureUrl = payload.secure_url;
-      if (typeof secureUrl !== 'string' || secureUrl.length === 0) {
-        throw new Error('Cloudinary response missing secure_url');
-      }
+      const { secureUrl } = await uploadToCloudinary(file, creds);
       await onUploaded(secureUrl);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Upload failed';

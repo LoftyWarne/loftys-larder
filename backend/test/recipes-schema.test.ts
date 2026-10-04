@@ -9,6 +9,7 @@ import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
 import { recipeDrafts } from '../src/db/schema/recipe-drafts.ts';
 import { recipeHealthScores } from '../src/db/schema/recipe-health.ts';
+import { recipeImportOriginals } from '../src/db/schema/recipe-import-originals.ts';
 import {
   recipeComments,
   recipeRatings,
@@ -165,6 +166,7 @@ describe('recipes schema', () => {
         'recipe_ratings',
         'recipe_comments',
         'recipe_health_scores',
+        'recipe_import_originals',
       ]) {
         expect(names.has(expected), `missing table ${expected}`).toBe(true);
       }
@@ -500,6 +502,56 @@ describe('recipes schema', () => {
           .insert(recipeHealthScores)
           .values({ recipeId, score: 10, model: 'test-model' }),
         'recipe_health_scores_pkey',
+      );
+    });
+  });
+
+  describe('recipe_import_originals', () => {
+    const PUBLIC_ID = 'loftys-larder/imports/page1';
+
+    it('rejects a negative position', async () => {
+      await seedFixtures(db);
+      const recipeId = await insertRecipe(db);
+      await expectConstraintViolation(
+        db
+          .insert(recipeImportOriginals)
+          .values({ recipeId, position: -1, publicId: PUBLIC_ID }),
+        'recipe_import_originals_position_nonnegative',
+      );
+    });
+
+    it('allows one image per position and each image once', async () => {
+      await seedFixtures(db);
+      const recipeId = await insertRecipe(db);
+      const other = await insertRecipe(db, { name: 'Other' });
+      await db
+        .insert(recipeImportOriginals)
+        .values({ recipeId, position: 0, publicId: PUBLIC_ID });
+      await expectConstraintViolation(
+        db.insert(recipeImportOriginals).values({
+          recipeId,
+          position: 0,
+          publicId: 'loftys-larder/imports/page2',
+        }),
+        'recipe_import_originals_recipe_id_position_pk',
+      );
+      await expectConstraintViolation(
+        db
+          .insert(recipeImportOriginals)
+          .values({ recipeId: other, position: 0, publicId: PUBLIC_ID }),
+        'recipe_import_originals_public_id_unique',
+      );
+    });
+
+    it('keeps a recipe with Originals from being hard-deleted', async () => {
+      await seedFixtures(db);
+      const recipeId = await insertRecipe(db);
+      await db
+        .insert(recipeImportOriginals)
+        .values({ recipeId, position: 0, publicId: PUBLIC_ID });
+      await expectConstraintViolation(
+        db.delete(recipes).where(eq(recipes.id, recipeId)),
+        'recipe_import_originals_recipe_id_recipes_id_fk',
       );
     });
   });

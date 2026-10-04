@@ -8,10 +8,14 @@ import { Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { DiscardImportButton } from '@/components/recipe-import/discard-import-button.tsx';
+import { ImportImagePicker } from '@/components/recipe-import/import-image-picker.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { useOnlineStatus } from '@/hooks/use-online-status.ts';
+import { uploadToCloudinary } from '@/lib/cloudinary-upload.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
+
+type InputMode = 'text' | 'images';
 
 const UPDATED_FORMAT = new Intl.DateTimeFormat('en-GB', {
   dateStyle: 'medium',
@@ -19,15 +23,26 @@ const UPDATED_FORMAT = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/London',
 });
 
-// Choosing an import input and resuming imports in progress (DEC-108). Only
-// pasted text for now; images and links join in FEAT-62 and FEAT-63.
+// Choosing an import input and resuming imports in progress (DEC-108): pasted
+// text, or images uploaded straight to Cloudinary (DEC-107). Web links will
+// join them.
 export function RecipeImportPage(): React.ReactElement {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
   const isOnline = useOnlineStatus();
   const startMutation = trpc.recipeImports.start.useMutation();
+  const credentialsQuery =
+    trpc.uploads.getRecipeImportImageCredentials.useQuery(undefined, {
+      enabled: false,
+    });
 
+  const [mode, setMode] = useState<InputMode>('text');
   const [text, setText] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  // The chosen images once uploaded, so trying again or picking one of
+  // several recipes doesn't upload them again.
+  const [uploadedIds, setUploadedIds] = useState<string[] | null>(null);
+  const [uploading, setUploading] = useState(false);
   // Set when the text holds several recipes: the input that was sent, so the
   // pick goes with the same one (DEC-103).
   const [several, setSeveral] = useState<{
@@ -36,7 +51,7 @@ export function RecipeImportPage(): React.ReactElement {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const working = startMutation.isPending;
+  const working = uploading || startMutation.isPending;
   const trimmed = text.trim();
 
   async function start(input: RecipeImportInput, pick?: string): Promise<void> {
@@ -59,6 +74,29 @@ export function RecipeImportPage(): React.ReactElement {
     }
   }
 
+  async function importImages(): Promise<void> {
+    setError(null);
+    let publicIds = uploadedIds;
+    if (publicIds === null) {
+      setUploading(true);
+      try {
+        const credentials = (await credentialsQuery.refetch()).data;
+        if (!credentials) throw new Error('No upload credentials');
+        const uploads = await Promise.all(
+          files.map((file) => uploadToCloudinary(file, credentials)),
+        );
+        publicIds = uploads.map((upload) => upload.publicId);
+        setUploadedIds(publicIds);
+      } catch {
+        setError('Couldn’t upload the images. Try again.');
+        return;
+      } finally {
+        setUploading(false);
+      }
+    }
+    await start({ kind: 'images', publicIds });
+  }
+
   return (
     <section className="mx-auto max-w-3xl space-y-8">
       <header className="space-y-2">
@@ -69,15 +107,18 @@ export function RecipeImportPage(): React.ReactElement {
         </p>
         <h1 className="text-2xl font-semibold">Import a recipe</h1>
         <p className="text-sm text-muted-foreground">
-          Paste a recipe and it&rsquo;s turned into a draft for you to check.
-          Nothing is added to your recipes until you create it.
+          Paste a recipe or add photos of it, and it&rsquo;s turned into a draft
+          for you to check. Nothing is added to your recipes until you create
+          it.
         </p>
       </header>
 
       {several ? (
         <section className="space-y-3" aria-labelledby="import-several-heading">
           <h2 id="import-several-heading" className="text-lg font-semibold">
-            That text has more than one recipe. Which one?
+            {several.input.kind === 'text'
+              ? 'That text has more than one recipe. Which one?'
+              : 'Those images have more than one recipe. Which one?'}
           </h2>
           <ul className="space-y-2">
             {several.names.map((name) => (
@@ -105,53 +146,126 @@ export function RecipeImportPage(): React.ReactElement {
               setError(null);
             }}
           >
-            Back to the text
+            {several.input.kind === 'text'
+              ? 'Back to the text'
+              : 'Back to the images'}
           </Button>
         </section>
       ) : (
-        <form
-          className="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (trimmed === '' || working || !isOnline) return;
-            void start({ kind: 'text', text: trimmed });
-          }}
-        >
-          <label htmlFor="import-text" className="text-sm font-medium">
-            Recipe text
-          </label>
-          <textarea
-            id="import-text"
-            rows={12}
-            maxLength={RECIPE_IMPORT_TEXT_MAX_LENGTH}
-            placeholder="Paste the whole recipe: title, ingredients and method."
-            disabled={working}
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-            }}
-          />
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            {!isOnline && (
-              <p className="text-sm text-muted-foreground">
-                You&rsquo;re offline. Importing needs a connection.
-              </p>
-            )}
+        <div className="space-y-4">
+          <div
+            role="group"
+            aria-label="Import from"
+            className="inline-flex gap-1 rounded-md border border-input p-1"
+          >
             <Button
-              type="submit"
-              disabled={trimmed === '' || working || !isOnline}
+              type="button"
+              size="sm"
+              variant={mode === 'text' ? 'secondary' : 'ghost'}
+              aria-pressed={mode === 'text'}
+              disabled={working}
+              onClick={() => {
+                setMode('text');
+                setError(null);
+              }}
             >
-              Import
+              Paste text
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === 'images' ? 'secondary' : 'ghost'}
+              aria-pressed={mode === 'images'}
+              disabled={working}
+              onClick={() => {
+                setMode('images');
+                setError(null);
+              }}
+            >
+              Photos
             </Button>
           </div>
-        </form>
+          {mode === 'text' ? (
+            <form
+              className="space-y-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (trimmed === '' || working || !isOnline) return;
+                void start({ kind: 'text', text: trimmed });
+              }}
+            >
+              <label htmlFor="import-text" className="text-sm font-medium">
+                Recipe text
+              </label>
+              <textarea
+                id="import-text"
+                rows={12}
+                maxLength={RECIPE_IMPORT_TEXT_MAX_LENGTH}
+                placeholder="Paste the whole recipe: title, ingredients and method."
+                disabled={working}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                value={text}
+                onChange={(event) => {
+                  setText(event.target.value);
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {!isOnline && (
+                  <p className="text-sm text-muted-foreground">
+                    You&rsquo;re offline. Importing needs a connection.
+                  </p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={trimmed === '' || working || !isOnline}
+                >
+                  Import
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <form
+              className="space-y-3"
+              aria-label="Import from images"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (files.length === 0 || working || !isOnline) return;
+                void importImages();
+              }}
+            >
+              <ImportImagePicker
+                files={files}
+                onFilesChange={(next) => {
+                  setFiles(next);
+                  setUploadedIds(null);
+                  setError(null);
+                }}
+                disabled={working}
+              />
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {!isOnline && (
+                  <p className="text-sm text-muted-foreground">
+                    You&rsquo;re offline. Importing needs a connection.
+                  </p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={files.length === 0 || working || !isOnline}
+                >
+                  Import
+                </Button>
+              </div>
+            </form>
+          )}
+        </div>
       )}
 
       {working && (
         <p role="status" className="flex items-center gap-2 text-sm">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          Reading the recipe&hellip; This can take up to a minute.
+          {uploading
+            ? 'Uploading the images…'
+            : 'Reading the recipe… This can take up to a minute.'}
         </p>
       )}
 

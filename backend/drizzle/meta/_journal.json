@@ -169,6 +169,13 @@
       "when": 1791106156772,
       "tag": "0023_recipe_draft_kind_and_estimated_nutrition",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791138062888,
+      "tag": "0024_recipe_import_originals",
+      "breakpoints": true
     }
   ]
 }

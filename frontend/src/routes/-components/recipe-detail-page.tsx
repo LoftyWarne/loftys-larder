@@ -7,6 +7,7 @@ import {
   useSearch,
 } from '@tanstack/react-router';
 
+import { ViewOriginalButton } from '@/components/original-images.tsx';
 import { PlanAheadSummary } from '@/components/plan-ahead-summary.tsx';
 import { PortionsStepper } from '@/components/portions-stepper.tsx';
 import { PrepAheadBadge } from '@/components/prep-ahead-badge.tsx';
@@ -149,6 +150,9 @@ export function RecipeDetailPage(): React.ReactElement {
             </span>
           )}
         </p>
+        {recipe.originals.length > 0 && (
+          <ViewOriginalButton images={recipe.originals} />
+        )}
         <RecipeTagList tags={recipe.tags} />
         <RecipeRating
           recipeId={recipe.id}

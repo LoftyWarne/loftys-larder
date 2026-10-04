@@ -99,6 +99,7 @@ export function importDraft(
   return {
     id: 41,
     proposal: PROPOSAL,
+    images: [],
     draftData: { version: 1, fields: { proposal: PROPOSAL, ...fields } },
     lastUpdatedAt: 1_760_000_000_000,
   };

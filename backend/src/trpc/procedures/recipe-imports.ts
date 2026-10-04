@@ -20,6 +20,7 @@ import {
   type DomainErrorCode,
   type GetRecipeImportResult,
   type ListRecipeImportsResult,
+  type RecipeImportInput,
   type RecipeImportProposal,
   type StartRecipeImportResult,
 } from '../../../../shared/src/index.ts';
@@ -27,6 +28,7 @@ import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import type { Db } from '../../db/index.ts';
 import { ingredients } from '../../db/schema/ingredients.ts';
 import { recipeDrafts } from '../../db/schema/recipe-drafts.ts';
+import { recipeImportOriginals } from '../../db/schema/recipe-import-originals.ts';
 import { recipeSources, recipeTags } from '../../db/schema/recipes.ts';
 import {
   ingredientCategories,
@@ -34,15 +36,21 @@ import {
   unitsOfMeasurement,
 } from '../../db/schema/reference.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
+import { importImageUrl } from '../../lib/cloudinary.ts';
 import {
   logModelUsage,
   type ModelUsageDetails,
 } from '../../lib/model-features/usage-log.ts';
+import {
+  destroyImportImages,
+  importImagePublicIds,
+} from '../../lib/recipe-import/import-images.ts';
 import { normaliseProposal } from '../../lib/recipe-import/normalise-proposal.ts';
 import {
   RecipeReaderTimeoutError,
   RecipeReaderUnavailableError,
   type RecipeReaderHousehold,
+  type RecipeReaderInput,
   type RecipeReaderUsage,
   type RecipeReading,
 } from '../../lib/recipe-reader/types.ts';
@@ -87,6 +95,10 @@ export const recipeImportsRouter = router({
         }
 
         const household = await loadReaderHousehold(ctx.db);
+        const readerInput = toReaderInput(
+          input.input,
+          ctx.cloudinary.cloudName,
+        );
         const { reader } = ctx.recipeImport;
         const pick = input.pick ?? null;
         const timeout = AbortSignal.timeout(RECIPE_IMPORT_TIMEOUT_MS);
@@ -110,14 +122,21 @@ export const recipeImportsRouter = router({
               latencyMs: Math.round(performance.now() - startedAt),
               outcome,
             },
-            { inputKind: input.input.kind, picked: pick !== null, ...details },
+            {
+              inputKind: input.input.kind,
+              picked: pick !== null,
+              ...(readerInput.kind === 'images'
+                ? { imageCount: readerInput.urls.length }
+                : {}),
+              ...details,
+            },
           );
         };
 
         let reading: RecipeReading;
         try {
           reading = await reader.read(
-            { input: input.input, household, pick },
+            { input: readerInput, household, pick },
             readSignal,
           );
         } catch (error) {
@@ -243,11 +262,15 @@ export const recipeImportsRouter = router({
       return {
         id: row.id,
         proposal: readProposal(row.draftData),
+        images: importImagePublicIds(row.draftData).map((publicId) => ({
+          url: importImageUrl(ctx.cloudinary.cloudName, publicId),
+        })),
         draftData: envelope.data,
         lastUpdatedAt: row.lastUpdatedAt.getTime(),
       };
     }),
 
+  // An image import's images go with it, once the draft is gone (DEC-107).
   discard: protectedProcedure
     .input(recipeImportDraftIdInputSchema)
     .output(discardRecipeImportResultSchema)
@@ -257,7 +280,11 @@ export const recipeImportsRouter = router({
         .where(
           and(eq(recipeDrafts.id, input.draftId), ownImportDrafts(ctx.user.id)),
         )
-        .returning({ id: recipeDrafts.id });
+        .returning({ draftData: recipeDrafts.draftData });
+      await destroyImportImages(
+        ctx,
+        deleted.flatMap((row) => importImagePublicIds(row.draftData)),
+      );
       return { deleted: deleted.length > 0 };
     }),
 
@@ -324,8 +351,9 @@ export const recipeImportsRouter = router({
               ownImportDrafts(ctx.user.id),
             ),
           )
-          .returning({ id: recipeDrafts.id });
-        if (claimed.length === 0) throw importNotFound();
+          .returning({ draftData: recipeDrafts.draftData });
+        const claimedDraft = claimed[0];
+        if (!claimedDraft) throw importNotFound();
 
         const sourceId = await resolveSource(tx, input.source);
         const idByKey = await insertNewIngredients(
@@ -369,6 +397,20 @@ export const recipeImportsRouter = router({
           })),
         );
         await writeTags(tx, id, input.tagNames);
+
+        // The import's images are kept as the recipe's Originals, never as
+        // its image (DEC-107). They're read from the proposal, which the
+        // server wrote, not from anything the editor owns (DEC-108).
+        const publicIds = importImagePublicIds(claimedDraft.draftData);
+        if (publicIds.length > 0) {
+          await tx.insert(recipeImportOriginals).values(
+            publicIds.map((publicId, position) => ({
+              recipeId: id,
+              position,
+              publicId,
+            })),
+          );
+        }
         return id;
       });
 
@@ -378,6 +420,21 @@ export const recipeImportsRouter = router({
 
 function ownImportDrafts(userId: string) {
   return and(eq(recipeDrafts.userId, userId), eq(recipeDrafts.kind, 'import'));
+}
+
+// Images reach the reader as delivery URLs for their JPEG rendition, never
+// as bytes through Fastify (DEC-50, DEC-107).
+function toReaderInput(
+  input: RecipeImportInput,
+  cloudName: string,
+): RecipeReaderInput {
+  if (input.kind === 'text') return input;
+  return {
+    kind: 'images',
+    urls: input.publicIds.map((publicId) =>
+      importImageUrl(cloudName, publicId),
+    ),
+  };
 }
 
 // The proposal the server wrote, if the draft still holds a readable one.

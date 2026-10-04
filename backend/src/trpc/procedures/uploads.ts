@@ -3,21 +3,31 @@ import {
   RECIPE_IMAGE_EAGER_TRANSFORMATION,
   RECIPE_IMAGE_FOLDER,
   RECIPE_IMAGE_MAX_FILE_SIZE,
+  RECIPE_IMPORT_IMAGE_ALLOWED_FORMATS,
+  RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
+  RECIPE_IMPORT_IMAGE_FOLDER,
+  RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
   recipeImageUploadCredentialsSchema,
+  recipeImportImageUploadCredentialsSchema,
   type RecipeImageUploadCredentials,
+  type RecipeImportImageUploadCredentials,
 } from '../../../../shared/src/index.ts';
 import { signUploadParams } from '../../lib/cloudinary.ts';
 import { protectedProcedure, router } from '../init.ts';
+
+// Cloudinary's `timestamp` parameter is Unix seconds — a protocol field
+// measured at UTC, not a domain date — so `dateUtils` doesn't apply.
+// Cloudinary rejects timestamps more than ~1 hour off, giving the signature
+// its short-lived window.
+function uploadTimestamp(): number {
+  return Math.floor(Date.now() / 1000);
+}
 
 export const uploadsRouter = router({
   getRecipeImageCredentials: protectedProcedure
     .output(recipeImageUploadCredentialsSchema)
     .query(({ ctx }): RecipeImageUploadCredentials => {
-      // Cloudinary's `timestamp` parameter is Unix seconds — a protocol field
-      // measured at UTC, not a domain date — so `dateUtils` doesn't apply.
-      // Cloudinary rejects timestamps more than ~1 hour off, giving the
-      // signature its short-lived window.
-      const timestamp = Math.floor(Date.now() / 1000);
+      const timestamp = uploadTimestamp();
 
       // NOTE: `max_file_size` is intentionally NOT signed and NOT posted —
       // it is a Pro-plan-only Cloudinary upload param. On lower plans
@@ -45,6 +55,35 @@ export const uploadsRouter = router({
         allowedFormats: ['jpg', 'jpeg', 'png', 'webp'],
         maxFileSize: RECIPE_IMAGE_MAX_FILE_SIZE,
         transformation: RECIPE_IMAGE_EAGER_TRANSFORMATION,
+      };
+    }),
+
+  // Recipe Import images (DEC-107): their own folder, HEIC allowed, and the
+  // JPEG rendition the reader is sent made at upload. The size limit is
+  // enforced client-side, as above.
+  getRecipeImportImageCredentials: protectedProcedure
+    .output(recipeImportImageUploadCredentialsSchema)
+    .query(({ ctx }): RecipeImportImageUploadCredentials => {
+      const timestamp = uploadTimestamp();
+      const signature = signUploadParams(
+        {
+          allowed_formats: RECIPE_IMPORT_IMAGE_ALLOWED_FORMATS.join(','),
+          eager: RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
+          folder: RECIPE_IMPORT_IMAGE_FOLDER,
+          timestamp,
+        },
+        ctx.cloudinary.apiSecret,
+      );
+
+      return {
+        cloudName: ctx.cloudinary.cloudName,
+        apiKey: ctx.cloudinary.apiKey,
+        timestamp,
+        signature,
+        folder: RECIPE_IMPORT_IMAGE_FOLDER,
+        allowedFormats: ['jpg', 'jpeg', 'png', 'webp', 'heic'],
+        maxFileSize: RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
+        transformation: RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
       };
     }),
 });

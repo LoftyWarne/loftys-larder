@@ -498,7 +498,11 @@ function ImportReviewEditor({
       <ReaderNotes notes={proposal.notes} />
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <OriginalInput input={proposal.input} collapsible={!isLarge} />
+        <OriginalInput
+          input={proposal.input}
+          images={draft.images}
+          collapsible={!isLarge}
+        />
 
         <div className="min-w-0 space-y-8">
           <HeaderFields

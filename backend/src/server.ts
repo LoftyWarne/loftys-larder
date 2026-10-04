@@ -7,6 +7,7 @@ import { createResendSender, withAllowList } from './auth/resend.ts';
 import type { MagicLinkSender } from './auth/resend.ts';
 import { ConfigValidationError, loadConfig, type Config } from './config.ts';
 import { getDb, type Db } from './db/index.ts';
+import { createDestroyImage } from './lib/cloudinary.ts';
 import { createRecipeReader } from './lib/recipe-reader/index.ts';
 import type { RecipeReader } from './lib/recipe-reader/types.ts';
 import { buildLoggerBundle } from './plugins/logger.ts';
@@ -101,11 +102,13 @@ export async function buildAppWithLogger(
 
   const db = options.db ?? getDb(app.log).db;
   app.decorate('db', db);
-  app.decorate('cloudinary', {
+  const cloudinary = {
     cloudName: config.CLOUDINARY_CLOUD_NAME,
     apiKey: config.CLOUDINARY_API_KEY,
     apiSecret: config.CLOUDINARY_API_SECRET,
-  });
+  };
+  app.decorate('cloudinary', cloudinary);
+  app.decorate('destroyImage', createDestroyImage(cloudinary));
   app.decorate(
     'recipeReader',
     options.recipeReader ?? createRecipeReader(config),

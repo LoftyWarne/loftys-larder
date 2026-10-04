@@ -232,6 +232,32 @@ describe('RecipeFilterBar', () => {
     ).toBeDisabled();
   });
 
+  // The suggestions open below the search box after every pick, so anything
+  // under it would be hidden.
+  it('lists picked ingredients above the search box', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={{ ingredients: [20, 22] }} onChange={vi.fn()} />);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Ingredients: 2 selected' }),
+    );
+    const panel = screen.getByRole('dialog', { name: 'Ingredients' });
+    const picked = within(panel).getByRole('list', {
+      name: 'Selected ingredients',
+    });
+    expect(
+      within(picked).getByRole('button', { name: 'Remove Chicken' }),
+    ).toBeInTheDocument();
+    expect(
+      within(picked).getByRole('button', { name: 'Remove Leek' }),
+    ).toBeInTheDocument();
+    expect(
+      picked.compareDocumentPosition(
+        within(panel).getByRole('combobox', { name: 'Find an ingredient' }),
+      ),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it('clears every filter at once, and only offers that while one is set', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

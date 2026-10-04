@@ -61,25 +61,8 @@ export function IngredientFilter({
         onChange([]);
       }}
     >
-      <SearchableCombobox
-        key={pickerKey}
-        ref={pickerRef}
-        value={null}
-        onChange={(option) => {
-          if (!option) return;
-          onChange([...selectedIds, option.id]);
-          setPickerKey((key) => key + 1);
-        }}
-        searchQuery={searchQuery}
-        ariaLabel="Find an ingredient"
-        placeholder={
-          atLimit
-            ? `Up to ${String(RECIPE_FILTER_INGREDIENTS_MAX)} ingredients`
-            : 'Find an ingredient'
-        }
-        disabled={atLimit}
-        emptyMessage="No matching ingredients"
-      />
+      {/* Above the picker: its suggestions open below it after every pick
+          and would cover anything there. */}
       {selectedIds.length > 0 && (
         <ul
           aria-label="Selected ingredients"
@@ -108,6 +91,25 @@ export function IngredientFilter({
           })}
         </ul>
       )}
+      <SearchableCombobox
+        key={pickerKey}
+        ref={pickerRef}
+        value={null}
+        onChange={(option) => {
+          if (!option) return;
+          onChange([...selectedIds, option.id]);
+          setPickerKey((key) => key + 1);
+        }}
+        searchQuery={searchQuery}
+        ariaLabel="Find an ingredient"
+        placeholder={
+          atLimit
+            ? `Up to ${String(RECIPE_FILTER_INGREDIENTS_MAX)} ingredients`
+            : 'Find an ingredient'
+        }
+        disabled={atLimit}
+        emptyMessage="No matching ingredients"
+      />
     </FilterPopover>
   );
 }

@@ -211,15 +211,10 @@ What it would be: tracking what's already in the cupboard / fridge / freezer and
 Why not part of this: requires constant manual upkeep to be useful (or barcode scanning, smart-shelf hardware, etc.). The shopping list aggregates *what the plan needs*, not *what the household lacks*. The cooks reconcile against the cupboard at shopping time — a 30-second human task that doesn't repay weeks of engineering.
 Adjacency note: a future "starting inventory" field on a plan could subtract from the list. That's a feature for a different product spec, not a v1 extension.
 
-### Recipe import from URLs
-What it would be: pasting a recipe URL and having the app scrape it into the editor.
-Why not part of this: scrapers break constantly, ingredient unit-and-quantity parsing is the hard part of recipe data, and the single-unit invariant means imports would need conversion review anyway. Manual entry is the unglamorous correct answer for a household whose recipe sources are unpredictable.
-Adjacency note: `source_url` is stored, but only as a reference link. No parsing.
-
 ### AI / LLM features
 What it would be: meal-plan suggestions, recipe recommendations, ingredient substitution advice, "what can I cook with X."
 Why not part of this: scope, cost, and the fact that two cooks know what they want to eat better than any model does. The plan is a tool for cooks who already cook, not a recommender.
-Adjacency note: not a stylistic objection to AI features in general — a stylistic objection to bolting them onto a tool whose value is structured deterministic data. DEC-101 makes one exception: a stored health score per recipe, produced by a model and labelled as an estimate. Suggestions, recommendations and substitution advice are still excluded, and the score never picks or changes anything.
+Adjacency note: model features are allowed when they follow the rules in DEC-110. The model proposes and a cook decides; kept output is labelled; deterministic data stays deterministic; each feature is built to cross-cutting #22. Built under those rules so far: the health score (DEC-101), and Recipe Import (DEC-103), which replaced the former "Recipe import from URLs" and "Photo recognition / OCR of cookbooks" entries. Recipe Generation (a model inventing a recipe from an idea) is deferred to its own feature, not excluded. The four exclusions above stay until a concrete feature is proposed. Each would be reversed through the normal non-goal process and judged against DEC-110.
 
 ### Recipe / meal-plan sharing across households
 What it would be: exporting a recipe (or a whole plan) for another household to import, or a discoverable public library.
@@ -239,7 +234,7 @@ Adjacency note: `is_plant` exists on ingredients and is computed into plant-poin
 ### Cost optimisation and price tracking
 What it would be: comparing ingredient prices across stores, tracking price history, suggesting cheaper substitutes, optimising the shopping list against a budget.
 Why not part of this: `estimated_cost_per_serving` exists as a recipe field for informational display. Price intelligence requires price data the app doesn't have and wouldn't pay for at this scale.
-Adjacency note: the field is stored, not computed. Manual entry only.
+Adjacency note: the field is stored, not computed. Manual entry only. Recipe Import leaves it blank (DEC-106).
 
 ### Cook-mode / step-by-step / timer integration
 What it would be: a kitchen mode that walks through method steps with built-in timers, screen-wake-lock, hands-free advance.
@@ -260,10 +255,6 @@ Adjacency note: not a hostile decision — just a YAGNI one. If the app is ever 
 What it would be: setting macro / calorie targets, tracking planned and actual intake, surfacing variance.
 Why not part of this: the plan stores per-serving macros for display. It does not store targets, does not compute against targets, does not track adherence. Nutrition tracking is a category of app, not a meal-planner feature.
 Adjacency note: plant-points are a specific, deliberately-narrow nutrition signal (variety, not adherence). Per-serving nutrition is now shown and edited on each recipe (DEC-102), and DEC-101 adds a per-recipe health score. Both describe a single recipe. There are still no targets, no intake tracking and no day or plan totals, and that line stays drawn.
-
-### Photo recognition / OCR of cookbooks
-What it would be: snapping a photo of a cookbook page and extracting a recipe.
-Why not part of this: see "Recipe import from URLs." The hard problem is structured ingredient parsing, not text extraction.
 
 ---
 

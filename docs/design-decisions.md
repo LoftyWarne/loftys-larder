@@ -196,6 +196,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** A real UX cost paid by whoever enters recipes from sources that don't match the chosen unit. Two cooks accept this; a wider audience might not.
 - **Revisit when:** Entry friction from manual conversion becomes an adoption barrier — cannot happen at household scale.
 - **Cross-refs:** FEAT-17 (procedure boundary enforcement), FEAT-21 (editor), FEAT-36 (aggregation); non-goal: "Multi-unit-per-ingredient support".
+- **Amended (2026-10-03) by DEC-105.** On a Recipe Import the model proposes each quantity already converted into the ingredient's unit, and the cook approves or corrects it in Import Review. One unit per ingredient and no conversion table both still hold.
 
 ### DEC-19 — Whole-recipe ingredient quantities with explicit `baseServings`
 
@@ -332,6 +333,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Every user-FK'd column is nullable, which makes "who created this" never a hard authorisation predicate (DEC-17 already accepts this). Account deletion needs to know every user-FK'd table — a new such table must extend the deletion sequence (cross-cutting concern #15). GDPR right-to-erasure of authored content is arguable under this model.
 - **Revisit when:** Data-protection requirements change such that right-to-erasure must include authored content.
 - **Cross-refs:** FEAT-35; non-goal: "Cascade delete on user account removal".
+- **Amended (2026-10-03) by DEC-107.** After the transaction commits, account deletion also deletes the Cloudinary images of the user's import drafts, best effort. Originals already linked to a saved recipe are household data and stay.
 
 ### DEC-30 — Lazy-create `shopping_list_items` on first GET
 
@@ -553,6 +555,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Cloudinary vendor lock-in for media — moving to a different host means re-uploading every asset and updating every URL. Orphaned uploads (signed credential issued, recipe never saved) accumulate; no cleanup job in v1.
 - **Revisit when:** Cloudinary's signed-upload model changes such that constraints can't be enforced at signing; or storage cost / asset clutter becomes visible.
 - **Cross-refs:** FEAT-18, FEAT-21; non-goal: "Backend proxying of image uploads", "Cloudinary orphan cleanup job".
+- **Amended (2026-10-03) by DEC-107.** A second signed preset uploads Recipe Import images to `loftys-larder/imports`, allowing HEIC with its own size limit. The backend deletes a discarded import's images with a signed destroy call. Image bytes still never pass through Fastify, and there's still no orphan cleanup job.
 
 ---
 
@@ -1130,6 +1133,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Four write paths have to call the helper, and any new path that changes ingredients or method must too. Editing a household ingredient (renaming it, or changing `is_plant`) doesn't mark the recipes that use it. The score is an AI judgement and can be wrong; the summary is model-written plain text (DEC-49). There's no `updated_at`; `scored_at` covers it, as with the other recipe child tables. Sending recipe content to a model provider is a new external data flow, to be settled with the scoring feature.
 - **Revisit when:** The scoring feature is specced: provider, where it runs given auto-stop (DEC-64), prompt and rubric, cost, and the write procedure. Also revisit if stale flags fire on edits that don't matter, or miss ones that do.
 - **Cross-refs:** DEC-16 (`$onUpdate`), DEC-17 (household scope), DEC-21 (soft-deleted recipes keep their score), DEC-23 (variations), DEC-29 (account deletion), DEC-32 (contrast: plant points are computed, never stored), DEC-34 (`withTransaction`), DEC-49 (plain text), DEC-64 (auto-stop), DEC-102 (nutrition edits mark the score stale); FEAT-57; non-goals: "AI / LLM features" and "Nutrition tracking against goals" (adjacency notes amended).
+- **Amended (2026-10-03) by DEC-104 and DEC-109.** Anthropic is the first provider, through `@anthropic-ai/sdk` as for Recipe Import. Scoring gets its own swappable seam in the DEC-109 style: a `RecipeScorer` with its own adapters and `HEALTH_SCORE_ADAPTER` / `HEALTH_SCORE_MODEL` config. The scoring feature still chooses its own model, prompt, rubric and write procedure. Nutrition may now be an Estimate (DEC-106), and the scorer can read `nutrition_is_estimated`.
 
 ### DEC-102 — Recipes show and edit per-serving nutrition: calories in whole kcal, gram values to 2 decimal places
 
@@ -1144,6 +1148,138 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Entry is manual: values come from the recipe source or a label, and nothing checks them against the ingredients. Migration `0021` fails if a stored gram value is 10,000 or more.
 - **Revisit when:** Nutrition is wanted per day or per plan (which edges into the tracking non-goal), or values need working out from the ingredients.
 - **Cross-refs:** DEC-19 (whole-recipe quantities; nutrition is per serving), DEC-49 (plain text), DEC-98 (the stepper doesn't scale nutrition), DEC-101 (nutrition edits mark a health score stale); FEAT-21 (editor), FEAT-58; non-goal: "Nutrition tracking against goals" (unchanged: no targets or intake tracking).
+- **Amended (2026-10-03) by DEC-106.** Nutrition can now come from a Recipe Import as an Estimate. A new `recipes.nutrition_is_estimated` flag labels it on the recipe page until the cook unticks it in the editor.
+
+### DEC-103 — Recipe Import: a model transcribes an existing recipe into a proposal, and nothing is saved until a cook approves it in Import Review
+
+- **Chosen:** A cook can start a recipe from an **import input** instead of a blank form: pasted text, 1–4 images (screenshots, photos or scans), or a web link. A model turns the input into a proposal: a full recipe (header, ingredient lines, method, tags) in the Larder's own structure. The proposal opens in **Import Review**, where the cook checks it against the input, corrects it, and presses "Create recipe". The recipe doesn't exist until then. The terms are defined in `CONTEXT.md`.
+  - **One recipe per import.** If the input holds several, the model returns their names, the cook picks one, and a second call imports it.
+  - **Failures save nothing.** Not a recipe, or a model refusal: domain error `IMPORT_NOT_A_RECIPE`. A timeout or provider error: try again. A partial or partly illegible input still gives a proposal; the gaps become Estimates or empty sections, flagged in Import Review.
+  - **v1 limits:** no re-run inside Import Review (discard and start again); standalone recipes only, never `is_base` or `base_recipe_id` (DEC-23); no import while offline; no automatic health scoring (DEC-101).
+  - **Delivery:** three features, in order: pasted text plus Import Review (FEAT-59), images (FEAT-60), web links (FEAT-61).
+- **Alternatives:** (a) Keep the non-goals and enter recipes by hand. (b) Auto-create the recipe with a "needs review" flag. Unreviewed recipes would reach the picker, which `pickable-recipes` can't tell apart, and ingredient matching would have to be fully automatic. (c) Include **Recipe Generation** (a model inventing a recipe from an idea) in the same feature. There's no original to check against, so review means judging the cooking rather than the transcription, which sits closer to the recommendations non-goal. Deferred to its own feature. (d) A deterministic scraper for links and OCR for images. Both stop at text, and structuring the ingredient lines is the hard part, which is what a model does well.
+- **Why it won:** The non-goals rejected import because structuring ingredient lines was the hard part and the one-unit rule meant reviewing conversions anyway. Models now do the structuring well. The review stays, and Import Review is where it happens. Manual entry was the main cost of adding a recipe.
+- **Consequences (+):** Most of the typing goes. The cook stays in control: nothing reaches the planner, the shopping list or the household's ingredient list without a save.
+- **Consequences (−):** A model provider sits on the request path for one feature, and recipe content leaves the app (DEC-104). A proposal can be wrong in ways that look right, and Import Review is only as good as the cook's check. Two non-goals are removed and a third is narrowed.
+- **Revisit when:** Cooks routinely save imports without changing anything (Import Review could get lighter), or routinely correct the same kind of mistake (the prompt or model needs work). Recipe Generation and a PWA share target are the named follow-ups.
+- **Cross-refs:** DEC-18 and DEC-105 (units), DEC-21, DEC-23, DEC-49, DEC-101, DEC-104 to DEC-109; FEAT-59, FEAT-60, FEAT-61; non-goals: "Recipe import from URLs" and "Photo recognition / OCR of cookbooks" (removed), "AI / LLM features" (adjacency note amended).
+
+### DEC-104 — Imports run in one synchronous tRPC mutation with a 75-second limit; the first reader is Claude Opus 5.5 through the Anthropic SDK
+
+- **Chosen:** Anthropic provides the first Recipe Import adapter behind the swappable reader seam (DEC-109), and is the first provider for the health score when that's built (DEC-101). New dependency `@anthropic-ai/sdk`, which ships ESM (DEC-01), and `ANTHROPIC_API_KEY` in `config.ts`.
+  - **Model:** starts as `claude-opus-5-5`, set by `RECIPE_IMPORT_MODEL` (DEC-109). Effort is set explicitly and tuned against the eval set. Inside the Anthropic adapter, output uses the SDK's structured outputs, because this model rejects forced tool choice.
+  - **Synchronous:** the import is one tRPC mutation. The server prepares the input, calls the reader, normalises the result, writes it into an Import Review draft (DEC-108) and returns the draft id. A hard 75-second timeout keeps it under Cloudflare's 100-second origin limit (DEC-72). A request in flight keeps the Fly machine awake, so auto-stop (DEC-64) is unaffected. The mutation stays on `httpBatchLink` (cross-cutting #16).
+  - **Guardrails:** a per-user limit on the import mutation through the existing rate-limit plugin, and a monthly spend cap set in the provider's console. No quota table.
+  - **Logging:** metadata only, to Pino → Axiom with `reqId` (DEC-77): input kind, image count, the adapter and model, input and output tokens, latency, and the outcome or domain error code. The procedure logs the usage the reader returns; adapters never log. Prompt content and model output are never logged and never attached to Sentry events (DEC-76).
+  - **Untrusted input:** a web page or photo can carry text aimed at the model. The model gets no tools, its output is normalised against the schema (DEC-109), and nothing is saved without Import Review, so the worst case is a strange draft.
+  - **Tests:** backend tests and e2e run on the `fake` adapter, and the database stays real (DEC-56). A manual eval set of about ten real inputs is run on demand through real adapters, not in CI, to check prompt and model changes against the time limit.
+- **Alternatives:** (a) OpenAI or Gemini as the first adapter. (b) Claude Sonnet 5.5: faster and about half the price, but handwriting and cookbook photos are where a misread costs the cook the most review time. The rough cost is 10–15p per import on Opus 5.5, so pennies a week either way, and switching later is a config change. (c) A background job with a `recipe_imports` table and polling. It survives the app closing, but it needs a table, and with no request in flight auto-stop can stop the machine mid-job. (d) Streaming over SSE or tRPC subscriptions, which changes the link setup.
+- **Why it won:** Opus 5.5 is the strongest current reader of handwriting and photos, and the cost is negligible at household volume. A synchronous call needs the least machinery, and both the auto-stop and Cloudflare limits allow it.
+- **Consequences (+):** No new table or worker. Changing the model is a config change, and changing the provider is a new adapter (DEC-109).
+- **Consequences (−):** Recipe content, photos and the household's ingredient, tag and source names go to the provider. A slow import holds a request open for up to 75 seconds, and closing the app mid-import loses it (nothing was saved). The same input can give slightly different proposals. The eval set is manual, so a regression only shows when someone runs it.
+- **Revisit when:** Real imports come close to 75 seconds (try lower effort or Sonnet 5.5, then a background job). The spend cap is hit.
+- **Cross-refs:** DEC-01, DEC-49, DEC-56, DEC-64, DEC-72, DEC-75, DEC-76, DEC-77, DEC-101, DEC-103, DEC-108, DEC-109; FEAT-59; cross-cutting #16.
+
+### DEC-105 — The model matches ingredient lines to household ingredients and proposes quantities in each ingredient's unit; the cook approves the conversion
+
+- **Chosen:** With the input, the model receives the household's ingredients (id, name, unit), the categories, units, prep types, tags and sources. For each ingredient line it proposes:
+  - a household ingredient, or a **new ingredient** (name, category, unit, `isPlant`, shelf life) when nothing matches;
+  - a quantity **converted into that ingredient's one unit** ("2 tbsp olive oil" → olive oil, 30 ml), marked as an Estimate when the conversion is approximate ("1 onion" → onion, 150 g);
+  - a nominal quantity, marked as an Estimate, for a line that has none ("salt to taste" → salt, 2 g), because `quantity` is NOT NULL;
+  - a prep type, and `isOptional` only when the original says "optional".
+
+  Import Review shows the original line under each proposed row. The original text isn't stored on the recipe.
+  - **New ingredients and sources are proposals held in the draft.** They're editable in place and created in the same transaction as the recipe on "Create recipe" (DEC-108). Any row can be switched to an existing ingredient through the combobox (FEAT-21), which catches near-duplicates the model missed. A recognised publication is matched to a Source or proposed as a new one in the same way.
+- **Amends DEC-18:** "users convert manually on entry" becomes "users approve a proposed conversion on import". The rule itself is unchanged (one unit per ingredient, no conversion table), and nothing about the conversion is stored.
+- **Alternatives:** (a) The model extracts raw lines; matching by trigram search and conversion by the cook. That keeps DEC-18 to the letter but leaves most of the typing. (b) The model extracts and converts, and code does the matching: one judgement split across two places for no gain. (c) For new ingredients, the existing inline create dialog, one per ingredient, created at once: six dialogs for a new cuisine, and abandoned imports leave ingredients behind. (d) Block saving until unmatched lines are mapped by hand. (e) Allow a NULL quantity: a schema change that reaches into shopping aggregation.
+- **Why it won:** Matching and converting are where manual entry spends its time, and the model has the context to do both. Showing the original line keeps every conversion checkable. Creating new ingredients with the recipe means an abandoned import changes nothing shared.
+- **Consequences (+):** Shopping aggregation is untouched: every saved line is still one ingredient in its one unit. Discarded imports leave no ingredients or sources behind.
+- **Consequences (−):** A wrong conversion that looks plausible (30 ml instead of 45 ml) gets through if the cook doesn't check. Nominal quantities for "to taste" lines put small amounts of salt and pepper on the shopping list. "Create recipe" must handle a new ingredient whose name was taken after the import (`INGREDIENT_NAME_TAKEN`, DEC-35).
+- **Revisit when:** Cooks often correct the same conversions (a household hint list in the prompt may help), or near-duplicate ingredients start to build up.
+- **Cross-refs:** DEC-14, DEC-17, DEC-18 (amended), DEC-19, DEC-35, DEC-103, DEC-106, DEC-108; FEAT-21, FEAT-36, FEAT-59.
+
+### DEC-106 — An import fills every field it can and marks what it estimated; cost and image stay blank, and estimated nutrition stays labelled after save
+
+- **Chosen:** The model fills every recipe field the input supports, and supplies the rest as **Estimates** where it can: description, `baseServings`, active and total time, nutrition per serving, tips and safety notes, per-step ingredient amounts (DEC-99) and prep-ahead marks (DEC-96). Import Review marks each Estimate.
+  - **Never filled:** cost per serving, because the model has no price data and the cost non-goal keeps that field manual; and the recipe image.
+  - **Tags** come from the household's existing tags only (DEC-97).
+  - **Nutrition stays labelled.** New column `recipes.nutrition_is_estimated boolean NOT NULL DEFAULT false`. An import sets it when any nutrition value is an Estimate. While it's set, the recipe page heads the section "Nutrition per serving · estimated". The editor shows it as a checkbox by the nutrition fields, which the cook unticks after checking a label. Manual entry leaves it false. Changing only the flag doesn't mark a health score stale.
+  - Every other Estimate exists only in Import Review. Once saved, it's ordinary data.
+- **Alternatives:** (a) Transcribe only: leave blank whatever the input doesn't state. (b) Structure, don't invent: infer step links, prep-ahead marks and tags, but never estimate nutrition, times or tips. The user chose to fill everything. (c) Flags only in Import Review, for nutrition too. No schema change, but an estimated 410 kcal would then look like one copied from a label, for good. (d) Track estimates for every field: a list of field names that every edit path keeps up to date, for fields whose mistakes show up when cooking.
+- **Why it won:** The aim is to cut typing, so an import should leave as little blank as possible. Nutrition is the one field where a guess passes for a fact and feeds another estimate (DEC-101), so it alone keeps its label.
+- **Consequences (+):** One column and an explicit toggle, with nothing inferred from edit history.
+- **Consequences (−):** Estimated times, tips and safety notes become ordinary data after save, and a model-written safety note can be wrong with no label on it. The flag depends on the cook unticking it, so it can outlast a check that did happen.
+- **Revisit when:** Estimates other than nutrition turn out to mislead after save, or the flag is never unticked in practice.
+- **Cross-refs:** DEC-49, DEC-96, DEC-97, DEC-99, DEC-101 (the score reads nutrition), DEC-102 (amended), DEC-103, DEC-105; FEAT-58, FEAT-59; non-goal: "Cost optimisation and price tracking" (unchanged).
+
+### DEC-107 — Import images go from the browser to Cloudinary and are kept as the recipe's Originals; web links are fetched by the backend, JSON-LD first
+
+- **Chosen:**
+  - **Images (FEAT-60):** the browser uploads 1–4 images directly to Cloudinary with signed credentials, into a separate `loftys-larder/imports` folder, as for recipe images (DEC-50). The backend passes Cloudinary delivery URLs to the model, with a transformation that caps the size and converts to JPEG, so iPhone HEIC photos work. Import formats: jpg, jpeg, png, webp and heic.
+  - **Originals:** on "Create recipe" the import images are kept and linked to the recipe in a new table, `recipe_import_originals` (`recipe_id` FK → `recipes`, `ON DELETE RESTRICT`; Cloudinary `public_id`; `position`). The recipe page offers "View original". An import image never becomes the recipe image automatically. Originals are household data like the recipe: kept when it's soft-deleted (DEC-21) and when the uploader's account is deleted (DEC-29). Pasted text isn't kept.
+  - **Discarded imports:** discarding an import deletes its images from Cloudinary. Account deletion's draft step also deletes the images of that user's import drafts, after the transaction commits and best effort. In-progress imports don't expire (DEC-108).
+  - **Links (FEAT-61):** the backend fetches the page and uses its schema.org `Recipe` JSON-LD if it has one, otherwise its readable text. The model always does the final mapping, because JSON-LD ingredients are still free text. The fetch allows https only, refuses private, loopback and link-local addresses (checked again after every redirect), and caps size and time. A refused or blocked page (paywall, bot check) gives a domain error suggesting the cook paste the text or a screenshot instead. The link fills `sourceUrl`.
+- **Amends DEC-50:** a second signed upload preset for imports, allowing HEIC with its own size limit, and targeted deletion of a discarded import's images through a signed Cloudinary destroy call from the backend. No image bytes pass through Fastify. This isn't the orphan cleanup job, which stays a non-goal.
+- **Alternatives:** (a) Images as base64 through tRPC: breaks DEC-50 and Fastify's 1 MiB body limit. (b) The browser calls the model directly, which exposes the API key. (c) Delete import images after save: loses the original a cook may want to recheck an Estimate against, and a handwritten family recipe is worth keeping. (d) The provider's server-side web-fetch tool: no SSRF exposure on our side, but less control, extra cost, and blocked sites stay blocked. (e) Fetch links from the browser: CORS blocks it.
+- **Why it won:** Image bytes stay off Fastify, as DEC-50 intends, and the signed-upload code is reused. Keeping originals lets the Import Review check continue after the save. JSON-LD is cleaner input than page text, and most large recipe sites publish it.
+- **Consequences (+):** Imported recipes keep a "View original". No image bytes on the API path.
+- **Consequences (−):** A new household-scoped table, scoped through the join to `recipes` as `recipe_tag_links` is. Cloudinary storage grows with every image import. The backend makes outbound requests to URLs users supply, so the SSRF guard is security-critical and needs its own tests. Some sites will always refuse a server fetch.
+- **Revisit when:** Cloudinary storage becomes noticeable, or a site the household uses often blocks fetches.
+- **Cross-refs:** DEC-17, DEC-21, DEC-29 (amended), DEC-50 (amended), DEC-68, DEC-103, DEC-104, DEC-108; FEAT-35, FEAT-60, FEAT-61; non-goals: "Backend proxying of image uploads" and "Cloudinary orphan cleanup job" (unchanged).
+
+### DEC-108 — Import Review drafts live in `recipe_drafts` with `kind = 'import'`, and "Create recipe" writes the whole recipe in one transaction
+
+- **Chosen:**
+  - **Draft kind:** new column `recipe_drafts.kind` (`manual` | `import`, default `manual`). `getNewDrafts` and `delete({ recipeId: null })` act on manual drafts only. Import drafts are read, autosaved and deleted by draft id. The import mutation creates the row, and Import Review autosaves into it as the editor does today. The draft holds the proposal, the Estimate marks, the original ingredient lines and the import input (image public ids, the link, or the pasted text).
+  - **Routes:** "New recipe" on `/recipes` offers **Start blank** (`/recipes/new`, unchanged) or **Import** (`/recipes/import`, where the cook chooses an input or resumes an import in progress). Import Review is `/recipes/import/$draftId` and reuses the editor's sections: header fields, ingredient list, method and tags.
+  - **Create recipe:** one procedure inside `withTransaction` creates the new ingredients and sources, the recipe, its ingredient lines, method and step links, tag links and Originals, then deletes the draft.
+  - **No expiry:** imports in progress stay listed until they're finished or discarded.
+- **Alternatives:** (a) Turn `/recipes/new` into the full editor for every new recipe, with import pre-filling it. That changes manual creation, which nobody asked for. (b) Create the recipe at once and send the cook to the edit page: the recipe would exist before review (DEC-103). (c) A `kind` field inside the JSON envelope, filtered with a jsonb operator. No migration, but it breaks the "server only enforces the envelope" design. (d) A separate `recipe_import_drafts` table, which duplicates the autosave machinery. (e) Sequential calls to `create`, `replaceIngredients` and `replaceMethod`: a failure halfway leaves a half-made recipe.
+- **Why it won:** Without a kind, import drafts collide with manual ones. `/recipes/new` loads the most recent `recipe_id IS NULL` draft, and saving a manual recipe deletes every NULL draft the user has. A column fixes both with one filter. A whole-recipe transaction is the only way to keep "nothing exists until save" true.
+- **Consequences (+):** Half-reviewed imports survive closing the app. The manual new-recipe flow is unchanged apart from the filter.
+- **Consequences (−):** A second way to create a recipe, which has to stay consistent with `create`, `replaceIngredients`, `replaceMethod` and `replaceTags`; their validation and write code should be shared, not copied. `useRecipeDraft` gains a third mode, by draft id.
+- **Revisit when:** The manual new-recipe flow is reworked, at which point the two creation paths could merge.
+- **Cross-refs:** DEC-16, DEC-29 (drafts are deleted on account deletion), DEC-34, DEC-99, DEC-103, DEC-105, DEC-107; FEAT-21, FEAT-59; cross-cutting #4.
+
+### DEC-109 — Recipe Import reads through a swappable `RecipeReader` seam, with adapters chosen by config and the rules applied outside the seam
+
+- **Chosen:** The code that turns an import input into a proposal sits behind one interface, `RecipeReader.read(request, signal)`. The names are provisional until kick-off.
+  - **Request:** a prepared input (`text`; `images` as Cloudinary delivery URLs; `page` as the URL plus its JSON-LD or readable text), the household's ingredients (id, name, unit), categories, units, prep types, tags and sources, and, when the input held several recipes, the name the cook picked.
+  - **Outcome:** an unvalidated proposal candidate, the names of several recipes, or not a recipe. Each carries usage: adapter, model, input and output tokens. Timeout and provider-unavailable are typed errors.
+  - **Every adapter must:** stop when the signal aborts, keeping its retries inside the caller's 75-second budget (DEC-104); map its provider's refusals to not a recipe; and never log.
+  - **Adapters:** `anthropic`, which owns its prompt and uses the official SDK's structured outputs, and `fake`, which returns canned outcomes for backend tests and e2e. A new provider means a new adapter with its own prompt.
+  - **Choosing one:** `RECIPE_IMPORT_ADAPTER` and `RECIPE_IMPORT_MODEL` in `config.ts`, validated by Zod. Swapping is an env change and a restart. Config refuses `fake` in production. The eval runner picks adapters directly, so models can be compared on the same inputs without a deploy.
+  - **Before the seam:** the import procedure prepares the input. It produces the image delivery URLs and fetches pages behind the SSRF guard (DEC-107). Adapters never fetch pages.
+  - **After the seam:** every candidate goes through one pure function, `normaliseProposal(candidate, household)`:
+    1. Validate against the `/shared` proposal schema. A failure shows "try again".
+    2. Strip markdown from all text (DEC-49).
+    3. An ingredient, tag, source, prep-type, category or unit id that wasn't sent becomes no match on its row. An unknown ingredient becomes a proposed new ingredient by name, and an unknown tag is dropped.
+    4. Force cost per serving and image to blank (DEC-106).
+    5. Keep the adapter's Estimate marks as given. Nothing is inferred here.
+  - **Tracing:** the procedure logs the returned usage (DEC-104), and the import draft records which adapter and model produced it.
+  - **The pattern for later model features:** health scoring (DEC-101) gets its own seam in the same style: a `RecipeScorer` with its own adapters and `HEALTH_SCORE_ADAPTER` / `HEALTH_SCORE_MODEL`, built with that feature. The only shared code is a small internal Anthropic client factory (key, timeout defaults), which is a helper, not a seam.
+- **Alternatives:** (a) A model id in config only: changing provider would mean a rewrite. (b) A generic model client ("prompt + images + schema → JSON") with one prompt for every provider. Providers differ in how they take images, return structured output and report refusals, and those differences would leak into the shared prompt and its callers. (c) A provider-agnostic library such as the Vercel AI SDK: another dependency that covers only provider swapping and lags provider-specific features such as Anthropic's effort setting. (d) Each adapter prepares its own input: page fetching and the SSRF guard re-implemented per adapter. (e) Adapters validate their own output, so each one can drift from the contract. (f) A runtime switch in the app's settings: a table and UI for something the developer changes rarely. (g) One "AI" seam with a method per feature: adding a feature changes every adapter, and import and scoring couldn't use different providers.
+- **Why it won:** The user wants the model and the code that drives it to be swappable. The seam is real from the start, with two adapters: Anthropic in production and Fake in tests and e2e. With validation and reference checks outside the seam, an adapter only has to be good at reading. It can't break the data's rules.
+- **Consequences (+):** Changing the model is a config change, and changing the provider is one new adapter. e2e runs without a real provider. The eval set can compare adapters side by side. Household scope (DEC-17) and plain text (DEC-49) hold whatever a model returns.
+- **Consequences (−):** The interface has to stay stable, because changing the outcome shape touches every adapter. Each adapter has its own prompt, so prompt improvements don't carry across providers. A provider that can't take image URLs would need its adapter to download images from Cloudinary, which puts image bytes in backend memory. DEC-50 forbids proxying uploads rather than this, but it goes against DEC-50's intent, so weigh it when such an adapter is proposed.
+- **Revisit when:** A second real provider adapter is added (check that the interface held), or the interface keeps changing. Two named triggers, recorded in cross-cutting #22: the first model feature that can't finish within one request (most likely the health-score backfill) decides background work against auto-stop (DEC-64); the first that needs streamed output decides the tRPC link change (cross-cutting #16).
+- **Cross-refs:** DEC-17, DEC-49, DEC-50, DEC-56, DEC-64, DEC-101, DEC-103, DEC-104, DEC-106, DEC-107, DEC-110; FEAT-59, FEAT-60, FEAT-61; cross-cutting #16, #22.
+
+### DEC-110 — Model features are allowed when they follow four rules, replacing the AI non-goal's list of exceptions
+
+- **Chosen:** A feature may use a model when it follows these rules:
+  1. **The model proposes and a cook decides.** Nothing is saved, changed or chosen without a person. Recipe Import has Import Review. The health score is a label and never picks or changes anything.
+  2. **Kept output is labelled.** Model output that stays after the person's decision is marked as AI or as an Estimate wherever a reader could take it for fact, as with the health score's badge and estimated nutrition.
+  3. **Deterministic data stays deterministic.** Models never compute shopping lists, aggregation, plant points, shelf life, dates or anything else the app works out by rule. They may propose data that a person then approves.
+  4. **Each feature is built to cross-cutting #22:** its own swappable seam (DEC-109), its rules applied outside the seam, metadata-only logging, and its data flow named in its DEC.
+
+  The "AI / LLM features" non-goal now points here. Its exclusions stay: meal-plan suggestions, recipe recommendations, substitution advice and "what can I cook with X". Each would be reversed through the normal non-goal process once a concrete feature is proposed, and judged against these rules.
+- **Alternatives:** (a) Keep adding exceptions to the non-goal one at a time. A list doesn't say what the next feature has to satisfy. (b) Drop the exclusions now, without a concrete feature to weigh them against.
+- **Why it won:** The user expects more AI features. The rules capture what made Recipe Import (DEC-103) and the health score (DEC-101) acceptable, so the next proposal is judged against principles, not against a list.
+- **Consequences (+):** Every model feature proposal faces the same test. The non-goal's reasoning ("two cooks know what they want to eat better than any model does") still guards the exclusions.
+- **Consequences (−):** Rule 1 rules out features that act on their own, such as filling a week's plan automatically, unless the rule is revisited. Whether a reader "could take it for fact" in rule 2 is a judgement made per feature.
+- **Revisit when:** A proposed feature is worth building but breaks a rule.
+- **Cross-refs:** DEC-32 (plant points are computed), DEC-101, DEC-103, DEC-104, DEC-106, DEC-109; cross-cutting #22; non-goal: "AI / LLM features" (now points here).
 
 ---
 

@@ -4,6 +4,53 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-03 — Recipe Import designed (DEC-103 to DEC-110, FEAT-59 to FEAT-61)
+
+**Status:** Design only, worked through question by question with the user. No code. Docs edited and not committed. FEAT-59 to FEAT-61 are drafts awaiting kick-off, with every checkbox unticked.
+
+**Agreed with the user:**
+- Recipe Import moves out of non-goals. "Recipe import from URLs" and "Photo recognition / OCR of cookbooks" are removed, and the "AI / LLM features" note is narrowed. Suggestions, recommendations and substitutions stay excluded.
+- Terms in the new `CONTEXT.md`: Recipe Import, Import input, Import Review, Estimate, Source (unchanged: provenance, not the input) and Recipe Generation.
+- Inputs: pasted text, 1–4 images, or a web link. Recipe Generation (inventing a recipe from an idea) is a separate, later feature.
+- Nothing is saved until the cook presses "Create recipe" in Import Review.
+- Provider: Anthropic, `claude-opus-5-5`, one synchronous tRPC mutation with a 75 s limit. This also settles the provider for DEC-101 scoring.
+- Ingredient matching and conversion into each ingredient's unit are proposed by the model and approved by the cook (DEC-18 amended). New ingredients and sources are proposals, created in the same transaction as the recipe.
+- The model fills everything it can and marks Estimates, but leaves cost and image blank and uses existing tags only. Estimated nutrition keeps a label after save (`recipes.nutrition_is_estimated`).
+- Images go browser → Cloudinary (`imports` folder) and are kept as Originals (`recipe_import_originals`). Links are fetched by the backend, JSON-LD first, behind an SSRF guard.
+- `recipe_drafts.kind` keeps import drafts apart from manual ones. Today `/recipes/new` loads the most recent NULL draft (`use-recipe-draft.ts`), and `delete({ recipeId: null })` deletes every NULL draft (`recipe-drafts.ts`), so without it the two would collide.
+- Logs carry metadata only. A per-user rate limit plus a console spend cap. Backend tests fake the provider, and a manual eval set of about 10 inputs is run on demand.
+- v1 leaves out: re-running inside Import Review, base or variation recipes, offline import, and automatic scoring. Drafts don't expire. Discarding deletes the draft's images, and account deletion deletes the user's import-draft images, best effort.
+- **Added 2026-10-04: swappable model and handler (DEC-109).** The user wants both swappable, which reverses DEC-104's "portability isn't needed". DEC-104 was edited in place because it wasn't committed.
+  - One domain seam, `RecipeReader.read(request, signal)`, returns a candidate, several names, or not a recipe, plus usage. Timeout and unavailable are typed errors.
+  - Two adapters: `anthropic` and `fake`. The fake one runs backend tests and e2e.
+  - `RECIPE_IMPORT_ADAPTER` / `RECIPE_IMPORT_MODEL` in config. `fake` is refused in production.
+  - Inputs are prepared outside the seam (image URLs, the SSRF-guarded fetch).
+  - Every candidate goes through a pure `normaliseProposal`: schema, markdown, reference checks, cost and image blanked.
+  - Health scoring gets its own `RecipeScorer` seam in the same style when it's built.
+- **Added 2026-10-04: future AI features (DEC-110, cross-cutting #22).** The user expects more AI features.
+  - The stance changes from "AI excluded, with exceptions" to "allowed under four rules": the model proposes and a cook decides; kept output is labelled; deterministic data stays deterministic; each feature is built to #22. The AI non-goal now points to DEC-110, and its four exclusions stay until a concrete feature is proposed.
+  - Cross-cutting #22 is the checklist every model feature follows. FEAT-59 names the usage logger and eval runner generically for scoring to reuse.
+  - Background work and streaming aren't designed now. Each has a named trigger in #22: background work with the first feature that can't finish in one request (likely the health-score backfill), streaming with the first feature that needs streamed output.
+
+**Changes:**
+- New `CONTEXT.md`, now listed in the `AGENTS.md` doc set. The FEAT and DEC counts in `AGENTS.md` are bumped.
+- `docs/design-decisions.md`: DEC-103 to DEC-110, plus amendment lines on DEC-18, DEC-29, DEC-50, DEC-101 and DEC-102.
+- `docs/non-goals.md`: two entries removed. The "AI / LLM features" adjacency note now points to DEC-110, and the "Cost optimisation" note is amended.
+- `docs/feature-specs.md`: cross-cutting #22, "Model features".
+- `docs/feature-specs.md`: FEAT-59 (pasted text + Import Review), FEAT-60 (images + Originals), FEAT-61 (web links).
+
+**Open, for kick-off:**
+- Three schema changes need approval at kick-off: `recipe_drafts.kind`, `recipes.nutrition_is_estimated` and `recipe_import_originals`.
+- New dependency `@anthropic-ai/sdk`. The npm package ships an `.mjs` default export; confirm the version to pin. Also whether HTML parsing for FEAT-61 needs a dependency.
+- Create recipe should reuse the write code of `create` / `replaceIngredients` / `replaceMethod` / `replaceTags`. Agree how they get extracted.
+- Final names for `RecipeReader` / `read` / `normaliseProposal`, and the exact outcome and error types.
+- Where the eval set and its runner live, and whether personal photos belong in the repo.
+- The per-user rate-limit numbers, and the import upload size limit (phone photos can exceed the 5 MB recipe-image limit).
+- Effort level for Opus 5.5, set from the eval set's timings against the 75 s limit.
+- Follow-ups not specced: Recipe Generation, PWA share target.
+
+---
+
 ## 2026-10-03 — Recipes page filters: source, times, ingredients; tag filter restyled (DEC-100, FEAT-56)
 
 **Status:** Committed + pushed to `main`. Typecheck, lint and format are clean in all four workspaces. Tests: backend 583 (with the gram-macros commit), frontend 648 and e2e 30, all green. One full e2e run failed `recipe filters pass axe in dark theme` once; the failure message wasn't captured, and it didn't come back in 4 more full runs or 15 runs of that test alone (see Open). No schema change. Not yet eyeballed in a browser. FEAT-56 checkboxes are left for the user to tick.

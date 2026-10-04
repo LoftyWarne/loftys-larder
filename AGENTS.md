@@ -5,9 +5,10 @@ Read this file before every prompt. Your default posture is **ask, don't assume*
 The doc set:
 
 - `README.md` — entry point, kept in sync with shipped features.
+- `CONTEXT.md` — domain glossary. Terms only, no implementation detail.
 - `docs/plan.md` — strategy. Source of hard constraints below.
-- `docs/feature-specs.md` — 58 executable units, FEAT-01 … FEAT-58.
-- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-102. Cross-refs to FEATs.
+- `docs/feature-specs.md` — 61 executable units, FEAT-01 … FEAT-61.
+- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-110. Cross-refs to FEATs.
 - `docs/non-goals.md` — deliberate exclusions. Useful to *prevent* work.
 - `docs/session-notes.md` — rolling working doc; pending questions, in-flight context.
 - `AGENTS.md` — this file.
@@ -172,6 +173,7 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 - **Optimistic updates:** use the shared hook (`useOptimisticSlotUpdate`, FEAT-31). Don't reimplement `onMutate`/`onError`/`onSettled` per consumer. (cross-cutting #7)
 - **Pickable recipes:** use the helper. Don't filter recipes by hand. (cross-cutting #5)
 - **Health-score staleness:** a recipe write that changes ingredients, method text, servings, nutrition or a variation's base calls `markHealthScoreStale` inside its transaction. (cross-cutting #21, DEC-101)
+- **Model features:** any feature that calls a model follows cross-cutting #22: its own seam with a `fake` adapter, `<FEATURE>_ADAPTER` / `<FEATURE>_MODEL` config, its rules applied outside the seam, and metadata-only logging. (DEC-109, DEC-110)
 - **Searchable combobox primitive** (FEAT-21) is the only combobox. Don't fork it per picker. (cross-cutting #6)
 - **Slot card** (FEAT-31) has explicit slots for future content. Extend, don't rewrite. (cross-cutting #14)
 - **Date logic** imports from `dateUtils`. No `new Date()` in domain code. (cross-cutting #8)

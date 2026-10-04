@@ -359,6 +359,8 @@ function startErrorMessage(err: unknown): string {
       return 'Couldn’t find a recipe in that.';
     case 'IMPORT_RATE_LIMITED':
       return 'You’ve reached the import limit. Try again in an hour.';
+    case 'IMPORT_REQUEST_REJECTED':
+      return 'Importing isn’t working at the moment, and trying again won’t help. The problem has been reported.';
     default:
       return 'The import didn’t work. Try again.';
   }

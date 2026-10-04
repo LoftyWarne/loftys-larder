@@ -68,3 +68,21 @@ export class RecipeReaderUnavailableError extends Error {
     this.name = 'RecipeReaderUnavailableError';
   }
 }
+
+// The provider refused the request itself, for a reason trying again can't
+// fix: a request it can't accept, a bad key or an unknown model. That's a
+// bug or a configuration problem on our side, not an outage.
+export class RecipeReaderRequestError extends Error {
+  constructor(
+    readonly status: number,
+    // The provider's error type and validation message, and its id for the
+    // request. The message says what was wrong with the request, so it's
+    // logged; it isn't prompt or model text (DEC-104).
+    readonly providerErrorType: string | null,
+    readonly providerMessage: string | null,
+    readonly providerRequestId: string | null,
+  ) {
+    super('The recipe reader refused the request');
+    this.name = 'RecipeReaderRequestError';
+  }
+}

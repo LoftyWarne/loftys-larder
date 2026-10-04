@@ -2509,6 +2509,7 @@ Conventions:
   - Adapters return a candidate shaped by `recipeImportCandidateSchema` (structured-output friendly); its rows refer to household ingredients as `{ id, name }`. A proposed new ingredient keeps a category or unit that wasn't sent as null (DEC-109 amended).
   - Create from import: an existing ingredient's row carries `unitId` for the unit-mismatch check; cost and image are accepted from the cook; a source proposed by name that exists by then is linked; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` carries the `newKey`. The draft is deleted first inside the transaction, so a second "Create recipe" finds nothing and rolls back (DEC-108 amended).
   - The eval runner and eval set move to FEAT-64, with manual verification steps 1 and 2.
+- Amended after the FEAT-62 deploy (2026-10-04): Anthropic refused the structured-output schema, so every import failed in production. The `anthropic` adapter now describes the reply in its prompt instead of using structured outputs, and a request the provider refuses outright is `IMPORT_REQUEST_REJECTED` rather than "try again" (DEC-104 and DEC-109 amended).
 
 **Manual verification:**
 1. Run the eval runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
@@ -2901,6 +2902,7 @@ Every model feature follows the rules in DEC-110 and is built the same way (DEC-
 - **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-64.
 - **Data flow.** The feature's DEC names any new data it sends to a provider.
 - **Shared code is helpers, not seams:** the provider client setup, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
+- **A real call before the first deploy.** The `fake` adapter can't catch a provider's limits. Recipe Import shipped with a schema Anthropic refused on every request, so send one real request through the real adapter before a model feature first deploys.
 
 **Named triggers:** the first model feature that can't finish within one request (most likely the health-score backfill) decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
 

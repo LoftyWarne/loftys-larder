@@ -1,20 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk';
 
-import { recipeImportReadingSchema } from '../../../../shared/src/index.ts';
 import type { ModelEffort } from '../../config.ts';
-import { toStructuredOutputSchema } from '../model-features/structured-output-schema.ts';
 import {
   buildRecipeReaderUserMessage,
   RECIPE_READER_SYSTEM_PROMPT,
 } from './anthropic-prompt.ts';
 import {
+  RecipeReaderRequestError,
   RecipeReaderTimeoutError,
   RecipeReaderUnavailableError,
   type RecipeReader,
   type RecipeReaderOutcome,
 } from './types.ts';
-
-const READING_SCHEMA = toStructuredOutputSchema(recipeImportReadingSchema);
 
 // Room for thinking plus a long proposal, and still under the SDK's limit for
 // a non-streaming request.
@@ -24,6 +21,11 @@ const MAX_TOKENS = 16_000;
 // category, inside the same call. A recipe tripping one is almost certainly
 // a false positive. A refusal from the whole chain is still not a recipe.
 const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+
+// Client errors that mean the request was wrong, as opposed to a timeout
+// (408), a conflict (409) or a rate limit (429), which can pass.
+const TRANSIENT_CLIENT_STATUSES = new Set([408, 409, 429]);
+const PROVIDER_MESSAGE_MAX_LENGTH = 500;
 
 export interface AnthropicRecipeReaderOptions {
   client: Anthropic;
@@ -47,10 +49,7 @@ export function createAnthropicRecipeReader(
             max_tokens: MAX_TOKENS,
             betas: [REFUSAL_FALLBACK_BETA],
             fallbacks: 'default',
-            output_config: {
-              effort,
-              format: { type: 'json_schema', schema: READING_SCHEMA },
-            },
+            output_config: { effort },
             system: RECIPE_READER_SYSTEM_PROMPT,
             messages: [
               {
@@ -83,11 +82,14 @@ export function createAnthropicRecipeReader(
 
 // Reads only the outcome envelope. The candidate goes back unvalidated, and
 // output that isn't JSON (cut off at `max_tokens`, say) becomes a candidate
-// that fails normalisation.
+// that fails normalisation. The prompt asks for bare JSON, but a code fence
+// or a sentence around the object is forgiven.
 function toOutcome(text: string): RecipeReaderOutcome {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(text.slice(start, end + 1));
   } catch {
     return { kind: 'candidate', candidate: null };
   }
@@ -119,9 +121,36 @@ function toReaderError(error: unknown, signal: AbortSignal): unknown {
   }
   if (error instanceof Anthropic.APIError) {
     const status: unknown = error.status;
+    if (
+      typeof status === 'number' &&
+      status >= 400 &&
+      status < 500 &&
+      !TRANSIENT_CLIENT_STATUSES.has(status)
+    ) {
+      return new RecipeReaderRequestError(
+        status,
+        error.type,
+        providerMessage(error.error),
+        error.requestID ?? null,
+      );
+    }
     return new RecipeReaderUnavailableError(
       typeof status === 'number' ? status : null,
     );
   }
   return error;
+}
+
+// The `error.message` of the provider's error body, if it has one.
+function providerMessage(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null || !('error' in body)) {
+    return null;
+  }
+  const detail: unknown = body.error;
+  if (typeof detail !== 'object' || detail === null || !('message' in detail)) {
+    return null;
+  }
+  return typeof detail.message === 'string'
+    ? detail.message.slice(0, PROVIDER_MESSAGE_MAX_LENGTH)
+    : null;
 }

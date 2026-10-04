@@ -36,6 +36,8 @@ export const DOMAIN_ERROR_CODES = [
   'IMPORT_NOT_A_RECIPE',
   // Metadata `reason`: `timeout`, `unavailable` or `invalid_proposal`.
   'IMPORT_TRY_AGAIN',
+  // The provider refused the request itself, so trying again won't help.
+  'IMPORT_REQUEST_REJECTED',
   'IMPORT_RATE_LIMITED',
 ] as const;
 

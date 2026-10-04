@@ -468,6 +468,12 @@ describe('recipe imports procedures', () => {
         'BAD_GATEWAY',
         { code: 'IMPORT_TRY_AGAIN', reason: 'invalid_proposal' },
       ],
+      [
+        'a request the provider refused',
+        FAKE_READER_MARKERS.rejected,
+        'INTERNAL_SERVER_ERROR',
+        { code: 'IMPORT_REQUEST_REJECTED' },
+      ],
     ])(
       'refuses %s and creates no draft',
       async (_label, marker, code, cause) => {
@@ -582,6 +588,39 @@ describe('recipe imports procedures', () => {
       expect(output).not.toContain('Secret Stew');
       expect(output).not.toContain('Secret list');
       expect(output).not.toContain('Fake Pepper');
+    });
+
+    it('logs why the provider refused a request, and tells the client only the code', async () => {
+      const lines: string[] = [];
+      const log = pino(
+        { level: 'info' },
+        { write: (line) => lines.push(line) },
+      );
+
+      const error: unknown = await createCaller(makeContext({ log }))
+        .recipeImports.start({
+          input: {
+            kind: 'text',
+            text: `${FAKE_READER_MARKERS.rejected} Grandmas Secret Stew`,
+          },
+        })
+        .catch((caught: unknown) => caught);
+
+      // The error formatter sends the cause's own fields to the client.
+      expect({ ...(error as { cause: object }).cause }).toEqual({
+        code: 'IMPORT_REQUEST_REJECTED',
+      });
+      const entry = lines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((logged) => 'modelUsage' in logged);
+      expect(entry?.modelUsage).toMatchObject({
+        outcome: 'IMPORT_REQUEST_REJECTED',
+        providerStatus: 400,
+        providerErrorType: 'invalid_request_error',
+        providerMessage: 'The fake reader refused the request',
+        providerRequestId: 'req_fake',
+      });
+      expect(lines.join('')).not.toContain('Secret Stew');
     });
 
     it('rejects unauthenticated callers', async () => {

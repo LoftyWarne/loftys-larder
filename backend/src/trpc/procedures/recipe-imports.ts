@@ -47,6 +47,7 @@ import {
 } from '../../lib/recipe-import/import-images.ts';
 import { normaliseProposal } from '../../lib/recipe-import/normalise-proposal.ts';
 import {
+  RecipeReaderRequestError,
   RecipeReaderTimeoutError,
   RecipeReaderUnavailableError,
   type RecipeReaderHousehold,
@@ -150,6 +151,22 @@ export const recipeImportsRouter = router({
               providerStatus: error.status,
             });
             throw tryAgain('unavailable');
+          }
+          // Our request was wrong, so the cook isn't told to try again and
+          // the provider's reason is kept for whoever fixes it. It reaches
+          // Sentry with the domain code only.
+          if (error instanceof RecipeReaderRequestError) {
+            logUsage('IMPORT_REQUEST_REJECTED', null, {
+              providerStatus: error.status,
+              providerErrorType: error.providerErrorType,
+              providerMessage: error.providerMessage,
+              providerRequestId: error.providerRequestId,
+            });
+            throw domainError(
+              'INTERNAL_SERVER_ERROR',
+              'IMPORT_REQUEST_REJECTED',
+              'The recipe reader refused the request',
+            );
           }
           throw error;
         }

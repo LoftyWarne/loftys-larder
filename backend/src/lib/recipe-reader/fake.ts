@@ -1,5 +1,6 @@
 import type { RecipeImportCandidate } from '../../../../shared/src/index.ts';
 import {
+  RecipeReaderRequestError,
   RecipeReaderTimeoutError,
   RecipeReaderUnavailableError,
   type RecipeReadRequest,
@@ -18,6 +19,7 @@ export const FAKE_READER_MARKERS = {
   timeout: '[fake:timeout]',
   unavailable: '[fake:unavailable]',
   invalid: '[fake:invalid]',
+  rejected: '[fake:rejected]',
 } as const;
 
 // Image public ids can't hold brackets or colons.
@@ -27,6 +29,7 @@ export const FAKE_READER_IMAGE_MARKERS = {
   timeout: 'fake-timeout',
   unavailable: 'fake-unavailable',
   invalid: 'fake-invalid',
+  rejected: 'fake-rejected',
 } as const satisfies Record<keyof typeof FAKE_READER_MARKERS, string>;
 
 type FakeMarker = keyof typeof FAKE_READER_MARKERS;
@@ -63,6 +66,14 @@ function readFake(
   }
   if (has('unavailable')) {
     throw new RecipeReaderUnavailableError(529);
+  }
+  if (has('rejected')) {
+    throw new RecipeReaderRequestError(
+      400,
+      'invalid_request_error',
+      'The fake reader refused the request',
+      'req_fake',
+    );
   }
   if (has('notARecipe')) {
     return { outcome: { kind: 'not_a_recipe' }, usage };
@@ -123,20 +134,13 @@ function fakeCandidate(request: RecipeReadRequest): RecipeImportCandidate {
   return {
     header: {
       name,
-      description: null,
+      description: '',
       baseServings: 2,
       activeTimeMins: 10,
       totalTimeMins: 20,
-      caloriesPerServing: 410,
-      proteinPerServing: null,
-      carbsPerServing: null,
-      fatPerServing: null,
-      saturatedFatPerServing: null,
-      fibrePerServing: null,
-      sugarPerServing: null,
-      saltPerServing: null,
-      sourceUrl: null,
-      sourceDetail: null,
+      nutrition: [{ field: 'caloriesPerServing', value: 410 }],
+      sourceUrl: '',
+      sourceDetail: '',
     },
     source: null,
     newIngredients: [

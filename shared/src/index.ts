@@ -207,6 +207,8 @@ export {
   RECIPE_IMPORT_SEVERAL_MAX,
   RECIPE_IMPORT_ORIGINAL_LINE_MAX_LENGTH,
   RECIPE_IMPORT_ESTIMATE_PATH_PATTERN,
+  RECIPE_IMPORT_NUTRITION_FIELDS,
+  type RecipeImportNutritionField,
   recipeImportImagePublicIdSchema,
   recipeImportInputSchema,
   type RecipeImportInput,

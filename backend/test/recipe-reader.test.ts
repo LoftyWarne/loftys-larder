@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createRecipeReader } from '../src/lib/recipe-reader/index.ts';
 import {
+  RecipeReaderRequestError,
   RecipeReaderTimeoutError,
   RecipeReaderUnavailableError,
   type RecipeReadRequest,
@@ -121,7 +122,7 @@ describe('choosing a recipe reader', () => {
 });
 
 describe('anthropic recipe reader', () => {
-  it('sends the model, effort, structured output format and the input', async () => {
+  it('sends the model, effort and the input, without a forced output format', async () => {
     const { read, requests } = readWith(() =>
       textResponse('{"outcome":"not_a_recipe"}'),
     );
@@ -138,11 +139,9 @@ describe('anthropic recipe reader', () => {
     expect(sent.body).toMatchObject({
       model: 'claude-opus-5-5',
       fallbacks: 'default',
-      output_config: {
-        effort: 'medium',
-        format: { type: 'json_schema' },
-      },
+      output_config: { effort: 'medium' },
     });
+    expect(sent.body.output_config).not.toHaveProperty('format');
     expect(sent.body).not.toHaveProperty('tools');
     expect(sent.body).not.toHaveProperty('tool_choice');
     expect(sent.body).not.toHaveProperty('thinking');
@@ -159,15 +158,18 @@ describe('anthropic recipe reader', () => {
     );
   });
 
-  it('keeps the outcome and enums enforced in the output schema', async () => {
+  // Anthropic's structured outputs can't compile a schema this large, so the
+  // prompt describes the reply instead (DEC-109).
+  it('describes the reply in the system prompt, with its outcomes and enums', async () => {
     const { read, requests } = readWith(() =>
       textResponse('{"outcome":"not_a_recipe"}'),
     );
     await read();
-    const schema = JSON.stringify(
-      (requests[0]?.body.output_config as { format: { schema: unknown } })
-        .format.schema,
-    );
+    const system = String(requests[0]?.body.system);
+    const schema = /<output_schema>\n(.*)\n<\/output_schema>/s.exec(
+      system,
+    )?.[1];
+    expect(schema).toBeDefined();
     expect(schema).toContain('"const":"recipe"');
     expect(schema).toContain('"const":"several"');
     expect(schema).toContain('"enum":["optional","required"]');
@@ -263,6 +265,15 @@ describe('anthropic recipe reader', () => {
     expect(reading.outcome).toEqual({ kind: 'not_a_recipe' });
   });
 
+  it.each([
+    ['a code fence', '```json\n{"outcome":"not_a_recipe"}\n```'],
+    ['a sentence', 'Here it is: {"outcome":"not_a_recipe"} Hope that helps.'],
+  ])('reads the JSON object out of %s around it', async (_label, text) => {
+    const { read } = readWith(() => textResponse(text));
+    const reading = await read();
+    expect(reading.outcome).toEqual({ kind: 'not_a_recipe' });
+  });
+
   it('passes output that is not JSON on as a candidate to fail later', async () => {
     const { read } = readWith(() =>
       textResponse('{"outcome":"recipe","recipe":{"hea', {
@@ -307,5 +318,56 @@ describe('anthropic recipe reader', () => {
     expect(error).toBeInstanceOf(RecipeReaderUnavailableError);
     expect((error as RecipeReaderUnavailableError).status).toBe(529);
     expect(requests).toHaveLength(2);
+  });
+
+  function errorResponse(status: number, type: string, message: string) {
+    return new Response(
+      JSON.stringify({ type: 'error', error: { type, message } }),
+      {
+        status,
+        headers: {
+          'content-type': 'application/json',
+          'request-id': 'req_test_1',
+        },
+      },
+    );
+  }
+
+  it('reports a request the provider refused as a request error, without retrying', async () => {
+    const { read, requests } = readWith(() =>
+      errorResponse(
+        400,
+        'invalid_request_error',
+        'Schemas contains too many parameters with union types',
+      ),
+    );
+    const error: unknown = await read().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(RecipeReaderRequestError);
+    expect(error).toMatchObject({
+      status: 400,
+      providerErrorType: 'invalid_request_error',
+      providerMessage: 'Schemas contains too many parameters with union types',
+      providerRequestId: 'req_test_1',
+    });
+    expect(requests).toHaveLength(1);
+  });
+
+  it.each([
+    [401, 'authentication_error'],
+    [403, 'permission_error'],
+    [404, 'not_found_error'],
+  ])('reports a %i as a request error too', async (status, type) => {
+    const { read } = readWith(() => errorResponse(status, type, 'No'));
+    await expect(read()).rejects.toBeInstanceOf(RecipeReaderRequestError);
+  });
+
+  it('keeps only the start of a long provider message', async () => {
+    const { read } = readWith(() =>
+      errorResponse(400, 'invalid_request_error', 'x'.repeat(2000)),
+    );
+    const error: unknown = await read().catch((caught: unknown) => caught);
+    expect((error as RecipeReaderRequestError).providerMessage).toHaveLength(
+      500,
+    );
   });
 });

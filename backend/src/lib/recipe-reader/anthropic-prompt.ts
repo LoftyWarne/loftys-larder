@@ -1,12 +1,15 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
+import { recipeImportReadingSchema } from '../../../../shared/src/index.ts';
+import { toStructuredOutputSchema } from '../model-features/structured-output-schema.ts';
 import type { RecipeReadRequest } from './types.ts';
 
 // The `anthropic` adapter's prompt (DEC-109: each adapter owns its prompt).
-// The output shape is enforced by structured outputs; this explains what
-// goes in it.
+// The reply's shape is described here rather than enforced: it's too large
+// for Anthropic's structured outputs to compile. `normaliseProposal` checks
+// every reply.
 
-export const RECIPE_READER_SYSTEM_PROMPT = `You turn a recipe that a home cook has given Lofty's Larder, a meal-planning app, as pasted text or as photos, screenshots or scans of its pages, into a structured proposal. The cook checks every part of the proposal against the original before anything is saved. Transcribe faithfully, fill in what the text leaves out where you reasonably can, and mark everything you supplied as an estimate.
+const INSTRUCTIONS = `You turn a recipe that a home cook has given Lofty's Larder, a meal-planning app, as pasted text or as photos, screenshots or scans of its pages, into a structured proposal. The cook checks every part of the proposal against the original before anything is saved. Transcribe faithfully, fill in what the text leaves out where you reasonably can, and mark everything you supplied as an estimate.
 
 The user message has two parts:
 - <household>: JSON describing this household's ingredients (each with the one unit its quantities are kept in), ingredient categories, units, preparation types, recipe tags and recipe sources. Refer to these only by the ids given.
@@ -29,8 +32,8 @@ Header
 - description: a sentence or two about the dish. Use the text's own if it has one; otherwise write one and mark it.
 - baseServings: how many servings the stated quantities make. If the text doesn't say, judge it from the quantities and mark it.
 - activeTimeMins and totalTimeMins: hands-on minutes and total minutes. Estimate and mark any the text doesn't state.
-- Nutrition per serving: caloriesPerServing in kcal; proteinPerServing, carbsPerServing, fatPerServing, saturatedFatPerServing, fibrePerServing, sugarPerServing and saltPerServing in grams. Copy stated values, converting whole-recipe values to per serving and sodium to salt (multiply by 2.5). Otherwise estimate each from the ingredients and quantities, and mark each one you estimate.
-- sourceUrl: a web address, only if the text contains one. sourceDetail: other provenance worth keeping, such as an author, a book title or a page number.
+- nutrition: values per serving, one entry per field: caloriesPerServing in kcal; proteinPerServing, carbsPerServing, fatPerServing, saturatedFatPerServing, fibrePerServing, sugarPerServing and saltPerServing in grams. Copy stated values, converting whole-recipe values to per serving and sodium to salt (multiply by 2.5). Otherwise estimate each from the ingredients and quantities, and mark each one you estimate by its field, for example "header.caloriesPerServing". Leave a field out only if you can't estimate it.
+- sourceUrl: a web address, only if the text contains one, otherwise an empty string. sourceDetail: other provenance worth keeping, such as an author, a book title or a page number, otherwise an empty string.
 - source: where the recipe was published. Use {"id"} for a matching household source, {"newName"} for a recognisable publication, book or website that isn't in the list, or null.
 
 Ingredients
@@ -53,7 +56,19 @@ Estimates: list every value you supplied that the text didn't state, by path. Us
 
 Notes: up to five short notes to the cook about problems with the text itself, such as "The method seems to continue on another page" or "The oven temperature is missing". An empty list when there's nothing to say.
 
-Write plain text everywhere: no markdown, bullet characters or emphasis.`;
+Write plain text everywhere: no markdown, bullet characters or emphasis.
+
+Reply with one JSON object that matches the JSON Schema in <output_schema>, and nothing else: no code fence and no words before or after it. Every property in the schema is required.`;
+
+const OUTPUT_SCHEMA = JSON.stringify(
+  toStructuredOutputSchema(recipeImportReadingSchema),
+);
+
+export const RECIPE_READER_SYSTEM_PROMPT = `${INSTRUCTIONS}
+
+<output_schema>
+${OUTPUT_SCHEMA}
+</output_schema>`;
 
 // Pasted text goes in one string. Images go first, in page order, as URLs
 // the provider fetches, followed by the household and any pick.

@@ -1185,6 +1185,9 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - The per-user limit is 14 imports an hour.
   - The eval set and its runner move to FEAT-64, which also compares Opus 5.5 with Sonnet 5.5 on the same inputs. A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its fallback doesn't cover `bio` or `general_harms` refusals.
   - The SDK adds about 0.8 MB to the server bundle. Worth checking against the cold-start budget (DEC-64, FEAT-52) after the first deploy.
+- **Amended (2026-10-04) after the FEAT-62 deploy.**
+  - The `anthropic` adapter no longer uses structured outputs: the prompt describes the reply instead (DEC-109 amended). Every import in production had been refused with a 400.
+  - A request the provider refuses for a reason trying again can't fix (a 4xx other than 408, 409 or 429: a bad request, key or model) is `IMPORT_REQUEST_REJECTED`, a server error that reaches Sentry, not "try again". Its log line also carries the provider's error type, its validation message (up to 500 characters) and its request id. The message says what was wrong with the request; prompt content and model output are still never logged.
 
 ### DEC-105 — The model matches ingredient lines to household ingredients and proposes quantities in each ingredient's unit; the cook approves the conversion
 
@@ -1289,6 +1292,11 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - Candidate rows refer to a household ingredient as `{ id, name }`, so an id that wasn't sent still has a name to become a proposed new ingredient by. A proposed new ingredient whose category or unit wasn't sent keeps it as null, and the cook picks one in Import Review.
   - Config adds `RECIPE_IMPORT_EFFORT`, read only by the `anthropic` adapter. Outside production the adapter defaults to `fake`; production must name a real one.
   - The provider-facing JSON schema comes from a shared helper that keeps `enum` and `const`, because the SDK's helper moves them into descriptions and would leave the outcome unenforced.
+- **Amended (2026-10-04) after the FEAT-62 deploy.**
+  - The `anthropic` adapter no longer uses structured outputs. Anthropic refused the reading schema twice: first for having more than 16 union-typed properties (it had 24), then, once under that, because the compiled grammar was too large. Probes against the live API found the schema right at that undocumented size limit, with no restructuring leaving room for even two more fields.
+  - The prompt now carries the same JSON schema, from the same helper, and asks for bare JSON; the adapter reads the object out of the reply even inside a code fence or a sentence. `normaliseProposal` stays the gate, so a malformed reply becomes "try again", as an invalid proposal always has. The reply's shape is no longer guaranteed; FEAT-64's evals measure how often it breaks.
+  - The candidate lists nutrition as `{ field, value }` entries, leaving out a field it has no value for, and gives an empty string for a missing description, source link or source detail. The proposal is unchanged.
+  - Revisit when Anthropic raises its grammar limits, or when evals show malformed replies are common.
 
 ### DEC-110 — Model features are allowed when they follow four rules, replacing the AI non-goal's list of exceptions
 

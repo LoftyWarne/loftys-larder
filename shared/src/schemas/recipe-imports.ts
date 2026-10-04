@@ -113,31 +113,47 @@ export type StartRecipeImportResult = z.infer<
 
 // --- Candidate (reader output, before normalisation) ------------------------
 
-// Kept to what structured outputs can express: every key present (nullable
-// rather than optional), no length or range limits, no records. The limits
-// live in the proposal schema, which `normaliseProposal` parses into.
+// Kept to what structured outputs can express: every key present, no length
+// or range limits, no records. The limits live in the proposal schema, which
+// `normaliseProposal` parses into. Structured outputs also allow only a few
+// union-typed properties (nullable ones count), so where a value can simply
+// be missing it's an empty string or a list entry rather than a null.
 const candidateIngredientRefSchema = z.union([
   z.strictObject({ id: z.number().int(), name: z.string() }),
   z.strictObject({ newKey: z.string() }),
 ]);
 
+export const RECIPE_IMPORT_NUTRITION_FIELDS = [
+  'caloriesPerServing',
+  'proteinPerServing',
+  'carbsPerServing',
+  'fatPerServing',
+  'saturatedFatPerServing',
+  'fibrePerServing',
+  'sugarPerServing',
+  'saltPerServing',
+] as const;
+
+export type RecipeImportNutritionField =
+  (typeof RECIPE_IMPORT_NUTRITION_FIELDS)[number];
+
 export const recipeImportCandidateSchema = z.object({
   header: z.object({
     name: z.string(),
-    description: z.string().nullable(),
+    // Empty when there's none, as for the source fields.
+    description: z.string(),
     baseServings: z.number(),
     activeTimeMins: z.number().nullable(),
     totalTimeMins: z.number().nullable(),
-    caloriesPerServing: z.number().nullable(),
-    proteinPerServing: z.number().nullable(),
-    carbsPerServing: z.number().nullable(),
-    fatPerServing: z.number().nullable(),
-    saturatedFatPerServing: z.number().nullable(),
-    fibrePerServing: z.number().nullable(),
-    sugarPerServing: z.number().nullable(),
-    saltPerServing: z.number().nullable(),
-    sourceUrl: z.string().nullable(),
-    sourceDetail: z.string().nullable(),
+    // Only the values the reader has; a field left out has none.
+    nutrition: z.array(
+      z.object({
+        field: z.enum(RECIPE_IMPORT_NUTRITION_FIELDS),
+        value: z.number(),
+      }),
+    ),
+    sourceUrl: z.string(),
+    sourceDetail: z.string(),
   }),
   source: z
     .union([

@@ -29,16 +29,13 @@ function candidate(
       baseServings: 4,
       activeTimeMins: 10,
       totalTimeMins: 30,
-      caloriesPerServing: 210,
-      proteinPerServing: 5.5,
-      carbsPerServing: null,
-      fatPerServing: null,
-      saturatedFatPerServing: null,
-      fibrePerServing: null,
-      sugarPerServing: null,
-      saltPerServing: 1.2,
-      sourceUrl: null,
-      sourceDetail: null,
+      nutrition: [
+        { field: 'caloriesPerServing', value: 210 },
+        { field: 'proteinPerServing', value: 5.5 },
+        { field: 'saltPerServing', value: 1.2 },
+      ],
+      sourceUrl: '',
+      sourceDetail: '',
     },
     source: null,
     newIngredients: [
@@ -280,6 +277,7 @@ describe('normaliseProposal', () => {
           { path: 'step:s1.tip', kind: 'estimate' },
           { path: 'step:s1.colour', kind: 'estimate' },
           { path: 'header.notAField', kind: 'estimate' },
+          { path: 'header.nutrition', kind: 'estimate' },
           { path: 'somewhere else', kind: 'estimate' },
           { path: 'header.caloriesPerServing', kind: 'estimate' },
         ],
@@ -293,11 +291,44 @@ describe('normaliseProposal', () => {
     ]);
   });
 
+  it('reads nutrition from its list, leaving out what it doesn’t give and ignoring a repeat', () => {
+    const value = candidate();
+    value.header.nutrition = [
+      { field: 'fibrePerServing', value: 4 },
+      { field: 'caloriesPerServing', value: 300 },
+      { field: 'fibrePerServing', value: 9 },
+    ];
+    expect(normalised(value).header).toMatchObject({
+      caloriesPerServing: 300,
+      proteinPerServing: null,
+      carbsPerServing: null,
+      fatPerServing: null,
+      saturatedFatPerServing: null,
+      fibrePerServing: 4,
+      sugarPerServing: null,
+      saltPerServing: null,
+    });
+  });
+
+  it('treats an empty description, source link or source detail as none', () => {
+    const value = candidate();
+    value.header.description = '  ';
+    value.header.sourceUrl = ' ';
+    value.header.sourceDetail = '';
+    expect(normalised(value).header).toMatchObject({
+      description: null,
+      sourceUrl: null,
+      sourceDetail: null,
+    });
+  });
+
   it('rounds numbers to what the columns hold', () => {
     const value = candidate();
     value.header.baseServings = 3.6;
-    value.header.caloriesPerServing = 409.6;
-    value.header.saltPerServing = 1.237;
+    value.header.nutrition = [
+      { field: 'caloriesPerServing', value: 409.6 },
+      { field: 'saltPerServing', value: 1.237 },
+    ];
     const row = value.ingredients[0];
     if (!row) throw new Error('fixture');
     row.quantity = 29.57353;

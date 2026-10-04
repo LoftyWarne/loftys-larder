@@ -5,10 +5,12 @@ import {
   RECIPE_IMPORT_ESTIMATE_PATH_PATTERN,
   RECIPE_IMPORT_NOTE_MAX_LENGTH,
   RECIPE_IMPORT_NOTES_MAX,
+  RECIPE_IMPORT_NUTRITION_FIELDS,
   RECIPE_TAGS_MAX,
   recipeImportCandidateSchema,
   recipeImportProposalContentSchema,
   type RecipeImportCandidate,
+  type RecipeImportNutritionField,
   type RecipeImportProposalContent,
 } from '../../../../shared/src/index.ts';
 import { stripMarkdown } from '../model-features/plain-text.ts';
@@ -187,7 +189,13 @@ function buildProposal(
 
   const rowKeys = new Set(rows.map((row) => row.key));
   const stepKeys = new Set(steps.map((step) => step.key));
-  const headerFields = new Set(Object.keys(header));
+  // Nutrition arrives as a list but is marked by field, like the rest of
+  // the header.
+  const headerFields = new Set<string>([
+    ...Object.keys(header).filter((field) => field !== 'nutrition'),
+    ...RECIPE_IMPORT_NUTRITION_FIELDS,
+  ]);
+  const nutrition = nutritionByField(header.nutrition);
   const seenPaths = new Set<string>();
   const estimates = candidate.estimates.filter((mark) => {
     if (seenPaths.has(mark.path)) return false;
@@ -206,16 +214,16 @@ function buildProposal(
       baseServings: Math.round(header.baseServings),
       activeTimeMins: whole(header.activeTimeMins),
       totalTimeMins: whole(header.totalTimeMins),
-      caloriesPerServing: whole(header.caloriesPerServing),
-      proteinPerServing: grams(header.proteinPerServing),
-      carbsPerServing: grams(header.carbsPerServing),
-      fatPerServing: grams(header.fatPerServing),
-      saturatedFatPerServing: grams(header.saturatedFatPerServing),
-      fibrePerServing: grams(header.fibrePerServing),
-      sugarPerServing: grams(header.sugarPerServing),
-      saltPerServing: grams(header.saltPerServing),
+      caloriesPerServing: whole(nutrition.caloriesPerServing ?? null),
+      proteinPerServing: grams(nutrition.proteinPerServing ?? null),
+      carbsPerServing: grams(nutrition.carbsPerServing ?? null),
+      fatPerServing: grams(nutrition.fatPerServing ?? null),
+      saturatedFatPerServing: grams(nutrition.saturatedFatPerServing ?? null),
+      fibrePerServing: grams(nutrition.fibrePerServing ?? null),
+      sugarPerServing: grams(nutrition.sugarPerServing ?? null),
+      saltPerServing: grams(nutrition.saltPerServing ?? null),
       // A URL isn't prose, so it's only trimmed.
-      sourceUrl: emptyToNull(header.sourceUrl?.trim() ?? null),
+      sourceUrl: emptyToNull(header.sourceUrl.trim()),
       sourceDetail: optionalPlain(header.sourceDetail),
       estimatedCostPerServing: null,
       imageUrl: null,
@@ -231,6 +239,15 @@ function buildProposal(
       .filter((note) => note.length > 0)
       .slice(0, RECIPE_IMPORT_NOTES_MAX),
   };
+}
+
+// The first value given for each field; a repeat is ignored.
+function nutritionByField(
+  entries: RecipeImportCandidate['header']['nutrition'],
+): Partial<Record<RecipeImportNutritionField, number>> {
+  const values: Partial<Record<RecipeImportNutritionField, number>> = {};
+  for (const { field, value } of entries) values[field] ??= value;
+  return values;
 }
 
 function resolveSource(

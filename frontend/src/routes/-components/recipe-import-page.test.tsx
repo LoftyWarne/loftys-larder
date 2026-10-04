@@ -279,6 +279,21 @@ describe('RecipeImportPage', () => {
     );
   });
 
+  it('says when trying again won’t help, keeping the text', async () => {
+    startMutateAsyncMock.mockRejectedValue(
+      domainError('IMPORT_REQUEST_REJECTED'),
+    );
+    const user = userEvent.setup();
+    render(<RecipeImportPage />);
+
+    await pasteAndImport(user);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Importing isn’t working at the moment, and trying again won’t help. The problem has been reported.',
+    );
+    expect(screen.getByLabelText('Recipe text')).toHaveValue(RECIPE_TEXT);
+  });
+
   it('disables Import while offline', async () => {
     const user = userEvent.setup();
     render(<RecipeImportPage />);

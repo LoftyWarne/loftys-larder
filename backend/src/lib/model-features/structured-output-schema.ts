@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-// JSON schema for a provider's structured output, from a `/shared` Zod
-// schema. Keeps only what structured outputs accept: types, properties,
-// items, `anyOf`, `enum`, `const` and descriptions, with every property
-// required and no extra properties. Length and range limits are dropped
-// here and enforced when the feature's normaliser parses the output.
+// JSON schema for a model's structured reply, from a `/shared` Zod schema,
+// whether a provider enforces it or a prompt describes it. Keeps only types,
+// properties, items, `anyOf`, `enum`, `const` and descriptions, with every
+// property required and no extra properties. Length and range limits are
+// dropped here and enforced when the feature's normaliser parses the reply.
 // (The SDK's own helper also moves `enum` and `const` into descriptions,
 // which would leave the outcome discriminator unenforced.)
 

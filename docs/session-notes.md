@@ -4,6 +4,32 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-04 — Every Recipe Import failed in production: Anthropic refused the reading schema
+
+**Status:** Fixed on `main`, committed, not pushed when written. Backend and frontend tests, typecheck and lint green. One real image import through the real adapter succeeded (see below).
+
+**What happened:** after the FEAT-62 deploy, image imports failed with "try again". The prod logs showed `recipeImports.start` getting HTTP 400 from Anthropic in about 1.5 s, logged as `IMPORT_TRY_AGAIN` / `unavailable` with no message. Replaying the exact request found two refusals, one behind the other:
+1. "Schemas contains too many parameters with union types (24 …; limit: 16)."
+2. Once under 16: "The compiled grammar is too large." Probes found the candidate alone only just compiles; adding an outcome enum and a names list breaks it, and no restructuring tried left headroom.
+
+Pasted-text imports were failing the same way since FEAT-60: the request never reached a model. The `fake` adapter can't catch provider limits, and FEAT-60's manual verification step 3 had not been run.
+
+**Fixes (agreed with the user):**
+- The `anthropic` adapter no longer sends `output_config.format`. The system prompt carries the same JSON schema inside `<output_schema>` and asks for bare JSON; the adapter parses the object out of the reply, forgiving a code fence or a sentence. `normaliseProposal` is still the gate (DEC-109 amended).
+- The candidate is simpler: nutrition as `{ field, value }` entries, empty strings for a missing description, source link or source detail. `normaliseProposal` maps it back; the proposal and Import Review are unchanged. Estimate marks on nutrition still use `header.<field>`.
+- A provider 4xx other than 408/409/429 is `RecipeReaderRequestError` → `IMPORT_REQUEST_REJECTED` (INTERNAL_SERVER_ERROR, reaches Sentry), with the provider's error type, message (≤ 500 chars) and request id in the model-usage log line, never in the client's error (DEC-104 amended). The Import page says trying again won't help. The `fake` adapter has a `rejected` marker.
+- Cross-cutting #22 gains "a real call before the first deploy".
+- A union-property counter and its test were written, then removed once structured outputs were dropped.
+
+**Live check:** four PNG screenshots (the user's failed prod attempt, still in `loftys-larder/imports`) through the real adapter: candidate in 36.4 s, normalised into "Shakshuka" with 8 rows (3 matched), 5 proposed ingredients, 2 steps, 9 step links, 10 Estimate marks, 5 notes, 340 kcal. 9,019 tokens in, 4,470 out (about 10p). Diagnosis and probes cost about 7p more.
+
+**Open:**
+- The reply's shape is no longer guaranteed. FEAT-64's evals should measure malformed replies.
+- The 8 images from the failed prod attempts are orphans in Cloudinary.
+- FEAT-60, 61 and 62 manual verification still needs a real run in production after this deploys.
+
+---
+
 ## 2026-10-04 — Recipe Import from images, keeping the originals (FEAT-62)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format clean. Backend 725 tests and frontend 752 green. e2e: `recipe-import.spec.ts` and the Import axe cases pass (12 of 12 on two reruns; the first run had the new table missing from the e2e DB until `prepare-db` ran, and one dark-theme axe case failed once and passed on rerun). Manual verification not run, so no real image has been through Cloudinary or the model yet. FEAT-62 checkboxes left for the user to tick.

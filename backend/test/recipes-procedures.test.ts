@@ -703,6 +703,27 @@ describe('recipes procedures', () => {
       expect(row.isDeleted).toBe(false);
     });
 
+    it('saves the estimated-nutrition flag when sent, and false when not', async () => {
+      const caller = createCaller(makeContext());
+      const estimated = await caller.recipes.create({
+        name: 'Estimated',
+        baseServings: 2,
+        caloriesPerServing: 410,
+        nutritionIsEstimated: true,
+      });
+      const plain = await caller.recipes.create({
+        name: 'Plain',
+        baseServings: 2,
+      });
+
+      expect(
+        (await caller.recipes.get({ id: estimated.id })).nutritionIsEstimated,
+      ).toBe(true);
+      expect(
+        (await caller.recipes.get({ id: plain.id })).nutritionIsEstimated,
+      ).toBe(false);
+    });
+
     it('persists optional fields when provided', async () => {
       const caller = createCaller(makeContext());
       const result = await caller.recipes.create({
@@ -861,6 +882,30 @@ describe('recipes procedures', () => {
         .from(recipes)
         .where(eq(recipes.id, recipeId));
       expect(rows[0]?.sourceDetail).toBe('p.88');
+    });
+
+    it('sets and clears the estimated-nutrition flag, which get returns', async () => {
+      const recipeId = await insertRecipe({ name: 'Dal' });
+      const caller = createCaller(makeContext());
+      expect(
+        (await caller.recipes.get({ id: recipeId })).nutritionIsEstimated,
+      ).toBe(false);
+
+      await caller.recipes.updateHeader({
+        id: recipeId,
+        patch: { nutritionIsEstimated: true },
+      });
+      expect(
+        (await caller.recipes.get({ id: recipeId })).nutritionIsEstimated,
+      ).toBe(true);
+
+      await caller.recipes.updateHeader({
+        id: recipeId,
+        patch: { nutritionIsEstimated: false },
+      });
+      expect(
+        (await caller.recipes.get({ id: recipeId })).nutritionIsEstimated,
+      ).toBe(false);
     });
 
     it('clears a nullable column when null is supplied', async () => {
@@ -3359,6 +3404,19 @@ describe('recipes procedures', () => {
       expect(await isStale(renamed)).toBe(false);
       expect(await isStale(salted)).toBe(true);
       expect(await isStale(resized)).toBe(true);
+    });
+
+    it('updateHeader leaves the score fresh when only the estimated flag changes', async () => {
+      const recipeId = await insertRecipe({ name: 'Checked' });
+      await insertHealthScore(recipeId);
+      const caller = createCaller(makeContext());
+
+      await caller.recipes.updateHeader({
+        id: recipeId,
+        patch: { nutritionIsEstimated: true },
+      });
+
+      expect(await isStale(recipeId)).toBe(false);
     });
 
     it('replaceIngredients marks the score stale only when the lines change', async () => {

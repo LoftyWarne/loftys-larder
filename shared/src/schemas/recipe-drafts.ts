@@ -64,12 +64,16 @@ export type GetRecipeDraftForRecipeResult = z.infer<
   typeof getRecipeDraftForRecipeResultSchema
 >;
 
+// The user's manual new-recipe drafts, newest first. Import drafts also have
+// no recipe but are left out (DEC-108).
 export const getNewRecipeDraftsResultSchema = z.array(recipeDraftSchema);
 
 export type GetNewRecipeDraftsResult = z.infer<
   typeof getNewRecipeDraftsResultSchema
 >;
 
+// `recipeId: null` deletes every manual new-recipe draft the user has, and
+// leaves import drafts alone.
 export const deleteRecipeDraftInputSchema = z.object({
   recipeId: recipeIdSchema.nullable(),
 });

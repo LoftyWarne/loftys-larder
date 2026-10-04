@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm';
 import {
+  check,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -10,6 +12,14 @@ import {
 
 import { users } from './auth.ts';
 import { recipes } from './recipes.ts';
+
+// `manual` drafts belong to the recipe editor; `import` drafts belong to
+// Import Review (DEC-108). An import is always for a recipe that doesn't
+// exist yet, so an import draft never has a `recipe_id`.
+export const recipeDraftKind = pgEnum('recipe_draft_kind', [
+  'manual',
+  'import',
+]);
 
 // Server-side autosave for the recipe editor (FEAT-21). `UNIQUE (user_id,
 // recipe_id)` relies on Postgres's NULL-distinct default: two rows with the
@@ -29,6 +39,7 @@ export const recipeDrafts = pgTable(
     recipeId: integer().references(() => recipes.id, {
       onDelete: 'restrict',
     }),
+    kind: recipeDraftKind().notNull().default('manual'),
     draftData: jsonb().notNull(),
     lastUpdatedAt: timestamp({ withTimezone: true })
       .notNull()
@@ -39,6 +50,10 @@ export const recipeDrafts = pgTable(
     uniqueIndex('recipe_drafts_user_recipe_unique').on(
       table.userId,
       table.recipeId,
+    ),
+    check(
+      'recipe_drafts_import_has_no_recipe',
+      sql`${table.kind} = 'manual' OR ${table.recipeId} IS NULL`,
     ),
   ],
 );

@@ -374,6 +374,7 @@ export const recipesRouter = router({
             fibrePerServing: recipes.fibrePerServing,
             sugarPerServing: recipes.sugarPerServing,
             saltPerServing: recipes.saltPerServing,
+            nutritionIsEstimated: recipes.nutritionIsEstimated,
             addedByUserId: recipes.addedByUserId,
             isBase: recipes.isBase,
             baseRecipeId: recipes.baseRecipeId,
@@ -447,6 +448,7 @@ export const recipesRouter = router({
         fibrePerServing: header.fibrePerServing,
         sugarPerServing: header.sugarPerServing,
         saltPerServing: header.saltPerServing,
+        nutritionIsEstimated: header.nutritionIsEstimated,
         addedByUserId: header.addedByUserId,
         isBase: header.isBase,
         baseRecipeId: header.baseRecipeId,
@@ -506,6 +508,7 @@ export const recipesRouter = router({
           fibrePerServing: input.fibrePerServing,
           sugarPerServing: input.sugarPerServing,
           saltPerServing: input.saltPerServing,
+          nutritionIsEstimated: input.nutritionIsEstimated ?? false,
           isBase: input.isBase ?? false,
           addedByUserId: ctx.user.id,
         })
@@ -564,6 +567,8 @@ export const recipesRouter = router({
         patchValues.sugarPerServing = patch.sugarPerServing;
       if (patch.saltPerServing !== undefined)
         patchValues.saltPerServing = patch.saltPerServing;
+      if (patch.nutritionIsEstimated !== undefined)
+        patchValues.nutritionIsEstimated = patch.nutritionIsEstimated;
 
       const withTransaction = makeWithTransaction(ctx.db);
       const row = await withTransaction(async (tx) => {

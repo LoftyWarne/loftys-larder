@@ -137,7 +137,52 @@ describe('recipe drafts procedures', () => {
     return { version: 1 as const, fields };
   }
 
+  async function insertImportDraft(name: string): Promise<number> {
+    const inserted = await db
+      .insert(recipeDrafts)
+      .values({
+        userId: USER_ID,
+        recipeId: null,
+        kind: 'import',
+        draftData: envelope({ proposal: { name } }),
+      })
+      .returning({ id: recipeDrafts.id });
+    const row = inserted[0];
+    if (!row) throw new Error('import draft insert failed');
+    return row.id;
+  }
+
   describe('upsert', () => {
+    it('writes new-recipe drafts as manual', async () => {
+      const caller = createCaller(makeContext());
+      await caller.recipeDrafts.upsert({
+        recipeId: null,
+        draftData: envelope({ header: { name: 'New' } }),
+      });
+
+      const rows = await db.select().from(recipeDrafts);
+      expect(rows.map((row) => row.kind)).toEqual(['manual']);
+    });
+
+    it('keeps an import draft’s kind when updated by draft id', async () => {
+      const draftId = await insertImportDraft('Imported');
+      const caller = createCaller(makeContext());
+
+      await caller.recipeDrafts.upsert({
+        draftId,
+        recipeId: null,
+        draftData: envelope({ header: { name: 'Reviewed' } }),
+      });
+
+      const rows = await db.select().from(recipeDrafts);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.kind).toBe('import');
+      expect(rows[0]?.draftData).toEqual({
+        version: 1,
+        fields: { header: { name: 'Reviewed' } },
+      });
+    });
+
     it('inserts a draft for a recipe when none exists', async () => {
       const recipeId = await insertRecipe('Pasta');
       const caller = createCaller(makeContext());
@@ -349,6 +394,20 @@ describe('recipe drafts procedures', () => {
       ]);
     });
 
+    it('leaves out import drafts', async () => {
+      await insertImportDraft('Imported');
+      const caller = createCaller(makeContext());
+      await caller.recipeDrafts.upsert({
+        recipeId: null,
+        draftData: envelope({ header: { name: 'Manual' } }),
+      });
+
+      const result = await caller.recipeDrafts.getNewDrafts();
+      expect(result.map((d) => d.draftData.fields)).toEqual([
+        { header: { name: 'Manual' } },
+      ]);
+    });
+
     it('omits drafts with mismatched envelope version', async () => {
       await db.insert(recipeDrafts).values({
         userId: USER_ID,
@@ -423,6 +482,21 @@ describe('recipe drafts procedures', () => {
 
       const rows = await db.select().from(recipeDrafts);
       expect(rows).toHaveLength(0);
+    });
+
+    it('leaves import drafts alone when recipeId is null', async () => {
+      const importDraftId = await insertImportDraft('Imported');
+      const caller = createCaller(makeContext());
+      await caller.recipeDrafts.upsert({
+        recipeId: null,
+        draftData: envelope({ header: { name: 'Manual' } }),
+      });
+
+      const result = await caller.recipeDrafts.delete({ recipeId: null });
+      expect(result).toEqual({ deleted: true });
+
+      const rows = await db.select().from(recipeDrafts);
+      expect(rows.map((row) => row.id)).toEqual([importDraftId]);
     });
 
     it('rejects unauthenticated callers', async () => {

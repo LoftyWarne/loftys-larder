@@ -224,6 +224,16 @@ describe('recipes schema', () => {
       });
     });
 
+    it('new recipes default to nutrition that is not estimated', async () => {
+      await seedFixtures(db);
+      const recipeId = await insertRecipe(db);
+      const [row] = await db
+        .select({ nutritionIsEstimated: recipes.nutritionIsEstimated })
+        .from(recipes)
+        .where(eq(recipes.id, recipeId));
+      expect(row?.nutritionIsEstimated).toBe(false);
+    });
+
     it('pg_trgm extension is installed', async () => {
       const result = await db.execute<{ extname: string }>(sql`
         select extname from pg_extension where extname = 'pg_trgm'
@@ -528,6 +538,47 @@ describe('recipes schema', () => {
         .from(recipeDrafts)
         .where(eq(recipeDrafts.userId, USER_ID));
       expect(rows).toHaveLength(2);
+    });
+
+    it('defaults kind to manual', async () => {
+      await seedFixtures(db);
+      await db.insert(recipeDrafts).values({
+        userId: USER_ID,
+        draftData: { name: 'new' },
+      });
+      const [row] = await db
+        .select({ kind: recipeDrafts.kind })
+        .from(recipeDrafts)
+        .where(eq(recipeDrafts.userId, USER_ID));
+      expect(row?.kind).toBe('manual');
+    });
+
+    it('allows an import draft with no recipe', async () => {
+      await seedFixtures(db);
+      await db.insert(recipeDrafts).values({
+        userId: USER_ID,
+        kind: 'import',
+        draftData: { name: 'import' },
+      });
+      const rows = await db
+        .select()
+        .from(recipeDrafts)
+        .where(eq(recipeDrafts.userId, USER_ID));
+      expect(rows).toHaveLength(1);
+    });
+
+    it('rejects an import draft that names a recipe', async () => {
+      await seedFixtures(db);
+      const recipeId = await insertRecipe(db);
+      await expectConstraintViolation(
+        db.insert(recipeDrafts).values({
+          userId: USER_ID,
+          recipeId,
+          kind: 'import',
+          draftData: { name: 'import' },
+        }),
+        'recipe_drafts_import_has_no_recipe',
+      );
     });
   });
 

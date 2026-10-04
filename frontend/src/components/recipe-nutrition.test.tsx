@@ -27,6 +27,7 @@ describe('RecipeNutrition', () => {
           proteinPerServing: 18,
           saltPerServing: 0.45,
         }}
+        estimated={false}
       />,
     );
 
@@ -46,12 +47,46 @@ describe('RecipeNutrition', () => {
   });
 
   it('shows a zero value rather than hiding it', () => {
-    render(<RecipeNutrition values={{ ...EMPTY, sugarPerServing: 0 }} />);
+    render(
+      <RecipeNutrition
+        values={{ ...EMPTY, sugarPerServing: 0 }}
+        estimated={false}
+      />,
+    );
     expect(screen.getByRole('definition')).toHaveTextContent('0 g');
   });
 
   it('renders nothing when no nutrition is recorded', () => {
-    const { container } = render(<RecipeNutrition values={EMPTY} />);
+    const { container } = render(
+      <RecipeNutrition values={EMPTY} estimated={true} />,
+    );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('heads the section as estimated while the flag is set', () => {
+    render(
+      <RecipeNutrition
+        values={{ ...EMPTY, caloriesPerServing: 410 }}
+        estimated={true}
+      />,
+    );
+    expect(
+      screen.getByRole('heading', {
+        name: 'Nutrition per serving · estimated',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('leaves the estimated label off when the flag is clear', () => {
+    render(
+      <RecipeNutrition
+        values={{ ...EMPTY, caloriesPerServing: 410 }}
+        estimated={false}
+      />,
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Nutrition per serving' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/estimated/)).not.toBeInTheDocument();
   });
 });

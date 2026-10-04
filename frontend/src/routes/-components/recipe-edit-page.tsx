@@ -156,6 +156,17 @@ export function RecipeEditPage(): React.ReactElement {
     serverDefaults: serverDefaults ?? EMPTY_DRAFT_SHAPE,
   });
 
+  // A header draft saved before a field existed lacks that key. Fill it from
+  // the server, or the form would load it blank and the next save would
+  // clear the stored value.
+  const headerDefaults = useMemo<HeaderFormValues>(
+    () => ({
+      ...(serverDefaults ?? EMPTY_DRAFT_SHAPE).header,
+      ...draft.mergedDefaults.header,
+    }),
+    [serverDefaults, draft.mergedDefaults.header],
+  );
+
   const methodIngredients = useMemo(
     () =>
       toMethodIngredients(
@@ -462,7 +473,7 @@ export function RecipeEditPage(): React.ReactElement {
       <HeaderFields
         ref={headerRef}
         mode="edit"
-        defaultValues={defaults.header}
+        defaultValues={headerDefaults}
         sources={references.sources}
         createSource={createSource}
         onSubmit={handleHeaderSubmit}
@@ -591,6 +602,7 @@ const EMPTY_DRAFT_SHAPE: EditorDraftShape = {
     fibrePerServing: null,
     sugarPerServing: null,
     saltPerServing: null,
+    nutritionIsEstimated: false,
     isBase: false,
   },
   ingredients: [],
@@ -618,6 +630,7 @@ function toHeaderDefaults(recipe: Recipe): HeaderFormValues {
     fibrePerServing: recipe.fibrePerServing,
     sugarPerServing: recipe.sugarPerServing,
     saltPerServing: recipe.saltPerServing,
+    nutritionIsEstimated: recipe.nutritionIsEstimated,
     isBase: recipe.isBase,
   };
 }
@@ -641,6 +654,7 @@ const PATCH_KEYS = [
   'fibrePerServing',
   'sugarPerServing',
   'saltPerServing',
+  'nutritionIsEstimated',
 ] as const satisfies readonly (keyof Patch & keyof HeaderFormValues)[];
 
 function diffHeader(before: HeaderFormValues, after: HeaderFormValues): Patch {

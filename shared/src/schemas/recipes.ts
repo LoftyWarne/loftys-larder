@@ -161,6 +161,7 @@ export const recipeSchema = recipeListItemSchema.extend({
   fibrePerServing: z.number().nullable(),
   sugarPerServing: z.number().nullable(),
   saltPerServing: z.number().nullable(),
+  nutritionIsEstimated: z.boolean(),
   addedByUserId: z.string().nullable(),
   baseRecipeName: z.string().nullable(),
   baseRecipeIsDeleted: z.boolean().nullable(),
@@ -326,6 +327,7 @@ const recipeHeaderWritableSchema = z.object({
   fibrePerServing: recipeMacroGramsSchema,
   sugarPerServing: recipeMacroGramsSchema,
   saltPerServing: recipeMacroGramsSchema,
+  nutritionIsEstimated: z.boolean(),
 });
 
 export const createRecipeInputSchema = recipeHeaderWritableSchema

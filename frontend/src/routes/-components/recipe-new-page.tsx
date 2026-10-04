@@ -33,6 +33,7 @@ function blankDefaults(): HeaderFormValues {
     fibrePerServing: null,
     sugarPerServing: null,
     saltPerServing: null,
+    nutritionIsEstimated: false,
     isBase: false,
   };
 }

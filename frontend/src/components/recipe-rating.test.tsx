@@ -81,6 +81,7 @@ const BASE_RECIPE: Recipe = {
   fibrePerServing: null,
   sugarPerServing: null,
   saltPerServing: null,
+  nutritionIsEstimated: false,
   addedByUserId: null,
   isBase: false,
   baseRecipeId: null,

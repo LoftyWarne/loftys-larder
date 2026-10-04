@@ -2407,22 +2407,23 @@ Conventions:
 
 **Files:**
 - `backend/src/db/schema/recipe-drafts.ts` (`kind`), `backend/src/db/schema/recipes.ts` (`nutritionIsEstimated`), one migration (new)
-- `backend/src/trpc/procedures/recipe-drafts.ts` (manual-only `getNewDrafts` and `delete({ recipeId: null })`), `backend/src/trpc/procedures/recipes.ts` (`nutritionIsEstimated` on `get` and `updateHeader`)
+- `backend/src/trpc/procedures/recipe-drafts.ts` (manual-only `getNewDrafts` and `delete({ recipeId: null })`), `backend/src/trpc/procedures/recipes.ts` (`nutritionIsEstimated` on `get`, `create` and `updateHeader`)
 - `shared/src/schemas/recipe-drafts.ts`, `shared/src/schemas/recipes.ts`
-- `frontend/src/components/recipe-nutrition.tsx` and `frontend/src/routes/-components/recipe-detail-page.tsx` (label), `frontend/src/components/recipe-editor/header-fields.tsx` (checkbox)
+- `frontend/src/components/recipe-nutrition.tsx` and `frontend/src/routes/-components/recipe-detail-page.tsx` (label), `frontend/src/components/recipe-editor/header-fields.tsx` (checkbox), `frontend/src/routes/-components/recipe-new-page.tsx` and `recipe-edit-page.tsx` (defaults and patch)
 - `docs/plan.md` (the two new columns)
 
 **Acceptance criteria:**
-- [ ] `recipe_drafts.kind` is `manual` or `import`, defaulting to `manual`, and existing drafts become `manual`
+- [ ] `recipe_drafts.kind` is `manual` or `import`, defaulting to `manual`, and existing drafts become `manual`. An import draft can't have a `recipe_id`
 - [ ] `getNewDrafts` returns only manual drafts, and `delete({ recipeId: null })` deletes only manual drafts
-- [ ] `recipes.nutrition_is_estimated` defaults to false; `recipes.get` returns it and `updateHeader` writes it
+- [ ] `recipes.nutrition_is_estimated` defaults to false; `recipes.get` returns it, and `create` and `updateHeader` write it
 - [ ] While it's set, the recipe page heads the nutrition section "Nutrition per serving · estimated"
-- [ ] The editor shows the flag as an "Estimated" checkbox in the nutrition group, and unticking it then saving clears it
+- [ ] The editor shows the flag as an "Estimated" checkbox in the nutrition group, when creating and when editing a recipe. Ticking it then saving sets it, and unticking it then saving clears it
 - [ ] Changing only the flag doesn't mark a health score stale
 - [ ] Manual recipe creation and editing behave as before
 
 **Implementation notes:**
 - Nothing writes `kind = 'import'` yet; FEAT-60 does. An upsert by `draftId` keeps the row's kind.
+- Amended at kick-off (2026-10-04): the checkbox also shows when creating a recipe, so manually entered nutrition can be marked estimated (DEC-106 amended), and a CHECK keeps import drafts free of a `recipe_id` (DEC-108 amended).
 
 **Manual verification:**
 1. Set `nutrition_is_estimated` on a recipe with SQL. The recipe page shows "· estimated". Untick it in the editor and save, and the label goes.

@@ -211,7 +211,10 @@ export function RecipeDetailPage(): React.ReactElement {
         )}
       </section>
 
-      <RecipeNutrition values={recipe} />
+      <RecipeNutrition
+        values={recipe}
+        estimated={recipe.nutritionIsEstimated}
+      />
 
       <PlanAheadSummary
         method={recipe.method}

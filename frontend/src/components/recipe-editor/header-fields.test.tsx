@@ -34,6 +34,7 @@ function blankDefaults(): HeaderFormValues {
     fibrePerServing: null,
     sugarPerServing: null,
     saltPerServing: null,
+    nutritionIsEstimated: false,
     isBase: false,
   };
 }
@@ -134,6 +135,43 @@ describe('HeaderFields', () => {
       await screen.findByText('Use at most 2 decimal places'),
     ).toBeVisible();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('submits the Estimated checkbox with the nutrition values', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderHeader();
+
+    await user.type(screen.getByLabelText('Name'), 'Lentil Dal');
+    await user.type(screen.getByLabelText('Calories (kcal)'), '410');
+    await user.click(screen.getByLabelText('Estimated'));
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(onSubmit.mock.calls[0]?.[0].nutritionIsEstimated).toBe(true);
+  });
+
+  it('shows the Estimated checkbox in both modes, ticked from the defaults', () => {
+    const { rerender } = render(
+      <HeaderFields
+        mode="create"
+        defaultValues={blankDefaults()}
+        sources={SOURCES}
+        onSubmit={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText('Estimated')).not.toBeChecked();
+
+    rerender(
+      <HeaderFields
+        mode="edit"
+        defaultValues={{ ...blankDefaults(), nutritionIsEstimated: true }}
+        sources={SOURCES}
+        onSubmit={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText('Estimated')).toBeChecked();
   });
 
   it('shows the isBase checkbox only in create mode', () => {

@@ -84,6 +84,10 @@ export const recipes = pgTable(
     fibrePerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
     sugarPerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
     saltPerServing: numeric({ precision: 6, scale: 2, mode: 'number' }),
+    // Labels the nutrition as an estimate on the recipe page (DEC-106). It
+    // isn't a nutrition value, so changing it doesn't mark a health score
+    // stale.
+    nutritionIsEstimated: boolean().notNull().default(false),
     addedByUserId: text().references(() => users.id, { onDelete: 'set null' }),
     // `mode: 'date'` so `$onUpdate(() => new Date())` is type-correct; Drizzle
     // serializes the JS Date back to a SQL `date` literal.

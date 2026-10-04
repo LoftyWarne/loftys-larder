@@ -162,6 +162,13 @@
       "when": 1791032884454,
       "tag": "0022_recipe_health_scores",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791106156772,
+      "tag": "0023_recipe_draft_kind_and_estimated_nutrition",
+      "breakpoints": true
     }
   ]
 }

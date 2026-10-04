@@ -344,6 +344,14 @@ export const HeaderFields = forwardRef<RecipeSectionHandle, HeaderFieldsProps>(
               />
             ))}
           </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              disabled={submitting}
+              {...register('nutritionIsEstimated')}
+            />
+            <span>Estimated</span>
+          </label>
         </fieldset>
 
         {mode === 'create' && (

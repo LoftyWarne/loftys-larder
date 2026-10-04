@@ -188,6 +188,7 @@ const RECIPE: Recipe = {
   fibrePerServing: null,
   sugarPerServing: null,
   saltPerServing: null,
+  nutritionIsEstimated: false,
   addedByUserId: null,
   isBase: false,
   baseRecipeId: null,
@@ -368,6 +369,63 @@ describe('RecipeEditPage', () => {
     expect(updateHeaderMutateAsyncMock.mock.calls[0]?.[0]).toEqual({
       id: 7,
       patch: { saltPerServing: 1.2 },
+    });
+  });
+
+  it('sends only the estimated flag when the checkbox is unticked', async () => {
+    recipeGetUseQueryMock.mockReturnValue({
+      data: { ...RECIPE, caloriesPerServing: 410, nutritionIsEstimated: true },
+      isLoading: false,
+      error: null,
+    });
+    updateHeaderMutateAsyncMock.mockResolvedValue({ id: 7 });
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    expect(screen.getByLabelText('Estimated')).toBeChecked();
+    await user.click(screen.getByLabelText('Estimated'));
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    await waitFor(() => {
+      expect(updateHeaderMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateHeaderMutateAsyncMock.mock.calls[0]?.[0]).toEqual({
+      id: 7,
+      patch: { nutritionIsEstimated: false },
+    });
+  });
+
+  it('keeps the saved estimated flag when a header draft predates it', async () => {
+    recipeGetUseQueryMock.mockReturnValue({
+      data: { ...RECIPE, nutritionIsEstimated: true },
+      isLoading: false,
+      error: null,
+    });
+    draftGetForRecipeUseQueryMock.mockReturnValue({
+      data: {
+        id: 99,
+        draftData: {
+          version: 1,
+          fields: { header: { ...toHeaderShape(RECIPE), name: 'Draft name' } },
+        },
+        lastUpdatedAt: 1700000000000,
+      },
+      isSuccess: true,
+      error: null,
+    });
+    updateHeaderMutateAsyncMock.mockResolvedValue({ id: 7 });
+    const user = userEvent.setup();
+    render(<RecipeEditPage />);
+
+    expect(screen.getByLabelText('Estimated')).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+
+    await waitFor(() => {
+      expect(updateHeaderMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateHeaderMutateAsyncMock.mock.calls[0]?.[0]).toEqual({
+      id: 7,
+      patch: { name: 'Draft name' },
     });
   });
 

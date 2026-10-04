@@ -4,6 +4,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-04 — Import groundwork: draft kinds and estimated nutrition (FEAT-59)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format clean. Backend 603 tests (11 new) and frontend 662 (7 new) green. e2e not run. Manual verification steps 1–2 not run. FEAT-59 checkboxes left for the user to tick.
+
+**Agreed at kick-off:**
+- The "Estimated" checkbox shows when creating a recipe too, so manually entered nutrition can be marked estimated. `recipes.create` accepts the flag and saves false when it's not sent. DEC-106 amended.
+- A CHECK, `recipe_drafts_import_has_no_recipe`, refuses an import draft with a `recipe_id`. DEC-108 amended.
+
+**Changes:**
+- Migration `0023_recipe_draft_kind_and_estimated_nutrition`: the `recipe_draft_kind` enum, `recipe_drafts.kind` (default `manual`), the CHECK, and `recipes.nutrition_is_estimated` (default false).
+- `getNewDrafts` and `delete({ recipeId: null })` act on manual drafts only. `upsert` is unchanged: the `draftId` path never writes `kind`.
+- The flag is in the shared header schema, so `create` and `updateHeader` both take it, and on `recipeSchema` for `get`. It isn't in `HEALTH_SCORE_HEADER_FIELDS`, so changing it alone doesn't mark a score stale.
+- `RecipeNutrition` takes `estimated` and adds a muted "· estimated" to the heading.
+- The edit page fills header keys missing from a saved draft from the server. Without this, a header draft saved before a field existed would load that field blank, and the next save would clear it. This applies to any header field, not just the flag.
+
+**Open:**
+- FEAT-60 is next. Its kick-off questions are in the 2026-10-03 entry below.
+
+---
+
 ## 2026-10-03 — Recipe Import designed (DEC-103 to DEC-110, FEAT-59 to FEAT-63)
 
 **Status:** Design only, worked through question by question with the user. No code. The design was committed in `5d0955e`, and the FEAT split and shapes follow in a second commit. FEAT-59 to FEAT-63 are drafts awaiting kick-off, with every checkbox unticked. Start with FEAT-59, using the AGENTS.md kick-off template.

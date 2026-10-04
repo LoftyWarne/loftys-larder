@@ -138,7 +138,11 @@ export const recipeDraftsRouter = router({
         })
         .from(recipeDrafts)
         .where(
-          and(eq(recipeDrafts.userId, userId), isNull(recipeDrafts.recipeId)),
+          and(
+            eq(recipeDrafts.userId, userId),
+            isNull(recipeDrafts.recipeId),
+            eq(recipeDrafts.kind, 'manual'),
+          ),
         )
         .orderBy(desc(recipeDrafts.lastUpdatedAt));
       const result: GetNewRecipeDraftsResult = [];
@@ -159,9 +163,11 @@ export const recipeDraftsRouter = router({
     .output(deleteRecipeDraftResultSchema)
     .mutation(async ({ ctx, input }): Promise<DeleteRecipeDraftResult> => {
       const userId = ctx.user.id;
+      // Import drafts also have no recipe, so the new-recipe case names the
+      // kind; Import Review deletes its drafts by id (DEC-108).
       const recipeMatch =
         input.recipeId === null
-          ? isNull(recipeDrafts.recipeId)
+          ? and(isNull(recipeDrafts.recipeId), eq(recipeDrafts.kind, 'manual'))
           : eq(recipeDrafts.recipeId, input.recipeId);
       const deleted = await ctx.db
         .delete(recipeDrafts)

@@ -1211,6 +1211,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Estimated times, tips and safety notes become ordinary data after save, and a model-written safety note can be wrong with no label on it. The flag depends on the cook unticking it, so it can outlast a check that did happen.
 - **Revisit when:** Estimates other than nutrition turn out to mislead after save, or the flag is never unticked in practice.
 - **Cross-refs:** DEC-49, DEC-96, DEC-97, DEC-99, DEC-101 (the score reads nutrition), DEC-102 (amended), DEC-103, DEC-105; FEAT-58 to FEAT-61; non-goal: "Cost optimisation and price tracking" (unchanged).
+- **Amended (2026-10-04) at FEAT-59 kick-off.** Manual entry starts with the flag off; a cook can tick it for nutrition they estimated themselves. The "Estimated" checkbox shows when creating a recipe as well as when editing one, and `recipes.create` accepts the flag.
 
 ### DEC-107 — Import images go from the browser to Cloudinary and are kept as the recipe's Originals; web links are fetched by the backend, JSON-LD first
 
@@ -1244,6 +1245,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** A second way to create a recipe, which has to stay consistent with `create`, `replaceIngredients`, `replaceMethod` and `replaceTags`; their validation and write code should be shared, not copied. `useRecipeDraft` gains a third mode, by draft id. The editor components Import Review reuses take `{ id } | { newKey }` references, a change the edit page mustn't notice.
 - **Revisit when:** The manual new-recipe flow is reworked, at which point the two creation paths could merge.
 - **Cross-refs:** DEC-16, DEC-29 (drafts are deleted on account deletion), DEC-34, DEC-99, DEC-103, DEC-105, DEC-107, DEC-109; FEAT-21, FEAT-59, FEAT-60, FEAT-61; cross-cutting #4.
+- **Amended (2026-10-04) at FEAT-59 kick-off.** A CHECK constraint, `recipe_drafts_import_has_no_recipe`, refuses an import draft with a `recipe_id`. Such a row would load into the edit page as the cook's edits and could block their own draft for that recipe.
 
 ### DEC-109 — Recipe Import reads through a swappable `RecipeReader` seam, with adapters chosen by config and the rules applied outside the seam
 

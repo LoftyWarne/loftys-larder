@@ -112,6 +112,26 @@ describe('RecipeNewPage', () => {
     });
   });
 
+  it('creates a recipe with its nutrition marked estimated when ticked', async () => {
+    createMutateAsyncMock.mockResolvedValue({ id: 42 });
+    navigateMock.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<RecipeNewPage />);
+
+    await user.type(screen.getByLabelText('Name'), 'Borsch');
+    await user.type(screen.getByLabelText('Calories (kcal)'), '410');
+    await user.click(screen.getByLabelText('Estimated'));
+    await user.click(screen.getByRole('button', { name: 'Save & continue →' }));
+
+    await waitFor(() => {
+      expect(createMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(createMutateAsyncMock.mock.calls[0]?.[0]).toMatchObject({
+      caloriesPerServing: 410,
+      nutritionIsEstimated: true,
+    });
+  });
+
   it('resumes the most recent new-recipe draft on mount', () => {
     draftGetNewDraftsUseQueryMock.mockReturnValue({
       data: [

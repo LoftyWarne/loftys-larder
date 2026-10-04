@@ -37,7 +37,7 @@ export interface ImportImagePickerProps {
   disabled: boolean;
 }
 
-// Choosing the 1–4 photos, screenshots or scans to import, from the camera
+// Choosing the 1–8 photos, screenshots or scans to import, from the camera
 // or from files (DEC-107). Nothing uploads until the cook imports.
 export function ImportImagePicker({
   files,

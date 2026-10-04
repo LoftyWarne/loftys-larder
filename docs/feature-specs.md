@@ -2607,7 +2607,7 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 
 ### FEAT-62 — Recipe Import from images, keeping the originals
 
-**Goal:** A cook imports a recipe from 1–4 screenshots, photos or scans. The images go straight from the browser to Cloudinary and are kept with the saved recipe, which links to them as "View original". (DEC-107, DEC-109)
+**Goal:** A cook imports a recipe from 1–8 screenshots, photos or scans. The images go straight from the browser to Cloudinary and are kept with the saved recipe, which links to them as "View original". (DEC-107, DEC-109)
 
 **Estimate:** 1.5–2 days. **Depends on:** FEAT-61, FEAT-18 (Cloudinary signing). **Enables:** none specifically.
 
@@ -2620,7 +2620,7 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 - `docs/plan.md` (the new table), `README.md`
 
 **Acceptance criteria:**
-- [ ] The Import page takes 1–4 images (jpg, jpeg, png, webp or heic) from the camera or files, and refuses a fifth
+- [ ] The Import page takes 1–8 images (jpg, jpeg, png, webp or heic) from the camera or files, and refuses a ninth
 - [ ] Images upload directly to Cloudinary's `loftys-larder/imports` folder, and the backend never receives image bytes
 - [ ] A two-page spread imported as two images gives one proposal drawn from both
 - [ ] An iPhone HEIC photo imports
@@ -2645,6 +2645,7 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
   - Account deletion waits for its destroy calls, each with a timeout, after the commit.
   - The reader files (`backend/src/lib/recipe-reader/`) change too: the request gains image URLs, and the `fake` adapter reads its markers from image ids.
   - "A two-page spread gives one proposal" and "an iPhone HEIC photo imports" need a real model, so they're manual verification steps 4 and 5. No new e2e spec: one would need Playwright to stand in for Cloudinary.
+- Amended after shipping (2026-10-04): the limit went from 4 images to 8 (DEC-103 amended), so the Goal and the first criterion now say 1–8 and a ninth.
 
 **Manual verification:**
 1. On a phone, photograph a cookbook page and import it. Import Review shows the photo beside the proposal.

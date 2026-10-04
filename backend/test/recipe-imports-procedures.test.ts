@@ -656,8 +656,10 @@ describe('recipe imports procedures', () => {
       ['a path that climbs out of the folder', ['loftys-larder/imports/../x']],
       ['no images', []],
       [
-        'five images',
-        ['a', 'b', 'c', 'd', 'e'].map((id) => `loftys-larder/imports/${id}`),
+        'nine images',
+        ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map(
+          (id) => `loftys-larder/imports/${id}`,
+        ),
       ],
       ['the same image twice', [PAGE_1, PAGE_1]],
     ])('refuses %s without calling the reader', async (_label, publicIds) => {

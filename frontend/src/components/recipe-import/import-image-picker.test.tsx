@@ -63,18 +63,29 @@ describe('ImportImagePicker', () => {
     expect(chosenNames()).toEqual(['IMG_0001.HEIC']);
   });
 
-  it('refuses a fifth image', async () => {
+  it('refuses a ninth image', async () => {
     const user = setup();
     render(<Harness />);
 
     await user.upload(
       screen.getByLabelText('Choose images to import'),
-      ['1', '2', '3', '4', '5'].map((n) => image(`${n}.jpg`)),
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((n) =>
+        image(`${n}.jpg`),
+      ),
     );
 
-    expect(chosenNames()).toEqual(['1.jpg', '2.jpg', '3.jpg', '4.jpg']);
+    expect(chosenNames()).toEqual([
+      '1.jpg',
+      '2.jpg',
+      '3.jpg',
+      '4.jpg',
+      '5.jpg',
+      '6.jpg',
+      '7.jpg',
+      '8.jpg',
+    ]);
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Up to 4 images can be imported at once, so not all of them were added.',
+      'Up to 8 images can be imported at once, so not all of them were added.',
     );
     expect(
       screen.getByRole('button', { name: 'Add another image' }),

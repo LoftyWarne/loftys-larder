@@ -1163,6 +1163,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** A model provider sits on the request path for one feature, and recipe content leaves the app (DEC-104). A proposal can be wrong in ways that look right, and Import Review is only as good as the cook's check. Two non-goals are removed and a third is narrowed.
 - **Revisit when:** Cooks routinely save imports without changing anything (Import Review could get lighter), or routinely correct the same kind of mistake (the prompt or model needs work). Recipe Generation and a PWA share target are the named follow-ups.
 - **Cross-refs:** DEC-18 and DEC-105 (units), DEC-21, DEC-23, DEC-49, DEC-101, DEC-104 to DEC-110; FEAT-59 to FEAT-63; non-goals: "Recipe import from URLs" and "Photo recognition / OCR of cookbooks" (removed), "AI / LLM features" (adjacency note amended).
+- **Amended (2026-10-04) after FEAT-62.** An image import takes 1–8 images instead of 1–4, so a recipe that runs over more pages fits in one import. The 75-second limit (DEC-104), the 10 MB per-image cap and the per-user rate limit, which counts imports rather than images, are unchanged. Accepted with it: a longer read comes closer to 75 seconds (the only measurement is four screenshots in 36.4 s), and every extra image is uploaded and kept as an Original (DEC-107).
 
 ### DEC-104 — Imports run in one synchronous tRPC mutation with a 75-second limit; the first reader is Claude Opus 5.5 through the Anthropic SDK
 
@@ -1241,6 +1242,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - The import preset makes one JPEG rendition at upload, capped at 2,576 px on the long edge (the reader model's maximum). The reader is sent its delivery URL, and Import Review and "View original" show it, so a HEIC photo works in every browser.
   - Image ids are accepted only from the `loftys-larder/imports` folder, and an image a saved recipe keeps as an Original is never destroyed, whatever a draft says. Autosave sends the proposal back, so its ids can't be trusted further than that.
   - Images upload when the cook presses Import, and the page reuses them for "Try again" and the several-recipes pick. A failed import's images are left as orphans, as DEC-50 accepts.
+- **Amended (2026-10-04).** Up to 8 images per import (DEC-103 amended). The uploads still run together and all-or-nothing: if one fails, the ones that succeeded are left as orphans and "Try again" uploads every image again. More images make that likelier. Revisit if failed uploads become common, by keeping the uploads that succeeded.
 
 ### DEC-108 — Import Review drafts live in `recipe_drafts` with `kind = 'import'`, and "Create recipe" writes the whole recipe in one transaction
 

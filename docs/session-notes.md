@@ -4,6 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-04 — Image imports take up to 8 images, not 4
+
+**Status:** Committed + pushed to `main` as its own commit. The FEAT-63 work in the same files was left out and is still uncommitted. Backend 847 and frontend 763 tests green; typecheck, lint and format clean. No real import with more than four images has been run.
+
+**Change (the user's call, after reviewing the trade-offs):** `RECIPE_IMPORT_IMAGES_MAX` 4 → 8. The input schema, the picker and its copy all read the constant. The picker and procedure tests now refuse a ninth image. DEC-103 and DEC-107 amended; FEAT-62's Goal and first criterion say 1–8 (checkbox untouched); README updated. No schema change: `recipe_import_originals.position` has no upper bound.
+
+**Unchanged on purpose:** the 75-second limit, 10 MB per image, 14 imports an hour (it counts imports, not images), and the all-at-once upload.
+
+**Open:**
+- The 75 s budget is the risk. The only measurement is four screenshots in 36.4 s. Run 6–8 real cookbook photos through the real adapter (a FEAT-64-style check) and compare against DEC-104's revisit trigger.
+- Uploads are still all-or-nothing (`Promise.all` in `recipe-import-page.tsx`): one failure orphans the rest and "Try again" re-uploads every image. Keeping the successful uploads is the fix if this bites (DEC-107 amended).
+
+---
+
 ## 2026-10-04 — Every Recipe Import failed in production: Anthropic refused the reading schema
 
 **Status:** Fixed on `main`, committed, not pushed when written. Backend and frontend tests, typecheck and lint green. One real image import through the real adapter succeeded (see below).

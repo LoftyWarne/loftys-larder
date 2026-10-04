@@ -30,7 +30,7 @@ const idSchema = z.number().int().positive();
 const draftIdSchema = z.number().int().positive();
 
 export const RECIPE_IMPORT_TEXT_MAX_LENGTH = 20_000;
-export const RECIPE_IMPORT_IMAGES_MAX = 4;
+export const RECIPE_IMPORT_IMAGES_MAX = 8;
 export const RECIPE_IMPORT_NOTES_MAX = 5;
 export const RECIPE_IMPORT_NOTE_MAX_LENGTH = 300;
 export const RECIPE_IMPORT_SEVERAL_MAX = 10;

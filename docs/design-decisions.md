@@ -1178,7 +1178,13 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** No new table or worker. Changing the model is a config change, and changing the provider is a new adapter (DEC-109).
 - **Consequences (−):** Recipe content, photos and the household's ingredient, tag and source names go to the provider. A slow import holds a request open for up to 75 seconds, and closing the app mid-import loses it (nothing was saved). The same input can give slightly different proposals. The eval set is manual, so a regression only shows when someone runs it.
 - **Revisit when:** Real imports come close to 75 seconds (try lower effort or Sonnet 5.5, then a background job). The spend cap is hit.
-- **Cross-refs:** DEC-01, DEC-49, DEC-56, DEC-64, DEC-72, DEC-75, DEC-76, DEC-77, DEC-101, DEC-103, DEC-108, DEC-109; FEAT-60; cross-cutting #16.
+- **Cross-refs:** DEC-01, DEC-49, DEC-56, DEC-64, DEC-72, DEC-75, DEC-76, DEC-77, DEC-101, DEC-103, DEC-108, DEC-109; FEAT-60, FEAT-64; cross-cutting #16.
+- **Amended (2026-10-04) at FEAT-60 kick-off.**
+  - Effort comes from `RECIPE_IMPORT_EFFORT` (default `medium`), so it moves with the model without a code change.
+  - The `anthropic` adapter turns on Anthropic's server-side refusal fallback (`fallbacks: "default"`). A classifier refusal is re-run, in the same call, on the model Anthropic recommends for its category; a recipe tripping one is almost certainly a false positive. The draft and the logs record the model that answered. A refusal from the whole chain is still `IMPORT_NOT_A_RECIPE`.
+  - The per-user limit is 14 imports an hour.
+  - The eval set and its runner move to FEAT-64, which also compares Opus 5.5 with Sonnet 5.5 on the same inputs. A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its fallback doesn't cover `bio` or `general_harms` refusals.
+  - The SDK adds about 0.8 MB to the server bundle. Worth checking against the cold-start budget (DEC-64, FEAT-52) after the first deploy.
 
 ### DEC-105 — The model matches ingredient lines to household ingredients and proposes quantities in each ingredient's unit; the cook approves the conversion
 
@@ -1246,6 +1252,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** The manual new-recipe flow is reworked, at which point the two creation paths could merge.
 - **Cross-refs:** DEC-16, DEC-29 (drafts are deleted on account deletion), DEC-34, DEC-99, DEC-103, DEC-105, DEC-107, DEC-109; FEAT-21, FEAT-59, FEAT-60, FEAT-61; cross-cutting #4.
 - **Amended (2026-10-04) at FEAT-59 kick-off.** A CHECK constraint, `recipe_drafts_import_has_no_recipe`, refuses an import draft with a `recipe_id`. Such a row would load into the edit page as the cook's edits and could block their own draft for that recipe.
+- **Amended (2026-10-04) at FEAT-60 kick-off.** Create recipe deletes the draft first inside its transaction, so a second "Create recipe" for the same import waits on that row, finds it gone and rolls back. An existing ingredient's row carries the unit the cook saw and gets the same unit-mismatch check as `replaceIngredients`. A source proposed by name that exists by the time of the save is linked rather than refused. The shared write code lives in `backend/src/lib/recipe-writes.ts`.
 
 ### DEC-109 — Recipe Import reads through a swappable `RecipeReader` seam, with adapters chosen by config and the rules applied outside the seam
 
@@ -1269,7 +1276,13 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Changing the model is a config change, and changing the provider is one new adapter. e2e runs without a real provider. The eval set can compare adapters side by side. Household scope (DEC-17) and plain text (DEC-49) hold whatever a model returns.
 - **Consequences (−):** The interface has to stay stable, because changing the outcome shape touches every adapter. Each adapter has its own prompt, so prompt improvements don't carry across providers. A provider that can't take image URLs would need its adapter to download images from Cloudinary, which puts image bytes in backend memory. DEC-50 forbids proxying uploads rather than this, but it goes against DEC-50's intent, so weigh it when such an adapter is proposed.
 - **Revisit when:** A second real provider adapter is added (check that the interface held), or the interface keeps changing. Two named triggers, recorded in cross-cutting #22: the first model feature that can't finish within one request (most likely the health-score backfill) decides background work against auto-stop (DEC-64); the first that needs streamed output decides the tRPC link change (cross-cutting #16).
-- **Cross-refs:** DEC-17, DEC-49, DEC-50, DEC-56, DEC-64, DEC-101, DEC-103, DEC-104, DEC-106, DEC-107, DEC-110; FEAT-60 to FEAT-63; cross-cutting #16, #22.
+- **Cross-refs:** DEC-17, DEC-49, DEC-50, DEC-56, DEC-64, DEC-101, DEC-103, DEC-104, DEC-106, DEC-107, DEC-110; FEAT-60 to FEAT-64; cross-cutting #16, #22.
+- **Amended (2026-10-04) at FEAT-60 kick-off.**
+  - The names stand: `RecipeReader.read(request, signal)` and `normaliseProposal`.
+  - Adapters return a candidate shaped by `recipeImportCandidateSchema` in `/shared`. It's kept to what structured outputs can express: every key present, no length or range limits, Estimate marks as a list. `normaliseProposal` parses it into the stricter proposal schema.
+  - Candidate rows refer to a household ingredient as `{ id, name }`, so an id that wasn't sent still has a name to become a proposed new ingredient by. A proposed new ingredient whose category or unit wasn't sent keeps it as null, and the cook picks one in Import Review.
+  - Config adds `RECIPE_IMPORT_EFFORT`, read only by the `anthropic` adapter. Outside production the adapter defaults to `fake`; production must name a real one.
+  - The provider-facing JSON schema comes from a shared helper that keeps `enum` and `const`, because the SDK's helper moves them into descriptions and would leave the outcome unenforced.
 
 ### DEC-110 — Model features are allowed when they follow four rules, replacing the AI non-goal's list of exceptions
 

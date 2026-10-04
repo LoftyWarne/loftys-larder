@@ -21,6 +21,15 @@ primary_region = "lhr"
 [deploy]
   release_command = "sh -c 'node /app/migrate.js && node /app/seed-reference.js'"
 
+# Recipe Import reader (DEC-104, DEC-109). Not secrets; ANTHROPIC_API_KEY is a
+# Fly secret and must be set before a deploy that selects `anthropic`
+# (docs/secrets-checklist.md). Changing the model or effort needs no code
+# change.
+[env]
+  RECIPE_IMPORT_ADAPTER = "anthropic"
+  RECIPE_IMPORT_MODEL = "claude-opus-5-5"
+  RECIPE_IMPORT_EFFORT = "medium"
+
 [http_service]
   internal_port = 3000
   force_https = true

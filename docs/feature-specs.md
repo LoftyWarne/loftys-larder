@@ -2453,10 +2453,11 @@ Conventions:
 - `backend/package.json` (`@anthropic-ai/sdk`), `backend/src/config.ts` (`ANTHROPIC_API_KEY`, `RECIPE_IMPORT_ADAPTER`, `RECIPE_IMPORT_MODEL`), `docs/secrets-checklist.md`
 - `backend/src/lib/recipe-reader/` (new): the `RecipeReader` interface, the `anthropic` adapter (prompt, structured outputs), the `fake` adapter, and choosing an adapter from config
 - `backend/src/lib/recipe-import/` (new): `normaliseProposal`
-- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22): the Anthropic client setup, the feature-tagged usage logger, and the eval runner (location decided at kick-off)
+- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-64 at kick-off
 - `backend/src/trpc/procedures/recipe-imports.ts` (new: start, list, get, discard, create recipe), `backend/src/trpc/router.ts`
-- `backend/src/trpc/procedures/recipes.ts` (write code shared with create recipe)
-- `backend/src/plugins/rate-limit.ts` (import limit)
+- `backend/src/lib/recipe-writes.ts` (new: write code shared by `recipes.ts` and create recipe), `backend/src/trpc/procedures/recipes.ts` (uses it)
+- `backend/src/plugins/rate-limit.ts` (import limit), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the reader and the limit on the context)
+- `fly.toml` and `backend/.env.example` (reader settings)
 - `shared/src/schemas/recipe-imports.ts` (new: the shapes below), `shared/src/schemas/errors.ts`, `shared/src/index.ts`
 
 **Shapes** (code in `shared/src/schemas/recipe-imports.ts`; names provisional). Three shapes, one owner each (DEC-108). The drafts envelope still leaves `fields` to the editor.
@@ -2501,11 +2502,20 @@ Conventions:
 - Create recipe should reuse the write code of `create`, `replaceIngredients`, `replaceMethod` and `replaceTags`, extracted into functions that take a `tx`, not copy it. Confirm the shape at kick-off.
 - The household lists sent to the reader are scoped by `CURRENT_HOUSEHOLD_ID` (DEC-17).
 - A new recipe has no health score, so create recipe doesn't call `markHealthScoreStale`.
+- Amended at kick-off (2026-10-04):
+  - `RECIPE_IMPORT_EFFORT` (default `medium`) sets effort, so it moves with the model without a code change. Config defaults the adapter to `fake` outside production and requires a real one in production.
+  - The `anthropic` adapter turns on Anthropic's server-side refusal fallback; the draft and logs record the model that answered (DEC-104 amended).
+  - The import limit is 14 `start` calls per user per hour, every call counted, checked inside `start` so the refusal is `TOO_MANY_REQUESTS` with `IMPORT_RATE_LIMITED`.
+  - Adapters return a candidate shaped by `recipeImportCandidateSchema` (structured-output friendly); its rows refer to household ingredients as `{ id, name }`. A proposed new ingredient keeps a category or unit that wasn't sent as null (DEC-109 amended).
+  - Create from import: an existing ingredient's row carries `unitId` for the unit-mismatch check; cost and image are accepted from the cook; a source proposed by name that exists by then is linked; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` carries the `newKey`. The draft is deleted first inside the transaction, so a second "Create recipe" finds nothing and rolls back (DEC-108 amended).
+  - The eval runner and eval set move to FEAT-64, with manual verification steps 1 and 2.
 
 **Manual verification:**
 1. Run the eval runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
 2. Run it on a shopping list. It reports not a recipe.
 3. Against a signed-in local app with a real key, call `start` and check the `recipe_drafts` row: `kind = 'import'`, the proposal, and the adapter and model.
+
+Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 
 **Common gotchas:**
 - `baseServings` is required. If the text doesn't state it, it's an Estimate.
@@ -2520,9 +2530,9 @@ Conventions:
   - `start`: a `fake` outcome becoming an import draft that records the reader; several recipes; not a recipe; timeout and provider error; the rate limit; household scoping of the lists sent.
   - Create recipe: one transaction; keys resolved for rows, step links and the source; rollback on a failure partway; `INGREDIENT_NAME_TAKEN`; the draft deleted.
   - `list`, `get` and `discard`: ownership, newest first, and manual drafts untouched.
-- Eval set: run once on the agreed inputs through the `anthropic` adapter, with timings recorded in the session notes.
+- Eval set: moved to FEAT-64 (kick-off, 2026-10-04).
 - Commit: `feat(recipes): read a pasted recipe into an import draft and create it in one transaction`
-- Gate check: manual verification steps 1 and 3.
+- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-64).
 
 ---
 
@@ -2694,6 +2704,45 @@ Conventions:
 
 ---
 
+### FEAT-64 — Model feature evals: the eval runner and the Recipe Import eval set
+
+**Goal:** Measure a model feature on real inputs before a model, effort or prompt change ships. One runner takes a feature and an adapter and runs that feature's inputs through its real reader; Recipe Import brings the first set, supplied by the user. The first run settles the import model (Opus 5.5 or Sonnet 5.5) and its effort level. (DEC-104, DEC-109, cross-cutting #22)
+
+**Estimate:** 1 day, plus the user's time gathering inputs. **Depends on:** FEAT-60. **Enables:** tuning `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT`; the AI scoring feature's evals.
+
+**Files:**
+- `backend/evals/` (new): the runner and the Recipe Import inputs. Where the household lists come from, and whether inputs are committed, are decided at kick-off
+- `backend/package.json` (an `eval` script: a new script name, so a stop-and-ask)
+- `docs/session-notes.md` (the run's results)
+
+**Acceptance criteria:**
+- [ ] One command runs every input of a named feature through a named adapter, with an optional model and effort, without starting the app or writing to the database
+- [ ] For each input it reports latency, input and output tokens, the model that answered, the outcome, and whether the proposal passed `normaliseProposal`, plus totals
+- [ ] The runner takes a feature name and an adapter, so health scoring can add its inputs without changing the runner
+- [ ] A run over the agreed inputs compares Opus 5.5 and Sonnet 5.5 at two effort levels each, with times against the 75-second limit and the corrections each proposal would need, recorded in the session notes
+
+**Implementation notes:**
+- Real provider calls cost money: every run is the user's decision, and the runner never runs in CI.
+- Proposals go to the terminal or a gitignored file, never to Axiom or Sentry. No `console.log`: write through Pino or `process.stdout.write`.
+- About ten inputs, chosen to cover what imports will meet: a clean typed recipe, one buried in a blog story, US cup measures, no servings stated, several recipes in one text, a shopping list, and anything the household's own recipes make likely.
+- Inputs that copy a publication's text may not belong in the repo; if not, keep them in a gitignored folder with one committed sample.
+
+**Manual verification:**
+1. Run the runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
+2. Run it on a shopping list. It reports not a recipe.
+
+**Common gotchas:**
+- Effort levels mean different amounts of thinking on different models, so compare each model across its own levels.
+- A classifier refusal can be answered by a fallback model. Check the model that answered in the report.
+
+**Definition of done:**
+- Tests cover: the runner's arguments and its report, on the `fake` adapter.
+- Eval set: run on the agreed inputs, with the comparison recorded in the session notes and `RECIPE_IMPORT_MODEL` / `RECIPE_IMPORT_EFFORT` set from it.
+- Commit: `feat(recipes): add the eval runner and the recipe import eval set`
+- Gate check: manual verification steps 1 and 2.
+
+---
+
 ## Cross-feature concerns and reuse-from-day-one
 
 The 53 features above are sequenced for incremental delivery, but several concerns thread through many of them. Each item below is something where a *decision or pattern made in an early feature locks in costs or affordances for later ones*. Surfacing them now prevents the small inconsistencies that compound over a project of this size.
@@ -2831,16 +2880,16 @@ A stored health score (DEC-101) is only trustworthy if it's marked stale when it
 
 ### 22. Model features
 
-**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-63, the AI scoring feature, and any future feature that calls a model.
+**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-63, FEAT-64 (evals), the AI scoring feature, and any future feature that calls a model.
 
 Every model feature follows the rules in DEC-110 and is built the same way (DEC-109). A new feature that skips a step drifts from the others, and the drift is costly to undo once a second provider or model is in play. The checklist:
 - **Its own seam.** One narrow, domain-level interface per feature (`RecipeReader`, `RecipeScorer`), never a shared "AI service". It has an adapter per provider and a `fake` adapter for tests and e2e.
-- **Config.** `<FEATURE>_ADAPTER` and `<FEATURE>_MODEL` in `config.ts`, validated by Zod. Config refuses `fake` in production.
+- **Config.** `<FEATURE>_ADAPTER` and `<FEATURE>_MODEL` in `config.ts`, validated by Zod. Config refuses `fake` in production. Where the provider has an effort setting, `<FEATURE>_EFFORT` too, since a level means different things on different models.
 - **Rules outside the seam.** Input preparation happens before the seam, and the feature's normaliser runs after it, on every adapter's output (schema, plain text, household references). Adapters only call the model.
 - **Logging.** Through one shared helper that takes a `feature` field and logs metadata only: `reqId`, feature, adapter, model, tokens, latency, outcome. No prompt or model text in logs or Sentry (DEC-104).
-- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs.
+- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-64.
 - **Data flow.** The feature's DEC names any new data it sends to a provider.
-- **Shared code is helpers, not seams:** the provider client setup, the logging helper, plain-text stripping and the eval runner.
+- **Shared code is helpers, not seams:** the provider client setup, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
 
 **Named triggers:** the first model feature that can't finish within one request (most likely the health-score backfill) decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
 

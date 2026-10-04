@@ -33,6 +33,10 @@ export const DOMAIN_ERROR_CODES = [
   'ACCOUNT_DELETE_EMAIL_MISMATCH',
   'ACCOUNT_DELETE_REAUTH_REQUIRED',
   'SHOPPING_INGREDIENT_NOT_IN_PLAN',
+  'IMPORT_NOT_A_RECIPE',
+  // Metadata `reason`: `timeout`, `unavailable` or `invalid_proposal`.
+  'IMPORT_TRY_AGAIN',
+  'IMPORT_RATE_LIMITED',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

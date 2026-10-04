@@ -47,6 +47,9 @@ const devConfig: Config = {
   DATABASE_URL: 'postgres://lofty:lofty@localhost:5433/lofty_dev',
   AXIOM_ENDPOINT: 'https://api.axiom.co',
   SENTRY_TRACES_SAMPLE_RATE: 0,
+  RECIPE_IMPORT_ADAPTER: 'fake',
+  RECIPE_IMPORT_MODEL: 'claude-opus-5-5',
+  RECIPE_IMPORT_EFFORT: 'medium',
   ...baseEnv,
 };
 

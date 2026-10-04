@@ -9,6 +9,7 @@ import {
 import { signUploadParams } from '../src/lib/cloudinary.ts';
 import type { AppContext } from '../src/trpc/context.ts';
 import { appRouter } from '../src/trpc/router.ts';
+import { contextDeps } from './helpers/context-deps.ts';
 
 const USER_ID = 'user-test-1';
 const USER_EMAIL = 'tester@example.com';
@@ -26,6 +27,7 @@ function makeContext(overrides: { authenticated?: boolean } = {}): AppContext {
     req: {} as AppContext['req'],
     reply: {} as AppContext['reply'],
     reqId: 'rid-test',
+    ...contextDeps(),
     // The uploads procedure does no DB I/O, so a placeholder is safe; cast is
     // narrowed to AppContext['db'] to avoid leaking the placeholder shape.
     db: {} as AppContext['db'],

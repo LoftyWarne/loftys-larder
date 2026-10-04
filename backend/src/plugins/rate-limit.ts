@@ -55,6 +55,21 @@ export interface RateLimitOptions {
   // higher sessioned credit.
   ipMaxPerMinute?: number;
   sessionMaxPerMinute?: number;
+  importStartsPerHour?: number;
+}
+
+export interface ImportRateLimitVerdict {
+  allowed: boolean;
+  retryAfterSeconds: number;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    // Counts one Recipe Import `start` for the request's user.
+    limitRecipeImportStart: (
+      req: FastifyRequest,
+    ) => Promise<ImportRateLimitVerdict>;
+  }
 }
 
 export async function registerRateLimit(
@@ -89,6 +104,27 @@ export async function registerRateLimit(
       return email ? `magic-email:${email}` : `magic-ip:${req.ip}`;
     },
   });
+
+  // Each import calls a paid model (DEC-104): every `start` counts, per user.
+  // Checked inside the procedure rather than here, so the refusal is a tRPC
+  // error the Import page can show.
+  const checkImportStart = app.createRateLimit({
+    max: options.importStartsPerHour ?? 14,
+    timeWindow: '1 hour',
+    keyGenerator: (req) =>
+      req.user ? `import:${req.user.id}` : `import-ip:${req.ip}`,
+  });
+  app.decorate(
+    'limitRecipeImportStart',
+    async (req: FastifyRequest): Promise<ImportRateLimitVerdict> => {
+      const result = await checkImportStart(req);
+      // `isAllowed` means allow-listed; under the limit is `!isExceeded`.
+      if (result.isAllowed || !result.isExceeded) {
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+      return { allowed: false, retryAfterSeconds: result.ttlInSeconds };
+    },
+  );
 
   // preHandler (not onRequest) so the auth plugin has already hydrated
   // req.session and Fastify has parsed req.body. Both are read by the

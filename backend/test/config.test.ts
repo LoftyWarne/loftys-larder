@@ -19,6 +19,12 @@ const baseEnv = {
   CLOUDINARY_API_SECRET: 'test-secret',
 } as const;
 
+// Production refuses to start without a real Recipe Import reader.
+const prodReaderEnv = {
+  RECIPE_IMPORT_ADAPTER: 'anthropic',
+  ANTHROPIC_API_KEY: 'sk-test',
+} as const;
+
 function envWithout(
   key: keyof typeof baseEnv,
 ): Partial<Record<keyof typeof baseEnv, string>> {
@@ -47,6 +53,7 @@ describe('loadConfig', () => {
   it('allows missing ALLOWED_ORIGIN in production', () => {
     const config = loadConfig({
       ...envWithout('ALLOWED_ORIGIN'),
+      ...prodReaderEnv,
       NODE_ENV: 'production',
       AXIOM_TOKEN: 'xaat-test',
       AXIOM_DATASET: 'lofty-prod',
@@ -141,6 +148,7 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({
         ...baseEnv,
+        ...prodReaderEnv,
         NODE_ENV: 'production',
         AXIOM_DATASET: 'lofty-prod',
       }),
@@ -151,6 +159,7 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({
         ...baseEnv,
+        ...prodReaderEnv,
         NODE_ENV: 'production',
         AXIOM_TOKEN: 'xaat-test',
       }),
@@ -160,6 +169,7 @@ describe('loadConfig', () => {
   it('accepts production with both AXIOM_TOKEN and AXIOM_DATASET set', () => {
     const config = loadConfig({
       ...baseEnv,
+      ...prodReaderEnv,
       NODE_ENV: 'production',
       AXIOM_TOKEN: 'xaat-test',
       AXIOM_DATASET: 'lofty-prod',
@@ -186,6 +196,71 @@ describe('loadConfig', () => {
     });
     expect(a.DATABASE_URL).toBe('postgres://u:p@h:5432/db');
     expect(b.DATABASE_URL).toBe('postgresql://u:p@h:5432/db');
+  });
+});
+
+describe('loadConfig — Recipe Import reader', () => {
+  const prodEnv = {
+    ...baseEnv,
+    NODE_ENV: 'production',
+    AXIOM_TOKEN: 'axiom-token',
+    AXIOM_DATASET: 'axiom-dataset',
+  } as const;
+
+  it('defaults to the fake adapter, Opus 5.5 and medium effort outside production', () => {
+    const config = loadConfig({ ...baseEnv });
+    expect(config.RECIPE_IMPORT_ADAPTER).toBe('fake');
+    expect(config.RECIPE_IMPORT_MODEL).toBe('claude-opus-5-5');
+    expect(config.RECIPE_IMPORT_EFFORT).toBe('medium');
+  });
+
+  it('takes the adapter, model and effort from the environment', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      RECIPE_IMPORT_ADAPTER: 'anthropic',
+      RECIPE_IMPORT_MODEL: 'claude-sonnet-5-5',
+      RECIPE_IMPORT_EFFORT: 'low',
+      ANTHROPIC_API_KEY: 'sk-test',
+    });
+    expect(config.RECIPE_IMPORT_ADAPTER).toBe('anthropic');
+    expect(config.RECIPE_IMPORT_MODEL).toBe('claude-sonnet-5-5');
+    expect(config.RECIPE_IMPORT_EFFORT).toBe('low');
+  });
+
+  it('refuses the fake adapter in production', () => {
+    expect(() =>
+      loadConfig({ ...prodEnv, RECIPE_IMPORT_ADAPTER: 'fake' }),
+    ).toThrowError(/RECIPE_IMPORT_ADAPTER/);
+  });
+
+  it('requires an adapter to be named in production', () => {
+    expect(() => loadConfig({ ...prodEnv })).toThrowError(
+      /RECIPE_IMPORT_ADAPTER/,
+    );
+  });
+
+  it('accepts the anthropic adapter in production', () => {
+    const config = loadConfig({
+      ...prodEnv,
+      RECIPE_IMPORT_ADAPTER: 'anthropic',
+      ANTHROPIC_API_KEY: 'sk-test',
+    });
+    expect(config.RECIPE_IMPORT_ADAPTER).toBe('anthropic');
+  });
+
+  it('requires ANTHROPIC_API_KEY for the anthropic adapter', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, RECIPE_IMPORT_ADAPTER: 'anthropic' }),
+    ).toThrowError(/ANTHROPIC_API_KEY/);
+  });
+
+  it.each([
+    ['an unknown adapter', { RECIPE_IMPORT_ADAPTER: 'openai' }],
+    ['an unknown effort', { RECIPE_IMPORT_EFFORT: 'extreme' }],
+  ])('rejects %s', (_label, env) => {
+    expect(() => loadConfig({ ...baseEnv, ...env })).toThrowError(
+      ConfigValidationError,
+    );
   });
 });
 

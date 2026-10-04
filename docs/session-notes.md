@@ -4,6 +4,62 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-04 — Recipe Import backend: reader seam and import procedures (FEAT-60)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format clean in all four workspaces. Backend 692 tests (89 new) and frontend 662 green. e2e not run. Manual verification step 3 (a real key against the local app) not run, so nothing has called the live API yet. FEAT-60 checkboxes left for the user to tick.
+
+**Before the next deploy:** `fly.toml` now selects the `anthropic` reader, and production refuses to boot without `ANTHROPIC_API_KEY`. Stage the Fly secret first (`docs/secrets-checklist.md`) and set a monthly spend cap in the Anthropic Console.
+
+**Agreed at kick-off:**
+- Shared write code moves to `backend/src/lib/recipe-writes.ts` (functions that take a `tx`). The existing procedures keep their pre-flight checks and `markHealthScoreStale` calls.
+- Import rate limit: 14 `start` calls per user per hour, every call counted, checked inside `start` so the refusal is a tRPC error (`TOO_MANY_REQUESTS` + `IMPORT_RATE_LIMITED`).
+- Config: `RECIPE_IMPORT_ADAPTER` defaults to `fake` outside production and must be set (and not `fake`) in production. `ANTHROPIC_API_KEY` is required only for the `anthropic` adapter. `RECIPE_IMPORT_MODEL` defaults to `claude-opus-5-5`. New `RECIPE_IMPORT_EFFORT` (`low`…`max`, default `medium`), read only by the `anthropic` adapter. Non-secret settings go in `fly.toml [env]`.
+- Unknown ids from a reader: proposed new ingredients may have a null category and unit (the cook picks in Import Review), and candidate rows carry `{ id, name }` so an unknown id still has a name to fall back on.
+- Create from import: existing-ingredient rows carry `unitId` and get the unit-mismatch check; cost and image are accepted from the cook; a `{ newName }` source taken meanwhile links to the existing one; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` names the `newKey`.
+- Anthropic's server-side refusal fallback (`fallbacks: "default"`) is on; the model that answered is recorded on the draft and in logs.
+- Evals become a later feature (FEAT-64): the eval runner, the user-supplied inputs, a Sonnet 5.5 vs Opus 5.5 comparison and effort tuning. FEAT-60's gate check is manual verification step 3 alone.
+- Model choice: Opus 5.5 stays the default (DEC-104). A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its refusal fallback doesn't cover `bio` or `general_harms` declines. Decide with FEAT-64's numbers.
+
+**Jev (TypeSafe AI) evaluated, not adopted.** Jev answers typed Choice / Score / yes-no questions with calibrated probabilities in 70–500 ms, but doesn't generate text and is weak at numbers ("not a calculator"), so it can't read recipes, convert units or estimate nutrition. Adopting it means a second provider and a new data flow. Ideas for later, each with a trigger:
+- **Near-duplicate check for proposed new ingredients** (DEC-105's revisit trigger: near-duplicates build up). Shortlist existing ingredients by trigram, ask a Choice "is this the same as one of these?" (max 255 options), show "possibly the same as X" in Import Review.
+- **Health scoring** (DEC-101, at its kick-off). A 10-level Score fits the 1–10 scale and would make a full backfill fast, but its docs admit weak numeric calibration on score levels, and it can't write the score's summary text.
+- **FEAT-64 grader** for fuzzy fields, e.g. "does this step keep the original instruction?".
+- Notes: `@typesafe-ai/sdk` ships ESM; data region not documented; zero data retention is enterprise-only.
+
+**Changes:**
+- **Shared:**
+  - New `schemas/recipe-imports.ts`: import input, `start` input and result, the candidate and reading schemas (structured-output friendly), the proposal, `list`/`get`/`discard` shapes and the create-from-import input.
+  - `recipes.ts` exports the header and field schemas it reuses; `recipeStepAmountSchema` is pulled out.
+  - Error codes `IMPORT_NOT_A_RECIPE`, `IMPORT_TRY_AGAIN` (metadata `reason`) and `IMPORT_RATE_LIMITED`.
+- **Backend:**
+  - `@anthropic-ai/sdk` ^0.131.0 (dual ESM/CJS; adds about 0.8 MB to `server.js`).
+  - `config.ts`: `RECIPE_IMPORT_ADAPTER` / `_MODEL` / `_EFFORT`, `ANTHROPIC_API_KEY`, with the production refinements.
+  - `lib/model-features/`: `anthropic-client.ts`, `usage-log.ts` (`logModelUsage`, nested under `modelUsage`), `plain-text.ts` (`stripMarkdown`), `structured-output-schema.ts`.
+  - `lib/recipe-reader/`: the seam types, the `anthropic` adapter and its prompt, the `fake` adapter (markers `[fake:several]`, `[fake:not-a-recipe]`, `[fake:timeout]`, `[fake:unavailable]`, `[fake:invalid]`), and `createRecipeReader`.
+  - `lib/recipe-import/normalise-proposal.ts`.
+  - `lib/recipe-writes.ts`: `insertRecipe`, `writeIngredientLines`, `writeMethod`, `writeTags`, and the ingredient, source and step-amount checks. `recipes.ts` uses them; its 171 tests pass unchanged.
+  - `procedures/recipe-imports.ts`: `start`, `list`, `get`, `discard`, `createRecipe`.
+  - `rate-limit.ts` decorates `limitRecipeImportStart` (14 an hour per user; 1,000 under `NODE_ENV=test`). `AppContext` gains `log` (the request logger) and `recipeImport` (reader and limiter); the server builds the reader once at boot.
+- **Tests:** `plain-text`, `normalise-proposal`, `recipe-reader` (SDK HTTP layer faked through its `fetch` option), `recipe-imports-procedures` (Testcontainers), plus config and rate-limit cases. `test/helpers/context-deps.ts` fills the two new context fields for the other procedure tests.
+- **Docs and config:** FEAT-60 amended; new FEAT-64 (evals); cross-cutting #22; DEC-104, DEC-108 and DEC-109 amended; `secrets-checklist.md`; `fly.toml [env]`; `backend/.env.example`; README; AGENTS.md feature count.
+
+**Drift from the kick-off plan:**
+- New helper `structured-output-schema.ts`, not in the agreed list. The SDK's `zodOutputFormat` moves `enum` and `const` into descriptions, which would leave the outcome discriminator and the enums unenforced. Easy to drop if the SDK's helper is preferred.
+- `assertSourceInHousehold` moved from `recipes.ts` into `recipe-writes.ts` so both creation paths share it.
+- Create recipe deletes the draft first inside its transaction (the spec says "then deletes"). It's the same transaction, and it stops a double submit from creating two recipes.
+- The `fake` adapter always reports model `fake`, whatever `RECIPE_IMPORT_MODEL` says.
+
+**Open:**
+- **Not checked against the live API:** structured outputs together with server-side fallback, the effort setting, and the prompt. Manual verification step 3 is the first real call.
+- **"Converted" marks:** the prompt follows DEC-105 and marks a converted quantity only when the conversion rests on an assumption (an onion's weight, flour's density), not exact ones (tbsp → ml). The FEAT-60 criterion reads as "converted quantities are marked". Tune in FEAT-64 if every conversion should be marked.
+- **Proposed new ingredient that already exists:** if the reader proposes a new ingredient whose name the household already has, `normaliseProposal` keeps it, and create recipe gives `INGREDIENT_NAME_TAKEN`. Import Review (FEAT-61) may want to flag it before then.
+- **Autosave and the proposal:** `recipeDrafts.upsert` replaces all of `draftData`, so Import Review must send `fields.proposal` back with each save. `list` falls back to a null name and `get` to a null proposal (FEAT-61).
+- **Closing the tab:** a cancelled request aborts the read. It's logged and reported as a timeout (`GATEWAY_TIMEOUT`, so it reaches Sentry).
+- **Rate limit store:** the limit is in memory, so a machine restart (auto-stop) resets it.
+- **Cold start:** the SDK adds about 0.8 MB to the server bundle. Check against the 3-second budget after deploy (DEC-64, FEAT-52).
+
+---
+
 ## 2026-10-04 — Import groundwork: draft kinds and estimated nutrition (FEAT-59)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format clean. Backend 603 tests (11 new) and frontend 662 (7 new) green. e2e not run. Manual verification steps 1–2 not run. FEAT-59 checkboxes left for the user to tick.

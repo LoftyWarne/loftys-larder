@@ -1,16 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import {
-  and,
-  asc,
-  avg,
-  desc,
-  eq,
-  inArray,
-  lte,
-  notInArray,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, asc, avg, desc, eq, inArray, lte, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
@@ -119,6 +108,17 @@ import {
   type PickableRecipesOptions,
 } from '../../lib/pickable-recipes.ts';
 import { recipePlantPointsExpr } from '../../lib/plant-points.ts';
+import {
+  assertIngredientLinesValid,
+  assertIngredientsInHousehold,
+  assertSourceInHousehold,
+  findStepAmountOverTotal,
+  insertRecipe,
+  toMilli,
+  writeIngredientLines,
+  writeMethod,
+  writeTags,
+} from '../../lib/recipe-writes.ts';
 import { protectedProcedure, router } from '../init.ts';
 
 const DEFAULT_LIST_LIMIT = 30;
@@ -486,10 +486,9 @@ export const recipesRouter = router({
       if (input.sourceId !== null && input.sourceId !== undefined) {
         await assertSourceInHousehold(ctx.db, input.sourceId);
       }
-      const inserted = await ctx.db
-        .insert(recipes)
-        .values({
-          householdId: CURRENT_HOUSEHOLD_ID,
+      const id = await insertRecipe(
+        ctx.db,
+        {
           name: input.name,
           description: input.description,
           imageUrl: input.imageUrl,
@@ -510,17 +509,10 @@ export const recipesRouter = router({
           saltPerServing: input.saltPerServing,
           nutritionIsEstimated: input.nutritionIsEstimated ?? false,
           isBase: input.isBase ?? false,
-          addedByUserId: ctx.user.id,
-        })
-        .returning({ id: recipes.id });
-      const row = inserted[0];
-      if (!row) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Insert returned no row',
-        });
-      }
-      return { id: row.id };
+        },
+        ctx.user.id,
+      );
+      return { id };
     }),
 
   updateHeader: protectedProcedure
@@ -604,97 +596,14 @@ export const recipesRouter = router({
     .mutation(
       async ({ ctx, input }): Promise<ReplaceRecipeIngredientsResult> => {
         await assertRecipeInHousehold(ctx.db, input.recipeId);
-
-        // Validate every line's ingredient + unit against household state
-        // before opening a transaction. A pre-flight lookup is cheaper than
-        // round-tripping each FK / unit check inside the write path, and the
-        // error messages are richer (we can name the offending line).
-        if (input.lines.length > 0) {
-          const ingredientIds = Array.from(
-            new Set(input.lines.map((line) => line.ingredientId)),
-          );
-          const ingredientRows = await ctx.db
-            .select({
-              id: ingredients.id,
-              defaultUnitId: ingredients.defaultUnitId,
-            })
-            .from(ingredients)
-            .where(
-              and(
-                inArray(ingredients.id, ingredientIds),
-                eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
-              ),
-            );
-          const byId = new Map(ingredientRows.map((r) => [r.id, r]));
-
-          for (const line of input.lines) {
-            const ingredient = byId.get(line.ingredientId);
-            if (!ingredient) {
-              throw domainBadRequest(
-                'RECIPE_INGREDIENT_NOT_FOUND',
-                'One or more ingredients are not available to this household',
-                { ingredientId: line.ingredientId },
-              );
-            }
-            if (ingredient.defaultUnitId !== line.unitId) {
-              throw domainBadRequest(
-                'RECIPE_INGREDIENT_UNIT_MISMATCH',
-                'Ingredient unit does not match its enforced unit',
-                {
-                  ingredientId: line.ingredientId,
-                  expectedUnitId: ingredient.defaultUnitId,
-                  providedUnitId: line.unitId,
-                },
-              );
-            }
-          }
-        }
+        await assertIngredientLinesValid(ctx.db, input.lines);
 
         const withTransaction = makeWithTransaction(ctx.db);
         await withTransaction(async (tx) => {
           if (await ingredientLinesChanged(tx, input.recipeId, input.lines)) {
             await markHealthScoreStale(tx, input.recipeId);
           }
-          await tx
-            .delete(recipeIngredients)
-            .where(eq(recipeIngredients.recipeId, input.recipeId));
-          if (input.lines.length > 0) {
-            await tx.insert(recipeIngredients).values(
-              input.lines.map((line) => ({
-                recipeId: input.recipeId,
-                ingredientId: line.ingredientId,
-                quantity: line.quantity,
-                prepTypeId: line.prepTypeId,
-                isOptional: line.isOptional,
-              })),
-            );
-          }
-          // An ingredient removed from the recipe takes its step links with it
-          // (DEC-99). Never blocked by step amounts: Save & Finish saves
-          // ingredients before the method, so the method save is where an
-          // over-total amount gets caught.
-          const keptIngredientIds = input.lines.map(
-            (line) => line.ingredientId,
-          );
-          await tx
-            .delete(recipeMethodIngredients)
-            .where(
-              and(
-                inArray(
-                  recipeMethodIngredients.methodStepId,
-                  tx
-                    .select({ id: recipeMethod.id })
-                    .from(recipeMethod)
-                    .where(eq(recipeMethod.recipeId, input.recipeId)),
-                ),
-                keptIngredientIds.length > 0
-                  ? notInArray(
-                      recipeMethodIngredients.ingredientId,
-                      keptIngredientIds,
-                    )
-                  : undefined,
-              ),
-            );
+          await writeIngredientLines(tx, input.recipeId, input.lines);
         });
 
         return { recipeId: input.recipeId, count: input.lines.length };
@@ -713,105 +622,22 @@ export const recipesRouter = router({
         if (await methodInstructionsChanged(tx, input.recipeId, input.steps)) {
           await markHealthScoreStale(tx, input.recipeId);
         }
-        await tx
-          .delete(recipeMethodIngredients)
-          .where(
-            inArray(
-              recipeMethodIngredients.methodStepId,
-              tx
-                .select({ id: recipeMethod.id })
-                .from(recipeMethod)
-                .where(eq(recipeMethod.recipeId, input.recipeId)),
-            ),
-          );
-        await tx
-          .delete(recipeMethod)
-          .where(eq(recipeMethod.recipeId, input.recipeId));
-        if (input.steps.length > 0) {
-          // Numbering is authoritative server-side — the unique
-          // `(recipe_id, step_number)` index would otherwise expose a footgun
-          // if clients sent duplicate step numbers.
-          const inserted = await tx
-            .insert(recipeMethod)
-            .values(
-              input.steps.map((step, index) => ({
-                recipeId: input.recipeId,
-                stepNumber: index + 1,
-                instruction: step.instruction,
-                safetyNote: step.safetyNote,
-                tip: step.tip,
-                prepAhead: step.prepAhead,
-              })),
-            )
-            .returning({
-              id: recipeMethod.id,
-              stepNumber: recipeMethod.stepNumber,
-            });
-          const stepIdByNumber = new Map(
-            inserted.map((row) => [row.stepNumber, row.id]),
-          );
-          const links = input.steps.flatMap((step, index) => {
-            const methodStepId = stepIdByNumber.get(index + 1);
-            if (methodStepId === undefined) return [];
-            return step.ingredients.map((link) => ({
-              methodStepId,
-              ingredientId: link.ingredientId,
-              quantity: link.quantity,
-            }));
-          });
-          if (links.length > 0) {
-            await tx.insert(recipeMethodIngredients).values(links);
-          }
-        }
+        await writeMethod(tx, input.recipeId, input.steps);
       });
 
       return { recipeId: input.recipeId, count: input.steps.length };
     }),
 
-  // Full replace by name (DEC-97). Unknown names are inserted into the
-  // household vocabulary; `ON CONFLICT DO NOTHING` against the
-  // `lower(name)` unique index means an existing spelling is kept and reused.
+  // Full replace by name (DEC-97).
   replaceTags: protectedProcedure
     .input(replaceRecipeTagsInputSchema)
     .output(replaceRecipeTagsResultSchema)
     .mutation(async ({ ctx, input }): Promise<ReplaceRecipeTagsResult> => {
       await assertRecipeInHousehold(ctx.db, input.recipeId);
 
-      const byLowerName = new Map<string, string>();
-      for (const name of input.names) {
-        const key = name.toLowerCase();
-        if (!byLowerName.has(key)) byLowerName.set(key, name);
-      }
-      const names = Array.from(byLowerName.values());
-
       const withTransaction = makeWithTransaction(ctx.db);
       await withTransaction(async (tx) => {
-        await tx
-          .delete(recipeTagLinks)
-          .where(eq(recipeTagLinks.recipeId, input.recipeId));
-        if (names.length === 0) return;
-
-        await tx
-          .insert(recipeTags)
-          .values(
-            names.map((name) => ({ householdId: CURRENT_HOUSEHOLD_ID, name })),
-          )
-          .onConflictDoNothing();
-        const tagRows = await tx
-          .select({ id: recipeTags.id })
-          .from(recipeTags)
-          .where(
-            and(
-              eq(recipeTags.householdId, CURRENT_HOUSEHOLD_ID),
-              inArray(sql`lower(${recipeTags.name})`, [...byLowerName.keys()]),
-            ),
-          );
-        await tx.insert(recipeTagLinks).values(
-          tagRows.map((row) => ({
-            recipeId: input.recipeId,
-            tagId: row.id,
-          })),
-        );
+        await writeTags(tx, input.recipeId, input.names);
       });
 
       const tagsByRecipe = await loadTagsByRecipe(ctx.db, [input.recipeId]);
@@ -1335,25 +1161,6 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
   return false;
 }
 
-async function assertSourceInHousehold(
-  db: Db,
-  sourceId: number,
-): Promise<void> {
-  const rows = await db
-    .select({ id: recipeSources.id })
-    .from(recipeSources)
-    .where(
-      and(
-        eq(recipeSources.id, sourceId),
-        eq(recipeSources.householdId, CURRENT_HOUSEHOLD_ID),
-      ),
-    )
-    .limit(1);
-  if (rows.length === 0) {
-    throw new TRPCError({ code: 'NOT_FOUND', message: 'Source not found' });
-  }
-}
-
 async function assertRecipeInHousehold(
   db: Db,
   recipeId: number,
@@ -1511,40 +1318,24 @@ async function assertStepIngredientsValid(
   recipeId: number,
   steps: readonly ReplaceRecipeMethodStepInput[],
 ): Promise<void> {
-  const links = steps.flatMap((step) => step.ingredients);
-  if (links.length === 0) return;
-
-  const ingredientIds = Array.from(
-    new Set(links.map((link) => link.ingredientId)),
+  const links = steps.flatMap((step) =>
+    step.ingredients.map((link) => ({
+      key: link.ingredientId,
+      quantity: link.quantity,
+    })),
   );
-  const known = await db
-    .select({ id: ingredients.id })
-    .from(ingredients)
-    .where(
-      and(
-        inArray(ingredients.id, ingredientIds),
-        eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
-      ),
-    );
-  const knownIds = new Set(known.map((row) => row.id));
-  const unknownId = ingredientIds.find((id) => !knownIds.has(id));
-  if (unknownId !== undefined) {
-    throw domainBadRequest(
-      'RECIPE_INGREDIENT_NOT_FOUND',
-      'One or more ingredients are not available to this household',
-      { ingredientId: unknownId },
-    );
-  }
+  if (links.length === 0) return;
+  await assertIngredientsInHousehold(
+    db,
+    links.map((link) => link.key),
+  );
 
-  const statedMilli = new Map<number, number>();
-  for (const link of links) {
-    if (link.quantity === null) continue;
-    statedMilli.set(
-      link.ingredientId,
-      (statedMilli.get(link.ingredientId) ?? 0) + toMilli(link.quantity),
-    );
-  }
-  if (statedMilli.size === 0) return;
+  const statedIds = Array.from(
+    new Set(
+      links.filter((link) => link.quantity !== null).map((link) => link.key),
+    ),
+  );
+  if (statedIds.length === 0) return;
 
   const totals = await db
     .select({
@@ -1555,26 +1346,21 @@ async function assertStepIngredientsValid(
     .where(
       and(
         eq(recipeIngredients.recipeId, recipeId),
-        inArray(recipeIngredients.ingredientId, [...statedMilli.keys()]),
+        inArray(recipeIngredients.ingredientId, statedIds),
       ),
     )
     .groupBy(recipeIngredients.ingredientId);
-  for (const { ingredientId, total } of totals) {
-    const stated = statedMilli.get(ingredientId) ?? 0;
-    if (stated > toMilli(total)) {
-      throw domainBadRequest(
-        'RECIPE_STEP_AMOUNT_EXCEEDS_TOTAL',
-        'Step amounts add up to more than the recipe uses',
-        { ingredientId, stated: stated / 1000, total: Number(total) },
-      );
-    }
+  const over = findStepAmountOverTotal(
+    links,
+    new Map(totals.map((row) => [row.ingredientId, toMilli(row.total)])),
+  );
+  if (over) {
+    throw domainBadRequest(
+      'RECIPE_STEP_AMOUNT_EXCEEDS_TOTAL',
+      'Step amounts add up to more than the recipe uses',
+      { ingredientId: over.key, stated: over.stated, total: over.total },
+    );
   }
-}
-
-// `numeric(10,3)` values compared as integer thousandths, so float error
-// can't tip a sum over its total.
-function toMilli(quantity: string): number {
-  return Math.round(Number(quantity) * 1000);
 }
 
 async function loadTagsByRecipe(

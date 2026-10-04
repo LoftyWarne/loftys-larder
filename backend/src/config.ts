@@ -14,6 +14,20 @@ export const databaseUrlSchema = z
     message: 'DATABASE_URL must be a postgres:// or postgresql:// URL.',
   });
 
+export const recipeImportAdapterSchema = z.enum(['anthropic', 'fake']);
+
+export type RecipeImportAdapter = z.infer<typeof recipeImportAdapterSchema>;
+
+export const modelEffortSchema = z.enum([
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
+export type ModelEffort = z.infer<typeof modelEffortSchema>;
+
 const allowedEmailsSchema = z
   .string()
   .transform((value) =>
@@ -67,6 +81,15 @@ const configSchema = z
     // SENTRY_DSN because the backend and frontend may use different Sentry
     // projects; an unset value just omits the origin from the directive.
     SENTRY_BROWSER_INGEST_ORIGIN: z.url().optional(),
+    // Recipe Import reader (DEC-104, DEC-109). Swapping adapter, model or
+    // effort is an env change and a restart. The adapter defaults to `fake`
+    // outside production so dev, tests and e2e run without a provider key.
+    RECIPE_IMPORT_ADAPTER: recipeImportAdapterSchema.optional(),
+    RECIPE_IMPORT_MODEL: z.string().min(1).default('claude-opus-5-5'),
+    // Read only by the `anthropic` adapter. Levels mean different amounts of
+    // thinking on different models, so it moves with RECIPE_IMPORT_MODEL.
+    RECIPE_IMPORT_EFFORT: modelEffortSchema.default('medium'),
+    ANTHROPIC_API_KEY: z.string().min(1).optional(),
   })
   .refine(
     (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),
@@ -91,7 +114,32 @@ const configSchema = z
       message:
         'AXIOM_DATASET is required in production (Pino → Axiom transport, DEC-75).',
     },
-  );
+  )
+  .refine(
+    (value) =>
+      value.NODE_ENV !== 'production' ||
+      (value.RECIPE_IMPORT_ADAPTER !== undefined &&
+        value.RECIPE_IMPORT_ADAPTER !== 'fake'),
+    {
+      path: ['RECIPE_IMPORT_ADAPTER'],
+      message:
+        'RECIPE_IMPORT_ADAPTER must be set to a real adapter in production (DEC-109).',
+    },
+  )
+  .refine(
+    (value) =>
+      value.RECIPE_IMPORT_ADAPTER !== 'anthropic' ||
+      Boolean(value.ANTHROPIC_API_KEY),
+    {
+      path: ['ANTHROPIC_API_KEY'],
+      message:
+        'ANTHROPIC_API_KEY is required when RECIPE_IMPORT_ADAPTER is anthropic.',
+    },
+  )
+  .transform((value) => ({
+    ...value,
+    RECIPE_IMPORT_ADAPTER: value.RECIPE_IMPORT_ADAPTER ?? 'fake',
+  }));
 
 export type Config = z.infer<typeof configSchema>;
 

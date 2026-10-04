@@ -31,6 +31,7 @@ import {
   TESTCONTAINER_BOOT_MS,
   type TestDb,
 } from './helpers/test-db.ts';
+import { contextDeps } from './helpers/context-deps.ts';
 
 type Schema = typeof schema;
 
@@ -66,6 +67,9 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     AXIOM_TOKEN: 'test-axiom-token',
     AXIOM_DATASET: 'test-axiom-dataset',
     SENTRY_TRACES_SAMPLE_RATE: 0,
+    RECIPE_IMPORT_ADAPTER: 'fake',
+    RECIPE_IMPORT_MODEL: 'claude-opus-5-5',
+    RECIPE_IMPORT_EFFORT: 'medium',
     ...overrides,
   };
 }
@@ -393,6 +397,7 @@ describe('auth', () => {
         req: {} as AppContext['req'],
         reply: {} as AppContext['reply'],
         reqId: 'rid',
+        ...contextDeps(),
         db: {} as AppContext['db'],
         cloudinary: {
           cloudName: 'test-cloud',

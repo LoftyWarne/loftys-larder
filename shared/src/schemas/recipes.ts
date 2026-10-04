@@ -241,7 +241,7 @@ const recipeDescriptionSchema = z.string().trim().min(1).max(5000).nullable();
 const recipeImageUrlSchema = z.string().trim().min(1).max(2000).nullable();
 const recipeSourceUrlSchema = z.string().trim().min(1).max(2000).nullable();
 const recipeSourceDetailSchema = z.string().trim().min(1).max(500).nullable();
-const recipeSourceNameSchema = z
+export const recipeSourceNameSchema = z
   .string()
   .trim()
   .min(1, 'Source name is required')
@@ -275,14 +275,14 @@ const recipeMoneySchema = z
     'Cost must be a non-negative number with up to 2 decimal places',
   )
   .nullable();
-const recipeQuantitySchema = z
+export const recipeQuantitySchema = z
   .string()
   .regex(
     /^\d+(\.\d{1,3})?$/,
     'Quantity must be a non-negative number with up to 3 decimal places',
   );
 export const RECIPE_INSTRUCTION_MAX_LENGTH = 5000;
-const recipeInstructionSchema = z
+export const recipeInstructionSchema = z
   .string()
   .trim()
   .min(1)
@@ -294,7 +294,7 @@ const recipeInstructionSchema = z
 export const RECIPE_STEP_NOTE_MAX_LENGTH = 1000;
 // Blank is rejected rather than coerced to null: the editor sends `null` for
 // "no note", so there is exactly one stored form (DEC-94).
-const recipeStepNoteSchema = z
+export const recipeStepNoteSchema = z
   .string()
   .trim()
   .min(1, 'Note cannot be blank')
@@ -308,7 +308,7 @@ const recipeStepNoteSchema = z
 // serving-variation surface, which owns the XOR enforcement against `is_base`.
 // `isBase` is allowed at create time so a household can mark a recipe as a base
 // from the start without round-tripping through the serving-variation editor.
-const recipeHeaderWritableSchema = z.object({
+export const recipeHeaderWritableSchema = z.object({
   name: recipeNameSchema,
   description: recipeDescriptionSchema,
   imageUrl: recipeImageUrlSchema,
@@ -399,11 +399,15 @@ export type ReplaceRecipeIngredientsResult = z.infer<
 
 export const RECIPE_STEP_INGREDIENTS_MAX = 50;
 
+// A step's own amount of an ingredient (DEC-99): more than 0, or not stated.
+export const recipeStepAmountSchema = recipeQuantitySchema.refine(
+  (value) => Number(value) > 0,
+  'Amount must be more than 0',
+);
+
 export const replaceRecipeMethodStepIngredientSchema = z.object({
   ingredientId: ingredientIdSchema,
-  quantity: recipeQuantitySchema
-    .refine((value) => Number(value) > 0, 'Amount must be more than 0')
-    .nullable(),
+  quantity: recipeStepAmountSchema.nullable(),
 });
 
 export type ReplaceRecipeMethodStepIngredient = z.infer<

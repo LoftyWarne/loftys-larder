@@ -81,6 +81,16 @@ bootstrap, stage everything then run the deploy workflow.
 | `SENTRY_ENVIRONMENT` | Optional Sentry environment tag | Manual |
 | `SENTRY_TRACES_SAMPLE_RATE` | Optional, 0–1; defaults to 0 (DEC-77 punts tracing) | Manual |
 | `SENTRY_BROWSER_INGEST_ORIGIN` | Added to CSP `connect-src` so the SPA can POST events | Sentry |
+| `ANTHROPIC_API_KEY` | Recipe Import's `anthropic` reader (DEC-104); required while `RECIPE_IMPORT_ADAPTER` is `anthropic`. Set a monthly spend cap on the key's workspace in the Anthropic Console | Anthropic Console |
+
+### Recipe Import reader settings
+
+`RECIPE_IMPORT_ADAPTER`, `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT` aren't
+secrets, so they live in `fly.toml` under `[env]` (DEC-109). Production refuses
+to boot unless `RECIPE_IMPORT_ADAPTER` names a real adapter, and the
+`anthropic` adapter refuses to boot without `ANTHROPIC_API_KEY`, so stage the
+key **before** deploying a `fly.toml` that selects it. Changing the model or
+effort is a `fly.toml` edit and a deploy; no code changes.
 
 ### Frontend Sentry DSN
 
@@ -119,7 +129,8 @@ flyctl secrets set --stage --app loftys-larder-prod \
   AXIOM_TOKEN="xaat-…" \
   AXIOM_DATASET="loftys-larder" \
   SENTRY_DSN="https://…@sentry.io/…" \
-  SENTRY_BROWSER_INGEST_ORIGIN="https://o0.ingest.sentry.io"
+  SENTRY_BROWSER_INGEST_ORIGIN="https://o0.ingest.sentry.io" \
+  ANTHROPIC_API_KEY="sk-ant-…"
 
 # 3. Trigger the first deploy from GitHub (push to main, or run the Deploy
 #    workflow via workflow_dispatch).

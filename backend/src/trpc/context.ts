@@ -1,7 +1,10 @@
 import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify';
+import type { FastifyBaseLogger } from 'fastify';
 import type { Auth } from '../auth/index.ts';
 import type { Db } from '../db/index.ts';
 import type { CloudinaryCredentials } from '../lib/cloudinary.ts';
+import type { RecipeReader } from '../lib/recipe-reader/types.ts';
+import type { ImportRateLimitVerdict } from '../plugins/rate-limit.ts';
 
 // Module augmentation lives here (rather than in the auth plugin) so it's
 // always part of any compilation unit that pulls the AppRouter type — notably
@@ -22,7 +25,13 @@ declare module 'fastify' {
   interface FastifyInstance {
     db: Db;
     cloudinary: CloudinaryCredentials;
+    recipeReader: RecipeReader;
   }
+}
+
+export interface RecipeImportContext {
+  reader: RecipeReader;
+  allowStart: () => Promise<ImportRateLimitVerdict>;
 }
 
 export interface AppContext {
@@ -33,6 +42,9 @@ export interface AppContext {
   cloudinary: CloudinaryCredentials;
   session: AuthSession | null;
   user: AuthUser | null;
+  // The request logger, which carries `reqId` (DEC-77).
+  log: FastifyBaseLogger;
+  recipeImport: RecipeImportContext;
 }
 
 export function createContext({
@@ -49,5 +61,10 @@ export function createContext({
     // are null on unauthenticated routes.
     session: req.session,
     user: req.user,
+    log: req.log,
+    recipeImport: {
+      reader: req.server.recipeReader,
+      allowStart: () => req.server.limitRecipeImportStart(req),
+    },
   };
 }

@@ -311,3 +311,57 @@ describe('rate limit — exemptions and trust proxy', () => {
     expect(exhaustedForwarded.statusCode).toBe(429);
   });
 });
+
+describe('rate limit — Recipe Import starts per user', () => {
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+    app = undefined;
+  });
+
+  async function buildImportApp(): Promise<FastifyInstance> {
+    const instance = Fastify({ logger: false, trustProxy: true });
+    instance.decorateRequest('session', null);
+    instance.decorateRequest('user', null);
+    instance.addHook('preHandler', (req, _reply, done) => {
+      const raw = req.headers['x-test-user'];
+      if (typeof raw === 'string') {
+        // Structural stub: the import limiter only reads `user.id`.
+        req.user = { id: raw } as unknown as typeof req.user;
+      }
+      done();
+    });
+    await registerRateLimit(instance);
+    instance.post('/import-probe', (req) =>
+      instance.limitRecipeImportStart(req),
+    );
+    await instance.ready();
+    return instance;
+  }
+
+  async function start(instance: FastifyInstance, userId: string) {
+    const response = await instance.inject({
+      method: 'POST',
+      url: '/import-probe',
+      headers: { 'x-test-user': userId },
+    });
+    return response.json<{ allowed: boolean; retryAfterSeconds: number }>();
+  }
+
+  it('allows 14 starts an hour per user and refuses the 15th', async () => {
+    app = await buildImportApp();
+    for (let i = 0; i < 14; i += 1) {
+      expect((await start(app, 'user-a')).allowed).toBe(true);
+    }
+    const refused = await start(app, 'user-a');
+    expect(refused.allowed).toBe(false);
+    expect(refused.retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  it('keeps a separate count for each user', async () => {
+    app = await buildImportApp();
+    for (let i = 0; i < 14; i += 1) await start(app, 'user-a');
+    expect((await start(app, 'user-b')).allowed).toBe(true);
+  });
+});

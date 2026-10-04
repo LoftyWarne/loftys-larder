@@ -36,6 +36,7 @@ import {
   TESTCONTAINER_BOOT_MS,
   type TestDb,
 } from './helpers/test-db.ts';
+import { contextDeps } from './helpers/context-deps.ts';
 
 type Schema = typeof schema;
 
@@ -109,6 +110,7 @@ describe('plans procedures', () => {
       req: {} as AppContext['req'],
       reply: {} as AppContext['reply'],
       reqId: 'rid-test',
+      ...contextDeps(),
       db,
       cloudinary: {
         cloudName: 'test-cloud',

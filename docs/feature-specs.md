@@ -2399,100 +2399,205 @@ Conventions:
 
 ---
 
-### FEAT-59 — Recipe Import from pasted text, with Import Review
+### FEAT-59 — Import groundwork: separate import drafts, and an "estimated" flag on nutrition
 
-**Goal:** A cook pastes a recipe's text and a model turns it into a proposed recipe in the Larder's own structure. The cook checks and corrects the proposal in Import Review, and nothing is saved until they press "Create recipe". This builds the import pipeline that images (FEAT-60) and web links (FEAT-61) feed into, with the model behind a swappable reader seam. (DEC-103, DEC-104, DEC-105, DEC-106, DEC-108, DEC-109, DEC-110)
+**Goal:** Two small schema changes Recipe Import needs, each useful on its own. Import drafts get their own kind, so they can't collide with manual new-recipe drafts, and recipes get a flag that labels estimated nutrition. (DEC-106, DEC-108)
 
-**Estimate:** 3–4 days. **Depends on:** FEAT-21 (editor sections and drafts), FEAT-55 (step ingredient links), FEAT-58 (nutrition fields). **Enables:** FEAT-60, FEAT-61, and the AI scoring feature (shares the provider client).
+**Estimate:** 0.5 day. **Depends on:** FEAT-21 (drafts), FEAT-58 (nutrition). **Enables:** FEAT-60, FEAT-61.
+
+**Files:**
+- `backend/src/db/schema/recipe-drafts.ts` (`kind`), `backend/src/db/schema/recipes.ts` (`nutritionIsEstimated`), one migration (new)
+- `backend/src/trpc/procedures/recipe-drafts.ts` (manual-only `getNewDrafts` and `delete({ recipeId: null })`), `backend/src/trpc/procedures/recipes.ts` (`nutritionIsEstimated` on `get` and `updateHeader`)
+- `shared/src/schemas/recipe-drafts.ts`, `shared/src/schemas/recipes.ts`
+- `frontend/src/components/recipe-nutrition.tsx` and `frontend/src/routes/-components/recipe-detail-page.tsx` (label), `frontend/src/components/recipe-editor/header-fields.tsx` (checkbox)
+- `docs/plan.md` (the two new columns)
+
+**Acceptance criteria:**
+- [ ] `recipe_drafts.kind` is `manual` or `import`, defaulting to `manual`, and existing drafts become `manual`
+- [ ] `getNewDrafts` returns only manual drafts, and `delete({ recipeId: null })` deletes only manual drafts
+- [ ] `recipes.nutrition_is_estimated` defaults to false; `recipes.get` returns it and `updateHeader` writes it
+- [ ] While it's set, the recipe page heads the nutrition section "Nutrition per serving · estimated"
+- [ ] The editor shows the flag as an "Estimated" checkbox in the nutrition group, and unticking it then saving clears it
+- [ ] Changing only the flag doesn't mark a health score stale
+- [ ] Manual recipe creation and editing behave as before
+
+**Implementation notes:**
+- Nothing writes `kind = 'import'` yet; FEAT-60 does. An upsert by `draftId` keeps the row's kind.
+
+**Manual verification:**
+1. Set `nutrition_is_estimated` on a recipe with SQL. The recipe page shows "· estimated". Untick it in the editor and save, and the label goes.
+2. Start a new recipe so a manual draft exists, then insert an import-kind draft row with SQL. Reload `/recipes/new`: the manual draft loads. Create the manual recipe: the import row is still there.
+
+**Common gotchas:**
+- The flag isn't a nutrition value, so `markHealthScoreStale` ignores it (DEC-106).
+
+**Definition of done:**
+- Tests cover:
+  - Migration: both defaults.
+  - Drafts: `getNewDrafts` and `delete({ recipeId: null })` ignoring import drafts.
+  - The flag read and written, and changing it alone not marking a score stale.
+  - Frontend: the label shown and hidden; the checkbox sent as a one-field patch.
+- Commit: `feat(recipes): keep import drafts apart and label estimated nutrition`
+- Gate check: manual verification steps 1–2 against a local database.
+
+---
+
+### FEAT-60 — Recipe Import backend: the reader seam and import procedures, from pasted text
+
+**Goal:** The server side of Recipe Import for pasted text. A swappable reader turns the text into a proposal, every proposal is normalised to the data's rules, and procedures start an import, list, read and discard import drafts, and create the reviewed recipe in one transaction. There's no UI yet; FEAT-61 builds Import Review on this. (DEC-103, DEC-104, DEC-105, DEC-106, DEC-108, DEC-109, DEC-110)
+
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-59. **Enables:** FEAT-61, FEAT-62, FEAT-63, and the AI scoring feature (shared helpers).
 
 **Files:**
 - `backend/package.json` (`@anthropic-ai/sdk`), `backend/src/config.ts` (`ANTHROPIC_API_KEY`, `RECIPE_IMPORT_ADAPTER`, `RECIPE_IMPORT_MODEL`), `docs/secrets-checklist.md`
-- `backend/src/db/schema/recipe-drafts.ts` (`kind`), `backend/src/db/schema/recipes.ts` (`nutritionIsEstimated`), one migration (new)
 - `backend/src/lib/recipe-reader/` (new): the `RecipeReader` interface, the `anthropic` adapter (prompt, structured outputs), the `fake` adapter, and choosing an adapter from config
-- `backend/src/lib/recipe-import/` (new): `normaliseProposal`, and mapping a proposal into draft fields
+- `backend/src/lib/recipe-import/` (new): `normaliseProposal`
 - Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22): the Anthropic client setup, the feature-tagged usage logger, and the eval runner (location decided at kick-off)
-- `backend/src/trpc/procedures/recipe-imports.ts` (new: start, get, discard, create recipe), `backend/src/trpc/router.ts`
-- `backend/src/trpc/procedures/recipe-drafts.ts` (manual-only filters), `backend/src/trpc/procedures/recipes.ts` (write code shared with create recipe; `nutritionIsEstimated` on `get` and `updateHeader`)
+- `backend/src/trpc/procedures/recipe-imports.ts` (new: start, list, get, discard, create recipe), `backend/src/trpc/router.ts`
+- `backend/src/trpc/procedures/recipes.ts` (write code shared with create recipe)
 - `backend/src/plugins/rate-limit.ts` (import limit)
-- `shared/src/schemas/recipe-imports.ts` (new: input, proposal, Estimate marks, draft fields), `shared/src/schemas/recipe-drafts.ts`, `shared/src/schemas/recipes.ts`, `shared/src/schemas/errors.ts`, `shared/src/index.ts`
-- `frontend/src/routes/_authed/recipes/import.index.tsx` and `import.$draftId.tsx` (new, thin shells)
-- `frontend/src/routes/-components/recipe-import-page.tsx` and `recipe-import-review-page.tsx` (both new)
-- `frontend/src/components/recipe-editor/` (Estimate marks, original lines, proposed new-ingredient rows), `frontend/src/hooks/use-recipe-draft.ts` (by-draft-id mode)
-- `frontend/src/routes/-components/recipes-page.tsx` (Start blank / Import), `recipe-detail-page.tsx` and `frontend/src/components/recipe-nutrition.tsx` (estimated label), `frontend/src/components/recipe-editor/header-fields.tsx` (estimated checkbox)
-- `docs/plan.md` (the two new columns), `README.md`
+- `shared/src/schemas/recipe-imports.ts` (new: the shapes below), `shared/src/schemas/errors.ts`, `shared/src/index.ts`
+
+**Shapes** (code in `shared/src/schemas/recipe-imports.ts`; names provisional). Three shapes, one owner each (DEC-108). The drafts envelope still leaves `fields` to the editor.
+- **Proposal:** what `normaliseProposal` returns. `start` writes it into the import draft once, as `fields.proposal`.
+  - `header`: name, description, `baseServings`, times, nutrition, `sourceUrl`, `sourceDetail`; cost and image always null. `source`: `{ id } | { newName } | null`.
+  - `newIngredients`: `{ key, name, categoryId, defaultUnitId, isPlant, averageShelfLifeDays }[]`. The key is local to the draft.
+  - `ingredients`: rows of `{ key, ingredient: { id } | { newKey }, quantity, prepTypeId, isOptional, originalLine }`. `quantity` is a decimal string in that ingredient's unit, as `recipeQuantitySchema`.
+  - `method`: steps of `{ key, instruction, safetyNote, tip, prepAhead, ingredients: { ingredient: { id } | { newKey }, quantity | null }[] }`.
+  - `tags`: existing tag names only.
+  - `estimates`: marks by path: `header.<field>`, `ingredient:<key>.quantity` with kind `converted` or `nominal`, and `step:<key>.<field>`.
+  - `notes`: up to five plain-text notes from the reader, e.g. "the method seems to continue on another page". Shown in Import Review and never saved.
+  - `reader`: `{ adapter, model }`, and the import input (the pasted text here; image ids and the link come in FEAT-62 and FEAT-63).
+- **Editor sections:** owned by the editor, as today. FEAT-61 maps the proposal into them on first open. This feature doesn't write them.
+- **Create-from-import input:** what the client sends to create recipe. The reviewed header and source, new ingredients, rows and steps with `{ id } | { newKey }` references, tag names, and whether any nutrition Estimate is left, which sets `nutritionIsEstimated`. Validated by Zod like any write. The server never reads the draft to create the recipe.
+- `start` returns `{ kind: 'draft', draftId }` or `{ kind: 'several', names }`. "Several" creates no draft, and the client calls `start` again with `pick` and the same input.
 
 **Acceptance criteria:**
-- [ ] "New recipe" on the recipes page offers Start blank (the existing flow, unchanged) and Import
-- [ ] On `/recipes/import`, pasting recipe text and choosing Import shows a working state, then opens Import Review with the proposal. No recipe exists yet
-- [ ] Import Review shows the pasted text alongside the proposal, and every section can be edited with the editor's own controls
-- [ ] Each proposed ingredient row shows the original line beneath it, with the quantity in the matched ingredient's unit
+- [ ] `start` with pasted text returns a draft id. The import draft (`kind = 'import'`) holds the proposal and the adapter and model that produced it
+- [ ] Each row carries its original line, with the quantity in the matched or proposed ingredient's unit
 - [ ] Estimates are marked: converted and nominal quantities, and any header, time, nutrition, tip, safety-note, step-link or prep-ahead value the text didn't state
-- [ ] An unmatched line shows a proposed new ingredient (name, category, unit, plant, shelf life) that can be edited in place, or switched to an existing ingredient through the combobox
-- [ ] A recognised publication is matched to an existing Source or proposed as a new one
-- [ ] Tags are only existing household tags, and cost per serving and image are left blank
-- [ ] "Create recipe" creates the new ingredients and sources, the recipe, its lines, method, step links and tag links in one transaction, deletes the draft and opens the recipe page. A failure leaves nothing behind
-- [ ] A proposed new ingredient whose name was taken after the import shows `INGREDIENT_NAME_TAKEN` on its row, and nothing is created
-- [ ] Edits in Import Review autosave, and an import closed partway can be resumed from `/recipes/import`
-- [ ] Discard deletes the draft
-- [ ] An import draft never loads on `/recipes/new`, and saving a manual new recipe doesn't delete import drafts
-- [ ] Text holding several recipes lists their names, and picking one imports it
-- [ ] Text that isn't a recipe shows "Couldn't find a recipe in that" (`IMPORT_NOT_A_RECIPE`). A timeout or provider failure says to try again. Neither creates a draft
+- [ ] An unmatched line becomes a row pointing at a proposed new ingredient by key. A recognised publication matches a Source or is proposed by name
+- [ ] Text holding several recipes returns their names and creates no draft, and `start` with `pick` imports the chosen one
+- [ ] Text that isn't a recipe, or a model refusal, gives `IMPORT_NOT_A_RECIPE`. A timeout or provider failure gives a try-again domain error. Neither creates a draft
 - [ ] An import gives up after 75 seconds
 - [ ] Imports beyond the per-user limit are refused
-- [ ] While `nutritionIsEstimated` is set the recipe page heads the section "Nutrition per serving · estimated", and the editor shows the flag as a checkbox that saves when unticked
-- [ ] Each import logs `reqId`, input kind, adapter, model, tokens, latency and outcome, and no prompt or model text
-- [ ] Text written by the model contains no markdown
-- [ ] Import is disabled while offline
-- [ ] Changing `RECIPE_IMPORT_ADAPTER` or `RECIPE_IMPORT_MODEL` changes the reader with no code change, and config refuses `fake` in production
-- [ ] A candidate that fails the proposal schema shows "try again" and creates no draft
+- [ ] A candidate that fails the proposal schema gives the try-again error and creates no draft
 - [ ] An ingredient, tag or source id that wasn't sent to the reader never reaches the draft: an unknown ingredient becomes a proposed new ingredient, and an unknown tag is dropped
-- [ ] The import draft records which adapter and model produced it
+- [ ] Cost per serving and image are always blank, tags are only existing household tags, and model text contains no markdown
+- [ ] Create recipe resolves the new-ingredient and new-source keys, writes the new sources, new ingredients, recipe, lines, method, step links and tags in one transaction, then deletes the draft. A failure partway leaves nothing behind
+- [ ] A proposed new ingredient whose name was taken after the import gives `INGREDIENT_NAME_TAKEN`, identifying the row, and nothing is created
+- [ ] `list` returns the user's import drafts, newest first. `get` and `discard` act on one by id. Only the user who started an import can see or discard it, and none of them touch manual drafts
+- [ ] Changing `RECIPE_IMPORT_ADAPTER` or `RECIPE_IMPORT_MODEL` changes the reader with no code change, and config refuses `fake` in production
+- [ ] Each import logs `reqId`, input kind, adapter, model, tokens, latency and outcome, and no prompt or model text
 
 **Implementation notes:**
-- Adapters return an unvalidated candidate. `normaliseProposal` validates it against the `/shared` proposal schema, strips markdown, checks references and blanks cost and image, the same for every adapter (DEC-109). Adapters never log.
+- Adapters return an unvalidated candidate. `normaliseProposal` validates it against the proposal schema, strips markdown, checks references and blanks cost and image, the same for every adapter (DEC-109). Adapters never log.
 - Read the `claude-api` skill before writing the `anthropic` adapter. Use structured outputs, not forced tool choice, which Opus 5.5 rejects. Set effort explicitly. Map a refusal to not a recipe.
+- The prompt must give each proposed new ingredient a key before the steps refer to it.
 - Adapters honour the `AbortSignal`. Set the SDK's timeout and retries so that retries can't push a request past 75 seconds.
-- The `fake` adapter returns canned outcomes chosen by the input text, so e2e can drive the proposal, several-recipes and not-a-recipe paths.
+- The `fake` adapter returns canned outcomes chosen by the input text, so tests and e2e can drive the proposal, several-recipes and not-a-recipe paths.
 - This feature sets the pattern in cross-cutting #22. Build only what import needs, but give the usage logger a `feature` field and let the eval runner take a feature name and an adapter, so scoring reuses them without renaming.
 - Create recipe should reuse the write code of `create`, `replaceIngredients`, `replaceMethod` and `replaceTags`, extracted into functions that take a `tx`, not copy it. Confirm the shape at kick-off.
-- The household lists sent to the model are scoped by `CURRENT_HOUSEHOLD_ID` (DEC-17).
+- The household lists sent to the reader are scoped by `CURRENT_HOUSEHOLD_ID` (DEC-17).
 - A new recipe has no health score, so create recipe doesn't call `markHealthScoreStale`.
 
 **Manual verification:**
-1. Paste a recipe from a website's print view. Import Review opens within the time limit, and "2 tbsp olive oil" shows as millilitres under its original line.
-2. Correct one quantity, close the tab, then resume the import from `/recipes/import`. The correction is still there.
-3. Create the recipe. It opens, it's in the planner's picker, and a proposed new ingredient is now on the ingredients page.
-4. Start another import and discard it. No recipe or ingredient is created.
-5. Paste a shopping list. The page shows "Couldn't find a recipe in that".
+1. Run the eval runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
+2. Run it on a shopping list. It reports not a recipe.
+3. Against a signed-in local app with a real key, call `start` and check the `recipe_drafts` row: `kind = 'import'`, the proposal, and the adapter and model.
 
 **Common gotchas:**
-- `recipeDrafts.delete({ recipeId: null })` deletes every manual new-recipe draft. It must never touch import drafts (DEC-108).
-- `baseServings` is required. If the text doesn't state it, it's an Estimate and must show as one.
+- `baseServings` is required. If the text doesn't state it, it's an Estimate.
 - Prompts and model output never go to Pino or Sentry (DEC-104).
-- Tests and e2e use the `fake` adapter. Only the eval set calls a real provider.
+- Tests use the `fake` adapter. Only the eval set calls a real provider.
 
 **Definition of done:**
 - Tests cover:
   - `normaliseProposal`: schema failures, markdown stripping, unknown ids (ingredient → proposed new, tag dropped, source → no match), cost and image blanked, Estimate marks kept.
   - Choosing an adapter: config picks the adapter and model, and `fake` is refused in production.
   - The `anthropic` adapter, with the SDK's HTTP layer faked: the request shape, a refusal mapped to not a recipe, an abort mapped to a timeout.
-  - Starting an import: an outcome from the `fake` adapter becoming an import draft that records the adapter and model; not a recipe, several recipes, timeout and provider error; the rate limit; household scoping of the lists sent.
-  - Create recipe: everything written in one transaction, rolled back on a failure partway; `INGREDIENT_NAME_TAKEN` for a taken name; the draft deleted.
-  - Drafts: `getNewDrafts` and `delete({ recipeId: null })` ignoring import drafts.
-  - `nutritionIsEstimated`: read and written, and not marking a score stale.
-  - Frontend: the Import page states; Import Review showing Estimates, original lines and proposed new ingredients; resume and discard; the recipes-page choice; the estimated label and checkbox.
-  - e2e: paste, review and create, on the `fake` adapter.
+  - `start`: a `fake` outcome becoming an import draft that records the reader; several recipes; not a recipe; timeout and provider error; the rate limit; household scoping of the lists sent.
+  - Create recipe: one transaction; keys resolved for rows, step links and the source; rollback on a failure partway; `INGREDIENT_NAME_TAKEN`; the draft deleted.
+  - `list`, `get` and `discard`: ownership, newest first, and manual drafts untouched.
 - Eval set: run once on the agreed inputs through the `anthropic` adapter, with timings recorded in the session notes.
+- Commit: `feat(recipes): read a pasted recipe into an import draft and create it in one transaction`
+- Gate check: manual verification steps 1 and 3.
+
+---
+
+### FEAT-61 — Import page and Import Review
+
+**Goal:** The cook's side of Recipe Import for pasted text. Choose Import from the recipes page, paste, check and correct the proposal in Import Review alongside the original, and create the recipe. (DEC-103, DEC-105, DEC-106, DEC-108)
+
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-60. **Enables:** FEAT-62, FEAT-63.
+
+**Files:**
+- `frontend/src/routes/_authed/recipes/import.index.tsx` and `import.$draftId.tsx` (new, thin shells)
+- `frontend/src/routes/-components/recipe-import-page.tsx` and `recipe-import-review-page.tsx` (both new)
+- `frontend/src/components/recipe-editor/` (Estimate marks, original lines, pending new-ingredient and new-source rows, pickers and step chips taking `{ id } | { newKey }`, a stable key on draft rows)
+- `frontend/src/hooks/use-recipe-draft.ts` (by-draft-id mode)
+- `frontend/src/lib/` (mapping a proposal into editor sections, building the create input, the Estimate-mark helper)
+- `frontend/src/routes/-components/recipes-page.tsx` (Start blank / Import)
+- e2e: a new import spec, with the backend on the `fake` adapter
+- `README.md`
+
+**Acceptance criteria:**
+- [ ] "New recipe" on the recipes page offers Start blank (the existing flow, unchanged) and Import
+- [ ] `/recipes/import` takes pasted text, shows a working state during the import, then opens Import Review
+- [ ] `/recipes/import` lists imports in progress, newest first, each of which can be resumed or discarded
+- [ ] Text holding several recipes shows their names, and picking one continues the import
+- [ ] Not a recipe shows "Couldn't find a recipe in that". A timeout or provider failure says to try again, and the pasted text is kept
+- [ ] Import Review shows the pasted text alongside the proposal, and every section uses the editor's own controls
+- [ ] The reader's notes show at the top of Import Review
+- [ ] Each ingredient row shows its original line beneath it
+- [ ] Estimates are marked, with converted and nominal quantities worded differently, and editing a field clears its mark
+- [ ] A row pointing at a proposed new ingredient shows it as new, with name, category, unit, plant and shelf life editable in place, and can be switched to an existing ingredient through the combobox
+- [ ] Step chips and the step-ingredient picker include proposed new ingredients
+- [ ] A proposed new source shows as new and can be switched to an existing one
+- [ ] Edits autosave, and closing and reopening resumes the import from `/recipes/import`
+- [ ] "Create recipe" opens the new recipe page, and the import leaves the in-progress list. `INGREDIENT_NAME_TAKEN` shows on the row concerned
+- [ ] If any nutrition Estimate is left at "Create recipe", the new recipe's page shows "· estimated"
+- [ ] Discard asks for confirmation, then deletes the import
+- [ ] An import draft never appears on `/recipes/new`
+- [ ] Import is disabled while offline
+- [ ] The Import page and Import Review work at phone width and pass the axe scan
+
+**Implementation notes:**
+- Map the proposal into the editor's sections once, on first open, and autosave the sections from then on (DEC-108). Imported steps start with `followsText: false`, so the editor's text matcher doesn't overwrite the reader's step links.
+- Row keys must survive autosave and reload, because Estimate marks and original lines are held by key.
+- Build the create input from the editor sections, not from the stored proposal.
+- Consider a throwaway prototype of the phone layout (the `prototype` skill) at kick-off: the original alongside the proposal is the hard part on a narrow screen.
+- Route files stay thin shells (AGENTS.md).
+
+**Manual verification:**
+1. With a real API key, paste a recipe from a website's print view. Import Review opens within the time limit, with "2 tbsp olive oil" in millilitres under its original line.
+2. Correct one quantity and its Estimate mark goes. Close the tab, reopen `/recipes/import` and resume: the correction is still there.
+3. Create the recipe. It opens, it's in the planner's picker, and a proposed new ingredient is now on the ingredients page.
+4. Start another import and discard it. No recipe or ingredient is created.
+5. At phone width, check you can read the original and correct the proposal without sideways scrolling.
+
+**Common gotchas:**
+- Import Review changes shared editor components to take `{ id } | { newKey }`. The edit page must behave exactly as before.
+- `baseServings` is required. If it's an Estimate, it must show as one.
+
+**Definition of done:**
+- Tests cover:
+  - Mapping a proposal into sections, and building the create input from them, including the nutrition flag.
+  - The Estimate helper, and a mark clearing on edit.
+  - The Import page: working, several recipes, not a recipe, try again, offline, the in-progress list.
+  - Import Review: notes, original lines, marks, pending ingredients and sources, step chips with pending ingredients, resume and discard.
+  - The recipes-page choice, and the edit page unchanged.
+  - e2e on the `fake` adapter: paste, review, correct and create; resume after a reload; discard; an axe scan of Import Review.
 - Commit: `feat(recipes): import a recipe from pasted text and review it before saving`
 - Gate check: manual verification steps 1–3 against a local database with a real API key.
 
 ---
 
-### FEAT-60 — Recipe Import from images, keeping the originals
+### FEAT-62 — Recipe Import from images, keeping the originals
 
 **Goal:** A cook imports a recipe from 1–4 screenshots, photos or scans. The images go straight from the browser to Cloudinary and are kept with the saved recipe, which links to them as "View original". (DEC-107, DEC-109)
 
-**Estimate:** 1.5–2 days. **Depends on:** FEAT-59, FEAT-18 (Cloudinary signing). **Enables:** none specifically.
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-61, FEAT-18 (Cloudinary signing). **Enables:** none specifically.
 
 **Files:**
 - `shared/src/schemas/uploads.ts` (imports preset), `shared/src/schemas/recipe-imports.ts` (image input), `shared/src/schemas/recipes.ts` (originals on `get`)
@@ -2516,6 +2621,7 @@ Conventions:
 
 **Implementation notes:**
 - The import procedure gives the reader Cloudinary delivery URLs with a transformation that caps the long edge and converts to JPEG, not the uploaded file. Adapters never sign or build URLs (DEC-109).
+- "Several recipes" reuses the uploaded images for the second call.
 - Decide the import upload size limit at kick-off: phone photos can exceed the 5 MB recipe-image limit.
 - Household scope for Originals comes through the join to `recipes` (DEC-17).
 
@@ -2540,11 +2646,11 @@ Conventions:
 
 ---
 
-### FEAT-61 — Recipe Import from a web link
+### FEAT-63 — Recipe Import from a web link
 
 **Goal:** A cook pastes a recipe page's link. The backend fetches the page and uses its schema.org `Recipe` data when it has some, and the model proposes the recipe with the link as its source. (DEC-107, DEC-109)
 
-**Estimate:** 1–1.5 days. **Depends on:** FEAT-59. **Enables:** none specifically.
+**Estimate:** 1–1.5 days. **Depends on:** FEAT-61. **Enables:** none specifically.
 
 **Files:**
 - `backend/src/lib/recipe-import/fetch-page.ts` (new: guarded fetch), `backend/src/lib/recipe-import/page-content.ts` (new: JSON-LD extraction and text fallback)
@@ -2724,7 +2830,7 @@ A stored health score (DEC-101) is only trustworthy if it's marked stale when it
 
 ### 22. Model features
 
-**Threads through:** FEAT-59 (sets the pattern with Recipe Import), FEAT-60, FEAT-61, the AI scoring feature, and any future feature that calls a model.
+**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-63, the AI scoring feature, and any future feature that calls a model.
 
 Every model feature follows the rules in DEC-110 and is built the same way (DEC-109). A new feature that skips a step drifts from the others, and the drift is costly to undo once a second provider or model is in play. The checklist:
 - **Its own seam.** One narrow, domain-level interface per feature (`RecipeReader`, `RecipeScorer`), never a shared "AI service". It has an adapter per provider and a `fake` adapter for tests and e2e.

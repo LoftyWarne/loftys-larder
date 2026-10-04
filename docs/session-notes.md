@@ -4,9 +4,9 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-10-03 — Recipe Import designed (DEC-103 to DEC-110, FEAT-59 to FEAT-61)
+## 2026-10-03 — Recipe Import designed (DEC-103 to DEC-110, FEAT-59 to FEAT-63)
 
-**Status:** Design only, worked through question by question with the user. No code. Docs edited and not committed. FEAT-59 to FEAT-61 are drafts awaiting kick-off, with every checkbox unticked.
+**Status:** Design only, worked through question by question with the user. No code. The design was committed in `5d0955e`, and the FEAT split and shapes follow in a second commit. FEAT-59 to FEAT-63 are drafts awaiting kick-off, with every checkbox unticked. Start with FEAT-59, using the AGENTS.md kick-off template.
 
 **Agreed with the user:**
 - Recipe Import moves out of non-goals. "Recipe import from URLs" and "Photo recognition / OCR of cookbooks" are removed, and the "AI / LLM features" note is narrowed. Suggestions, recommendations and substitutions stay excluded.
@@ -29,24 +29,31 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
   - Health scoring gets its own `RecipeScorer` seam in the same style when it's built.
 - **Added 2026-10-04: future AI features (DEC-110, cross-cutting #22).** The user expects more AI features.
   - The stance changes from "AI excluded, with exceptions" to "allowed under four rules": the model proposes and a cook decides; kept output is labelled; deterministic data stays deterministic; each feature is built to #22. The AI non-goal now points to DEC-110, and its four exclusions stay until a concrete feature is proposed.
-  - Cross-cutting #22 is the checklist every model feature follows. FEAT-59 names the usage logger and eval runner generically for scoring to reuse.
+  - Cross-cutting #22 is the checklist every model feature follows. FEAT-60 names the usage logger and eval runner generically for scoring to reuse.
   - Background work and streaming aren't designed now. Each has a named trigger in #22: background work with the first feature that can't finish in one request (likely the health-score backfill), streaming with the first feature that needs streamed output.
+- **Added 2026-10-04: split into sitting-sized features, with the shapes designed.** The old FEAT-59 (3–4 days) was too big for one sitting, and the proposal and draft shapes were undesigned.
+  - New order: FEAT-59 groundwork (`recipe_drafts.kind`, `nutrition_is_estimated`); FEAT-60 reader seam and import procedures for pasted text, with a "Shapes" section; FEAT-61 Import page and Import Review; FEAT-62 images (was FEAT-60); FEAT-63 web links (was FEAT-61).
+  - Shapes (DEC-108, edited in place): three shapes with one owner each. The proposal is in `/shared` and written once by the server. The editor sections stay owned by the editor. The create-from-import input is in `/shared` and validated like any write; the server never reads editor-owned fields.
+  - New ingredients and sources are referenced by draft-local key (`{ id } | { newKey }`, `{ id } | { newName }`) and resolved in the create transaction.
+  - Estimate marks are kept by path beside the data, rows carry stable keys, and editing a field clears its mark. `nutritionIsEstimated` is set if any nutrition mark is left at create.
+  - The reader may return up to five notes, shown in Import Review and never saved.
 
 **Changes:**
 - New `CONTEXT.md`, now listed in the `AGENTS.md` doc set. The FEAT and DEC counts in `AGENTS.md` are bumped.
 - `docs/design-decisions.md`: DEC-103 to DEC-110, plus amendment lines on DEC-18, DEC-29, DEC-50, DEC-101 and DEC-102.
 - `docs/non-goals.md`: two entries removed. The "AI / LLM features" adjacency note now points to DEC-110, and the "Cost optimisation" note is amended.
 - `docs/feature-specs.md`: cross-cutting #22, "Model features".
-- `docs/feature-specs.md`: FEAT-59 (pasted text + Import Review), FEAT-60 (images + Originals), FEAT-61 (web links).
+- `docs/feature-specs.md`: FEAT-59 (groundwork), FEAT-60 (reader + import procedures), FEAT-61 (Import page + Import Review), FEAT-62 (images + Originals), FEAT-63 (web links).
 
 **Open, for kick-off:**
 - Three schema changes need approval at kick-off: `recipe_drafts.kind`, `recipes.nutrition_is_estimated` and `recipe_import_originals`.
-- New dependency `@anthropic-ai/sdk`. The npm package ships an `.mjs` default export; confirm the version to pin. Also whether HTML parsing for FEAT-61 needs a dependency.
+- New dependency `@anthropic-ai/sdk`. The npm package ships an `.mjs` default export; confirm the version to pin. Also whether HTML parsing for FEAT-63 needs a dependency.
 - Create recipe should reuse the write code of `create` / `replaceIngredients` / `replaceMethod` / `replaceTags`. Agree how they get extracted.
 - Final names for `RecipeReader` / `read` / `normaliseProposal`, and the exact outcome and error types.
 - Where the eval set and its runner live, and whether personal photos belong in the repo.
 - The per-user rate-limit numbers, and the import upload size limit (phone photos can exceed the 5 MB recipe-image limit).
 - Effort level for Opus 5.5, set from the eval set's timings against the 75 s limit.
+- Whether to prototype Import Review's phone layout at FEAT-61 kick-off.
 - Follow-ups not specced: Recipe Generation, PWA share target.
 
 ---

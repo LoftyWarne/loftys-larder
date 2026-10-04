@@ -8,6 +8,7 @@ import type { MagicLinkSender } from './auth/resend.ts';
 import { ConfigValidationError, loadConfig, type Config } from './config.ts';
 import { getDb, type Db } from './db/index.ts';
 import { createDestroyImage } from './lib/cloudinary.ts';
+import { createPageFetcher } from './lib/recipe-import/fetch-page.ts';
 import { createRecipeReader } from './lib/recipe-reader/index.ts';
 import type { RecipeReader } from './lib/recipe-reader/types.ts';
 import { buildLoggerBundle } from './plugins/logger.ts';
@@ -113,6 +114,7 @@ export async function buildAppWithLogger(
     'recipeReader',
     options.recipeReader ?? createRecipeReader(config),
   );
+  app.decorate('fetchPage', createPageFetcher());
 
   registerHealth(app);
 

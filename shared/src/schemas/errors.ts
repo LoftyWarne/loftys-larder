@@ -39,6 +39,10 @@ export const DOMAIN_ERROR_CODES = [
   // The provider refused the request itself, so trying again won't help.
   'IMPORT_REQUEST_REJECTED',
   'IMPORT_RATE_LIMITED',
+  // A link that isn't https, or that leads to a private address.
+  'IMPORT_LINK_NOT_ALLOWED',
+  // The page refused the fetch, timed out, was too large or wasn't HTML.
+  'IMPORT_LINK_UNREADABLE',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

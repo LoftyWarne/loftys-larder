@@ -42,10 +42,17 @@ import {
   type ModelUsageDetails,
 } from '../../lib/model-features/usage-log.ts';
 import {
+  LinkNotAllowedError,
+  PageUnreadableError,
+  type FetchedPage,
+} from '../../lib/recipe-import/fetch-page.ts';
+import {
   destroyImportImages,
   importImagePublicIds,
 } from '../../lib/recipe-import/import-images.ts';
+import { checkImportLink } from '../../lib/recipe-import/link-guard.ts';
 import { normaliseProposal } from '../../lib/recipe-import/normalise-proposal.ts';
+import { readPageContent } from '../../lib/recipe-import/page-content.ts';
 import {
   RecipeReaderRequestError,
   RecipeReaderTimeoutError,
@@ -96,17 +103,15 @@ export const recipeImportsRouter = router({
         }
 
         const household = await loadReaderHousehold(ctx.db);
-        const readerInput = toReaderInput(
-          input.input,
-          ctx.cloudinary.cloudName,
-        );
-        const { reader } = ctx.recipeImport;
+        const { reader, fetchPage } = ctx.recipeImport;
         const pick = input.pick ?? null;
+        // A link's fetch and the read share the one budget (DEC-104).
         const timeout = AbortSignal.timeout(RECIPE_IMPORT_TIMEOUT_MS);
-        const readSignal = signal
+        const importSignal = signal
           ? AbortSignal.any([signal, timeout])
           : timeout;
         const startedAt = performance.now();
+        let inputDetails: ModelUsageDetails = {};
         const logUsage = (
           outcome: string,
           usage: RecipeReaderUsage | null,
@@ -126,19 +131,70 @@ export const recipeImportsRouter = router({
             {
               inputKind: input.input.kind,
               picked: pick !== null,
-              ...(readerInput.kind === 'images'
-                ? { imageCount: readerInput.urls.length }
-                : {}),
+              ...inputDetails,
               ...details,
             },
           );
         };
 
+        let readerInput: RecipeReaderInput;
+        if (input.input.kind === 'link') {
+          const link = checkImportLink(input.input.url);
+          if (!link.ok) {
+            logUsage('IMPORT_LINK_NOT_ALLOWED', null, { reason: link.reason });
+            throw linkNotAllowed();
+          }
+          // The host only: a link's path and query are the cook's.
+          inputDetails = { host: link.url.hostname };
+          let page: FetchedPage;
+          try {
+            page = await fetchPage(link.url, importSignal);
+          } catch (error) {
+            if (importSignal.aborted) {
+              logUsage('IMPORT_TRY_AGAIN', null, { reason: 'timeout' });
+              throw tryAgain('timeout');
+            }
+            if (error instanceof LinkNotAllowedError) {
+              logUsage('IMPORT_LINK_NOT_ALLOWED', null, {
+                reason: error.reason,
+              });
+              throw linkNotAllowed();
+            }
+            if (error instanceof PageUnreadableError) {
+              logUsage('IMPORT_LINK_UNREADABLE', null, {
+                reason: error.reason,
+                pageStatus: error.status,
+              });
+              throw domainError(
+                'UNPROCESSABLE_CONTENT',
+                'IMPORT_LINK_UNREADABLE',
+                'Couldn’t read that page',
+              );
+            }
+            throw error;
+          }
+          const content = readPageContent(page.html);
+          readerInput = { kind: 'page', url: page.url.href, ...content };
+          inputDetails = {
+            ...inputDetails,
+            pageFormat: content.format,
+            pageChars: content.content.length,
+            pageTruncated: content.truncated,
+            redirects: page.redirects,
+            fetchMs: Math.round(performance.now() - startedAt),
+          };
+        } else {
+          readerInput = toReaderInput(input.input, ctx.cloudinary.cloudName);
+          if (readerInput.kind === 'images') {
+            inputDetails = { imageCount: readerInput.urls.length };
+          }
+        }
+
         let reading: RecipeReading;
         try {
           reading = await reader.read(
             { input: readerInput, household, pick },
-            readSignal,
+            importSignal,
           );
         } catch (error) {
           if (error instanceof RecipeReaderTimeoutError) {
@@ -204,6 +260,11 @@ export const recipeImportsRouter = router({
 
         const proposal: RecipeImportProposal = {
           ...normalised.proposal,
+          // A linked recipe's source is the link the cook gave.
+          header:
+            input.input.kind === 'link'
+              ? { ...normalised.proposal.header, sourceUrl: input.input.url }
+              : normalised.proposal.header,
           reader: { adapter: reader.adapter, model: usage.model },
           input: input.input,
         };
@@ -442,7 +503,7 @@ function ownImportDrafts(userId: string) {
 // Images reach the reader as delivery URLs for their JPEG rendition, never
 // as bytes through Fastify (DEC-50, DEC-107).
 function toReaderInput(
-  input: RecipeImportInput,
+  input: Exclude<RecipeImportInput, { kind: 'link' }>,
   cloudName: string,
 ): RecipeReaderInput {
   if (input.kind === 'text') return input;
@@ -674,6 +735,14 @@ function ingredientNameTaken(newKey: string): TRPCError {
     'INGREDIENT_NAME_TAKEN',
     'An ingredient with this name already exists',
     { newKey },
+  );
+}
+
+function linkNotAllowed(): TRPCError {
+  return domainError(
+    'BAD_REQUEST',
+    'IMPORT_LINK_NOT_ALLOWED',
+    'That link can’t be imported',
   );
 }
 

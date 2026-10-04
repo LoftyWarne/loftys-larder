@@ -2,7 +2,10 @@ import type {
   RecipeImportDraftSummary,
   RecipeImportInput,
 } from '@loftys-larder/shared';
-import { RECIPE_IMPORT_TEXT_MAX_LENGTH } from '@loftys-larder/shared';
+import {
+  RECIPE_IMPORT_LINK_MAX_LENGTH,
+  RECIPE_IMPORT_TEXT_MAX_LENGTH,
+} from '@loftys-larder/shared';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Loader2 } from 'lucide-react';
 import { useState } from 'react';
@@ -15,7 +18,23 @@ import { uploadToCloudinary } from '@/lib/cloudinary-upload.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
 
-type InputMode = 'text' | 'images';
+type InputMode = RecipeImportInput['kind'];
+
+// What "several recipes" and "back" refer to, by input.
+const INPUT_WORDS: Record<InputMode, { several: string; back: string }> = {
+  text: {
+    several: 'That text has more than one recipe. Which one?',
+    back: 'Back to the text',
+  },
+  images: {
+    several: 'Those images have more than one recipe. Which one?',
+    back: 'Back to the images',
+  },
+  link: {
+    several: 'That page has more than one recipe. Which one?',
+    back: 'Back to the link',
+  },
+};
 
 const UPDATED_FORMAT = new Intl.DateTimeFormat('en-GB', {
   dateStyle: 'medium',
@@ -24,8 +43,8 @@ const UPDATED_FORMAT = new Intl.DateTimeFormat('en-GB', {
 });
 
 // Choosing an import input and resuming imports in progress (DEC-108): pasted
-// text, or images uploaded straight to Cloudinary (DEC-107). Web links will
-// join them.
+// text, images uploaded straight to Cloudinary, or a web link the server
+// fetches (DEC-107).
 export function RecipeImportPage(): React.ReactElement {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
@@ -38,6 +57,7 @@ export function RecipeImportPage(): React.ReactElement {
 
   const [mode, setMode] = useState<InputMode>('text');
   const [text, setText] = useState('');
+  const [link, setLink] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   // The chosen images once uploaded, so trying again or picking one of
   // several recipes doesn't upload them again.
@@ -53,6 +73,7 @@ export function RecipeImportPage(): React.ReactElement {
 
   const working = uploading || startMutation.isPending;
   const trimmed = text.trim();
+  const trimmedLink = link.trim();
 
   async function start(input: RecipeImportInput, pick?: string): Promise<void> {
     setError(null);
@@ -70,8 +91,17 @@ export function RecipeImportPage(): React.ReactElement {
         params: { draftId: String(result.draftId) },
       });
     } catch (err) {
-      setError(startErrorMessage(err));
+      setError(startErrorMessage(err, input.kind));
     }
+  }
+
+  async function importLink(): Promise<void> {
+    const url = withScheme(trimmedLink);
+    if (!URL.canParse(url)) {
+      setError('That doesn’t look like a web link.');
+      return;
+    }
+    await start({ kind: 'link', url });
   }
 
   async function importImages(): Promise<void> {
@@ -107,18 +137,16 @@ export function RecipeImportPage(): React.ReactElement {
         </p>
         <h1 className="text-2xl font-semibold">Import a recipe</h1>
         <p className="text-sm text-muted-foreground">
-          Paste a recipe or add photos of it, and it&rsquo;s turned into a draft
-          for you to check. Nothing is added to your recipes until you create
-          it.
+          Paste a recipe, add photos of it or give a link to it, and it&rsquo;s
+          turned into a draft for you to check. Nothing is added to your recipes
+          until you create it.
         </p>
       </header>
 
       {several ? (
         <section className="space-y-3" aria-labelledby="import-several-heading">
           <h2 id="import-several-heading" className="text-lg font-semibold">
-            {several.input.kind === 'text'
-              ? 'That text has more than one recipe. Which one?'
-              : 'Those images have more than one recipe. Which one?'}
+            {INPUT_WORDS[several.input.kind].several}
           </h2>
           <ul className="space-y-2">
             {several.names.map((name) => (
@@ -146,9 +174,7 @@ export function RecipeImportPage(): React.ReactElement {
               setError(null);
             }}
           >
-            {several.input.kind === 'text'
-              ? 'Back to the text'
-              : 'Back to the images'}
+            {INPUT_WORDS[several.input.kind].back}
           </Button>
         </section>
       ) : (
@@ -184,6 +210,19 @@ export function RecipeImportPage(): React.ReactElement {
             >
               Photos
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === 'link' ? 'secondary' : 'ghost'}
+              aria-pressed={mode === 'link'}
+              disabled={working}
+              onClick={() => {
+                setMode('link');
+                setError(null);
+              }}
+            >
+              Link
+            </Button>
           </div>
           {mode === 'text' ? (
             <form
@@ -218,6 +257,47 @@ export function RecipeImportPage(): React.ReactElement {
                 <Button
                   type="submit"
                   disabled={trimmed === '' || working || !isOnline}
+                >
+                  Import
+                </Button>
+              </div>
+            </form>
+          ) : mode === 'link' ? (
+            <form
+              className="space-y-3"
+              noValidate
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (trimmedLink === '' || working || !isOnline) return;
+                void importLink();
+              }}
+            >
+              <label htmlFor="import-link" className="text-sm font-medium">
+                Recipe link
+              </label>
+              <input
+                id="import-link"
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                maxLength={RECIPE_IMPORT_LINK_MAX_LENGTH}
+                placeholder="https://"
+                disabled={working}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                value={link}
+                onChange={(event) => {
+                  setLink(event.target.value);
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {!isOnline && (
+                  <p className="text-sm text-muted-foreground">
+                    You&rsquo;re offline. Importing needs a connection.
+                  </p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={trimmedLink === '' || working || !isOnline}
                 >
                   Import
                 </Button>
@@ -353,10 +433,21 @@ function ImportRow({
   );
 }
 
-function startErrorMessage(err: unknown): string {
+// A link typed without a scheme is taken as https.
+function withScheme(link: string): string {
+  return /^[a-z][a-z\d+.-]*:/i.test(link) ? link : `https://${link}`;
+}
+
+function startErrorMessage(err: unknown, kind: InputMode): string {
   switch (getDomainErrorCode(err)) {
     case 'IMPORT_NOT_A_RECIPE':
-      return 'Couldn’t find a recipe in that.';
+      return kind === 'link'
+        ? 'Couldn’t find a recipe in that. If the page has one, paste the text or a screenshot instead.'
+        : 'Couldn’t find a recipe in that.';
+    case 'IMPORT_LINK_NOT_ALLOWED':
+      return 'That link can’t be imported. Use an https link to a public recipe page.';
+    case 'IMPORT_LINK_UNREADABLE':
+      return 'Couldn’t read that page. Paste the text or a screenshot instead.';
     case 'IMPORT_RATE_LIMITED':
       return 'You’ve reached the import limit. Try again in an hour.';
     case 'IMPORT_REQUEST_REJECTED':

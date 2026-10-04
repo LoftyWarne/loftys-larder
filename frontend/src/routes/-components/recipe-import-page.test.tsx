@@ -491,6 +491,130 @@ describe('RecipeImportPage', () => {
     });
   });
 
+  describe('from a link', () => {
+    const LINK = 'https://recipes.example/lemon-tart';
+
+    async function enterLinkAndImport(
+      user: ReturnType<typeof userEvent.setup>,
+      link = LINK,
+    ): Promise<void> {
+      await user.click(screen.getByRole('button', { name: 'Link' }));
+      await user.click(screen.getByLabelText('Recipe link'));
+      await user.paste(link);
+      await user.click(screen.getByRole('button', { name: 'Import' }));
+    }
+
+    it('imports the link and opens Import Review', async () => {
+      startMutateAsyncMock.mockResolvedValue({ kind: 'draft', draftId: 45 });
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await enterLinkAndImport(user, `  ${LINK} `);
+
+      expect(startMutateAsyncMock).toHaveBeenCalledWith({
+        input: { kind: 'link', url: LINK },
+      });
+      await waitFor(() => {
+        expect(navigateMock).toHaveBeenCalledWith({
+          to: '/recipes/import/$draftId',
+          params: { draftId: '45' },
+        });
+      });
+    });
+
+    it('takes a link typed without https:// as https', async () => {
+      startMutateAsyncMock.mockResolvedValue({ kind: 'draft', draftId: 46 });
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await enterLinkAndImport(user, 'recipes.example/lemon-tart');
+
+      expect(startMutateAsyncMock).toHaveBeenCalledWith({
+        input: { kind: 'link', url: LINK },
+      });
+    });
+
+    it('says when what was typed isn’t a link, without importing', async () => {
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await enterLinkAndImport(user, 'lemon tart recipe');
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'That doesn’t look like a web link.',
+      );
+      expect(startMutateAsyncMock).not.toHaveBeenCalled();
+    });
+
+    it('lists several recipes on the page, and picking one continues with the same link', async () => {
+      startMutateAsyncMock
+        .mockResolvedValueOnce({
+          kind: 'several',
+          names: ['Lemon Tart', 'Shortcrust Pastry'],
+        })
+        .mockResolvedValueOnce({ kind: 'draft', draftId: 47 });
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await enterLinkAndImport(user);
+
+      expect(
+        await screen.findByRole('heading', {
+          name: 'That page has more than one recipe. Which one?',
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Back to the link' }),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Lemon Tart' }));
+      expect(startMutateAsyncMock).toHaveBeenLastCalledWith({
+        input: { kind: 'link', url: LINK },
+        pick: 'Lemon Tart',
+      });
+    });
+
+    it.each([
+      [
+        'IMPORT_LINK_NOT_ALLOWED',
+        'That link can’t be imported. Use an https link to a public recipe page.',
+      ],
+      [
+        'IMPORT_LINK_UNREADABLE',
+        'Couldn’t read that page. Paste the text or a screenshot instead.',
+      ],
+      [
+        'IMPORT_NOT_A_RECIPE',
+        'Couldn’t find a recipe in that. If the page has one, paste the text or a screenshot instead.',
+      ],
+    ])('explains %s, keeping the link', async (code, message) => {
+      startMutateAsyncMock.mockRejectedValue(domainError(code));
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+
+      await enterLinkAndImport(user);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(message);
+      expect(screen.getByLabelText('Recipe link')).toHaveValue(LINK);
+    });
+
+    it('disables Import until a link is entered, and while offline', async () => {
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+      await user.click(screen.getByRole('button', { name: 'Link' }));
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+
+      await user.click(screen.getByLabelText('Recipe link'));
+      await user.paste(LINK);
+      expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+
+      act(() => {
+        setOnline(false);
+        window.dispatchEvent(new Event('offline'));
+      });
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    });
+  });
+
   it('shows no list when nothing is in progress', () => {
     render(<RecipeImportPage />);
 

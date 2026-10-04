@@ -2682,6 +2682,7 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 - `shared/src/schemas/recipe-imports.ts` (link input), `shared/src/schemas/errors.ts`
 - `frontend/src/routes/-components/recipe-import-page.tsx` (link field), `recipe-import-review-page.tsx` (link alongside)
 - `backend/package.json` only if HTML parsing needs a dependency. That's a stop-and-ask at kick-off
+- Added at kick-off: `backend/src/lib/recipe-import/link-guard.ts` (new: the link and address checks, pure), the reader files (`backend/src/lib/recipe-reader/`: a `page` input, its prompt section, the `fake` adapter's markers), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the fetcher on the context), and `frontend/src/components/recipe-import/original-input.tsx` (where Import Review's original panel lives)
 
 **Acceptance criteria:**
 - [ ] Pasting an https recipe link imports it, and the proposal's `sourceUrl` is the link
@@ -2696,6 +2697,19 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 - JSON-LD may be an array, a `@graph` or nested, and `@type` may be an array. Look for `Recipe` in all of those.
 - For the text fallback, strip scripts, styles and navigation, and cap the characters sent to the model.
 - The fetch runs before the reader is called, outside the seam (DEC-109), and its time counts against the 75-second budget.
+- Amended at kick-off (2026-10-04):
+  - New dependency `htmlparser2` (ESM-only). It removes nested navigation and site chrome properly, prefers `<main>` or `<article>`, and decodes entities, which JSON-LD strings are full of.
+  - The link as pasted, trimmed, becomes `sourceUrl` and is what Import Review shows. The reader is told the address the page was read from, after redirects.
+  - Caps: 15 seconds for the whole fetch, at most 5 redirects, 5 MB of HTML counted after decompression, `text/html` or `application/xhtml+xml` only. Page content sent to the reader is capped at 20,000 characters, the paste limit, and the reader is told when it was cut.
+  - The guard also refuses a link with a user name or password, or a port other than 443. IPv4 refuses every IANA special-purpose range, shared address space included. IPv6 allows only global unicast (2000::/3), which refuses Fly's private `fdaa::` network and IPv4-mapped addresses. A host is refused if any DNS answer is.
+  - A `Recipe` counts only with ingredients or a method; otherwise the page falls back to text. Recipe nodes are pruned to the fields the reader needs (no reviews, ratings, images or video), and up to 10 different ones are sent, so "several recipes" works.
+  - `IMPORT_LINK_NOT_ALLOWED` is `BAD_REQUEST`: "That link can't be imported. Use an https link to a public recipe page." `IMPORT_LINK_UNREADABLE` is `UNPROCESSABLE_CONTENT`, so a blocked page doesn't reach Sentry. Not a recipe, for a link, adds "If the page has one, paste the text or a screenshot instead."
+  - The fetch sends an honest User-Agent, `LoftysLarder/1.0 (recipe import; +https://loftys-larder.co.uk)`. Sites that block it give the unreadable message.
+  - One 75-second deadline covers the fetch and the read. A cook who leaves during the fetch gets the existing timeout.
+  - Logs carry the link's host, never its path or query, plus the content kind, its length, whether it was cut, the redirect count and the fetch time.
+  - The several-recipes pick fetches the page again. A link typed without a scheme is taken as https.
+  - Import Review makes the link clickable only when it's https, because autosave sends the draft's input back.
+  - The guard's tests run a real HTTPS server on loopback with a committed self-signed certificate (`backend/test/fixtures/page-fetch/`), with DNS and the address policy injected.
 
 **Manual verification:**
 1. Import a recipe link from a large recipe site. Import Review opens with the link as the source.

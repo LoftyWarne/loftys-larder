@@ -1242,6 +1242,12 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - The import preset makes one JPEG rendition at upload, capped at 2,576 px on the long edge (the reader model's maximum). The reader is sent its delivery URL, and Import Review and "View original" show it, so a HEIC photo works in every browser.
   - Image ids are accepted only from the `loftys-larder/imports` folder, and an image a saved recipe keeps as an Original is never destroyed, whatever a draft says. Autosave sends the proposal back, so its ids can't be trusted further than that.
   - Images upload when the cook presses Import, and the page reuses them for "Try again" and the several-recipes pick. A failed import's images are left as orphans, as DEC-50 accepts.
+- **Amended (2026-10-04) at FEAT-63 kick-off.** Full detail in FEAT-63's implementation notes.
+  - HTML is parsed with `htmlparser2` (ESM-only, DEC-01), a new backend dependency.
+  - The guard checks the link (https, no user name or password, port 443), then every address it would connect to, both in the DNS lookup it hands the socket and once connected. IPv4 refuses every IANA special-purpose range. IPv6 allows only global unicast, which keeps Fly's private network (and so the database) out of reach. Every redirect is checked from the start.
+  - Caps: 15 seconds, 5 redirects, 5 MB of HTML after decompression, and 20,000 characters of page content to the reader. One 75-second deadline covers the fetch and the read (DEC-104).
+  - The link as pasted fills `sourceUrl`. A page that can't be read, won't be served to the app's User-Agent or isn't HTML gives `IMPORT_LINK_UNREADABLE`, a client error that doesn't reach Sentry. A link the guard refuses gives `IMPORT_LINK_NOT_ALLOWED`.
+  - Data flow (cross-cutting #22): a linked page's recipe data or text goes to the provider, as pasted text does. Logs carry its host only.
 - **Amended (2026-10-04).** Up to 8 images per import (DEC-103 amended). The uploads still run together and all-or-nothing: if one fails, the ones that succeeded are left as orphans and "Try again" uploads every image again. More images make that likelier. Revisit if failed uploads become common, by keeping the uploads that succeeded.
 
 ### DEC-108 — Import Review drafts live in `recipe_drafts` with `kind = 'import'`, and "Create recipe" writes the whole recipe in one transaction

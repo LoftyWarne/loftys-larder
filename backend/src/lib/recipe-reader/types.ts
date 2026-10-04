@@ -14,12 +14,22 @@ export interface RecipeReaderHousehold {
   sources: { id: number; name: string }[];
 }
 
-// Prepared before the seam. Web pages will join these.
+// A linked page's recipe data, or its text when it has none, capped.
+export interface RecipeReaderPageContent {
+  format: 'json_ld' | 'text';
+  content: string;
+  truncated: boolean;
+}
+
+// Prepared before the seam.
 export type RecipeReaderInput =
   | { kind: 'text'; text: string }
   // Delivery URLs in page order, built by the import procedure. Adapters
   // never build or sign image URLs (DEC-109).
-  | { kind: 'images'; urls: string[] };
+  | { kind: 'images'; urls: string[] }
+  // Fetched by the import procedure behind the SSRF guard. Adapters never
+  // fetch pages (DEC-109). `url` is where the page was read from.
+  | ({ kind: 'page'; url: string } & RecipeReaderPageContent);
 
 export interface RecipeReadRequest {
   input: RecipeReaderInput;

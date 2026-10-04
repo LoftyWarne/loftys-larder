@@ -11,6 +11,12 @@ export interface OriginalInputProps {
   collapsible: boolean;
 }
 
+const TITLES: Record<RecipeImportInput['kind'], string> = {
+  text: 'Original text',
+  images: 'Original images',
+  link: 'Original page',
+};
+
 // The import input as the cook gave it, to check the proposal against
 // (DEC-103). Plain text only (DEC-49).
 export function OriginalInput({
@@ -18,14 +24,16 @@ export function OriginalInput({
   images,
   collapsible,
 }: OriginalInputProps): React.ReactElement {
-  const title = input.kind === 'text' ? 'Original text' : 'Original images';
+  const title = TITLES[input.kind];
   const body =
     input.kind === 'text' ? (
       <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
         {input.text}
       </pre>
-    ) : (
+    ) : input.kind === 'images' ? (
       <OriginalImages images={images} />
+    ) : (
+      <OriginalLink url={input.url} />
     );
 
   if (collapsible) {
@@ -55,4 +63,27 @@ export function OriginalInput({
       </div>
     </aside>
   );
+}
+
+// The page opens beside Import Review. The draft's input comes back through
+// autosave, so only an https link is made clickable.
+function OriginalLink({ url }: { url: string }): React.ReactElement {
+  if (!isHttps(url)) {
+    return <p className="break-all text-sm">{url}</p>;
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="break-all text-sm underline underline-offset-2 hover:text-primary"
+    >
+      {url}
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  );
+}
+
+function isHttps(url: string): boolean {
+  return URL.canParse(url) && new URL(url).protocol === 'https:';
 }

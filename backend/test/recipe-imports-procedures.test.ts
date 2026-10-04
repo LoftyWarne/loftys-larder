@@ -46,6 +46,11 @@ import {
 } from '../src/db/schema/reference.ts';
 import type { DestroyImage } from '../src/lib/cloudinary.ts';
 import {
+  LinkNotAllowedError,
+  PageUnreadableError,
+  type PageFetcher,
+} from '../src/lib/recipe-import/fetch-page.ts';
+import {
   createFakeRecipeReader,
   FAKE_READER_IMAGE_MARKERS,
   FAKE_READER_MARKERS,
@@ -80,6 +85,17 @@ const PAGE_1 = 'loftys-larder/imports/page1';
 const PAGE_2 = 'loftys-larder/imports/page2';
 const IMPORT_URL_PREFIX =
   'https://res.cloudinary.com/test-cloud/image/upload/c_limit,w_2576,h_2576,f_jpg,q_auto/';
+
+const LINK = 'https://recipes.example/shakshuka?utm_source=share';
+const RECIPE_JSON_LD = {
+  '@context': 'https://schema.org',
+  '@type': 'Recipe',
+  name: 'Shakshuka',
+  recipeIngredient: ['2 tbsp olive oil'],
+  recipeInstructions: [{ '@type': 'HowToStep', text: 'Simmer the eggs.' }],
+  aggregateRating: { ratingValue: 5 },
+};
+const JSON_LD_PAGE = `<html><head><title>Shakshuka</title><script type="application/ld+json">${JSON.stringify(RECIPE_JSON_LD)}</script></head><body><p>A long story.</p></body></html>`;
 
 describe('recipe imports procedures', () => {
   let testDb: TestDb | undefined;
@@ -210,6 +226,7 @@ describe('recipe imports procedures', () => {
     allowStart?: () => Promise<ImportRateLimitVerdict>;
     log?: AppContext['log'];
     destroyImage?: DestroyImage;
+    fetchPage?: PageFetcher;
   }
 
   function makeContext(options: ContextOptions = {}): AppContext {
@@ -253,6 +270,9 @@ describe('recipe imports procedures', () => {
       log: options.log ?? pino({ level: 'silent' }),
       recipeImport: {
         reader: options.reader ?? createFakeRecipeReader(),
+        fetchPage:
+          options.fetchPage ??
+          (() => Promise.reject(new PageUnreadableError('network'))),
         allowStart:
           options.allowStart ??
           (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
@@ -303,6 +323,25 @@ describe('recipe imports procedures', () => {
     );
     if (result.kind !== 'draft') throw new Error('expected a draft');
     return result.draftId;
+  }
+
+  // Serves `html` for any link, as if read from `servedFrom`.
+  function pageFetcher(html: string, servedFrom = LINK) {
+    const calls: { url: URL; signal: AbortSignal }[] = [];
+    const fetchPage: PageFetcher = (url, signal) => {
+      calls.push({ url, signal });
+      return Promise.resolve({ url: new URL(servedFrom), html, redirects: 0 });
+    };
+    return { fetchPage, calls };
+  }
+
+  function failingFetcher(error: Error) {
+    const calls: URL[] = [];
+    const fetchPage: PageFetcher = (url) => {
+      calls.push(url);
+      return Promise.reject(error);
+    };
+    return { fetchPage, calls };
   }
 
   // Records each destroy call; ids in `failing` reject.
@@ -713,6 +752,268 @@ describe('recipe imports procedures', () => {
       const output = lines.join('');
       expect(output).not.toContain('res.cloudinary.com');
       expect(output).not.toContain(PAGE_1);
+    });
+
+    describe('from a link', () => {
+      it("reads a page's JSON-LD into a draft whose source link is the link", async () => {
+        const { fetchPage, calls } = pageFetcher(
+          JSON_LD_PAGE,
+          'https://www.recipes.example/shakshuka',
+        );
+        const { reader, requests } = spyReader();
+        const result = await createCaller(
+          makeContext({ reader, fetchPage }),
+        ).recipeImports.start({ input: { kind: 'link', url: LINK } });
+        if (result.kind !== 'draft') throw new Error('expected a draft');
+
+        expect(calls.map((call) => call.url.href)).toEqual([LINK]);
+        const input = requests[0]?.input;
+        expect(input).toMatchObject({
+          kind: 'page',
+          url: 'https://www.recipes.example/shakshuka',
+          format: 'json_ld',
+          truncated: false,
+        });
+        expect(input?.kind === 'page' && JSON.parse(input.content)).toEqual([
+          {
+            '@type': 'Recipe',
+            name: 'Shakshuka',
+            recipeIngredient: ['2 tbsp olive oil'],
+            recipeInstructions: [
+              { '@type': 'HowToStep', text: 'Simmer the eggs.' },
+            ],
+          },
+        ]);
+
+        const proposal = await storedProposal(result.draftId);
+        expect(proposal.input).toEqual({ kind: 'link', url: LINK });
+        expect(proposal.header.sourceUrl).toBe(LINK);
+        expect(proposal.header.name).toBe('Linked Recipe');
+      });
+
+      it("puts the link in place of the reader's own source link", async () => {
+        const { fetchPage } = pageFetcher(JSON_LD_PAGE);
+        const inner = createFakeRecipeReader();
+        const reader: RecipeReader = {
+          ...inner,
+          read: async (request, signal) => {
+            const reading = await inner.read(request, signal);
+            if (reading.outcome.kind !== 'candidate') return reading;
+            const candidate = reading.outcome.candidate as {
+              header: Record<string, unknown>;
+            };
+            candidate.header.sourceUrl = 'https://elsewhere.example/';
+            return reading;
+          },
+        };
+        const result = await createCaller(
+          makeContext({ reader, fetchPage }),
+        ).recipeImports.start({ input: { kind: 'link', url: LINK } });
+        if (result.kind !== 'draft') throw new Error('expected a draft');
+
+        expect((await storedProposal(result.draftId)).header.sourceUrl).toBe(
+          LINK,
+        );
+      });
+
+      it('reads a page without JSON-LD from its text', async () => {
+        const { fetchPage } = pageFetcher(
+          '<html><body><nav>Home</nav><main><h1>Lentil Soup</h1><p>Simmer the lentils.</p></main></body></html>',
+        );
+        const { reader, requests } = spyReader();
+        await createCaller(
+          makeContext({ reader, fetchPage }),
+        ).recipeImports.start({ input: { kind: 'link', url: LINK } });
+
+        const input = requests[0]?.input;
+        expect(input).toMatchObject({ kind: 'page', format: 'text' });
+        expect(input?.kind === 'page' && input.content).toBe(
+          'Lentil Soup\nSimmer the lentils.',
+        );
+      });
+
+      it.each([
+        ['an http link', 'http://recipes.example/soup'],
+        ['a link with a password', 'https://cook:pw@recipes.example/soup'],
+        ['a link to another port', 'https://recipes.example:8443/soup'],
+        ['a link that is not a web page', 'ftp://recipes.example/soup'],
+      ])('refuses %s without fetching it', async (_label, url) => {
+        const { fetchPage, calls } = pageFetcher(JSON_LD_PAGE);
+        const { reader, requests } = spyReader();
+        await expect(
+          createCaller(makeContext({ reader, fetchPage })).recipeImports.start({
+            input: { kind: 'link', url },
+          }),
+        ).rejects.toMatchObject({
+          code: 'BAD_REQUEST',
+          cause: { code: 'IMPORT_LINK_NOT_ALLOWED' },
+        });
+        expect(calls).toHaveLength(0);
+        expect(requests).toHaveLength(0);
+        expect(await draftRows()).toHaveLength(0);
+      });
+
+      it('refuses a link the fetch finds leads to a private address', async () => {
+        const { fetchPage } = failingFetcher(
+          new LinkNotAllowedError('address'),
+        );
+        const { reader, requests } = spyReader();
+        await expect(
+          createCaller(makeContext({ reader, fetchPage })).recipeImports.start({
+            input: { kind: 'link', url: LINK },
+          }),
+        ).rejects.toMatchObject({
+          code: 'BAD_REQUEST',
+          cause: { code: 'IMPORT_LINK_NOT_ALLOWED' },
+        });
+        expect(requests).toHaveLength(0);
+      });
+
+      it.each([
+        ['refuses the fetch', new PageUnreadableError('status', 403)],
+        ['times out', new PageUnreadableError('timeout')],
+        ['is too large', new PageUnreadableError('too_large')],
+        ["isn't HTML", new PageUnreadableError('not_html')],
+      ])(
+        'reports a page that %s as unreadable, and creates no draft',
+        async (_label, error) => {
+          const { fetchPage } = failingFetcher(error);
+          const { reader, requests } = spyReader();
+          await expect(
+            createCaller(
+              makeContext({ reader, fetchPage }),
+            ).recipeImports.start({ input: { kind: 'link', url: LINK } }),
+          ).rejects.toMatchObject({
+            code: 'UNPROCESSABLE_CONTENT',
+            cause: { code: 'IMPORT_LINK_UNREADABLE' },
+          });
+          expect(requests).toHaveLength(0);
+          expect(await draftRows()).toHaveLength(0);
+        },
+      );
+
+      it('counts the fetch against the 75 seconds', async () => {
+        const deadline = new AbortController();
+        const timeout = vi
+          .spyOn(AbortSignal, 'timeout')
+          .mockReturnValue(deadline.signal);
+        let fetching = false;
+        const fetchPage: PageFetcher = (_url, signal) =>
+          new Promise((_resolve, reject) => {
+            fetching = true;
+            signal.addEventListener('abort', () => {
+              reject(new Error('aborted'));
+            });
+          });
+        const { reader, requests } = spyReader();
+        try {
+          const pending = createCaller(
+            makeContext({ reader, fetchPage }),
+          ).recipeImports.start({ input: { kind: 'link', url: LINK } });
+          await vi.waitFor(() => {
+            expect(fetching).toBe(true);
+          });
+          deadline.abort();
+          await expect(pending).rejects.toMatchObject({
+            code: 'GATEWAY_TIMEOUT',
+            cause: { code: 'IMPORT_TRY_AGAIN', reason: 'timeout' },
+          });
+          expect(timeout).toHaveBeenCalledTimes(1);
+          expect(timeout).toHaveBeenCalledWith(RECIPE_IMPORT_TIMEOUT_MS);
+        } finally {
+          timeout.mockRestore();
+        }
+        expect(requests).toHaveLength(0);
+        expect(await draftRows()).toHaveLength(0);
+      });
+
+      it('gives the reader what is left of the same 75 seconds', async () => {
+        const { fetchPage, calls } = pageFetcher(JSON_LD_PAGE);
+        const readSignals: AbortSignal[] = [];
+        const inner = createFakeRecipeReader();
+        const reader: RecipeReader = {
+          ...inner,
+          read: (request, signal) => {
+            readSignals.push(signal);
+            return inner.read(request, signal);
+          },
+        };
+        await createCaller(
+          makeContext({ reader, fetchPage }),
+        ).recipeImports.start({ input: { kind: 'link', url: LINK } });
+
+        expect(readSignals[0]).toBeDefined();
+        expect(readSignals[0]).toBe(calls[0]?.signal);
+      });
+
+      it('imports the picked recipe from the same link', async () => {
+        const { fetchPage, calls } = pageFetcher(
+          `<html><body><main><p>${FAKE_READER_MARKERS.several} Menu</p></main></body></html>`,
+        );
+        const { reader, requests } = spyReader();
+        const caller = createCaller(makeContext({ reader, fetchPage }));
+        const input = { kind: 'link' as const, url: LINK };
+
+        expect(await caller.recipeImports.start({ input })).toEqual({
+          kind: 'several',
+          names: ['Fake Soup', 'Fake Salad'],
+        });
+        const picked = await caller.recipeImports.start({
+          input,
+          pick: 'Fake Salad',
+        });
+
+        expect(picked.kind).toBe('draft');
+        expect(calls).toHaveLength(2);
+        expect(requests[1]?.input).toEqual(requests[0]?.input);
+        expect(requests[1]?.pick).toBe('Fake Salad');
+      });
+
+      it("logs the link's host, never its path or the page", async () => {
+        const lines: string[] = [];
+        const log = pino(
+          { level: 'info' },
+          { write: (line) => lines.push(line) },
+        );
+        const { fetchPage } = pageFetcher(JSON_LD_PAGE);
+        await createCaller(makeContext({ log, fetchPage })).recipeImports.start(
+          { input: { kind: 'link', url: LINK } },
+        );
+        await expect(
+          createCaller(
+            makeContext({
+              log,
+              fetchPage: failingFetcher(new PageUnreadableError('status', 403))
+                .fetchPage,
+            }),
+          ).recipeImports.start({ input: { kind: 'link', url: LINK } }),
+        ).rejects.toBeDefined();
+
+        const entries = lines
+          .map((line) => JSON.parse(line) as Record<string, unknown>)
+          .filter((entry) => 'modelUsage' in entry);
+        expect(entries[0]?.modelUsage).toMatchObject({
+          inputKind: 'link',
+          host: 'recipes.example',
+          pageFormat: 'json_ld',
+          pageTruncated: false,
+          redirects: 0,
+          outcome: 'draft',
+        });
+        expect(entries[0]?.modelUsage).toHaveProperty('fetchMs');
+        expect(entries[1]?.modelUsage).toMatchObject({
+          inputKind: 'link',
+          host: 'recipes.example',
+          outcome: 'IMPORT_LINK_UNREADABLE',
+          reason: 'status',
+          pageStatus: 403,
+          inputTokens: null,
+        });
+        const output = lines.join('');
+        expect(output).not.toContain('shakshuka');
+        expect(output).not.toContain('utm_source');
+        expect(output).not.toContain('olive oil');
+      });
     });
   });
 

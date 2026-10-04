@@ -30,6 +30,8 @@ const idSchema = z.number().int().positive();
 const draftIdSchema = z.number().int().positive();
 
 export const RECIPE_IMPORT_TEXT_MAX_LENGTH = 20_000;
+// Fits `sourceUrl`, which the link fills.
+export const RECIPE_IMPORT_LINK_MAX_LENGTH = 2000;
 export const RECIPE_IMPORT_IMAGES_MAX = 8;
 export const RECIPE_IMPORT_NOTES_MAX = 5;
 export const RECIPE_IMPORT_NOTE_MAX_LENGTH = 300;
@@ -57,7 +59,6 @@ export const recipeImportImagePublicIdSchema = z
     'Not an import image',
   );
 
-// Web links will join this union.
 export const recipeImportInputSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('text'),
@@ -75,11 +76,22 @@ export const recipeImportInputSchema = z.discriminatedUnion('kind', [
         'Each image can only be used once',
       ),
   }),
+  // Any web address: the server refuses one it won't fetch with
+  // IMPORT_LINK_NOT_ALLOWED, so an http link gets that, not a schema error.
+  z.object({
+    kind: z.literal('link'),
+    url: z
+      .string()
+      .trim()
+      .min(1)
+      .max(RECIPE_IMPORT_LINK_MAX_LENGTH)
+      .refine((url) => URL.canParse(url), 'Not a web link'),
+  }),
 ]);
 
 export type RecipeImportInput = z.infer<typeof recipeImportInputSchema>;
 
-export const recipeImportInputKindSchema = z.enum(['text', 'images']);
+export const recipeImportInputKindSchema = z.enum(['text', 'images', 'link']);
 
 export type RecipeImportInputKind = z.infer<typeof recipeImportInputKindSchema>;
 

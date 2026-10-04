@@ -244,6 +244,44 @@ describe('RecipeImportReviewPage', () => {
     ).toBeInTheDocument();
   });
 
+  function renderLinkImport(url: string): void {
+    const proposal: RecipeImportProposal = {
+      ...PROPOSAL,
+      input: { kind: 'link', url },
+    };
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...importDraft(),
+        proposal,
+        draftData: { version: 1, fields: { proposal } },
+      },
+      error: null,
+    });
+    render(<RecipeImportReviewPage />);
+  }
+
+  it('shows a link import’s page alongside the proposal, opening in a new tab', () => {
+    renderLinkImport('https://recipes.example/pasta');
+
+    const original = screen.getByText('Original page').closest('details');
+    if (!original) throw new Error('no original');
+    const link = within(original).getByRole('link', {
+      name: 'https://recipes.example/pasta (opens in a new tab)',
+    });
+    expect(link).toHaveAttribute('href', 'https://recipes.example/pasta');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('shows a link that isn’t https as text only', () => {
+    renderLinkImport('javascript:alert(1)');
+
+    const original = screen.getByText('Original page').closest('details');
+    if (!original) throw new Error('no original');
+    expect(within(original).queryByRole('link')).not.toBeInTheDocument();
+    expect(original).toHaveTextContent('javascript:alert(1)');
+  });
+
   it('fills every section with the editor’s own controls', () => {
     render(<RecipeImportReviewPage />);
 

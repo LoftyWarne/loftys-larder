@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Auth } from '../auth/index.ts';
 import type { Db } from '../db/index.ts';
 import type { CloudinaryCredentials, DestroyImage } from '../lib/cloudinary.ts';
+import type { PageFetcher } from '../lib/recipe-import/fetch-page.ts';
 import type { RecipeReader } from '../lib/recipe-reader/types.ts';
 import type { ImportRateLimitVerdict } from '../plugins/rate-limit.ts';
 
@@ -27,11 +28,14 @@ declare module 'fastify' {
     cloudinary: CloudinaryCredentials;
     destroyImage: DestroyImage;
     recipeReader: RecipeReader;
+    fetchPage: PageFetcher;
   }
 }
 
 export interface RecipeImportContext {
   reader: RecipeReader;
+  // Fetches a linked page behind the SSRF guard (DEC-107).
+  fetchPage: PageFetcher;
   allowStart: () => Promise<ImportRateLimitVerdict>;
 }
 
@@ -68,6 +72,7 @@ export function createContext({
     log: req.log,
     recipeImport: {
       reader: req.server.recipeReader,
+      fetchPage: req.server.fetchPage,
       allowStart: () => req.server.limitRecipeImportStart(req),
     },
   };

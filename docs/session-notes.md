@@ -18,6 +18,47 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-04 — Recipe Import from a web link (FEAT-63)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format clean in every workspace. Backend 847 tests (109 new) and frontend 763 (10 new) green. e2e not run. The backend bundle grows by about 150 KB. FEAT-63 checkboxes left for the user to tick.
+
+**Live check (no model call):** the real fetcher and guard against live pages. BBC Good Food's shakshuka: 569 KB of HTML in 77 ms, read from JSON-LD, 1,781 characters with all 8 ingredient lines and both steps. Allrecipes: JSON-LD with an array `@type`. Wikibooks' pancake page has no Recipe JSON-LD and fell back to 2,980 characters of text. `https://localhost/`, `http://169.254.169.254/` and `https://169.254.169.254/` were refused. No link import has been through the real model yet.
+
+**Agreed at kick-off:**
+- New dependency `htmlparser2` ^12 (ESM-only, Node ≥20.19).
+- `sourceUrl` is the link as pasted, trimmed. The reader is told the address after redirects.
+- Caps: 15 s fetch, 5 redirects, 5 MB after decompression, HTML only, and 20,000 characters to the reader, flagged when cut.
+- Guard: https on 443 only, no credentials. IPv4 refuses every IANA special-purpose range; IPv6 allows only 2000::/3. Any private DNS answer refuses the host.
+- JSON-LD: a `Recipe` needs ingredients or a method. It's pruned to an allowlist of fields, and up to 10 different ones are sent.
+- `IMPORT_LINK_NOT_ALLOWED` → `BAD_REQUEST`; `IMPORT_LINK_UNREADABLE` → `UNPROCESSABLE_CONTENT`. A link that isn't a recipe adds "paste the text or a screenshot instead".
+- Honest User-Agent. One 75 s deadline for fetch and read. Logs carry the host only. The several-recipes pick fetches again. No scheme is taken as https.
+
+**Changes:**
+- **Shared:** `{ kind: 'link', url }` in the import input (any parseable URL up to 2,000 characters, so http reaches the guard); `'link'` input kind; the two error codes.
+- **Backend:**
+  - `lib/recipe-import/link-guard.ts`: `checkImportLink` and `isPublicAddress` (Node's `BlockList`).
+  - `lib/recipe-import/fetch-page.ts`: `createPageFetcher`, using `node:https` with its own DNS lookup, a check of `socket.remoteAddress` on connect, manual redirects, gzip, deflate and brotli, and the charset from the header or a `<meta>`. `LinkNotAllowedError` and `PageUnreadableError` carry a reason.
+  - `lib/recipe-import/page-content.ts`: `readPageContent`.
+  - Reader seam: a `page` input; the prompt gains a "Web pages" section and `<recipe_page url content truncated>`; the `fake` adapter reads markers from page content.
+  - `recipeImports.start` checks the link, fetches it under the shared deadline, reads the content, and sets `header.sourceUrl` after `normaliseProposal`. `fetchPage` is on `ctx.recipeImport`.
+- **Frontend:** a "Link" mode on the Import page, with link-specific messages and "several" wording. Import Review's original panel shows "Original page" with the link opening in a new tab, clickable only when it's https.
+- **Tests:** `link-guard`, `page-content`, and `fetch-page` (a real HTTPS server on loopback with a committed self-signed certificate in `test/fixtures/page-fetch/`, valid to 2126). Procedure tests for link imports, and frontend tests for both pages.
+- **Docs:** FEAT-63 amended, DEC-107 amended, `plan.md` link flow, README. README also no longer lists URL import as a non-goal.
+
+**Drift from the kick-off plan:**
+- No injectable `timeoutMs` on the context. The procedure test spies on `AbortSignal.timeout`, as the existing 75-second test does, and checks the reader gets the same signal the fetch did.
+- No `BuildAppOptions` entry for the fetcher: nothing at server level needed one.
+- The fix of a prompt grammar slip ("The text hold several recipes" is now "holds") changes the text-import prompt by one word.
+- The test certificate names `recipe.test` and 127.0.0.1. A `*.test` wildcard was tried first, but Node won't match a wildcard over a single-label domain.
+
+**Open:**
+- **Real model call before deploy** (cross-cutting #22): one link import through the `anthropic` adapter. Manual verification step 1 is that call.
+- **Sites that block the User-Agent or Fly's IPs** are unknown until real use. DEC-107's revisit trigger covers a site the household uses often.
+- **Bad source data** goes to the model as given. BBC Good Food's shakshuka declares "1.2 milligram of sodium", and the prompt's sodium-to-salt rule would make that 0.003 g. Worth an eval case in FEAT-64.
+- e2e has no link import: one would need a stand-in page server reachable through the guard.
+
+---
+
 ## 2026-10-04 — Every Recipe Import failed in production: Anthropic refused the reading schema
 
 **Status:** Fixed on `main`, committed, not pushed when written. Backend and frontend tests, typecheck and lint green. One real image import through the real adapter succeeded (see below).

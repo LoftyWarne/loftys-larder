@@ -1,5 +1,6 @@
 import pino from 'pino';
 
+import { PageUnreadableError } from '../../src/lib/recipe-import/fetch-page.ts';
 import { createFakeRecipeReader } from '../../src/lib/recipe-reader/fake.ts';
 import type { AppContext } from '../../src/trpc/context.ts';
 
@@ -13,6 +14,7 @@ export function contextDeps(): Pick<
     destroyImage: () => Promise.resolve(),
     recipeImport: {
       reader: createFakeRecipeReader(),
+      fetchPage: () => Promise.reject(new PageUnreadableError('network')),
       allowStart: () =>
         Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
     },

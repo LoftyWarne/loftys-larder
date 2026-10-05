@@ -8,6 +8,8 @@ import {
   getRecipeImportResultSchema,
   listRecipeImportsResultSchema,
   RECIPE_DRAFT_VERSION,
+  RECIPE_IMPORT_PDF_MAX_FILE_SIZE,
+  RECIPE_IMPORT_PDF_PAGES_MAX,
   RECIPE_IMPORT_SEVERAL_MAX,
   recipeDraftEnvelopeSchema,
   recipeImportDraftIdInputSchema,
@@ -20,6 +22,7 @@ import {
   type DomainErrorCode,
   type GetRecipeImportResult,
   type ListRecipeImportsResult,
+  type RecipeImageView,
   type RecipeImportInput,
   type RecipeImportProposal,
   type RecipeImportStoredInput,
@@ -37,7 +40,12 @@ import {
   unitsOfMeasurement,
 } from '../../db/schema/reference.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
-import { importImageUrl } from '../../lib/cloudinary.ts';
+import {
+  importImageUrl,
+  importPdfPageUrl,
+  importPdfUrl,
+  type ImportUploadDetails,
+} from '../../lib/cloudinary.ts';
 import {
   logModelUsage,
   type ModelUsageDetails,
@@ -48,9 +56,10 @@ import {
   type FetchedPage,
 } from '../../lib/recipe-import/fetch-page.ts';
 import {
-  destroyImportImages,
-  importImagePublicIds,
-} from '../../lib/recipe-import/import-images.ts';
+  destroyImportUploads,
+  importStoredInput,
+  importUploads,
+} from '../../lib/recipe-import/import-uploads.ts';
 import { checkImportLink } from '../../lib/recipe-import/link-guard.ts';
 import { normaliseProposal } from '../../lib/recipe-import/normalise-proposal.ts';
 import {
@@ -82,6 +91,8 @@ import { protectedProcedure, router } from '../init.ts';
 
 // Keeps an import under Cloudflare's 100-second origin limit (DEC-104).
 export const RECIPE_IMPORT_TIMEOUT_MS = 75_000;
+// Inside the 75 seconds, so a slow Admin API leaves the reader its time.
+export const RECIPE_IMPORT_PDF_LOOKUP_TIMEOUT_MS = 10_000;
 
 const FEATURE = 'recipe-import';
 
@@ -108,9 +119,10 @@ export const recipeImportsRouter = router({
         }
 
         const household = await loadReaderHousehold(ctx.db);
-        const { reader, fetchPage } = ctx.recipeImport;
+        const { reader, fetchPage, lookUpPdf } = ctx.recipeImport;
         const pick = input.pick ?? null;
-        // A link's fetch and the read share the one budget (DEC-104).
+        // A link's fetch or a PDF's lookup and the read share the one budget
+        // (DEC-104).
         const timeout = AbortSignal.timeout(RECIPE_IMPORT_TIMEOUT_MS);
         const importSignal = signal
           ? AbortSignal.any([signal, timeout])
@@ -143,10 +155,13 @@ export const recipeImportsRouter = router({
         };
 
         let readerInput: RecipeReaderInput;
+        // What the draft keeps of the input (DEC-108).
+        let storedInput: RecipeImportStoredInput;
         // Takes the place of the reader's own source link: the link the cook
         // gave, or the address a saved page names as its own.
         let sourceUrl: string | null = null;
         if (input.input.kind === 'link') {
+          storedInput = input.input;
           sourceUrl = input.input.url;
           const link = checkImportLink(input.input.url);
           if (!link.ok) {
@@ -195,10 +210,17 @@ export const recipeImportsRouter = router({
         } else if (input.input.kind === 'html') {
           // A saved page is read as a linked one is, without a fetch, so the
           // link guard isn't involved (DEC-111).
-          const { html } = input.input;
+          const { fileName, html } = input.input;
           const content = readPageContent(html);
           sourceUrl = findPageSourceLink(html);
           readerInput = { kind: 'page', url: sourceUrl, ...content };
+          // Never the markup, which autosave would send back on every edit.
+          storedInput = {
+            kind: 'html',
+            fileName,
+            sourceUrl,
+            text: readPageText(html),
+          };
           // Never the file name or the link's path.
           inputDetails = {
             htmlChars: html.length,
@@ -209,7 +231,66 @@ export const recipeImportsRouter = router({
               ? {}
               : { host: new URL(sourceUrl).hostname }),
           };
+        } else if (input.input.kind === 'pdf') {
+          // The page count comes from Cloudinary, never from the browser
+          // (DEC-111). The PDF reaches the reader as a URL, never as bytes
+          // through Fastify (DEC-50).
+          const { publicId } = input.input;
+          const lookupSignal = AbortSignal.any([
+            importSignal,
+            AbortSignal.timeout(RECIPE_IMPORT_PDF_LOOKUP_TIMEOUT_MS),
+          ]);
+          let upload: ImportUploadDetails | null;
+          try {
+            upload = await lookUpPdf(publicId, lookupSignal);
+          } catch {
+            const reason = lookupSignal.aborted ? 'timeout' : 'unavailable';
+            logUsage('IMPORT_TRY_AGAIN', null, { reason, pdfLookup: true });
+            throw tryAgain(reason);
+          }
+          inputDetails = {
+            lookupMs: Math.round(performance.now() - startedAt),
+          };
+          const refusal = refusePdf(upload);
+          if (upload === null || refusal !== null) {
+            logUsage('upload_refused', null, {
+              reason: refusal,
+              ...(upload === null ? {} : { pdfBytes: upload.bytes }),
+            });
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'That upload can’t be imported',
+            });
+          }
+          if (upload.pages === null) {
+            logUsage('IMPORT_TRY_AGAIN', null, {
+              reason: 'unavailable',
+              pdfLookup: true,
+            });
+            throw tryAgain('unavailable');
+          }
+          const pageCount = upload.pages;
+          inputDetails = {
+            ...inputDetails,
+            pdfPages: pageCount,
+            pdfBytes: upload.bytes,
+          };
+          if (pageCount > RECIPE_IMPORT_PDF_PAGES_MAX) {
+            logUsage('IMPORT_DOCUMENT_TOO_LONG', null);
+            throw domainError(
+              'BAD_REQUEST',
+              'IMPORT_DOCUMENT_TOO_LONG',
+              'That PDF has too many pages',
+              { pageCount, maxPages: RECIPE_IMPORT_PDF_PAGES_MAX },
+            );
+          }
+          readerInput = {
+            kind: 'pdf',
+            url: importPdfUrl(ctx.cloudinary.cloudName, publicId),
+          };
+          storedInput = { kind: 'pdf', publicId, pageCount };
         } else {
+          storedInput = input.input;
           readerInput = toReaderInput(input.input, ctx.cloudinary.cloudName);
           if (readerInput.kind === 'images') {
             inputDetails = { imageCount: readerInput.urls.length };
@@ -291,7 +372,7 @@ export const recipeImportsRouter = router({
               ? normalised.proposal.header
               : { ...normalised.proposal.header, sourceUrl },
           reader: { adapter: reader.adapter, model: usage.model },
-          input: toStoredInput(input.input, sourceUrl),
+          input: storedInput,
         };
         const inserted = await ctx.db
           .insert(recipeDrafts)
@@ -365,15 +446,14 @@ export const recipeImportsRouter = router({
       return {
         id: row.id,
         proposal: readProposal(row.draftData),
-        images: importImagePublicIds(row.draftData).map((publicId) => ({
-          url: importImageUrl(ctx.cloudinary.cloudName, publicId),
-        })),
+        images: reviewImages(row.draftData, ctx.cloudinary.cloudName),
         draftData: envelope.data,
         lastUpdatedAt: row.lastUpdatedAt.getTime(),
       };
     }),
 
-  // An image import's images go with it, once the draft is gone (DEC-107).
+  // An image import's images, or a PDF import's PDF, go with it once the
+  // draft is gone (DEC-107, DEC-111).
   discard: protectedProcedure
     .input(recipeImportDraftIdInputSchema)
     .output(discardRecipeImportResultSchema)
@@ -384,9 +464,11 @@ export const recipeImportsRouter = router({
           and(eq(recipeDrafts.id, input.draftId), ownImportDrafts(ctx.user.id)),
         )
         .returning({ draftData: recipeDrafts.draftData });
-      await destroyImportImages(
+      await destroyImportUploads(
         ctx,
-        deleted.flatMap((row) => importImagePublicIds(row.draftData)),
+        deleted.flatMap((row) =>
+          importUploads(row.draftData).map((upload) => upload.publicId),
+        ),
       );
       return { deleted: deleted.length > 0 };
     }),
@@ -501,16 +583,18 @@ export const recipeImportsRouter = router({
         );
         await writeTags(tx, id, input.tagNames);
 
-        // The import's images are kept as the recipe's Originals, never as
-        // its image (DEC-107). They're read from the proposal, which the
-        // server wrote, not from anything the editor owns (DEC-108).
-        const publicIds = importImagePublicIds(claimedDraft.draftData);
-        if (publicIds.length > 0) {
+        // The import's images, or its PDF, are kept as the recipe's
+        // Originals, never as its image (DEC-107, DEC-111). They're read from
+        // the proposal, which the server wrote, not from anything the editor
+        // owns (DEC-108).
+        const uploads = importUploads(claimedDraft.draftData);
+        if (uploads.length > 0) {
           await tx.insert(recipeImportOriginals).values(
-            publicIds.map((publicId, position) => ({
+            uploads.map((upload, position) => ({
               recipeId: id,
               position,
-              publicId,
+              publicId: upload.publicId,
+              format: upload.format,
             })),
           );
         }
@@ -540,20 +624,35 @@ function toReaderInput(
   };
 }
 
-// What the draft keeps of the input (DEC-108). A saved page keeps its file
-// name, source link and readable text, never its markup, which autosave
-// would send back on every edit.
-function toStoredInput(
-  input: RecipeImportInput,
-  sourceUrl: string | null,
-): RecipeImportStoredInput {
-  if (input.kind !== 'html') return input;
-  return {
-    kind: 'html',
-    fileName: input.fileName,
-    sourceUrl,
-    text: readPageText(input.html),
-  };
+// Why an uploaded PDF can't be read, if it can't. The size is checked again
+// because Cloudinary can't enforce it on this plan.
+function refusePdf(
+  upload: ImportUploadDetails | null,
+): 'not_found' | 'not_pdf' | 'too_big' | null {
+  if (upload === null) return 'not_found';
+  if (upload.format !== 'pdf') return 'not_pdf';
+  if (upload.bytes > RECIPE_IMPORT_PDF_MAX_FILE_SIZE) return 'too_big';
+  return null;
+}
+
+// What Import Review shows of an import's uploads: an image import's
+// renditions, or a PDF's pages as JPEGs, in page order.
+function reviewImages(
+  draftData: unknown,
+  cloudName: string,
+): RecipeImageView[] {
+  const input = importStoredInput(draftData);
+  if (input?.kind === 'images') {
+    return input.publicIds.map((publicId) => ({
+      url: importImageUrl(cloudName, publicId),
+    }));
+  }
+  if (input?.kind === 'pdf') {
+    return Array.from({ length: input.pageCount }, (_, index) => ({
+      url: importPdfPageUrl(cloudName, input.publicId, index + 1),
+    }));
+  }
+  return [];
 }
 
 // The proposal the server wrote, if the draft still holds a readable one.

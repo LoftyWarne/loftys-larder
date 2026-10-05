@@ -44,7 +44,11 @@ import {
   preparationTypes,
   unitsOfMeasurement,
 } from '../src/db/schema/reference.ts';
-import type { DestroyImage } from '../src/lib/cloudinary.ts';
+import type {
+  DestroyImage,
+  ImportUploadDetails,
+  LookUpImportPdf,
+} from '../src/lib/cloudinary.ts';
 import {
   LinkNotAllowedError,
   PageUnreadableError,
@@ -63,7 +67,10 @@ import {
 } from '../src/lib/recipe-reader/types.ts';
 import type { ImportRateLimitVerdict } from '../src/plugins/rate-limit.ts';
 import type { AppContext } from '../src/trpc/context.ts';
-import { RECIPE_IMPORT_TIMEOUT_MS } from '../src/trpc/procedures/recipe-imports.ts';
+import {
+  RECIPE_IMPORT_PDF_LOOKUP_TIMEOUT_MS,
+  RECIPE_IMPORT_TIMEOUT_MS,
+} from '../src/trpc/procedures/recipe-imports.ts';
 import { appRouter } from '../src/trpc/router.ts';
 import {
   startTestDb,
@@ -85,6 +92,19 @@ const PAGE_1 = 'loftys-larder/imports/page1';
 const PAGE_2 = 'loftys-larder/imports/page2';
 const IMPORT_URL_PREFIX =
   'https://res.cloudinary.com/test-cloud/image/upload/c_limit,w_2576,h_2576,f_jpg,q_auto/';
+
+const PDF_ID = 'loftys-larder/imports/recipe-pdf';
+const PDF_URL =
+  'https://res.cloudinary.com/test-cloud/image/upload/loftys-larder/imports/recipe-pdf.pdf';
+const PDF_DETAILS: ImportUploadDetails = {
+  format: 'pdf',
+  bytes: 250_000,
+  pages: 2,
+};
+
+function pdfPageUrl(page: number): string {
+  return `https://res.cloudinary.com/test-cloud/image/upload/pg_${String(page)},c_limit,w_2576,h_2576,q_auto/${PDF_ID}.jpg`;
+}
 
 const LINK = 'https://recipes.example/shakshuka?utm_source=share';
 const RECIPE_JSON_LD = {
@@ -237,6 +257,7 @@ describe('recipe imports procedures', () => {
     log?: AppContext['log'];
     destroyImage?: DestroyImage;
     fetchPage?: PageFetcher;
+    lookUpPdf?: LookUpImportPdf;
   }
 
   function makeContext(options: ContextOptions = {}): AppContext {
@@ -283,6 +304,7 @@ describe('recipe imports procedures', () => {
         fetchPage:
           options.fetchPage ??
           (() => Promise.reject(new PageUnreadableError('network'))),
+        lookUpPdf: options.lookUpPdf ?? (() => Promise.resolve(null)),
         allowStart:
           options.allowStart ??
           (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
@@ -331,6 +353,27 @@ describe('recipe imports procedures', () => {
     const result = await createCaller(makeContext(options)).recipeImports.start(
       { input: { kind: 'images', publicIds } },
     );
+    if (result.kind !== 'draft') throw new Error('expected a draft');
+    return result.draftId;
+  }
+
+  // Answers every lookup with `details`.
+  function pdfLookup(details: ImportUploadDetails | null = PDF_DETAILS) {
+    const calls: { publicId: string; signal: AbortSignal }[] = [];
+    const lookUpPdf: LookUpImportPdf = (publicId, signal) => {
+      calls.push({ publicId, signal });
+      return Promise.resolve(details);
+    };
+    return { lookUpPdf, calls };
+  }
+
+  async function startPdfImport(
+    publicId = PDF_ID,
+    options: ContextOptions = {},
+  ): Promise<number> {
+    const result = await createCaller(
+      makeContext({ lookUpPdf: pdfLookup().lookUpPdf, ...options }),
+    ).recipeImports.start({ input: { kind: 'pdf', publicId } });
     if (result.kind !== 'draft') throw new Error('expected a draft');
     return result.draftId;
   }
@@ -1225,6 +1268,251 @@ describe('recipe imports procedures', () => {
         expect(output).not.toContain('Lentil');
       });
     });
+
+    describe('from a PDF', () => {
+      it("sends the reader the PDF's delivery URL and keeps its page count", async () => {
+        const { reader, requests } = spyReader();
+        const { lookUpPdf, calls } = pdfLookup();
+        const draftId = await startPdfImport(PDF_ID, { reader, lookUpPdf });
+
+        expect(calls.map((call) => call.publicId)).toEqual([PDF_ID]);
+        expect(requests[0]?.input).toEqual({ kind: 'pdf', url: PDF_URL });
+        const proposal = await storedProposal(draftId);
+        expect(proposal.input).toEqual({
+          kind: 'pdf',
+          publicId: PDF_ID,
+          pageCount: 2,
+        });
+        expect(proposal.header.name).toBe('PDF Recipe');
+        expect(proposal.header.imageUrl).toBeNull();
+      });
+
+      it('reads a PDF of 8 pages', async () => {
+        const { lookUpPdf } = pdfLookup({ ...PDF_DETAILS, pages: 8 });
+        const draftId = await startPdfImport(PDF_ID, { lookUpPdf });
+
+        expect((await storedProposal(draftId)).input).toMatchObject({
+          pageCount: 8,
+        });
+      });
+
+      it('refuses a PDF of more than 8 pages, naming the count, without reading it', async () => {
+        const { reader, requests } = spyReader();
+        const { lookUpPdf } = pdfLookup({ ...PDF_DETAILS, pages: 9 });
+
+        await expect(
+          createCaller(makeContext({ reader, lookUpPdf })).recipeImports.start({
+            input: { kind: 'pdf', publicId: PDF_ID },
+          }),
+        ).rejects.toMatchObject({
+          code: 'BAD_REQUEST',
+          cause: {
+            code: 'IMPORT_DOCUMENT_TOO_LONG',
+            pageCount: 9,
+            maxPages: 8,
+          },
+        });
+        expect(requests).toHaveLength(0);
+        expect(await draftRows()).toHaveLength(0);
+      });
+
+      it.each([
+        ['an upload that is not there', null],
+        [
+          'an upload that is not a PDF',
+          { format: 'jpg', bytes: 2048, pages: null },
+        ],
+        ['a PDF over 10 MB', { format: 'pdf', bytes: 10_485_761, pages: 1 }],
+      ])(
+        'refuses %s as a bad request, without reading it',
+        async (_label, details) => {
+          const { reader, requests } = spyReader();
+          const { lookUpPdf } = pdfLookup(details);
+
+          const error: unknown = await createCaller(
+            makeContext({ reader, lookUpPdf }),
+          )
+            .recipeImports.start({ input: { kind: 'pdf', publicId: PDF_ID } })
+            .catch((caught: unknown) => caught);
+
+          expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+          expect((error as Error).cause).toBeUndefined();
+          expect(requests).toHaveLength(0);
+          expect(await draftRows()).toHaveLength(0);
+        },
+      );
+
+      it('refuses a PDF outside the imports folder without looking it up', async () => {
+        const { lookUpPdf, calls } = pdfLookup();
+        await expect(
+          createCaller(makeContext({ lookUpPdf })).recipeImports.start({
+            input: { kind: 'pdf', publicId: 'loftys-larder/recipes/abc' },
+          }),
+        ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+        expect(calls).toHaveLength(0);
+      });
+
+      it.each([
+        ['fails', () => Promise.reject(new Error('Cloudinary is down'))],
+        [
+          'gives a PDF no page count',
+          () =>
+            Promise.resolve({
+              format: 'pdf',
+              bytes: 2048,
+              pages: null,
+            }),
+        ],
+      ])(
+        'asks the cook to try again when the lookup %s',
+        async (_label, lookUpPdf) => {
+          const { reader, requests } = spyReader();
+          await expect(
+            createCaller(
+              makeContext({ reader, lookUpPdf }),
+            ).recipeImports.start({ input: { kind: 'pdf', publicId: PDF_ID } }),
+          ).rejects.toMatchObject({
+            code: 'SERVICE_UNAVAILABLE',
+            cause: { code: 'IMPORT_TRY_AGAIN', reason: 'unavailable' },
+          });
+          expect(requests).toHaveLength(0);
+          expect(await draftRows()).toHaveLength(0);
+        },
+      );
+
+      it('counts the lookup against the 75 seconds', async () => {
+        const deadline = new AbortController();
+        const timeout = vi
+          .spyOn(AbortSignal, 'timeout')
+          .mockImplementation((ms) =>
+            ms === RECIPE_IMPORT_TIMEOUT_MS
+              ? deadline.signal
+              : new AbortController().signal,
+          );
+        let lookingUp = false;
+        const lookUpPdf: LookUpImportPdf = (_publicId, signal) =>
+          new Promise((_resolve, reject) => {
+            lookingUp = true;
+            signal.addEventListener('abort', () => {
+              reject(new Error('aborted'));
+            });
+          });
+        const { reader, requests } = spyReader();
+        try {
+          const pending = createCaller(
+            makeContext({ reader, lookUpPdf }),
+          ).recipeImports.start({ input: { kind: 'pdf', publicId: PDF_ID } });
+          await vi.waitFor(() => {
+            expect(lookingUp).toBe(true);
+          });
+          deadline.abort();
+          await expect(pending).rejects.toMatchObject({
+            code: 'GATEWAY_TIMEOUT',
+            cause: { code: 'IMPORT_TRY_AGAIN', reason: 'timeout' },
+          });
+          expect(timeout).toHaveBeenCalledWith(RECIPE_IMPORT_TIMEOUT_MS);
+        } finally {
+          timeout.mockRestore();
+        }
+        expect(requests).toHaveLength(0);
+        expect(await draftRows()).toHaveLength(0);
+      });
+
+      it('gives the lookup at most 10 of the 75 seconds', async () => {
+        const lookupDeadline = new AbortController();
+        const timeout = vi
+          .spyOn(AbortSignal, 'timeout')
+          .mockImplementation((ms) =>
+            ms === RECIPE_IMPORT_PDF_LOOKUP_TIMEOUT_MS
+              ? lookupDeadline.signal
+              : new AbortController().signal,
+          );
+        let lookingUp = false;
+        const lookUpPdf: LookUpImportPdf = (_publicId, signal) =>
+          new Promise((_resolve, reject) => {
+            lookingUp = true;
+            signal.addEventListener('abort', () => {
+              reject(new Error('aborted'));
+            });
+          });
+        try {
+          const pending = createCaller(
+            makeContext({ lookUpPdf }),
+          ).recipeImports.start({ input: { kind: 'pdf', publicId: PDF_ID } });
+          await vi.waitFor(() => {
+            expect(lookingUp).toBe(true);
+          });
+          lookupDeadline.abort();
+          await expect(pending).rejects.toMatchObject({
+            code: 'GATEWAY_TIMEOUT',
+            cause: { code: 'IMPORT_TRY_AGAIN', reason: 'timeout' },
+          });
+          expect(timeout).toHaveBeenCalledWith(RECIPE_IMPORT_TIMEOUT_MS);
+          expect(RECIPE_IMPORT_PDF_LOOKUP_TIMEOUT_MS).toBe(10_000);
+        } finally {
+          timeout.mockRestore();
+        }
+        expect(await draftRows()).toHaveLength(0);
+      });
+
+      it('imports the picked recipe from the same PDF, looking it up again', async () => {
+        const several = `loftys-larder/imports/${FAKE_READER_IMAGE_MARKERS.several}`;
+        const { reader, requests } = spyReader();
+        const { lookUpPdf, calls } = pdfLookup();
+        const caller = createCaller(makeContext({ reader, lookUpPdf }));
+        const input = { kind: 'pdf' as const, publicId: several };
+
+        expect(await caller.recipeImports.start({ input })).toEqual({
+          kind: 'several',
+          names: ['Fake Soup', 'Fake Salad'],
+        });
+        const picked = await caller.recipeImports.start({
+          input,
+          pick: 'Fake Salad',
+        });
+
+        expect(picked.kind).toBe('draft');
+        expect(calls).toHaveLength(2);
+        expect(requests[1]?.input).toEqual(requests[0]?.input);
+        expect(requests[1]?.pick).toBe('Fake Salad');
+      });
+
+      it('logs the page count and size, never the upload or its URL', async () => {
+        const lines: string[] = [];
+        const log = pino(
+          { level: 'info' },
+          { write: (line) => lines.push(line) },
+        );
+        await startPdfImport(PDF_ID, { log });
+        await createCaller(
+          makeContext({
+            log,
+            lookUpPdf: pdfLookup({ ...PDF_DETAILS, pages: 12 }).lookUpPdf,
+          }),
+        )
+          .recipeImports.start({ input: { kind: 'pdf', publicId: PDF_ID } })
+          .catch(() => undefined);
+
+        const entries = lines
+          .map((line) => JSON.parse(line) as Record<string, unknown>)
+          .filter((entry) => 'modelUsage' in entry);
+        expect(entries[0]?.modelUsage).toMatchObject({
+          inputKind: 'pdf',
+          pdfPages: 2,
+          pdfBytes: 250_000,
+          outcome: 'draft',
+        });
+        expect(entries[0]?.modelUsage).toHaveProperty('lookupMs');
+        expect(entries[1]?.modelUsage).toMatchObject({
+          inputKind: 'pdf',
+          pdfPages: 12,
+          outcome: 'IMPORT_DOCUMENT_TOO_LONG',
+        });
+        const output = lines.join('');
+        expect(output).not.toContain('recipe-pdf');
+        expect(output).not.toContain('res.cloudinary.com');
+      });
+    });
   });
 
   async function insertManualDraft(): Promise<number> {
@@ -1402,6 +1690,46 @@ describe('recipe imports procedures', () => {
       expect((await caller.recipeImports.list())[0]?.inputKind).toBe('html');
     });
 
+    it('lists and gets a PDF import with its pages as images', async () => {
+      const draftId = await startPdfImport();
+      const caller = createCaller(makeContext());
+
+      expect((await caller.recipeImports.list())[0]).toMatchObject({
+        id: draftId,
+        inputKind: 'pdf',
+      });
+      expect((await caller.recipeImports.get({ draftId })).images).toEqual([
+        { url: pdfPageUrl(1) },
+        { url: pdfPageUrl(2) },
+      ]);
+    });
+
+    it("deletes a discarded PDF import's PDF from Cloudinary", async () => {
+      const draftId = await startPdfImport();
+      const { destroyImage, destroyed } = destroySpy();
+
+      const result = await createCaller(
+        makeContext({ destroyImage }),
+      ).recipeImports.discard({ draftId });
+
+      expect(result).toEqual({ deleted: true });
+      expect(destroyed).toEqual([PDF_ID]);
+      expect(await draftRows()).toHaveLength(0);
+    });
+
+    it('discards a PDF import even when Cloudinary fails', async () => {
+      const draftId = await startPdfImport();
+      const { destroyImage, destroyed } = destroySpy([PDF_ID]);
+
+      const result = await createCaller(
+        makeContext({ destroyImage }),
+      ).recipeImports.discard({ draftId });
+
+      expect(result).toEqual({ deleted: true });
+      expect(destroyed).toEqual([PDF_ID]);
+      expect(await draftRows()).toHaveLength(0);
+    });
+
     it('gets a text import with no images', async () => {
       const draftId = await startImport();
       const result = await createCaller(makeContext()).recipeImports.get({
@@ -1442,7 +1770,7 @@ describe('recipe imports procedures', () => {
       const warning = lines
         .map((line) => JSON.parse(line) as Record<string, unknown>)
         .find(
-          (entry) => entry.msg === 'Import image not deleted from Cloudinary',
+          (entry) => entry.msg === 'Import upload not deleted from Cloudinary',
         );
       expect(warning).toMatchObject({ level: 40, publicId: PAGE_1 });
     });
@@ -1863,20 +2191,21 @@ describe('recipe imports procedures', () => {
         .from(recipeImportOriginals)
         .orderBy(asc(recipeImportOriginals.position));
       expect(
-        originals.map(({ recipeId: id, position, publicId }) => ({
+        originals.map(({ recipeId: id, position, publicId, format }) => ({
           id,
           position,
           publicId,
+          format,
         })),
       ).toEqual([
-        { id: recipeId, position: 0, publicId: PAGE_2 },
-        { id: recipeId, position: 1, publicId: PAGE_1 },
+        { id: recipeId, position: 0, publicId: PAGE_2, format: 'image' },
+        { id: recipeId, position: 1, publicId: PAGE_1, format: 'image' },
       ]);
       const recipe = await caller.recipes.get({ id: recipeId });
       expect(recipe.imageUrl).toBeNull();
       expect(recipe.originals).toEqual([
-        { url: `${IMPORT_URL_PREFIX}${PAGE_2}` },
-        { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
+        { url: `${IMPORT_URL_PREFIX}${PAGE_2}`, format: 'image' },
+        { url: `${IMPORT_URL_PREFIX}${PAGE_1}`, format: 'image' },
       ]);
       expect(destroyed).toEqual([]);
     });
@@ -1890,12 +2219,79 @@ describe('recipe imports procedures', () => {
 
       await caller.recipes.softDelete({ id: recipeId });
       expect((await caller.recipes.get({ id: recipeId })).originals).toEqual([
-        { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
+        { url: `${IMPORT_URL_PREFIX}${PAGE_1}`, format: 'image' },
       ]);
       await caller.recipes.restore({ id: recipeId });
       expect((await caller.recipes.get({ id: recipeId })).originals).toEqual([
-        { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
+        { url: `${IMPORT_URL_PREFIX}${PAGE_1}`, format: 'image' },
       ]);
+    });
+
+    it("keeps a PDF import's PDF as its one Original, which opens as the PDF", async () => {
+      const draftId = await startPdfImport();
+      const { destroyImage, destroyed } = destroySpy();
+      const caller = createCaller(makeContext({ destroyImage }));
+
+      const { recipeId } = await caller.recipeImports.createRecipe(
+        createInput(draftId),
+      );
+
+      const originals = await db.select().from(recipeImportOriginals);
+      expect(
+        originals.map(({ recipeId: id, position, publicId, format }) => ({
+          id,
+          position,
+          publicId,
+          format,
+        })),
+      ).toEqual([
+        { id: recipeId, position: 0, publicId: PDF_ID, format: 'pdf' },
+      ]);
+      const recipe = await caller.recipes.get({ id: recipeId });
+      expect(recipe.imageUrl).toBeNull();
+      expect(recipe.originals).toEqual([{ url: PDF_URL, format: 'pdf' }]);
+      expect(destroyed).toEqual([]);
+      expect(await draftRows()).toHaveLength(0);
+    });
+
+    it('keeps a PDF Original through soft delete and restore', async () => {
+      const draftId = await startPdfImport();
+      const caller = createCaller(makeContext());
+      const { recipeId } = await caller.recipeImports.createRecipe(
+        createInput(draftId),
+      );
+
+      await caller.recipes.softDelete({ id: recipeId });
+      expect((await caller.recipes.get({ id: recipeId })).originals).toEqual([
+        { url: PDF_URL, format: 'pdf' },
+      ]);
+      await caller.recipes.restore({ id: recipeId });
+      expect((await caller.recipes.get({ id: recipeId })).originals).toEqual([
+        { url: PDF_URL, format: 'pdf' },
+      ]);
+    });
+
+    it('reads an Original written before formats as an image', async () => {
+      const [recipe] = await db
+        .insert(recipes)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          name: 'Older Import',
+          baseServings: 2,
+        })
+        .returning({ id: recipes.id });
+      if (!recipe) throw new Error('recipe seed failed');
+      await db.execute(
+        sql`insert into recipe_import_originals (recipe_id, position, public_id) values (${recipe.id}, 0, ${PAGE_1})`,
+      );
+
+      expect((await db.select().from(recipeImportOriginals))[0]?.format).toBe(
+        'image',
+      );
+      expect(
+        (await createCaller(makeContext()).recipes.get({ id: recipe.id }))
+          .originals,
+      ).toEqual([{ url: `${IMPORT_URL_PREFIX}${PAGE_1}`, format: 'image' }]);
     });
 
     it('keeps no Originals for a text import', async () => {

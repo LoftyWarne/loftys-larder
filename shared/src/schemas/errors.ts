@@ -43,6 +43,9 @@ export const DOMAIN_ERROR_CODES = [
   'IMPORT_LINK_NOT_ALLOWED',
   // The page refused the fetch, timed out, was too large or wasn't HTML.
   'IMPORT_LINK_UNREADABLE',
+  // Metadata `pageCount` and `maxPages`: a PDF with more pages than an
+  // import reads.
+  'IMPORT_DOCUMENT_TOO_LONG',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

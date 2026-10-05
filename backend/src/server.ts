@@ -7,7 +7,7 @@ import { createResendSender, withAllowList } from './auth/resend.ts';
 import type { MagicLinkSender } from './auth/resend.ts';
 import { ConfigValidationError, loadConfig, type Config } from './config.ts';
 import { getDb, type Db } from './db/index.ts';
-import { createDestroyImage } from './lib/cloudinary.ts';
+import { createDestroyImage, createLookUpImportPdf } from './lib/cloudinary.ts';
 import { createPageFetcher } from './lib/recipe-import/fetch-page.ts';
 import { createRecipeReader } from './lib/recipe-reader/index.ts';
 import type { RecipeReader } from './lib/recipe-reader/types.ts';
@@ -115,6 +115,7 @@ export async function buildAppWithLogger(
     options.recipeReader ?? createRecipeReader(config),
   );
   app.decorate('fetchPage', createPageFetcher());
+  app.decorate('lookUpImportPdf', createLookUpImportPdf(cloudinary));
 
   registerHealth(app);
 

@@ -227,6 +227,37 @@ describe('anthropic recipe reader', () => {
     expect(text).not.toContain('<recipe_text>');
   });
 
+  it('sends a PDF as a document by URL, ahead of the household', async () => {
+    const fake = fakeFetch(() => textResponse('{"outcome":"not_a_recipe"}'));
+    const reader = createRecipeReader(anthropicConfig, { fetch: fake.fetch });
+    await reader.read(
+      {
+        ...request,
+        input: { kind: 'pdf', url: 'https://pdf.test/recipe.pdf' },
+        pick: 'Fake Salad',
+      },
+      new AbortController().signal,
+    );
+
+    const messages = fake.requests[0]?.body.messages as {
+      content: Record<string, unknown>[];
+    }[];
+    const content = messages[0]?.content ?? [];
+    expect(content).toHaveLength(2);
+    expect(content[0]).toEqual({
+      type: 'document',
+      source: { type: 'url', url: 'https://pdf.test/recipe.pdf' },
+    });
+    expect(content[1]?.type).toBe('text');
+    const text = String(content[1]?.text);
+    expect(text).toContain('{"id":10,"name":"Olive Oil","unit":"ml"}');
+    expect(text).toContain('The recipe is in the PDF above.');
+    expect(text).toContain(
+      'The PDF holds several recipes. Import only the one named: "Fake Salad"',
+    );
+    expect(String(fake.requests[0]?.body.system)).toContain('PDFs');
+  });
+
   it('sends a page in one string, with its address and format', async () => {
     const fake = fakeFetch(() => textResponse('{"outcome":"not_a_recipe"}'));
     const reader = createRecipeReader(anthropicConfig, { fetch: fake.fetch });

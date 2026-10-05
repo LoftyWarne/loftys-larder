@@ -15,6 +15,7 @@ export function contextDeps(): Pick<
     recipeImport: {
       reader: createFakeRecipeReader(),
       fetchPage: () => Promise.reject(new PageUnreadableError('network')),
+      lookUpPdf: () => Promise.resolve(null),
       allowStart: () =>
         Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
     },

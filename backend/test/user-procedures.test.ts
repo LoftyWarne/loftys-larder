@@ -774,11 +774,12 @@ describe('user procedures', () => {
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
 
-    describe('import images', () => {
+    describe('import uploads', () => {
       const MINE = [
         'loftys-larder/imports/mine-1',
         'loftys-larder/imports/mine-2',
       ];
+      const MINE_PDF = 'loftys-larder/imports/mine-pdf';
       const THEIRS = 'loftys-larder/imports/theirs';
       const KEPT = 'loftys-larder/imports/kept';
 
@@ -804,6 +805,11 @@ describe('user procedures', () => {
         });
         await insertImportDraft(USER_ID, { kind: 'images', publicIds: MINE });
         await insertImportDraft(USER_ID, { kind: 'text', text: 'Soup' });
+        await insertImportDraft(USER_ID, {
+          kind: 'pdf',
+          publicId: MINE_PDF,
+          pageCount: 3,
+        });
         await insertImportDraft(OTHER_USER_ID, {
           kind: 'images',
           publicIds: [THEIRS],
@@ -817,7 +823,7 @@ describe('user procedures', () => {
           .values({ recipeId, position: 0, publicId: KEPT });
       }
 
-      it("deletes the images of the user's import drafts once the deletion has committed", async () => {
+      it("deletes the images and PDFs of the user's import drafts once the deletion has committed", async () => {
         await seedImports();
         const destroyed: { publicId: string; userRows: number }[] = [];
         const destroyImage: DestroyImage = async (publicId) => {
@@ -838,6 +844,7 @@ describe('user procedures', () => {
         ).toEqual([
           { publicId: MINE[0], userRows: 0 },
           { publicId: MINE[1], userRows: 0 },
+          { publicId: MINE_PDF, userRows: 0 },
         ]);
         const originals = await db.select().from(recipeImportOriginals);
         expect(originals.map((row) => row.publicId)).toEqual([KEPT]);
@@ -860,7 +867,7 @@ describe('user procedures', () => {
         expect(userRows).toHaveLength(0);
       });
 
-      it('deletes no images when the deletion rolls back', async () => {
+      it('deletes no uploads when the deletion rolls back', async () => {
         await seedImports();
         const destroyed: string[] = [];
         const destroyImage: DestroyImage = (publicId) => {
@@ -892,7 +899,7 @@ describe('user procedures', () => {
           .select()
           .from(recipeDrafts)
           .where(eq(recipeDrafts.userId, USER_ID));
-        expect(drafts).toHaveLength(2);
+        expect(drafts).toHaveLength(3);
       });
     });
   });

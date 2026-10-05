@@ -5,6 +5,7 @@ import type {
 import {
   RECIPE_IMPORT_IMAGES_MAX,
   RECIPE_IMPORT_LINK_MAX_LENGTH,
+  RECIPE_IMPORT_PDF_PAGES_MAX,
   RECIPE_IMPORT_TEXT_MAX_LENGTH,
 } from '@loftys-larder/shared';
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -21,7 +22,7 @@ import { useFileDrop } from '@/components/recipe-import/use-file-drop.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { useOnlineStatus } from '@/hooks/use-online-status.ts';
 import { uploadToCloudinary } from '@/lib/cloudinary-upload.ts';
-import { getDomainErrorCode } from '@/lib/domain-error.ts';
+import { getDomainErrorCause } from '@/lib/domain-error.ts';
 import {
   readImportDocument,
   sortDroppedFiles,
@@ -31,8 +32,8 @@ import { trpc } from '@/lib/trpc.ts';
 
 type InputKind = RecipeImportInput['kind'];
 
-// Document mode sends a text or Markdown file as pasted text, and a saved
-// web page as its markup (DEC-111).
+// Document mode sends a text or Markdown file as pasted text, a saved web
+// page as its markup, and a PDF as an upload (DEC-111).
 type ImportMode = 'text' | 'images' | 'link' | 'document';
 
 const MODES: { mode: ImportMode; label: string }[] = [
@@ -60,6 +61,10 @@ const INPUT_WORDS: Record<InputKind, { several: string; back: string }> = {
     several: 'That page has more than one recipe. Which one?',
     back: 'Back to the document',
   },
+  pdf: {
+    several: 'That PDF has more than one recipe. Which one?',
+    back: 'Back to the document',
+  },
 };
 
 const UPDATED_FORMAT = new Intl.DateTimeFormat('en-GB', {
@@ -81,6 +86,10 @@ export function RecipeImportPage(): React.ReactElement {
     trpc.uploads.getRecipeImportImageCredentials.useQuery(undefined, {
       enabled: false,
     });
+  const pdfCredentialsQuery =
+    trpc.uploads.getRecipeImportPdfCredentials.useQuery(undefined, {
+      enabled: false,
+    });
 
   const [mode, setMode] = useState<ImportMode>('text');
   const [text, setText] = useState('');
@@ -92,6 +101,11 @@ export function RecipeImportPage(): React.ReactElement {
   // The chosen images once uploaded, so trying again or picking one of
   // several recipes doesn't upload them again.
   const [uploadedIds, setUploadedIds] = useState<string[] | null>(null);
+  // The same for a PDF, kept with the file it came from.
+  const [uploadedPdf, setUploadedPdf] = useState<{
+    file: File;
+    publicId: string;
+  } | null>(null);
   const [uploading, setUploading] = useState(false);
   // Set when the text holds several recipes: the input that was sent, so the
   // pick goes with the same one (DEC-103).
@@ -105,7 +119,7 @@ export function RecipeImportPage(): React.ReactElement {
   const trimmed = text.trim();
   const trimmedLink = link.trim();
   const docReady =
-    doc !== null && (doc.kind === 'html' || doc.text.trim() !== '');
+    doc !== null && (doc.kind !== 'text' || doc.text.trim() !== '');
 
   const dragging = useFileDrop(
     isOnline && !working && several === null,
@@ -187,11 +201,36 @@ export function RecipeImportPage(): React.ReactElement {
 
   async function importDocument(): Promise<void> {
     if (doc === null) return;
+    if (doc.kind === 'pdf') {
+      await importPdf(doc.file);
+      return;
+    }
     await start(
       doc.kind === 'text'
         ? { kind: 'text', text: doc.text.trim() }
         : { kind: 'html', fileName: doc.fileName, html: doc.html },
     );
+  }
+
+  // Straight to Cloudinary, never through the backend (DEC-50, DEC-111).
+  async function importPdf(file: File): Promise<void> {
+    setError(null);
+    let publicId = uploadedPdf?.file === file ? uploadedPdf.publicId : null;
+    if (publicId === null) {
+      setUploading(true);
+      try {
+        const credentials = (await pdfCredentialsQuery.refetch()).data;
+        if (!credentials) throw new Error('No upload credentials');
+        publicId = (await uploadToCloudinary(file, credentials)).publicId;
+        setUploadedPdf({ file, publicId });
+      } catch {
+        setError('Couldn’t upload the PDF. Try again.');
+        return;
+      } finally {
+        setUploading(false);
+      }
+    }
+    await start({ kind: 'pdf', publicId });
   }
 
   async function importImages(): Promise<void> {
@@ -452,7 +491,9 @@ export function RecipeImportPage(): React.ReactElement {
         <p role="status" className="flex items-center gap-2 text-sm">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
           {uploading
-            ? 'Uploading the images…'
+            ? mode === 'document'
+              ? 'Uploading the PDF…'
+              : 'Uploading the images…'
             : 'Reading the recipe… This can take up to a minute.'}
         </p>
       )}
@@ -561,7 +602,8 @@ function withScheme(link: string): string {
 }
 
 function startErrorMessage(err: unknown, kind: InputKind): string {
-  switch (getDomainErrorCode(err)) {
+  const cause = getDomainErrorCause(err);
+  switch (cause?.code) {
     case 'IMPORT_NOT_A_RECIPE':
       return kind === 'link' || kind === 'html'
         ? 'Couldn’t find a recipe in that. If the page has one, paste the text or a screenshot instead.'
@@ -572,6 +614,13 @@ function startErrorMessage(err: unknown, kind: InputKind): string {
       return 'Couldn’t read that page. Paste the text or a screenshot instead.';
     case 'IMPORT_RATE_LIMITED':
       return 'You’ve reached the import limit. Try again in an hour.';
+    case 'IMPORT_DOCUMENT_TOO_LONG': {
+      const pageCount =
+        typeof cause.pageCount === 'number' ? cause.pageCount : null;
+      return pageCount === null
+        ? `That PDF has more than ${String(RECIPE_IMPORT_PDF_PAGES_MAX)} pages. Save just the recipe’s pages as a PDF, or screenshot them.`
+        : `That PDF has ${String(pageCount)} pages; the most is ${String(RECIPE_IMPORT_PDF_PAGES_MAX)}. Save just the recipe’s pages as a PDF, or screenshot them.`;
+    }
     case 'IMPORT_REQUEST_REJECTED':
       return 'Importing isn’t working at the moment, and trying again won’t help. The problem has been reported.';
     default:

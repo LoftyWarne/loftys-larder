@@ -74,3 +74,24 @@ export const recipeImportImageUploadCredentialsSchema = z.object({
 export type RecipeImportImageUploadCredentials = z.infer<
   typeof recipeImportImageUploadCredentialsSchema
 >;
+
+// Recipe Import PDFs (DEC-111): the same folder, PDF only, and no
+// transformation, because the reader is sent the PDF itself. Cloudinary
+// keeps a PDF as an image resource, so the image endpoints take it.
+export const RECIPE_IMPORT_PDF_ALLOWED_FORMATS = ['pdf'] as const;
+
+export const RECIPE_IMPORT_PDF_MAX_FILE_SIZE = 10_485_760;
+
+export const recipeImportPdfUploadCredentialsSchema = z.object({
+  cloudName: z.string().min(1),
+  apiKey: z.string().min(1),
+  timestamp: z.number().int().positive(),
+  signature: z.string().regex(/^[a-f0-9]{40}$/, 'expected SHA-1 hex digest'),
+  folder: z.literal(RECIPE_IMPORT_IMAGE_FOLDER),
+  allowedFormats: z.tuple([z.literal('pdf')]),
+  maxFileSize: z.literal(RECIPE_IMPORT_PDF_MAX_FILE_SIZE),
+});
+
+export type RecipeImportPdfUploadCredentials = z.infer<
+  typeof recipeImportPdfUploadCredentialsSchema
+>;

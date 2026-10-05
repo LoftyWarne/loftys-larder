@@ -24,9 +24,9 @@ import {
 import { recipes } from '../../db/schema/recipes.ts';
 import { makeWithTransaction } from '../../db/withTransaction.ts';
 import {
-  destroyImportImages,
-  importImagePublicIds,
-} from '../../lib/recipe-import/import-images.ts';
+  destroyImportUploads,
+  importUploads,
+} from '../../lib/recipe-import/import-uploads.ts';
 import { protectedProcedure, router } from '../init.ts';
 
 const RECENT_SIGN_IN_HOURS = 24;
@@ -191,7 +191,7 @@ export const userRouter = router({
       const email = ctx.user.email;
 
       const withTransaction = makeWithTransaction(ctx.db);
-      const importImageIds = await withTransaction(async (tx) => {
+      const importUploadIds = await withTransaction(async (tx) => {
         // 1. Hard-delete personal ratings (RESTRICT FK).
         await tx.delete(recipeRatings).where(eq(recipeRatings.userId, userId));
 
@@ -245,13 +245,15 @@ export const userRouter = router({
         await tx.delete(users).where(eq(users.id, userId));
 
         return drafts.flatMap((draft) =>
-          draft.kind === 'import' ? importImagePublicIds(draft.draftData) : [],
+          draft.kind === 'import'
+            ? importUploads(draft.draftData).map((upload) => upload.publicId)
+            : [],
         );
       });
 
       // Only once the deletion has committed, and best effort: Originals of
       // saved recipes are household data and stay (DEC-29, DEC-107).
-      await destroyImportImages(ctx, importImageIds);
+      await destroyImportUploads(ctx, importUploadIds);
 
       return { deleted: true };
     }),

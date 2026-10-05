@@ -9,6 +9,7 @@ import {
   RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
   RECIPE_IMPORT_IMAGE_FOLDER,
   RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
+  RECIPE_IMPORT_PDF_MAX_FILE_SIZE,
 } from '../../shared/src/index.ts';
 import { signUploadParams } from '../src/lib/cloudinary.ts';
 import type { AppContext } from '../src/trpc/context.ts';
@@ -164,6 +165,49 @@ describe('uploads procedures', () => {
       );
       await expect(
         caller.uploads.getRecipeImportImageCredentials(),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+  });
+
+  describe('getRecipeImportPdfCredentials', () => {
+    it('returns the PDF constraints: the imports folder, PDF only, 10 MB, nothing made at upload', async () => {
+      const caller = appRouter.createCaller(makeContext());
+      const creds = await caller.uploads.getRecipeImportPdfCredentials();
+
+      expect(creds).toEqual({
+        cloudName: 'test-cloud',
+        apiKey: 'test-key',
+        timestamp: creds.timestamp,
+        signature: creds.signature,
+        folder: 'loftys-larder/imports',
+        allowedFormats: ['pdf'],
+        maxFileSize: 10_485_760,
+      });
+      expect(RECIPE_IMPORT_PDF_MAX_FILE_SIZE).toBe(10_485_760);
+    });
+
+    it('signs the folder and format only, with no transformation', async () => {
+      const caller = appRouter.createCaller(makeContext());
+      const creds = await caller.uploads.getRecipeImportPdfCredentials();
+
+      expect(creds.signature).toBe(
+        signUploadParams(
+          {
+            allowed_formats: 'pdf',
+            folder: RECIPE_IMPORT_IMAGE_FOLDER,
+            timestamp: creds.timestamp,
+          },
+          cloudinary.apiSecret,
+        ),
+      );
+    });
+
+    it('rejects unauthenticated callers', async () => {
+      const caller = appRouter.createCaller(
+        makeContext({ authenticated: false }),
+      );
+      await expect(
+        caller.uploads.getRecipeImportPdfCredentials(),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     });
   });

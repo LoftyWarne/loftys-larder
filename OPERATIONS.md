@@ -14,6 +14,7 @@ The document is the artefact; the [rehearsal log](#rehearsal-log) at the bottom 
 - [Restore A — Fly Postgres snapshot to a fork cluster](#restore-a--fly-postgres-snapshot-to-a-fork-cluster)
 - [Restore B — R2 dump to a fresh local Postgres](#restore-b--r2-dump-to-a-fresh-local-postgres)
 - [Rate limits](#rate-limits)
+- [Cloudinary account settings](#cloudinary-account-settings)
 - [Accessibility — documented axe-core exceptions](#accessibility--documented-axe-core-exceptions)
 - [Secret rotation](#secret-rotation)
 - [Rehearsal log](#rehearsal-log)
@@ -278,6 +279,21 @@ and a `Retry-After` header. The body is an HTTP-level envelope, not a tRPC one �
 - Store is in-memory. The single Fly machine in `lhr` plus auto-stop (DEC-63 / DEC-64) means counters reset whenever the machine wakes from sleep. Accepted v1 trade-off — if scaled out, plug Redis via the plugin's `redis` option.
 - Limits sized for household traffic, not adversarial scale (`docs/non-goals.md`). If Cloudflare's edge surfaces patterns that suggest these are wrong in either direction, revisit.
 - Under `NODE_ENV=test` the caps are raised to 10 000 IP / 30 000 session per minute (`backend/src/server.ts`) so the e2e suite — particularly the axe-core spot-check, which does many navigations in quick succession and pays IP-bucket cost on every `/api/auth/get-session` call — does not trip the limiter. Production sizing is unaffected.
+
+---
+
+## Cloudinary account settings
+
+Two settings in the Cloudinary console that Recipe Import's PDF Documents depend on (DEC-111). Neither lives in code or config, so check both whenever the account changes.
+
+| Setting (console) | Must be | Why |
+|---|---|---|
+| Settings → Security → "Allow delivery of PDF and ZIP files" | On | The reader is sent a PDF's delivery URL (`…/image/upload/<public_id>.pdf`) and the provider fetches it; "View original" opens the same URL. Free accounts block PDF delivery by default. With it off, every PDF import fails in production, while tests on the `fake` adapter, which never fetches, still pass. |
+| Settings → Security → "Strict transformations" | Off, or `pg_<n>,c_limit,w_2576,h_2576,q_auto` allowed | Import Review shows a PDF's pages as JPEGs Cloudinary makes on the first request. With strict transformations on and that transformation not allowed, the page images don't load. |
+
+With PDF delivery on, any PDF or ZIP in the account can be fetched by its URL. Uploads are signed and public ids are random, so only the app can put one there.
+
+**Status:** PDF delivery not yet confirmed on. Turn it on before the first deploy with PDF import, then replace this line with the date it was checked.
 
 ---
 

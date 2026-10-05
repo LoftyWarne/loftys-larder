@@ -1,5 +1,5 @@
-// A signed upload credential from the backend (DEC-50). Recipe images and
-// Recipe Import images each have their own preset.
+// A signed upload credential from the backend (DEC-50). Recipe images,
+// Recipe Import images and Recipe Import PDFs each have their own preset.
 export interface CloudinaryUploadCredentials {
   cloudName: string;
   apiKey: string;
@@ -8,7 +8,8 @@ export interface CloudinaryUploadCredentials {
   folder: string;
   allowedFormats: readonly string[];
   maxFileSize: number;
-  transformation: string;
+  // What Cloudinary makes at upload. A PDF credential makes nothing.
+  transformation?: string;
 }
 
 export interface CloudinaryUploadResult {
@@ -28,7 +29,7 @@ export function fileSizeLimitMessage(maxFileSize: number): string {
   return `Image must be ${mb} MB or smaller`;
 }
 
-// Uploads straight from the browser to Cloudinary; image bytes never pass
+// Uploads straight from the browser to Cloudinary; file bytes never pass
 // through the backend (DEC-50). Throws an Error whose message can be shown.
 export async function uploadToCloudinary(
   file: File,
@@ -54,7 +55,10 @@ export async function uploadToCloudinary(
   formData.append('signature', creds.signature);
   formData.append('folder', creds.folder);
   formData.append('allowed_formats', creds.allowedFormats.join(','));
-  formData.append('eager', creds.transformation);
+  // Posted only when it was signed, or the signature won't match.
+  if (creds.transformation !== undefined) {
+    formData.append('eager', creds.transformation);
+  }
 
   const response = await fetch(url, {
     method: 'POST',

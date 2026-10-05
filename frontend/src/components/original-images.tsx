@@ -1,4 +1,4 @@
-import type { RecipeImageView } from '@loftys-larder/shared';
+import type { RecipeImageView, RecipeOriginal } from '@loftys-larder/shared';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
@@ -141,14 +141,27 @@ export function OriginalImages({
 }
 
 export interface ViewOriginalButtonProps {
-  images: readonly RecipeImageView[];
+  originals: readonly RecipeOriginal[];
 }
 
-// On a recipe imported from images: its Originals, from the first page.
+// On an imported recipe: its images from the first page, or its PDF in the
+// browser's own viewer in a new tab (DEC-111).
 export function ViewOriginalButton({
-  images,
+  originals,
 }: ViewOriginalButtonProps): React.ReactElement {
   const [index, setIndex] = useState<number | null>(null);
+  const pdf = originals.find((original) => original.format === 'pdf');
+
+  if (pdf) {
+    return (
+      <Button asChild variant="outline" size="sm">
+        <a href={pdf.url} target="_blank" rel="noopener noreferrer">
+          View original
+          <span className="sr-only"> (PDF, opens in a new tab)</span>
+        </a>
+      </Button>
+    );
+  }
 
   return (
     <>
@@ -163,7 +176,7 @@ export function ViewOriginalButton({
         View original
       </Button>
       <OriginalImagesDialog
-        images={images}
+        images={originals}
         index={index}
         onIndexChange={setIndex}
       />

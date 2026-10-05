@@ -7,7 +7,7 @@ import { OriginalImages } from '@/components/original-images.tsx';
 
 export interface OriginalInputProps {
   input: RecipeImportStoredInput;
-  // An image import's images, in page order.
+  // An image import's images, or a PDF's pages, in page order.
   images: readonly RecipeImageView[];
   // Below `lg` the original folds away above the proposal; at `lg` and wider
   // it stays beside it.
@@ -19,6 +19,7 @@ const TITLES: Record<RecipeImportStoredInput['kind'], string> = {
   images: 'Original images',
   link: 'Original page',
   html: 'Original document',
+  pdf: 'Original document',
 };
 
 // The import input as the cook gave it, to check the proposal against
@@ -32,7 +33,7 @@ export function OriginalInput({
   const body =
     input.kind === 'text' ? (
       <OriginalText text={input.text} />
-    ) : input.kind === 'images' ? (
+    ) : input.kind === 'images' || input.kind === 'pdf' ? (
       <OriginalImages images={images} />
     ) : input.kind === 'link' ? (
       <OriginalLink url={input.url} />

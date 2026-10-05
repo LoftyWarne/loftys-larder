@@ -3,8 +3,10 @@ import {
   RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
   RECIPE_IMPORT_IMAGE_FOLDER,
   RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
+  RECIPE_IMPORT_PDF_MAX_FILE_SIZE,
   type RecipeImportDraftSummary,
   type RecipeImportImageUploadCredentials,
+  type RecipeImportPdfUploadCredentials,
 } from '@loftys-larder/shared';
 import {
   act,
@@ -26,6 +28,7 @@ const {
   discardMutateAsyncMock,
   navigateMock,
   credentialsRefetchMock,
+  pdfCredentialsRefetchMock,
 } = vi.hoisted(() => ({
   startMutateAsyncMock: vi.fn(),
   startUseMutationMock: vi.fn(),
@@ -34,6 +37,7 @@ const {
   discardMutateAsyncMock: vi.fn(),
   navigateMock: vi.fn(),
   credentialsRefetchMock: vi.fn(),
+  pdfCredentialsRefetchMock: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
@@ -51,6 +55,9 @@ vi.mock('@/lib/trpc.ts', () => ({
     uploads: {
       getRecipeImportImageCredentials: {
         useQuery: () => ({ refetch: credentialsRefetchMock }),
+      },
+      getRecipeImportPdfCredentials: {
+        useQuery: () => ({ refetch: pdfCredentialsRefetchMock }),
       },
     },
   },
@@ -97,9 +104,12 @@ function setOnline(value: boolean): void {
   });
 }
 
-function domainError(code: string): TRPCClientError<never> {
+function domainError(
+  code: string,
+  metadata: Record<string, unknown> = {},
+): TRPCClientError<never> {
   const error = new TRPCClientError<never>('Rejected');
-  Object.assign(error, { shape: { data: { cause: { code } } } });
+  Object.assign(error, { shape: { data: { cause: { code, ...metadata } } } });
   return error;
 }
 
@@ -127,6 +137,16 @@ const CREDENTIALS: RecipeImportImageUploadCredentials = {
   allowedFormats: [...RECIPE_IMPORT_IMAGE_ALLOWED_FORMATS],
   maxFileSize: RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE,
   transformation: RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION,
+};
+
+const PDF_CREDENTIALS: RecipeImportPdfUploadCredentials = {
+  cloudName: 'test-cloud',
+  apiKey: 'test-key',
+  timestamp: 1_700_000_000,
+  signature: 'abcdef0123456789abcdef0123456789abcdef01',
+  folder: RECIPE_IMPORT_IMAGE_FOLDER,
+  allowedFormats: ['pdf'],
+  maxFileSize: RECIPE_IMPORT_PDF_MAX_FILE_SIZE,
 };
 
 const PAGE_1 = new File(['one'], 'page-1.heic', { type: 'image/heic' });
@@ -164,6 +184,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
   credentialsRefetchMock.mockResolvedValue({ data: CREDENTIALS });
+  pdfCredentialsRefetchMock.mockResolvedValue({ data: PDF_CREDENTIALS });
   setOnline(true);
   startUseMutationMock.mockReturnValue({
     mutateAsync: startMutateAsyncMock,
@@ -744,8 +765,26 @@ describe('RecipeImportPage', () => {
     it.each([
       [
         'a file it can’t import',
-        new File(['%PDF'], 'tart.pdf', { type: 'application/pdf' }),
-        'That file can’t be imported. Use a text, Markdown or web page (.html) file.',
+        new File(['PK'], 'tart.docx', { type: 'application/msword' }),
+        'That file can’t be imported. Use a PDF, text, Markdown or web page (.html) file.',
+      ],
+      [
+        'a password-protected PDF',
+        new File(
+          ['%PDF-1.7\ntrailer\n<< /Root 1 0 R /Encrypt 9 0 R >>\n%%EOF'],
+          'tart.pdf',
+          { type: 'application/pdf' },
+        ),
+        'That PDF is password-protected. Save an unlocked copy, or screenshot the recipe.',
+      ],
+      [
+        'a PDF over 10 MB',
+        (() => {
+          const big = new File(['%PDF'], 'tart.pdf');
+          Object.defineProperty(big, 'size', { value: 10_485_761 });
+          return big;
+        })(),
+        'That file is too big to import.',
       ],
       [
         'a file over 10 MB',
@@ -772,6 +811,167 @@ describe('RecipeImportPage', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent(message);
       expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    });
+
+    describe('a PDF', () => {
+      function pdf(name = 'Lemon tart.pdf'): File {
+        return new File(
+          [
+            '%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF',
+          ],
+          name,
+          { type: 'application/pdf' },
+        );
+      }
+
+      async function choosePdfAndImport(
+        user: ReturnType<typeof userEvent.setup>,
+        file = pdf(),
+      ): Promise<void> {
+        await chooseDocument(user, file);
+        await screen.findByText(/^PDF ·/);
+        await user.click(screen.getByRole('button', { name: 'Import' }));
+      }
+
+      it('uploads the PDF to Cloudinary with its own credential, then imports it', async () => {
+        const fetchSpy = mockCloudinary();
+        startMutateAsyncMock.mockResolvedValue({ kind: 'draft', draftId: 50 });
+        const user = documentUser();
+        render(<RecipeImportPage />);
+
+        await choosePdfAndImport(user);
+
+        await waitFor(() => {
+          expect(startMutateAsyncMock).toHaveBeenCalledWith({
+            input: {
+              kind: 'pdf',
+              publicId: 'loftys-larder/imports/Lemon tart',
+            },
+          });
+        });
+        expect(pdfCredentialsRefetchMock).toHaveBeenCalledTimes(1);
+        expect(credentialsRefetchMock).not.toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const [url, init] = fetchSpy.mock.calls[0] ?? [];
+        expect(url).toBe(
+          'https://api.cloudinary.com/v1_1/test-cloud/image/upload',
+        );
+        const body = init?.body as FormData;
+        expect(body.get('folder')).toBe('loftys-larder/imports');
+        expect(body.get('allowed_formats')).toBe('pdf');
+        expect(body.get('signature')).toBe(PDF_CREDENTIALS.signature);
+        expect(body.has('eager')).toBe(false);
+        expect((body.get('file') as File).name).toBe('Lemon tart.pdf');
+        await waitFor(() => {
+          expect(navigateMock).toHaveBeenCalledWith({
+            to: '/recipes/import/$draftId',
+            params: { draftId: '50' },
+          });
+        });
+      });
+
+      it('shows that the PDF is uploading', async () => {
+        vi.spyOn(globalThis, 'fetch').mockReturnValue(
+          new Promise<Response>(() => undefined),
+        );
+        const user = documentUser();
+        render(<RecipeImportPage />);
+
+        await choosePdfAndImport(user);
+
+        expect(await screen.findByRole('status')).toHaveTextContent(
+          'Uploading the PDF…',
+        );
+        expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+      });
+
+      it('picks one of several recipes from the same PDF without uploading it again', async () => {
+        const fetchSpy = mockCloudinary();
+        startMutateAsyncMock
+          .mockResolvedValueOnce({
+            kind: 'several',
+            names: ['Lemon Tart', 'Shortcrust Pastry'],
+          })
+          .mockResolvedValueOnce({ kind: 'draft', draftId: 51 });
+        const user = documentUser();
+        render(<RecipeImportPage />);
+
+        await choosePdfAndImport(user);
+        expect(
+          await screen.findByRole('heading', {
+            name: 'That PDF has more than one recipe. Which one?',
+          }),
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Lemon Tart' }));
+
+        expect(startMutateAsyncMock).toHaveBeenLastCalledWith({
+          input: { kind: 'pdf', publicId: 'loftys-larder/imports/Lemon tart' },
+          pick: 'Lemon Tart',
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      });
+
+      it('tries again without uploading the PDF again, until another is chosen', async () => {
+        const fetchSpy = mockCloudinary();
+        startMutateAsyncMock.mockRejectedValue(domainError('IMPORT_TRY_AGAIN'));
+        const user = documentUser();
+        render(<RecipeImportPage />);
+
+        await choosePdfAndImport(user);
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'The import didn’t work. Try again.',
+        );
+        await user.click(screen.getByRole('button', { name: 'Import' }));
+        await waitFor(() => {
+          expect(startMutateAsyncMock).toHaveBeenCalledTimes(2);
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+        await choosePdfAndImport(user, pdf('Other tart.pdf'));
+        await waitFor(() => {
+          expect(startMutateAsyncMock).toHaveBeenLastCalledWith({
+            input: {
+              kind: 'pdf',
+              publicId: 'loftys-larder/imports/Other tart',
+            },
+          });
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      });
+
+      it('names the page count of a PDF that is too long', async () => {
+        mockCloudinary();
+        startMutateAsyncMock.mockRejectedValue(
+          domainError('IMPORT_DOCUMENT_TOO_LONG', {
+            pageCount: 12,
+            maxPages: 8,
+          }),
+        );
+        const user = documentUser();
+        render(<RecipeImportPage />);
+
+        await choosePdfAndImport(user);
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'That PDF has 12 pages; the most is 8. Save just the recipe’s pages as a PDF, or screenshot them.',
+        );
+      });
+
+      it('says when the upload fails, keeping the PDF and starting nothing', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+          new Response('Server error', { status: 500 }),
+        );
+        const user = documentUser();
+        render(<RecipeImportPage />);
+
+        await choosePdfAndImport(user);
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'Couldn’t upload the PDF. Try again.',
+        );
+        expect(startMutateAsyncMock).not.toHaveBeenCalled();
+        expect(screen.getByText('Lemon tart.pdf')).toBeInTheDocument();
+      });
     });
 
     it('removes the file, and disables Import until there is one, and while offline', async () => {
@@ -914,7 +1114,7 @@ describe('RecipeImportPage', () => {
       drop([new File(['x'], 'tart.docx')]);
 
       expect(screen.getByRole('alert')).toHaveTextContent(
-        'That file can’t be imported. Use a text, Markdown or web page (.html) file.',
+        'That file can’t be imported. Use a PDF, text, Markdown or web page (.html) file.',
       );
       expect(pressed()).toBe('Paste text');
     });

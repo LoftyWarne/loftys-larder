@@ -9,7 +9,8 @@ import {
 } from './types.ts';
 
 // Canned outcomes for backend tests and e2e, chosen by markers in the input
-// text or a page's content, or in an image's URL for an image import. Any
+// text or a page's content, or in the public id in an image's or a PDF's
+// URL. The fake never fetches a URL. Any
 // other input gets a small candidate named after the input's first line, or
 // after its kind, built from the household it was sent, with one matched
 // ingredient, one proposed new ingredient, and a converted and a nominal
@@ -23,7 +24,7 @@ export const FAKE_READER_MARKERS = {
   rejected: '[fake:rejected]',
 } as const;
 
-// Image public ids can't hold brackets or colons.
+// Upload public ids can't hold brackets or colons.
 export const FAKE_READER_IMAGE_MARKERS = {
   several: 'fake-several',
   notARecipe: 'fake-not-a-recipe',
@@ -61,9 +62,11 @@ function readFake(
       ? input.urls.some((url) =>
           url.includes(FAKE_READER_IMAGE_MARKERS[marker]),
         )
-      : (input.kind === 'text' ? input.text : input.content).includes(
-          FAKE_READER_MARKERS[marker],
-        );
+      : input.kind === 'pdf'
+        ? input.url.includes(FAKE_READER_IMAGE_MARKERS[marker])
+        : (input.kind === 'text' ? input.text : input.content).includes(
+            FAKE_READER_MARKERS[marker],
+          );
   if (has('timeout')) {
     throw new RecipeReaderTimeoutError();
   }
@@ -109,9 +112,11 @@ function fakeCandidate(request: RecipeReadRequest): RecipeImportCandidate {
           .find((line) => line.length > 0) ?? 'Imported Recipe')
       : input.kind === 'images'
         ? 'Photographed Recipe'
-        : input.url === null
-          ? 'Saved Page Recipe'
-          : 'Linked Recipe';
+        : input.kind === 'pdf'
+          ? 'PDF Recipe'
+          : input.url === null
+            ? 'Saved Page Recipe'
+            : 'Linked Recipe';
   const name = request.pick ?? firstLine.slice(0, 200);
   const known = household.ingredients[0];
   const category = household.categories[0];

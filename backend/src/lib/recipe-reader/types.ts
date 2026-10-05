@@ -31,7 +31,10 @@ export type RecipeReaderInput =
   // a page the cook saved as a file. Adapters never fetch pages (DEC-109).
   // `url` is where a linked page was read from, or the address a saved page
   // names as its own; null when a saved page names none.
-  | ({ kind: 'page'; url: string | null } & RecipeReaderPageContent);
+  | ({ kind: 'page'; url: string | null } & RecipeReaderPageContent)
+  // A PDF Document's delivery URL, which the provider fetches and reads as
+  // text and page images (DEC-111).
+  | { kind: 'pdf'; url: string };
 
 export interface RecipeReadRequest {
   input: RecipeReaderInput;

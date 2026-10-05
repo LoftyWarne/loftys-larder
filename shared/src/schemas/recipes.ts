@@ -126,6 +126,19 @@ export const recipeImageViewSchema = z.object({
 
 export type RecipeImageView = z.infer<typeof recipeImageViewSchema>;
 
+// An Original is the images an imported recipe was read from, or the one PDF
+// (DEC-107, DEC-111).
+export const RECIPE_ORIGINAL_FORMATS = ['image', 'pdf'] as const;
+
+export type RecipeOriginalFormat = (typeof RECIPE_ORIGINAL_FORMATS)[number];
+
+export const recipeOriginalSchema = z.object({
+  url: z.string(),
+  format: z.enum(RECIPE_ORIGINAL_FORMATS),
+});
+
+export type RecipeOriginal = z.infer<typeof recipeOriginalSchema>;
+
 // Browse card / picker row.
 export const recipeListItemSchema = z.object({
   id: recipeIdSchema,
@@ -177,8 +190,9 @@ export const recipeSchema = recipeListItemSchema.extend({
   method: z.array(recipeMethodStepSchema),
   yourRating: ratingSchema.nullable(),
   healthScore: recipeHealthScoreDetailSchema.nullable(),
-  // The images an imported recipe was read from, in page order.
-  originals: z.array(recipeImageViewSchema),
+  // What an imported recipe was read from: its images in page order, or its
+  // PDF.
+  originals: z.array(recipeOriginalSchema),
 });
 
 export type Recipe = z.infer<typeof recipeSchema>;

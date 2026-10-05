@@ -33,11 +33,14 @@ export const RECIPE_IMPORT_TEXT_MAX_LENGTH = 20_000;
 // Fits `sourceUrl`, which the link fills.
 export const RECIPE_IMPORT_LINK_MAX_LENGTH = 2000;
 export const RECIPE_IMPORT_IMAGES_MAX = 8;
+// Provisional until a real 8-page PDF is timed against the 75-second limit.
+export const RECIPE_IMPORT_PDF_PAGES_MAX = 8;
 
 // Documents (DEC-111): one file per import, sorted into a kind by its
-// extension. A text or Markdown file is sent as pasted text; a saved web
-// page as pruned markup.
+// extension. A text or Markdown file is sent as pasted text, a saved web
+// page as pruned markup, and a PDF is uploaded to Cloudinary.
 export const RECIPE_IMPORT_DOCUMENT_EXTENSIONS = {
+  pdf: 'pdf',
   txt: 'text',
   text: 'text',
   md: 'text',
@@ -66,9 +69,9 @@ const recipeImportPickSchema = z.string().trim().min(1).max(200);
 
 // --- Import input -----------------------------------------------------------
 
-// Only images in the imports folder, so discarding an import can never
-// delete a recipe image (DEC-107). The cook's autosave sends the proposal
-// back, so this is checked wherever the ids are read.
+// Only uploads in the imports folder, images or a PDF, so discarding an
+// import can never delete a recipe image (DEC-107). The cook's autosave
+// sends the proposal back, so this is checked wherever the ids are read.
 const IMPORT_IMAGE_PREFIX = `${RECIPE_IMPORT_IMAGE_FOLDER}/`;
 
 export const recipeImportImagePublicIdSchema = z
@@ -137,6 +140,12 @@ export const recipeImportInputSchema = z.discriminatedUnion('kind', [
     fileName: fileNameSchema,
     html: z.string().min(1).max(RECIPE_IMPORT_HTML_MAX_LENGTH),
   }),
+  // A PDF uploaded to Cloudinary. Its page count comes from Cloudinary,
+  // never from the browser.
+  z.object({
+    kind: z.literal('pdf'),
+    publicId: recipeImportImagePublicIdSchema,
+  }),
 ]);
 
 export type RecipeImportInput = z.infer<typeof recipeImportInputSchema>;
@@ -154,6 +163,13 @@ export const recipeImportStoredInputSchema = z.discriminatedUnion('kind', [
     sourceUrl: recipeImportSourceLinkSchema.nullable(),
     text: z.string().max(RECIPE_IMPORT_TEXT_MAX_LENGTH),
   }),
+  // The page count Cloudinary gave, so Import Review's page images need no
+  // second lookup.
+  z.object({
+    kind: z.literal('pdf'),
+    publicId: recipeImportImagePublicIdSchema,
+    pageCount: z.number().int().min(1).max(RECIPE_IMPORT_PDF_PAGES_MAX),
+  }),
 ]);
 
 export type RecipeImportStoredInput = z.infer<
@@ -165,6 +181,7 @@ export const recipeImportInputKindSchema = z.enum([
   'images',
   'link',
   'html',
+  'pdf',
 ]);
 
 export type RecipeImportInputKind = z.infer<typeof recipeImportInputKindSchema>;
@@ -483,7 +500,8 @@ export type RecipeImportDraftIdInput = z.infer<
 export const getRecipeImportResultSchema = z.object({
   id: draftIdSchema,
   proposal: recipeImportProposalSchema.nullable(),
-  // An image import's images, in page order. Empty for any other input.
+  // An image import's images, or a PDF's pages as images, in page order.
+  // Empty for any other input.
   images: z.array(recipeImageViewSchema),
   draftData: recipeDraftEnvelopeSchema,
   lastUpdatedAt: z.number().int().nonnegative(),

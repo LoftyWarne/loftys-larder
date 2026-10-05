@@ -4,6 +4,8 @@ import type { FastifyBaseLogger } from 'fastify';
 import {
   recipeDraftEnvelopeSchema,
   recipeImportStoredInputSchema,
+  type RecipeImportStoredInput,
+  type RecipeOriginalFormat,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import type { Db } from '../../db/index.ts';
@@ -13,36 +15,53 @@ import type { DestroyImage } from '../cloudinary.ts';
 
 const DESTROY_TIMEOUT_MS = 10_000;
 
-// The image public ids an import draft was started from, in page order.
-// Only the import input is read, so a proposal the cook's autosave has made
-// unreadable still gives up its images. The input schema keeps the ids to
-// the imports folder (DEC-107).
-export function importImagePublicIds(draftData: unknown): string[] {
+// The input an import draft keeps. Only the input is read, so a proposal the
+// cook's autosave has made unreadable still gives up its uploads. The input
+// schema keeps upload ids to the imports folder (DEC-107).
+export function importStoredInput(
+  draftData: unknown,
+): RecipeImportStoredInput | null {
   const envelope = recipeDraftEnvelopeSchema.safeParse(draftData);
-  if (!envelope.success) return [];
+  if (!envelope.success) return null;
   const proposal = envelope.data.fields.proposal;
   const input = recipeImportStoredInputSchema.safeParse(
     typeof proposal === 'object' && proposal !== null && 'input' in proposal
       ? proposal.input
       : undefined,
   );
-  return input.success && input.data.kind === 'images'
-    ? input.data.publicIds
-    : [];
+  return input.success ? input.data : null;
 }
 
-export interface ImportImageDeps {
+export interface ImportUpload {
+  publicId: string;
+  format: RecipeOriginalFormat;
+}
+
+// What an import draft uploaded to Cloudinary: its images in page order, or
+// its one PDF (DEC-111).
+export function importUploads(draftData: unknown): ImportUpload[] {
+  const input = importStoredInput(draftData);
+  if (input?.kind === 'images') {
+    return input.publicIds.map((publicId) => ({ publicId, format: 'image' }));
+  }
+  if (input?.kind === 'pdf') {
+    return [{ publicId: input.publicId, format: 'pdf' }];
+  }
+  return [];
+}
+
+export interface ImportUploadDeps {
   db: Db;
   destroyImage: DestroyImage;
   log: FastifyBaseLogger;
 }
 
-// Deletes a discarded import's images: after commit, outside any
+// Deletes a discarded import's uploads: after commit, outside any
 // transaction, and best effort, so a failure is logged and never fails the
-// caller (DEC-107). An image a saved recipe keeps as an Original is never
+// caller (DEC-107). An upload a saved recipe keeps as an Original is never
 // deleted, whatever a draft says.
-export async function destroyImportImages(
-  { db, destroyImage, log }: ImportImageDeps,
+export async function destroyImportUploads(
+  { db, destroyImage, log }: ImportUploadDeps,
   publicIds: readonly string[],
 ): Promise<void> {
   if (publicIds.length === 0) return;
@@ -59,8 +78,8 @@ export async function destroyImportImages(
         ),
       );
   } catch (err) {
-    // Without knowing which images are kept, none are deleted.
-    log.warn({ err }, 'Import images not deleted from Cloudinary');
+    // Without knowing which uploads are kept, none are deleted.
+    log.warn({ err }, 'Import uploads not deleted from Cloudinary');
     return;
   }
   const keptIds = new Set(kept.map((row) => row.publicId));
@@ -75,7 +94,7 @@ export async function destroyImportImages(
     if (result.status === 'rejected') {
       log.warn(
         { err: result.reason, publicId: discarded[index] },
-        'Import image not deleted from Cloudinary',
+        'Import upload not deleted from Cloudinary',
       );
     }
   });

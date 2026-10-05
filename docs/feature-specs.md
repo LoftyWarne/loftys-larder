@@ -2851,6 +2851,7 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 - `frontend/src/routes/-components/recipe-import-page.tsx` and `frontend/src/components/recipe-import/document-picker.tsx`: PDFs picked or dropped, uploaded on Import, and reused for "Try again" and the pick
 - `frontend/src/routes/-components/recipe-detail-page.tsx` and the "View original" button: a PDF Original opens in a new tab
 - `docs/plan.md` (the new column and the PDF flow), `OPERATIONS.md` (Cloudinary's PDF delivery setting), `README.md`
+- Added at kick-off: `import-images.ts` is renamed `import-uploads.ts` (`importUploads`, `destroyImportUploads`, `importStoredInput`); `frontend/src/lib/domain-error.ts` (`getDomainErrorCause`, so the page can name the page count); `frontend/src/components/original-images.tsx` (where "View original" lives) and `frontend/src/components/recipe-import/original-input.tsx` (the PDF's pages in Import Review); `backend/test/helpers/context-deps.ts` (a default lookup)
 
 **Shapes:**
 - **Upload:** the browser posts to `https://api.cloudinary.com/v1_1/<cloud>/image/upload`. A PDF is an `image` resource in Cloudinary, and the existing endpoint and signing work for it.
@@ -2886,6 +2887,25 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 - Create recipe reads the PDF's public id from the stored input in the draft it deletes, as it does image ids (DEC-108 amended), and keeps it only if it's in the imports folder. A public id kept as an Original is never destroyed, whatever a draft says (DEC-107).
 - The existing signed destroy (`image/destroy`) deletes a PDF, because a PDF is an `image` resource.
 - Household scope for Originals still comes through the join to `recipes` (DEC-17).
+- Amended at kick-off (2026-10-05):
+  - `format` is a pgEnum, `recipe_import_original_format` (`image`, `pdf`), `NOT NULL DEFAULT 'image'`, as `recipe_drafts.kind` is. Migration `0025_recipe_import_original_format.sql`.
+  - The server also refuses a PDF over 10 MB, from the lookup's `bytes`, because Cloudinary can't enforce the size on this plan.
+  - A PDF refused after upload (too long, not a PDF, too big) is left in Cloudinary as an orphan, as a failed image import's images are (DEC-107).
+  - An upload that isn't there, isn't a PDF or is too big is a plain `BAD_REQUEST` with no domain code, so the page shows "The import didn't work. Try again." Only tampering reaches it.
+  - The lookup has its own 10 seconds inside the 75. Either running out is `IMPORT_TRY_AGAIN` with reason `timeout`; any other failure that isn't a 404 is reason `unavailable`. The rate limit is spent before the lookup, as for links.
+  - Logs carry `pdfPages`, `pdfBytes` and `lookupMs`; a too-long PDF logs its page count with the outcome `IMPORT_DOCUMENT_TOO_LONG`.
+  - The lookup sits on the context as `recipeImport.lookUpPdf`, beside `fetchPage`.
+  - Import Review heads a PDF "Original document" and shows its pages through `OriginalImages`. It has no link to the PDF itself.
+  - Wording: "Uploading the PDF…", "Couldn't upload the PDF. Try again.", "That PDF has more than one recipe. Which one?", and the picker's "A PDF, text, Markdown or web page (.html) file…". Not a recipe, for a PDF, is the plain "Couldn't find a recipe in that."
+  - The encryption check reads the first and last 2 KB for `/Encrypt`. There's no `%PDF-` check: Cloudinary refuses an upload that isn't a PDF.
+  - The `fake` adapter reads its image markers from the PDF's URL and names its candidate "PDF Recipe".
+  - No PDF e2e: it would need a faked Cloudinary upload and lookup.
+- Found while implementing (2026-10-05):
+  - The prompt gained a short "PDFs" section: read the pages together, read a scanned page as a photo, ignore running headers, footers and page numbers, and take a web address a browser printed in a header or footer as `sourceUrl`.
+  - The `pdf` inputs reuse `recipeImportImagePublicIdSchema`, since a PDF is an image resource in Cloudinary.
+  - A PDF the lookup reports without a page count is `IMPORT_TRY_AGAIN` (`unavailable`).
+  - The page keeps the uploaded PDF's id with the `File` it came from, so choosing another PDF uploads that one.
+  - On a recipe page, "View original" for a PDF is a link styled as the button, read out as "View original (PDF, opens in a new tab)".
 
 **Manual verification:**
 1. Import a typed PDF of 2–3 pages, such as a recipe page saved with "Print → Save as PDF". Import Review shows its pages beside the proposal.

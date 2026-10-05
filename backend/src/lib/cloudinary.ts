@@ -44,7 +44,84 @@ export function importImageUrl(cloudName: string, publicId: string): string {
   return `https://res.cloudinary.com/${cloudName}/image/upload/${RECIPE_IMPORT_IMAGE_EAGER_TRANSFORMATION}/${publicId}`;
 }
 
-// Deletes one image and purges its cached copies from Cloudinary's CDN.
+// A PDF Document as it was uploaded (DEC-111): what the reader is sent and
+// what "View original" opens. It needs the account's "Allow delivery of PDF
+// and ZIP files" setting.
+export function importPdfUrl(cloudName: string, publicId: string): string {
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${publicId}.pdf`;
+}
+
+// One page of a PDF Document as a JPEG, capped as import images are, for
+// Import Review. Cloudinary makes it on the first request.
+export function importPdfPageUrl(
+  cloudName: string,
+  publicId: string,
+  page: number,
+): string {
+  return `https://res.cloudinary.com/${cloudName}/image/upload/pg_${String(page)},c_limit,w_2576,h_2576,q_auto/${publicId}.jpg`;
+}
+
+export interface ImportUploadDetails {
+  format: string;
+  bytes: number;
+  // Reported for a PDF only.
+  pages: number | null;
+}
+
+// Looks an upload up through the Admin API, for what the browser can't be
+// trusted to report (DEC-111). Null when there's no such upload.
+export type LookUpImportPdf = (
+  publicId: string,
+  signal: AbortSignal,
+) => Promise<ImportUploadDetails | null>;
+
+export class CloudinaryLookupError extends Error {
+  constructor(
+    // Metadata only: an HTTP status or what was missing.
+    readonly detail: string,
+  ) {
+    super(`Cloudinary didn't look the upload up: ${detail}`);
+    this.name = 'CloudinaryLookupError';
+  }
+}
+
+export function createLookUpImportPdf(
+  credentials: CloudinaryCredentials,
+  fetchImpl: typeof fetch = fetch,
+): LookUpImportPdf {
+  const authorization = `Basic ${Buffer.from(`${credentials.apiKey}:${credentials.apiSecret}`).toString('base64')}`;
+  return async (publicId, signal) => {
+    const path = publicId.split('/').map(encodeURIComponent).join('/');
+    // `pages` is only reported when it's asked for.
+    const response = await fetchImpl(
+      `https://api.cloudinary.com/v1_1/${credentials.cloudName}/resources/image/upload/${path}?pages=true`,
+      { headers: { authorization }, signal },
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new CloudinaryLookupError(`status ${String(response.status)}`);
+    }
+    const payload = (await response.json()) as {
+      format?: unknown;
+      bytes?: unknown;
+      pages?: unknown;
+    };
+    if (typeof payload.format !== 'string') {
+      throw new CloudinaryLookupError('no format');
+    }
+    if (typeof payload.bytes !== 'number') {
+      throw new CloudinaryLookupError('no size');
+    }
+    return {
+      format: payload.format,
+      bytes: payload.bytes,
+      pages: typeof payload.pages === 'number' ? payload.pages : null,
+    };
+  };
+}
+
+// Deletes one image and purges its cached copies from Cloudinary's CDN. A
+// PDF is an image resource, so it's deleted the same way.
 export type DestroyImage = (
   publicId: string,
   signal: AbortSignal,

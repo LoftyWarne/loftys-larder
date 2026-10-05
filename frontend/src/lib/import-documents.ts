@@ -13,20 +13,24 @@ import {
 
 // Documents (DEC-111), read in the browser. A text or Markdown file loads
 // into a text box and imports as pasted text. A saved web page is pruned
-// here, so the backend never receives the file as it was saved.
+// here, so the backend never receives the file as it was saved. A PDF is
+// checked here and uploaded to Cloudinary on Import.
 
 export const DOCUMENT_REFUSED =
-  'That file can’t be imported. Use a text, Markdown or web page (.html) file.';
+  'That file can’t be imported. Use a PDF, text, Markdown or web page (.html) file.';
 export const DOCUMENT_TOO_BIG = 'That file is too big to import.';
 export const DOCUMENT_UNREADABLE = 'Couldn’t read that file. Try again.';
 export const PAGE_TOO_BIG =
   'That page is too big to import. Paste the recipe’s text instead.';
+export const PDF_PASSWORD_PROTECTED =
+  'That PDF is password-protected. Save an unlocked copy, or screenshot the recipe.';
 export const DROP_ONE_DOCUMENT = `Drop one document, or up to ${String(RECIPE_IMPORT_IMAGES_MAX)} photos.`;
 
 export const DOCUMENT_ACCEPT = [
   ...Object.keys(RECIPE_IMPORT_DOCUMENT_EXTENSIONS).map(
     (extension) => `.${extension}`,
   ),
+  'application/pdf',
   'text/plain',
   'text/markdown',
   'text/html',
@@ -37,6 +41,7 @@ const KIND_BY_EXTENSION = new Map<string, RecipeImportDocumentKind>(
 );
 
 const KIND_BY_TYPE = new Map<string, RecipeImportDocumentKind>([
+  ['application/pdf', 'pdf'],
   ['text/plain', 'text'],
   ['text/markdown', 'text'],
   ['text/x-markdown', 'text'],
@@ -55,7 +60,9 @@ export type ImportDocument =
       // Longer than the paste limit, so only its start was loaded.
       truncated: boolean;
     }
-  | { kind: 'html'; fileName: string; size: number; html: string };
+  | { kind: 'html'; fileName: string; size: number; html: string }
+  // Uploaded as it is when the cook presses Import.
+  | { kind: 'pdf'; fileName: string; size: number; file: File };
 
 export type ImportDocumentReading =
   | { ok: true; document: ImportDocument }
@@ -231,6 +238,25 @@ function documentFileName(name: string): string {
   return trimmed.trim() === '' ? 'Untitled document' : trimmed;
 }
 
+// Where an encrypted PDF names its encryption: the trailer near the end, or
+// the first-page trailer near the start of a linearised file.
+const PDF_TRAILER_BYTES = 2048;
+const PDF_ENCRYPT = /\/Encrypt(?![A-Za-z])/;
+
+// A courtesy, not a guarantee: a PDF that gets past this is refused by the
+// reader instead.
+export async function pdfIsEncrypted(file: Blob): Promise<boolean> {
+  const [head, tail] = await Promise.all([
+    file.slice(0, PDF_TRAILER_BYTES).arrayBuffer(),
+    file.slice(Math.max(0, file.size - PDF_TRAILER_BYTES)).arrayBuffer(),
+  ]);
+  const latin1 = new TextDecoder('windows-1252');
+  return (
+    PDF_ENCRYPT.test(latin1.decode(head)) ||
+    PDF_ENCRYPT.test(latin1.decode(tail))
+  );
+}
+
 export async function readImportDocument(
   file: File,
 ): Promise<ImportDocumentReading> {
@@ -239,13 +265,23 @@ export async function readImportDocument(
   if (file.size > RECIPE_IMPORT_DOCUMENT_MAX_FILE_SIZE) {
     return { ok: false, problem: DOCUMENT_TOO_BIG };
   }
+  const fileName = documentFileName(file.name);
+  if (kind === 'pdf') {
+    let encrypted: boolean;
+    try {
+      encrypted = await pdfIsEncrypted(file);
+    } catch {
+      return { ok: false, problem: DOCUMENT_UNREADABLE };
+    }
+    if (encrypted) return { ok: false, problem: PDF_PASSWORD_PROTECTED };
+    return { ok: true, document: { kind, fileName, size: file.size, file } };
+  }
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(await file.arrayBuffer());
   } catch {
     return { ok: false, problem: DOCUMENT_UNREADABLE };
   }
-  const fileName = documentFileName(file.name);
   if (kind === 'text') {
     const text = decodeText(bytes);
     return {

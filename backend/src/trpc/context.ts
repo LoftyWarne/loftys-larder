@@ -2,7 +2,11 @@ import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
 import type { FastifyBaseLogger } from 'fastify';
 import type { Auth } from '../auth/index.ts';
 import type { Db } from '../db/index.ts';
-import type { CloudinaryCredentials, DestroyImage } from '../lib/cloudinary.ts';
+import type {
+  CloudinaryCredentials,
+  DestroyImage,
+  LookUpImportPdf,
+} from '../lib/cloudinary.ts';
 import type { PageFetcher } from '../lib/recipe-import/fetch-page.ts';
 import type { RecipeReader } from '../lib/recipe-reader/types.ts';
 import type { ImportRateLimitVerdict } from '../plugins/rate-limit.ts';
@@ -29,6 +33,7 @@ declare module 'fastify' {
     destroyImage: DestroyImage;
     recipeReader: RecipeReader;
     fetchPage: PageFetcher;
+    lookUpImportPdf: LookUpImportPdf;
   }
 }
 
@@ -36,6 +41,8 @@ export interface RecipeImportContext {
   reader: RecipeReader;
   // Fetches a linked page behind the SSRF guard (DEC-107).
   fetchPage: PageFetcher;
+  // Looks an uploaded PDF up in Cloudinary for its page count (DEC-111).
+  lookUpPdf: LookUpImportPdf;
   allowStart: () => Promise<ImportRateLimitVerdict>;
 }
 
@@ -73,6 +80,7 @@ export function createContext({
     recipeImport: {
       reader: req.server.recipeReader,
       fetchPage: req.server.fetchPage,
+      lookUpPdf: req.server.lookUpImportPdf,
       allowStart: () => req.server.limitRecipeImportStart(req),
     },
   };

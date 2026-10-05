@@ -1349,6 +1349,10 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - The browser checks a pruned page against both caps, 750,000 characters and 900,000 bytes as JSON, so the server's schema never refuses one the browser let through.
   - A drop of one Document goes to Document mode, and images go to Photos through the picker's own checks. Two Documents, or a Document with any other file, are refused. Drops are ignored while offline, while an import runs and during the several-recipes pick.
   - Text cut to a cap and stored in a draft never ends in half an emoji, because Postgres refuses a lone surrogate in jsonb.
+- **Amended (2026-10-05) at FEAT-65 kick-off.** Full detail in FEAT-65's implementation notes.
+  - `recipe_import_originals.format` is a pgEnum (`image`, `pdf`), as `recipe_drafts.kind` is, defaulting to `image`.
+  - The server checks the PDF's size as well as its format and page count, from the same lookup. A refused PDF is left in Cloudinary as an orphan. An upload that isn't there, isn't a PDF or is too big is a plain bad request; only more than 8 pages has a domain code.
+  - The lookup gets 10 seconds of the 75. A timeout or failure is the usual try-again error, and no draft is made.
 
 ---
 

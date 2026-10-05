@@ -151,7 +151,7 @@ export function RecipeDetailPage(): React.ReactElement {
           )}
         </p>
         {recipe.originals.length > 0 && (
-          <ViewOriginalButton images={recipe.originals} />
+          <ViewOriginalButton originals={recipe.originals} />
         )}
         <RecipeTagList tags={recipe.tags} />
         <RecipeRating

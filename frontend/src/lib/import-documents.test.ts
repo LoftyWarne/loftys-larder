@@ -14,6 +14,8 @@ import {
   htmlEncoding,
   htmlFitsCaps,
   PAGE_TOO_BIG,
+  PDF_PASSWORD_PROTECTED,
+  pdfIsEncrypted,
   pruneHtml,
   readImportDocument,
   sortDroppedFiles,
@@ -39,14 +41,16 @@ describe('documentKind', () => {
     ['RECIPE.MARKDOWN', '', 'text'],
     ['recipe.html', 'text/html', 'html'],
     ['recipe.htm', '', 'html'],
+    ['recipe.pdf', 'application/pdf', 'pdf'],
+    ['Scan.PDF', 'application/octet-stream', 'pdf'],
   ] as const)('sorts %s by its extension', (name, type, kind) => {
     expect(documentKind(file(name, type))).toBe(kind);
   });
 
   it.each([
-    ['recipe.pdf', 'application/pdf'],
     ['recipe.docx', 'text/plain'],
     ['recipe.rtf', 'text/rtf'],
+    ['recipe.pdfx', 'application/pdf'],
   ])('refuses %s, whatever its type', (name, type) => {
     expect(documentKind(file(name, type))).toBeNull();
   });
@@ -56,6 +60,7 @@ describe('documentKind', () => {
     ['text/markdown', 'text'],
     ['text/html; charset=utf-8', 'html'],
     ['application/xhtml+xml', 'html'],
+    ['application/pdf', 'pdf'],
     ['', null],
     ['application/octet-stream', null],
   ] as const)(
@@ -73,9 +78,16 @@ describe('sortDroppedFiles', () => {
   const photo = file('soup.jpg', 'image/jpeg');
   const heic = file('IMG_0001.HEIC');
   const word = file('soup.docx', 'application/msword');
+  const pdf = file('soup.pdf', 'application/pdf');
 
-  it('takes one Document', () => {
-    expect(sortDroppedFiles([page])).toEqual({ kind: 'document', file: page });
+  it.each([
+    ['a saved page', page],
+    ['a PDF', pdf],
+  ])('takes one Document, %s', (_label, document) => {
+    expect(sortDroppedFiles([document])).toEqual({
+      kind: 'document',
+      file: document,
+    });
   });
 
   it('takes images, with anything else among them, for the Photos checks', () => {
@@ -89,7 +101,8 @@ describe('sortDroppedFiles', () => {
     ['two Documents', [page, notes]],
     ['a Document with images', [notes, photo]],
     ['a Document with another file', [page, word]],
-    ['several files that are neither', [word, file('soup.pdf')]],
+    ['a PDF with a photo', [pdf, photo]],
+    ['several files that are neither', [word, file('soup.rtf')]],
   ])('refuses %s', (_label, files) => {
     expect(sortDroppedFiles(files)).toEqual({
       kind: 'refused',
@@ -258,6 +271,51 @@ describe('htmlFitsCaps', () => {
   });
 });
 
+// A PDF of about 6 KB, with its trailer at the end, or a linearised one
+// whose first-page trailer is near the start.
+function pdfWith(head: string, tail: string): string {
+  return `%PDF-1.7\n${head}\n${'0'.repeat(6000)}\n${tail}\nstartxref\n123\n%%EOF\n`;
+}
+
+function unlockedPdf(): string {
+  return pdfWith(
+    '1 0 obj << /Type /Catalog >> endobj',
+    'trailer\n<< /Size 10 /Root 1 0 R >>',
+  );
+}
+
+function lockedPdf(where: 'start' | 'end'): string {
+  const trailer = 'trailer\n<< /Size 10 /Root 1 0 R /Encrypt 9 0 R >>';
+  return where === 'end'
+    ? pdfWith('1 0 obj << /Type /Catalog >> endobj', trailer)
+    : pdfWith(
+        `1 0 obj << /Linearized 1 >> endobj\n${trailer}`,
+        'trailer\n<< /Size 10 >>',
+      );
+}
+
+describe('pdfIsEncrypted', () => {
+  it.each([
+    ['in the trailer at the end', lockedPdf('end')],
+    ['in the first-page trailer of a linearised file', lockedPdf('start')],
+  ])('finds the encryption %s', async (_label, content) => {
+    expect(await pdfIsEncrypted(new Blob([content]))).toBe(true);
+  });
+
+  it('passes a PDF with no encryption', async () => {
+    expect(await pdfIsEncrypted(new Blob([unlockedPdf()]))).toBe(false);
+  });
+
+  it('reads only the first and last 2 KB', async () => {
+    const pdf = new Blob([unlockedPdf()]);
+    const slice = vi.spyOn(pdf, 'slice');
+
+    await pdfIsEncrypted(pdf);
+
+    expect(slice.mock.calls).toEqual([[0, 2048], [pdf.size - 2048]]);
+  });
+});
+
 describe('readImportDocument', () => {
   it('loads a text file', async () => {
     const reading = await readImportDocument(
@@ -305,7 +363,7 @@ describe('readImportDocument', () => {
   });
 
   it('refuses a file it can’t import', async () => {
-    expect(await readImportDocument(file('soup.pdf'))).toEqual({
+    expect(await readImportDocument(file('soup.docx'))).toEqual({
       ok: false,
       problem: DOCUMENT_REFUSED,
     });
@@ -323,6 +381,42 @@ describe('readImportDocument', () => {
       problem: DOCUMENT_TOO_BIG,
     });
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it('loads a PDF as it is, for uploading on Import', async () => {
+    const pdf = file('Soup.pdf', 'application/pdf', unlockedPdf());
+
+    expect(await readImportDocument(pdf)).toEqual({
+      ok: true,
+      document: {
+        kind: 'pdf',
+        fileName: 'Soup.pdf',
+        size: pdf.size,
+        file: pdf,
+      },
+    });
+  });
+
+  it('refuses a password-protected PDF', async () => {
+    expect(
+      await readImportDocument(
+        file('Soup.pdf', 'application/pdf', lockedPdf('end')),
+      ),
+    ).toEqual({ ok: false, problem: PDF_PASSWORD_PROTECTED });
+  });
+
+  it('refuses a PDF over 10 MB without reading it', async () => {
+    const big = file('soup.pdf', 'application/pdf');
+    Object.defineProperty(big, 'size', {
+      value: RECIPE_IMPORT_DOCUMENT_MAX_FILE_SIZE + 1,
+    });
+    const slice = vi.spyOn(big, 'slice');
+
+    expect(await readImportDocument(big)).toEqual({
+      ok: false,
+      problem: DOCUMENT_TOO_BIG,
+    });
+    expect(slice).not.toHaveBeenCalled();
   });
 
   it('refuses a page still too big once pruned', async () => {

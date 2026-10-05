@@ -4,6 +4,35 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-05 — Document import: PDFs, kept as Originals (FEAT-65)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format clean in every workspace. Backend 910 tests and frontend 854 green. e2e: the import spec and the import axe cases pass (16 of 16, unchanged; no PDF e2e by agreement); the rest of the e2e suite wasn't run. No real model call and no real Cloudinary call yet, and manual verification not run. FEAT-65 checkboxes left for the user to tick.
+
+**Agreed at kick-off** (all twelve readings approved as proposed; detail in FEAT-65's amended notes):
+- `format` is a pgEnum (`recipe_import_original_format`), like `recipe_drafts.kind`.
+- The server refuses a PDF over 10 MB as well as one that's missing, not a PDF, or over 8 pages. Refused PDFs stay in Cloudinary as orphans.
+- Missing, not a PDF or too big is a plain `BAD_REQUEST` (generic message); over 8 pages is `IMPORT_DOCUMENT_TOO_LONG` with `pageCount` and `maxPages`.
+- Lookup: 10 seconds inside the 75; timeout → try again `timeout`, other failures → `unavailable`.
+- `import-images.ts` → `import-uploads.ts`. Import Review heads a PDF "Original document" and shows its pages. No PDF e2e.
+
+**Changes:**
+- **Shared:** the PDF upload credential; `pdf` start and stored inputs, the `pdf` input kind, `.pdf` in the Documents, `RECIPE_IMPORT_PDF_PAGES_MAX`; `recipeOriginalSchema` (`{ url, format }`) for `recipes.get`; `IMPORT_DOCUMENT_TOO_LONG`.
+- **Backend:** `importPdfUrl`, `importPdfPageUrl` and `createLookUpImportPdf` in `cloudinary.ts`; `getRecipeImportPdfCredentials`; migration 0025; `start` looks a PDF up, refuses it or sends the reader its URL, and stores `{ publicId, pageCount }`; `get` returns its page JPEGs; create keeps it as a `pdf` Original; discard and account deletion destroy it; the reader's `pdf` input goes to Claude as a URL document block before the text; the prompt has a short PDFs section; the fake reads markers from the PDF's URL.
+- **Frontend:** `.pdf` and the encryption check in `import-documents.ts`; the upload helper posts `eager` only when signed; Document mode uploads a PDF on Import and reuses it for "Try again" and the pick; the too-long message names the page count (`getDomainErrorCause`); Import Review shows the pages; "View original" opens a PDF in a new tab.
+- **Docs:** FEAT-65 and DEC-111 amended, `plan.md` (PDF flow, the column), `OPERATIONS.md` (new "Cloudinary account settings" section), README.
+
+**Drift from the kick-off plan:**
+- The prompt's PDFs section wasn't spelled out at kick-off. It tells the reader to take a web address a browser printed in a page's header or footer as `sourceUrl`.
+- A PDF the lookup reports without a page count is try again (`unavailable`).
+
+**Open:**
+- **Cloudinary console, before deploy:** turn on "Allow delivery of PDF and ZIP files" and check "Strict transformations" is off. Without the first, every PDF import fails in production. `OPERATIONS.md` has a status line to date once checked.
+- **Real model call before deploy** (cross-cutting #22): the reader gained a `pdf` input and the prompt changed. Gate check steps 1–5 cover it; step 3 times an 8-page PDF against the 75 seconds and should be recorded here.
+- What Anthropic returns when it can't fetch the PDF (delivery off) isn't confirmed; probably a 400, which would surface as `IMPORT_REQUEST_REJECTED`.
+- Manual verification steps 1–6 not run.
+
+---
+
 ## 2026-10-05 — Document import: text, Markdown and saved web pages (FEAT-64)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format clean in every workspace. Backend 880 tests and frontend 832 green. e2e: the import spec and the import axe cases pass (16 of 16), including the two new Document specs and the new phone-width Document axe case; the rest of the e2e suite wasn't run. No real model call yet, and manual verification not run. FEAT-64 checkboxes left for the user to tick.

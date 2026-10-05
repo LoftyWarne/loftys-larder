@@ -108,7 +108,7 @@ import {
   pickableRecipesWhere,
   type PickableRecipesOptions,
 } from '../../lib/pickable-recipes.ts';
-import { importImageUrl } from '../../lib/cloudinary.ts';
+import { importImageUrl, importPdfUrl } from '../../lib/cloudinary.ts';
 import { recipePlantPointsExpr } from '../../lib/plant-points.ts';
 import {
   assertIngredientLinesValid,
@@ -423,7 +423,10 @@ export const recipesRouter = router({
         loadTagsByRecipe(ctx.db, [recipeId]),
         // Kept through soft delete, like the recipe (DEC-107).
         ctx.db
-          .select({ publicId: recipeImportOriginals.publicId })
+          .select({
+            publicId: recipeImportOriginals.publicId,
+            format: recipeImportOriginals.format,
+          })
           .from(recipeImportOriginals)
           .innerJoin(recipes, eq(recipes.id, recipeImportOriginals.recipeId))
           .where(
@@ -482,7 +485,11 @@ export const recipesRouter = router({
         yourRating: ratingRow.yourRating,
         tags: tagsByRecipe.get(recipeId) ?? [],
         originals: originalRows.map((row) => ({
-          url: importImageUrl(ctx.cloudinary.cloudName, row.publicId),
+          url:
+            row.format === 'pdf'
+              ? importPdfUrl(ctx.cloudinary.cloudName, row.publicId)
+              : importImageUrl(ctx.cloudinary.cloudName, row.publicId),
+          format: row.format,
         })),
         healthScore:
           header.healthScore === null ||

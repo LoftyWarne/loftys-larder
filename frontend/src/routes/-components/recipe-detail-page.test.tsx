@@ -453,7 +453,7 @@ describe('RecipeDetailPage', () => {
     );
   });
 
-  it('offers View original only for a recipe imported from images', () => {
+  it('offers View original only for a recipe with Originals', () => {
     getUseQueryMock.mockReturnValue({
       data: FULL_RECIPE,
       isLoading: false,
@@ -464,6 +464,9 @@ describe('RecipeDetailPage', () => {
     expect(
       screen.queryByRole('button', { name: 'View original' }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /^View original/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('opens the Originals in page order from View original', async () => {
@@ -471,8 +474,8 @@ describe('RecipeDetailPage', () => {
       data: {
         ...FULL_RECIPE,
         originals: [
-          { url: 'https://img.test/p1' },
-          { url: 'https://img.test/p2' },
+          { url: 'https://img.test/p1', format: 'image' },
+          { url: 'https://img.test/p2', format: 'image' },
         ],
       },
       isLoading: false,
@@ -504,7 +507,10 @@ describe('RecipeDetailPage', () => {
 
   it('calls a single Original just that', async () => {
     getUseQueryMock.mockReturnValue({
-      data: { ...FULL_RECIPE, originals: [{ url: 'https://img.test/p1' }] },
+      data: {
+        ...FULL_RECIPE,
+        originals: [{ url: 'https://img.test/p1', format: 'image' }],
+      },
       isLoading: false,
       error: null,
     });
@@ -516,6 +522,27 @@ describe('RecipeDetailPage', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Original' });
     expect(
       within(dialog).queryByRole('button', { name: 'Next page' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens a PDF Original in a new tab from View original', () => {
+    const url =
+      'https://res.cloudinary.com/test-cloud/image/upload/loftys-larder/imports/tart.pdf';
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, originals: [{ url, format: 'pdf' }] },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    const link = screen.getByRole('link', {
+      name: 'View original (PDF, opens in a new tab)',
+    });
+    expect(link).toHaveAttribute('href', url);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(
+      screen.queryByRole('button', { name: 'View original' }),
     ).not.toBeInTheDocument();
   });
 

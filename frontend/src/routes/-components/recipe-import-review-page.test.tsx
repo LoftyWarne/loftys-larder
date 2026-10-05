@@ -244,6 +244,52 @@ describe('RecipeImportReviewPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows a PDF import’s pages, each of which can be enlarged', async () => {
+    const proposal: RecipeImportProposal = {
+      ...PROPOSAL,
+      input: {
+        kind: 'pdf',
+        publicId: 'loftys-larder/imports/tart',
+        pageCount: 2,
+      },
+    };
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...importDraft(),
+        proposal,
+        images: [
+          { url: 'https://img.test/pg1.jpg' },
+          { url: 'https://img.test/pg2.jpg' },
+        ],
+        draftData: { version: 1, fields: { proposal } },
+      },
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<RecipeImportReviewPage />);
+
+    await user.click(screen.getByText('Original document'));
+    const original = screen.getByText('Original document').closest('details');
+    if (!original) throw new Error('no original');
+    expect(
+      within(original)
+        .getAllByRole('img')
+        .map((img) => [img.getAttribute('alt'), img.getAttribute('src')]),
+    ).toEqual([
+      ['Page 1 of 2', 'https://img.test/pg1.jpg'],
+      ['Page 2 of 2', 'https://img.test/pg2.jpg'],
+    ]);
+
+    await user.click(
+      within(original).getByRole('button', { name: 'Enlarge page 1 of 2' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Page 1 of 2' });
+    expect(within(dialog).getByRole('img')).toHaveAttribute(
+      'src',
+      'https://img.test/pg1.jpg',
+    );
+  });
+
   function renderLinkImport(url: string): void {
     const proposal: RecipeImportProposal = {
       ...PROPOSAL,

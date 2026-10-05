@@ -15,6 +15,7 @@ import {
 const KIND_LABELS: Record<ImportDocument['kind'], string> = {
   text: 'Text file',
   html: 'Saved web page',
+  pdf: 'PDF',
 };
 
 export interface DocumentPickerProps {
@@ -29,6 +30,7 @@ export interface DocumentPickerProps {
 
 // Choosing the one Document to import (DEC-111). A text or Markdown file
 // opens in a text box the cook can trim before importing it as pasted text.
+// A PDF of up to 8 pages is uploaded on Import.
 export function DocumentPicker({
   value,
   problem,
@@ -42,7 +44,7 @@ export function DocumentPicker({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        A text, Markdown or web page (.html) file holding the recipe, up to{' '}
+        A PDF, text, Markdown or web page (.html) file holding the recipe, up to{' '}
         {formatFileSize(RECIPE_IMPORT_DOCUMENT_MAX_FILE_SIZE)}. You can also
         drop a file anywhere on this page.
       </p>

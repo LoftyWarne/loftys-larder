@@ -1,0 +1,2 @@
+CREATE TYPE "public"."recipe_import_original_format" AS ENUM('image', 'pdf');--> statement-breakpoint
+ALTER TABLE "recipe_import_originals" ADD COLUMN "format" "recipe_import_original_format" DEFAULT 'image' NOT NULL;

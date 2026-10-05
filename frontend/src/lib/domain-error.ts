@@ -1,5 +1,6 @@
 import {
   domainErrorCauseSchema,
+  type DomainErrorCause,
   type DomainErrorCode,
 } from '@loftys-larder/shared';
 import { TRPCClientError } from '@trpc/client';
@@ -10,10 +11,15 @@ import { TRPCClientError } from '@trpc/client';
 // typed cause — caller falls back to the standard tRPC code and a generic
 // message.
 export function getDomainErrorCode(error: unknown): DomainErrorCode | null {
+  return getDomainErrorCause(error)?.code ?? null;
+}
+
+// The whole cause, for an error whose metadata the message names.
+export function getDomainErrorCause(error: unknown): DomainErrorCause | null {
   if (!(error instanceof TRPCClientError)) return null;
   const rawCause = (error.shape as { data?: { cause?: unknown } } | undefined)
     ?.data?.cause;
   if (rawCause === undefined) return null;
   const parsed = domainErrorCauseSchema.safeParse(rawCause);
-  return parsed.success ? parsed.data.code : null;
+  return parsed.success ? parsed.data : null;
 }

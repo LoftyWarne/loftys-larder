@@ -4,6 +4,33 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-05 — Document import scoped (DEC-111, FEAT-64, FEAT-65); eval runner renumbered FEAT-66
+
+**Status:** Docs only, no code. Scoped in a grilling session with the user. The specs are written to be implemented in a later session from the docs alone: start with FEAT-64's kick-off.
+
+**Decided:**
+- New glossary term **Document** (`CONTEXT.md`): a PDF, plain-text, Markdown or HTML file handed whole to a Recipe Import. A photo is never a Document. The import input definition now includes it.
+- One Document per import, one recipe per import (the "several" pick as before). Bulk import is a new non-goal.
+- Formats: `.pdf`, `.txt`, `.text`, `.md`, `.markdown`, `.html`, `.htm`. No `.webarchive`, `.mhtml`, `.docx`, `.rtf` or app exports.
+- Routes by format (DEC-111):
+  - Text and Markdown load into an editable text box and import as pasted text. No server change.
+  - HTML is pruned in the browser and sent as a new `html` input. The server reads it with `readPageContent` and takes `sourceUrl` from the page itself.
+  - PDF goes browser → Cloudinary and Claude reads it natively by URL. Cap 8 pages and 10 MB; the server checks the page count through Cloudinary's Admin API. Kept as an Original via a new `recipe_import_originals.format` column. "View original" opens it in a new tab, and Import Review shows its pages as JPEGs.
+- Drag-and-drop on the whole Import page, for Documents and photos.
+- Two features: FEAT-64 (text, Markdown, saved web pages) then FEAT-65 (PDFs). At the user's request they come before the eval runner, so **FEAT-64 is renumbered FEAT-66** everywhere in the docs, these notes included. The number is an identifier, so older entries that said FEAT-64 meant the eval runner.
+
+**Facts checked at scoping:**
+- The installed `@anthropic-ai/sdk` (0.131.0) has `BetaURLPDFSource`, so a PDF can be sent by URL. Claude's PDF limits: 32 MB and 600 pages per request; about 1,500–3,000 text tokens a page plus the page image.
+- Cloudinary blocks PDF delivery on free accounts by default ("Allow delivery of PDF and ZIP files"). A page delivered as a JPEG (`pg_N`) isn't blocked.
+- Cloudinary's upload response and its Admin API resource lookup (`GET /resources/image/upload/:public_id?pages=true`) both report `pages`. The lookup reports it only when `pages=true` is sent.
+- Fastify's body limit is the 1 MiB default; nothing sets `bodyLimit`.
+
+**Open, for the kick-offs:**
+- FEAT-64: the stored-input schema touches every reader of `proposal.input`. Existing drafts must still parse.
+- FEAT-65: turn on Cloudinary's PDF delivery setting before its first deploy. Time a real 8-page PDF against the 75-second limit (manual verification step 3); FEAT-66 tunes the cap. Confirm the `format` column's name and type.
+
+---
+
 ## 2026-10-04 — Image imports take up to 8 images, not 4
 
 **Status:** Committed + pushed to `main` as its own commit. The FEAT-63 work in the same files was left out and is still uncommitted. Backend 847 and frontend 763 tests green; typecheck, lint and format clean. No real import with more than four images has been run.
@@ -13,7 +40,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 **Unchanged on purpose:** the 75-second limit, 10 MB per image, 14 imports an hour (it counts imports, not images), and the all-at-once upload.
 
 **Open:**
-- The 75 s budget is the risk. The only measurement is four screenshots in 36.4 s. Run 6–8 real cookbook photos through the real adapter (a FEAT-64-style check) and compare against DEC-104's revisit trigger.
+- The 75 s budget is the risk. The only measurement is four screenshots in 36.4 s. Run 6–8 real cookbook photos through the real adapter (a FEAT-66-style check) and compare against DEC-104's revisit trigger.
 - Uploads are still all-or-nothing (`Promise.all` in `recipe-import-page.tsx`): one failure orphans the rest and "Try again" re-uploads every image. Keeping the successful uploads is the fix if this bites (DEC-107 amended).
 
 ---
@@ -54,7 +81,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 **Open:**
 - **Real model call before deploy** (cross-cutting #22): one link import through the `anthropic` adapter. Manual verification step 1 is that call.
 - **Sites that block the User-Agent or Fly's IPs** are unknown until real use. DEC-107's revisit trigger covers a site the household uses often.
-- **Bad source data** goes to the model as given. BBC Good Food's shakshuka declares "1.2 milligram of sodium", and the prompt's sodium-to-salt rule would make that 0.003 g. Worth an eval case in FEAT-64.
+- **Bad source data** goes to the model as given. BBC Good Food's shakshuka declares "1.2 milligram of sodium", and the prompt's sodium-to-salt rule would make that 0.003 g. Worth an eval case in FEAT-66.
 - e2e has no link import: one would need a stand-in page server reachable through the guard.
 
 ---
@@ -79,7 +106,7 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
 **Live check:** four PNG screenshots (the user's failed prod attempt, still in `loftys-larder/imports`) through the real adapter: candidate in 36.4 s, normalised into "Shakshuka" with 8 rows (3 matched), 5 proposed ingredients, 2 steps, 9 step links, 10 Estimate marks, 5 notes, 340 kcal. 9,019 tokens in, 4,470 out (about 10p). Diagnosis and probes cost about 7p more.
 
 **Open:**
-- The reply's shape is no longer guaranteed. FEAT-64's evals should measure malformed replies.
+- The reply's shape is no longer guaranteed. FEAT-66's evals should measure malformed replies.
 - The 8 images from the failed prod attempts are orphans in Cloudinary.
 - FEAT-60, 61 and 62 manual verification still needs a real run in production after this deploys.
 
@@ -176,13 +203,13 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
 - Unknown ids from a reader: proposed new ingredients may have a null category and unit (the cook picks in Import Review), and candidate rows carry `{ id, name }` so an unknown id still has a name to fall back on.
 - Create from import: existing-ingredient rows carry `unitId` and get the unit-mismatch check; cost and image are accepted from the cook; a `{ newName }` source taken meanwhile links to the existing one; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` names the `newKey`.
 - Anthropic's server-side refusal fallback (`fallbacks: "default"`) is on; the model that answered is recorded on the draft and in logs.
-- Evals become a later feature (FEAT-64): the eval runner, the user-supplied inputs, a Sonnet 5.5 vs Opus 5.5 comparison and effort tuning. FEAT-60's gate check is manual verification step 3 alone.
-- Model choice: Opus 5.5 stays the default (DEC-104). A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its refusal fallback doesn't cover `bio` or `general_harms` declines. Decide with FEAT-64's numbers.
+- Evals become a later feature (FEAT-66): the eval runner, the user-supplied inputs, a Sonnet 5.5 vs Opus 5.5 comparison and effort tuning. FEAT-60's gate check is manual verification step 3 alone.
+- Model choice: Opus 5.5 stays the default (DEC-104). A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its refusal fallback doesn't cover `bio` or `general_harms` declines. Decide with FEAT-66's numbers.
 
 **Jev (TypeSafe AI) evaluated, not adopted.** Jev answers typed Choice / Score / yes-no questions with calibrated probabilities in 70–500 ms, but doesn't generate text and is weak at numbers ("not a calculator"), so it can't read recipes, convert units or estimate nutrition. Adopting it means a second provider and a new data flow. Ideas for later, each with a trigger:
 - **Near-duplicate check for proposed new ingredients** (DEC-105's revisit trigger: near-duplicates build up). Shortlist existing ingredients by trigram, ask a Choice "is this the same as one of these?" (max 255 options), show "possibly the same as X" in Import Review.
 - **Health scoring** (DEC-101, at its kick-off). A 10-level Score fits the 1–10 scale and would make a full backfill fast, but its docs admit weak numeric calibration on score levels, and it can't write the score's summary text.
-- **FEAT-64 grader** for fuzzy fields, e.g. "does this step keep the original instruction?".
+- **FEAT-66 grader** for fuzzy fields, e.g. "does this step keep the original instruction?".
 - Notes: `@typesafe-ai/sdk` ships ESM; data region not documented; zero data retention is enterprise-only.
 
 **Changes:**
@@ -200,7 +227,7 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
   - `procedures/recipe-imports.ts`: `start`, `list`, `get`, `discard`, `createRecipe`.
   - `rate-limit.ts` decorates `limitRecipeImportStart` (14 an hour per user; 1,000 under `NODE_ENV=test`). `AppContext` gains `log` (the request logger) and `recipeImport` (reader and limiter); the server builds the reader once at boot.
 - **Tests:** `plain-text`, `normalise-proposal`, `recipe-reader` (SDK HTTP layer faked through its `fetch` option), `recipe-imports-procedures` (Testcontainers), plus config and rate-limit cases. `test/helpers/context-deps.ts` fills the two new context fields for the other procedure tests.
-- **Docs and config:** FEAT-60 amended; new FEAT-64 (evals); cross-cutting #22; DEC-104, DEC-108 and DEC-109 amended; `secrets-checklist.md`; `fly.toml [env]`; `backend/.env.example`; README; AGENTS.md feature count.
+- **Docs and config:** FEAT-60 amended; new FEAT-66 (evals); cross-cutting #22; DEC-104, DEC-108 and DEC-109 amended; `secrets-checklist.md`; `fly.toml [env]`; `backend/.env.example`; README; AGENTS.md feature count.
 
 **Drift from the kick-off plan:**
 - New helper `structured-output-schema.ts`, not in the agreed list. The SDK's `zodOutputFormat` moves `enum` and `const` into descriptions, which would leave the outcome discriminator and the enums unenforced. Easy to drop if the SDK's helper is preferred.
@@ -210,7 +237,7 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
 
 **Open:**
 - **Not checked against the live API:** structured outputs together with server-side fallback, the effort setting, and the prompt. Manual verification step 3 is the first real call.
-- **"Converted" marks:** the prompt follows DEC-105 and marks a converted quantity only when the conversion rests on an assumption (an onion's weight, flour's density), not exact ones (tbsp → ml). The FEAT-60 criterion reads as "converted quantities are marked". Tune in FEAT-64 if every conversion should be marked.
+- **"Converted" marks:** the prompt follows DEC-105 and marks a converted quantity only when the conversion rests on an assumption (an onion's weight, flour's density), not exact ones (tbsp → ml). The FEAT-60 criterion reads as "converted quantities are marked". Tune in FEAT-66 if every conversion should be marked.
 - **Proposed new ingredient that already exists:** if the reader proposes a new ingredient whose name the household already has, `normaliseProposal` keeps it, and create recipe gives `INGREDIENT_NAME_TAKEN`. Import Review (FEAT-61) may want to flag it before then.
 - **Autosave and the proposal:** `recipeDrafts.upsert` replaces all of `draftData`, so Import Review must send `fields.proposal` back with each save. `list` falls back to a null name and `get` to a null proposal (FEAT-61).
 - **Closing the tab:** a cancelled request aborts the read. It's logged and reported as a timeout (`GATEWAY_TIMEOUT`, so it reaches Sentry).

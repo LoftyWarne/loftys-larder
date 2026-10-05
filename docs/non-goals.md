@@ -113,6 +113,12 @@ Why not: storage cost at household-scale upload volume is negligible. Building, 
 Revisit: when storage cost or asset clutter becomes visible in the Cloudinary dashboard.
 `[→ decision log]`
 
+### Bulk recipe import
+What it is: importing many recipes in one go: another recipe app's export (Paprika, Mealie, Recipe Keeper), several files at once, or every recipe in one Document.
+Why not: Recipe Import is worth having because every proposal is checked against its original in Import Review before it exists (DEC-103). A bulk import either skips that check or queues dozens of reviews, and each recipe is still a model call that has to finish within one request (DEC-104). Each app's export format would be its own parser, for what is a one-off move. Imports take one Document, and one recipe from it (DEC-111).
+Revisit: when the household moves over from another recipe app with a large collection, or keeps importing many recipes from one file, one at a time. It would bring the background-work decision named in cross-cutting #22.
+`[→ decision log]`
+
 ---
 
 ## 2. Quality Bars Deliberately Held

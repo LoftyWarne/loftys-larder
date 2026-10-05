@@ -11,8 +11,12 @@ Turning a recipe that already exists outside the app into a Larder recipe, with 
 _Avoid_: scrape, parse, OCR, AI recipe
 
 **Import input**:
-What the cook hands to a Recipe Import: one or more images, a web link, or pasted text.
+What the cook hands to a Recipe Import: one or more images, a Document, a web link, or pasted text.
 _Avoid_: source, upload, capture
+
+**Document**:
+A PDF, plain-text, Markdown or HTML file holding a recipe, handed to a Recipe Import whole. A photo or screenshot is an image, never a Document.
+_Avoid_: file, attachment
 
 **Import Review**:
 The step where a cook checks and corrects what a Recipe Import proposed, alongside its import input, before the recipe exists.

@@ -2453,7 +2453,7 @@ Conventions:
 - `backend/package.json` (`@anthropic-ai/sdk`), `backend/src/config.ts` (`ANTHROPIC_API_KEY`, `RECIPE_IMPORT_ADAPTER`, `RECIPE_IMPORT_MODEL`), `docs/secrets-checklist.md`
 - `backend/src/lib/recipe-reader/` (new): the `RecipeReader` interface, the `anthropic` adapter (prompt, structured outputs), the `fake` adapter, and choosing an adapter from config
 - `backend/src/lib/recipe-import/` (new): `normaliseProposal`
-- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-64 at kick-off
+- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-66 at kick-off
 - `backend/src/trpc/procedures/recipe-imports.ts` (new: start, list, get, discard, create recipe), `backend/src/trpc/router.ts`
 - `backend/src/lib/recipe-writes.ts` (new: write code shared by `recipes.ts` and create recipe), `backend/src/trpc/procedures/recipes.ts` (uses it)
 - `backend/src/plugins/rate-limit.ts` (import limit), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the reader and the limit on the context)
@@ -2508,7 +2508,7 @@ Conventions:
   - The import limit is 14 `start` calls per user per hour, every call counted, checked inside `start` so the refusal is `TOO_MANY_REQUESTS` with `IMPORT_RATE_LIMITED`.
   - Adapters return a candidate shaped by `recipeImportCandidateSchema` (structured-output friendly); its rows refer to household ingredients as `{ id, name }`. A proposed new ingredient keeps a category or unit that wasn't sent as null (DEC-109 amended).
   - Create from import: an existing ingredient's row carries `unitId` for the unit-mismatch check; cost and image are accepted from the cook; a source proposed by name that exists by then is linked; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` carries the `newKey`. The draft is deleted first inside the transaction, so a second "Create recipe" finds nothing and rolls back (DEC-108 amended).
-  - The eval runner and eval set move to FEAT-64, with manual verification steps 1 and 2.
+  - The eval runner and eval set move to FEAT-66, with manual verification steps 1 and 2.
 - Amended after the FEAT-62 deploy (2026-10-04): Anthropic refused the structured-output schema, so every import failed in production. The `anthropic` adapter now describes the reply in its prompt instead of using structured outputs, and a request the provider refuses outright is `IMPORT_REQUEST_REJECTED` rather than "try again" (DEC-104 and DEC-109 amended).
 
 **Manual verification:**
@@ -2516,7 +2516,7 @@ Conventions:
 2. Run it on a shopping list. It reports not a recipe.
 3. Against a signed-in local app with a real key, call `start` and check the `recipe_drafts` row: `kind = 'import'`, the proposal, and the adapter and model.
 
-Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
+Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 
 **Common gotchas:**
 - `baseServings` is required. If the text doesn't state it, it's an Estimate.
@@ -2531,9 +2531,9 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
   - `start`: a `fake` outcome becoming an import draft that records the reader; several recipes; not a recipe; timeout and provider error; the rate limit; household scoping of the lists sent.
   - Create recipe: one transaction; keys resolved for rows, step links and the source; rollback on a failure partway; `INGREDIENT_NAME_TAKEN`; the draft deleted.
   - `list`, `get` and `discard`: ownership, newest first, and manual drafts untouched.
-- Eval set: moved to FEAT-64 (kick-off, 2026-10-04).
+- Eval set: moved to FEAT-66 (kick-off, 2026-10-04).
 - Commit: `feat(recipes): read a pasted recipe into an import draft and create it in one transaction`
-- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-64).
+- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-66).
 
 ---
 
@@ -2731,11 +2731,181 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-64 — Model feature evals: the eval runner and the Recipe Import eval set
+### FEAT-64 — Document import: text, Markdown and saved web pages
+
+**Goal:** A cook imports a recipe from a **Document** (`CONTEXT.md`) that's a text, Markdown or saved web page file. The Import page gains a Document mode and accepts a dropped file in every mode. A text or Markdown file opens in an editable text box and imports as pasted text. An HTML file is pruned in the browser and read on the server like a linked page, JSON-LD first, without a fetch. (DEC-111, DEC-103, DEC-107, DEC-109)
+
+**Estimate:** 1–1.5 days. **Depends on:** FEAT-61 (Import page, Import Review), FEAT-62 (the Photos picker, which drops reuse), FEAT-63 (`readPageContent`, the reader's `page` input). **Enables:** FEAT-65.
+
+**Files:**
+- `shared/src/schemas/recipe-imports.ts`: the accepted Document extensions and caps, an `html` start input, the stored input (see Shapes), and the `html` input kind
+- `backend/src/trpc/procedures/recipe-imports.ts`: the `html` input in `start` (read the content, find the source link, store the readable text); `toReaderInput`
+- `backend/src/lib/recipe-import/page-content.ts`: export the readable-text extraction on its own, so Import Review gets text even when the reader got JSON-LD
+- `backend/src/lib/recipe-import/page-source-link.ts` (new, pure): the source link from a saved page
+- `backend/src/lib/recipe-reader/types.ts`, `anthropic-prompt.ts` and `fake.ts`: the `page` input's `url` becomes nullable, and the prompt says the page is a file the cook saved when there's no URL
+- `backend/src/lib/recipe-import/import-images.ts`: parse the draft's input with the stored-input schema
+- `frontend/src/routes/-components/recipe-import-page.tsx`: Document mode and the drop target
+- `frontend/src/components/recipe-import/document-picker.tsx` (new): the picker, the file's name and size, and the "From `<file name>`" text box
+- `frontend/src/lib/import-documents.ts` (new, pure): sorting a picked or dropped file into a Document kind, text decoding, and HTML pruning
+- `frontend/src/components/recipe-import/original-input.tsx`: an HTML Document's file name, source link and readable text
+- e2e: `e2e/specs/recipe-import.spec.ts` (a text file and an HTML file on the `fake` adapter)
+- `docs/plan.md` (a "Document flow" paragraph beside the image and link flows), `README.md`
+
+**Shapes** (code in `shared/src/schemas/recipe-imports.ts`; names provisional):
+- **Accepted Documents:** `.txt`, `.text`, `.md`, `.markdown`, `.html` and `.htm`. Sort by extension first, then MIME type, because phones often report `.md` as `application/octet-stream` or nothing. FEAT-65 adds `.pdf`.
+- **Start input:** the import input gains `{ kind: 'html', fileName, html }`. `fileName` is the base name, trimmed and capped at 255 characters. `html` is the pruned markup, capped at `RECIPE_IMPORT_HTML_MAX_LENGTH` (750,000) characters. Text and Markdown files use the existing `{ kind: 'text', text }`.
+- **Stored input:** the proposal's `input` stops being the start input and gets its own schema, `recipeImportStoredInputSchema`. It's the same as the start input for `text`, `images` and `link`. For `html` it's `{ kind: 'html', fileName, sourceUrl: string | null, text }`, where `text` is the page's readable text, capped at 20,000 characters. The markup is never stored: autosave sends the proposal back on every edit. Every reader of `proposal.input` uses the stored schema (`readProposal`, `importImagePublicIds`, `get`, create recipe, the Import Review page).
+- **Input kind:** `recipeImportInputKindSchema` gains `html`. The in-progress list and the "several recipes" wording (`INPUT_WORDS`) need a label for it, e.g. "Document".
+- **Page modes:** the Import page's modes stop matching input kinds one to one. Its mode type becomes `text | images | link | document`, and Document mode sends `text` (a text or Markdown file) or `html` (FEAT-65 adds `pdf`). Keep "several recipes" and error wording keyed by the input kind sent.
+- **Reader input:** `{ kind: 'page', url: string | null, format, content, truncated }`. A saved page passes its source link as `url`, or null.
+
+**Acceptance criteria:**
+- [ ] The Import page has a Document mode beside Paste text, Photos and Link. Its picker accepts `.txt`, `.text`, `.md`, `.markdown`, `.html` and `.htm`, and refuses any other file with "That file can't be imported. Use a text, Markdown or web page (.html) file."
+- [ ] A Document file over 10 MB is refused before it's read: "That file is too big to import."
+- [ ] A text or Markdown file opens in an editable text box headed "From `<file name>`", and Import sends it as pasted text. Import Review shows it as the original text, and the file isn't kept
+- [ ] A text file longer than 20,000 characters loads its first 20,000, with the notice "Only the first 20,000 characters were loaded. Trim it to the recipe."
+- [ ] A text file that isn't valid UTF-8 is read as Windows-1252, so "£" and "½" come through
+- [ ] An HTML file is pruned in the browser: scripts other than `application/ld+json`, styles, SVG, `<noscript>`, `<iframe>`, `<template>` and comments are removed, except a "saved from url" comment. If what's left is still over the cap, it's refused with "That page is too big to import. Paste the recipe's text instead." The backend never receives the unpruned file
+- [ ] An HTML file with schema.org `Recipe` JSON-LD is imported from that data, and one without from its text, as for a link. Not a recipe, for an HTML file, adds "If the page has one, paste the text or a screenshot instead."
+- [ ] An HTML file's `sourceUrl` is its canonical link, otherwise its `og:url`, otherwise its "saved from url" comment, taking the first that's an https URL. With none, the proposal's own `sourceUrl` stands. The link is never fetched
+- [ ] Import Review shows an HTML Document's file name, its source link if there is one (clickable only when https), and the page's readable text up to 20,000 characters
+- [ ] "Several recipes" from an HTML file sends the pruned file again with the pick, without reading the file again
+- [ ] A file dropped anywhere on the Import page is taken in every mode. A Document switches to Document mode. Images switch to Photos and join the picked images, up to 8, with the Photos picker's format and size checks. Two Documents, or a Document with images, are refused with "Drop one document, or up to 8 photos."
+- [ ] Dropping is off while offline, as Import is, and the page shows where a file can be dropped while one is dragged over it
+- [ ] An HTML import logs the input kind, the pruned size, the content kind, its length, whether it was cut, and the source link's host if there is one. It never logs the file name, the link's path or the content
+- [ ] The Document mode works at phone width and passes the axe scan
+
+**Implementation notes:**
+- Read files with `File.arrayBuffer()` and decode with `TextDecoder`. For text, try UTF-8 with `fatal: true` (after stripping a BOM), and fall back to `windows-1252`. For HTML, use a BOM if there is one, otherwise the charset in the first 1,024 bytes' `<meta charset>` or `<meta http-equiv="Content-Type">`, otherwise UTF-8.
+- Prune with `new DOMParser().parseFromString(html, 'text/html')`. A parsed document runs no scripts and loads nothing. Remove the elements listed above, then serialise the whole document, including any comment before `<html>`: each of `document.childNodes` in turn, a comment as `<!--…-->` and the root element by its `outerHTML`. Keep `<head>`, because the canonical link, `og:url` and JSON-LD often live there. Keep a comment that starts `saved from url=` (browsers write it before `<html>`, so walk the document's own child nodes as well as the element tree), and remove every other comment.
+- The cap is on what reaches Fastify. Its default body limit is 1 MiB (no `bodyLimit` is set), so check in the browser that `new TextEncoder().encode(JSON.stringify(html)).length` is at most 900,000 bytes. The shared schema's 750,000-character cap is the server-side check, and Fastify's limit is the backstop. A saved page is mostly ASCII, so the two agree in practice.
+- On the server, an `html` input skips the link guard and the fetch. It runs `readPageContent` on the markup, finds the source link with `page-source-link.ts` (using `htmlparser2`, already a dependency), and reads the readable text for the stored input, all under the same 75-second deadline. Set `header.sourceUrl` after `normaliseProposal`, as the link path does, but only when a source link was found.
+- Text and Markdown files need no server change: they reach `start` as `{ kind: 'text' }`. The Markdown goes to the model as written, and `normaliseProposal` already strips markdown from what comes back (DEC-49).
+- The drop target is the whole page: listen for `dragenter`, `dragover`, `dragleave` and `drop` on `window` while the Import page is mounted, with `preventDefault` so the browser doesn't open a file dropped outside the form. Route dropped images through the Photos picker's own validation; don't copy it.
+- A saved page and its source link are untrusted input (DEC-104): https only, at most 2,000 characters, and never fetched.
+- Route files stay thin shells (AGENTS.md).
+
+**Manual verification:**
+1. Save a recipe page from a large recipe site with the browser's "Save Page As… / Webpage, HTML only" and import the file. Import Review opens with the page's link as the source and its text alongside.
+2. Save a small blog's recipe page with no JSON-LD and import it.
+3. Export a recipe from a notes app as Markdown, trim it in the text box, and import it.
+4. On a desktop, drag a photo onto the Import page in Link mode: it switches to Photos. Drag a saved page: it switches to Document. Drag two files of different kinds: it refuses.
+
+**Common gotchas:**
+- "Webpage, Complete" saves a folder of assets beside the `.html`. Only the `.html` is needed.
+- A page saved from a JavaScript-rendered site may hold no recipe text. That gives "Couldn't find a recipe", with the paste-or-screenshot suggestion links get.
+- Changing the proposal's `input` to the stored schema touches every place that reads it. Existing drafts (text, images, link) must still parse.
+
+**Definition of done:**
+- Tests cover:
+  - `import-documents.ts`: sorting by extension and type, UTF-8 with the Windows-1252 fallback, charset sniffing, pruning (JSON-LD and `<head>` kept, the rest removed), and the size check.
+  - `page-source-link.ts`: canonical, `og:url` and the saved-from comment in that order, and an http or malformed link skipped.
+  - `start` with an `html` input on the `fake` adapter: JSON-LD and text paths, `sourceUrl` set only when a link was found, the stored input holding the file name, link and readable text but no markup, and several recipes.
+  - Existing text, image and link drafts parse under the stored-input schema.
+  - The Import page: Document mode, the text box with the notice, drops (a Document, images, mixed and two Documents refused, offline).
+  - Import Review's original panel for an HTML Document.
+  - e2e on the `fake` adapter: a text file and an HTML file imported, reviewed and created.
+- Commit: `feat(recipes): import a recipe from a text, Markdown or saved web page file`
+- Gate check: manual verification steps 1–4, step 1 through the real `anthropic` adapter (cross-cutting #22: the reader's `page` input changed).
+
+---
+
+### FEAT-65 — Document import: PDFs, kept as Originals
+
+**Goal:** A cook imports a recipe from a PDF of up to 8 pages. The PDF goes straight from the browser to Cloudinary, and Claude reads it natively (its text and its page images), so a scanned PDF works too. Import Review shows the PDF's pages, and the saved recipe keeps the PDF as an Original that "View original" opens. (DEC-111, DEC-107, DEC-109)
+
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-64 (Document mode, the stored input), FEAT-62 (import uploads, Originals, signed destroy). **Enables:** none specifically.
+
+**Files:**
+- `shared/src/schemas/uploads.ts`: the PDF import credential (`RECIPE_IMPORT_PDF_MAX_FILE_SIZE` = 10 MB, `allowed_formats: ['pdf']`, the imports folder, no transformation)
+- `shared/src/schemas/recipe-imports.ts`: a `pdf` start input `{ kind: 'pdf', publicId }` and stored input `{ kind: 'pdf', publicId, pageCount }`; the `pdf` input kind; `RECIPE_IMPORT_PDF_PAGES_MAX` = 8; `.pdf` in the accepted Documents
+- `shared/src/schemas/recipes.ts`: an Original on `get` becomes `{ url, format: 'image' | 'pdf' }`
+- `shared/src/schemas/errors.ts`: `IMPORT_DOCUMENT_TOO_LONG`
+- `backend/src/lib/cloudinary.ts`: the PDF's delivery URL, a page's JPEG URL, and `lookUpImportPdf(publicId, signal)` through the Admin API
+- `backend/src/trpc/procedures/uploads.ts`: `getRecipeImportPdfCredentials`
+- `backend/src/db/schema/recipe-import-originals.ts` (`format`), one migration (new)
+- `backend/src/trpc/procedures/recipe-imports.ts`: the `pdf` input in `start` (look up, cap, reader); page URLs in `get`; the PDF kept as an Original on create; destroyed on discard
+- `backend/src/lib/recipe-import/import-images.ts`: the draft's upload ids, images or the PDF, for discard and account deletion; rename it if it no longer reads right
+- `backend/src/trpc/procedures/recipes.ts`: `get` returns each Original's format and URL
+- `backend/src/trpc/procedures/user.ts`: account deletion destroys import PDFs too, if the shared helper doesn't already cover it
+- `backend/src/lib/recipe-reader/types.ts`, `anthropic.ts`, `anthropic-prompt.ts` and `fake.ts`: a `pdf` input `{ kind: 'pdf', url }`, sent as a document block; the `fake` adapter reads its markers from the public id
+- `backend/src/trpc/context.ts` and `backend/src/server.ts`: the PDF lookup on the context, injectable for tests
+- `frontend/src/lib/import-documents.ts`: `.pdf`, the size check and the encryption check
+- `frontend/src/lib/cloudinary-upload.ts`: an upload with the PDF credential, if the existing helper can't take it as it is
+- `frontend/src/routes/-components/recipe-import-page.tsx` and `frontend/src/components/recipe-import/document-picker.tsx`: PDFs picked or dropped, uploaded on Import, and reused for "Try again" and the pick
+- `frontend/src/routes/-components/recipe-detail-page.tsx` and the "View original" button: a PDF Original opens in a new tab
+- `docs/plan.md` (the new column and the PDF flow), `OPERATIONS.md` (Cloudinary's PDF delivery setting), `README.md`
+
+**Shapes:**
+- **Upload:** the browser posts to `https://api.cloudinary.com/v1_1/<cloud>/image/upload`. A PDF is an `image` resource in Cloudinary, and the existing endpoint and signing work for it.
+- **Lookup:** `GET https://api.cloudinary.com/v1_1/<cloud>/resources/image/upload/<public_id>?pages=true` with Basic authentication (API key and secret, which the backend already holds). Read `format`, `bytes` and `pages`. `pages` is only reported when `pages=true` is sent.
+- **Reader URL:** `https://res.cloudinary.com/<cloud>/image/upload/<public_id>.pdf`.
+- **Page images:** `https://res.cloudinary.com/<cloud>/image/upload/pg_<n>,c_limit,w_2576,h_2576,q_auto/<public_id>.jpg`, for `n` from 1 to `pageCount`. `get` returns them as the import's `images`, so Import Review's existing `OriginalImages` shows them unchanged.
+- **Originals:** `recipe_import_originals.format text NOT NULL DEFAULT 'image'`, with a CHECK for `image` or `pdf`. Existing rows become `image`. A PDF Original is one row at position 0. Confirm the column name and type at kick-off; the change itself was agreed at scoping (DEC-111).
+- **Error:** `IMPORT_DOCUMENT_TOO_LONG` is `BAD_REQUEST` with cause `{ code: 'IMPORT_DOCUMENT_TOO_LONG', pageCount, maxPages }`, so the page can name the count. Add the code to `shared/src/schemas/errors.ts` beside the other import codes.
+- **Anthropic request:** a `BetaRequestDocumentBlock` with `source: { type: 'url', url }` (`BetaURLPDFSource`), placed before the text block, as images are.
+
+**Acceptance criteria:**
+- [ ] The Document picker and drop accept a `.pdf` of up to 10 MB, and refuse a larger one in the browser. The refusal for an unaccepted file now reads "That file can't be imported. Use a PDF, text, Markdown or web page (.html) file."
+- [ ] A password-protected PDF is refused in the browser before upload: "That PDF is password-protected. Save an unlocked copy, or screenshot the recipe."
+- [ ] The PDF uploads directly to Cloudinary's `loftys-larder/imports` folder with its own signed credential, and the backend never receives its bytes
+- [ ] Before calling the reader, the server looks the upload up in Cloudinary. More than 8 pages gives `IMPORT_DOCUMENT_TOO_LONG` (`BAD_REQUEST`), which the page shows as "That PDF has `<n>` pages; the most is 8. Save just the recipe's pages as a PDF, or screenshot them." An upload that isn't a PDF is refused as a bad request. Neither creates a draft
+- [ ] The reader receives the PDF's delivery URL, and both a typed PDF and a scanned PDF give a proposal
+- [ ] Import Review shows the PDF's pages as images, each of which can be enlarged
+- [ ] "Try again" and "several recipes" reuse the uploaded PDF without uploading it again
+- [ ] "Create recipe" keeps the PDF as an Original with format `pdf`. The recipe page's "View original" opens the PDF in a new tab. Image Originals behave as before
+- [ ] Discarding a PDF import deletes the PDF from Cloudinary. Account deletion deletes the PDFs of that user's import drafts after the deletion commits, and a Cloudinary failure is logged and doesn't fail the deletion
+- [ ] A soft-deleted recipe keeps its PDF Original, and it shows again when the recipe is restored
+- [ ] The 75-second limit covers the lookup and the read together
+- [ ] A PDF import logs the input kind, the page count and the size in bytes, never the file name or content
+
+**Implementation notes:**
+- **Before the first deploy**, turn on "Allow delivery of PDF and ZIP files" under Settings → Security in the Cloudinary console, and record it in `OPERATIONS.md`. Free accounts block PDF delivery by default. Without the setting, Anthropic can't fetch the PDF and every PDF import fails in production, while tests on the `fake` adapter still pass. Page JPEGs are images, so they work either way.
+- The page count comes from the lookup, never from the browser. The browser's upload response includes `pages`, but the server can't verify a number the client sends. The lookup also confirms the upload exists, is in the imports folder (the schema already checks the prefix) and is a PDF. The free plan allows 500 Admin API calls an hour. A lookup that finds nothing (404), or finds something that isn't a PDF, is `BAD_REQUEST` with no draft. Any other failure, a timeout included, is the existing try-again error. Give the lookup its own short timeout (10 seconds) inside the 75-second deadline.
+- Store `pageCount` in the stored input, so `get` builds page URLs without another lookup. "Several recipes" calls `start` again, which looks the PDF up again; that's cheap.
+- The encryption check reads the file in the browser and looks for `/Encrypt` in the trailer dictionary near the end of the file (the last 2 KB, and the first 2 KB for linearised files). It's a courtesy, not a guarantee. An encrypted PDF that gets through gives the provider's 400, which stays `IMPORT_REQUEST_REJECTED` so it reaches Sentry.
+- The PDF credential has no eager transformation. The image import preset's `c_limit,…,f_jpg` would make a JPEG of page 1, which nothing uses.
+- Read the `claude-api` skill before changing the `anthropic` adapter. Claude reads each PDF page as text and as an image: about 1,500–3,000 text tokens per page plus the image, so a page costs more time and money than a photo. Claude's own limits (32 MB and 600 pages per request) are far above this feature's caps.
+- 8 pages is provisional. Manual verification step 3 times a real 8-page PDF, and FEAT-66 tunes the cap.
+- Create recipe reads the PDF's public id from the stored input in the draft it deletes, as it does image ids (DEC-108 amended), and keeps it only if it's in the imports folder. A public id kept as an Original is never destroyed, whatever a draft says (DEC-107).
+- The existing signed destroy (`image/destroy`) deletes a PDF, because a PDF is an `image` resource.
+- Household scope for Originals still comes through the join to `recipes` (DEC-17).
+
+**Manual verification:**
+1. Import a typed PDF of 2–3 pages, such as a recipe page saved with "Print → Save as PDF". Import Review shows its pages beside the proposal.
+2. Import a scanned PDF of a cookbook page. A proposal comes back.
+3. Import a real 8-page PDF through the real `anthropic` adapter and record the time against the 75-second limit in the session notes.
+4. Try a 9-page PDF (refused after upload, with no draft) and a password-protected PDF (refused before upload).
+5. Create a recipe from a PDF and tap "View original" on a phone and on a desktop. The PDF opens in a new tab.
+6. Discard a PDF import. The PDF is gone from the Cloudinary media library.
+
+**Common gotchas:**
+- Never send a PDF through tRPC as base64, and never download it into the backend (DEC-50, DEC-109).
+- Cloudinary calls are external. Keep the lookup and destroy calls out of database transactions.
+- A PDF is untrusted input to the model (DEC-104).
+- The `fake` adapter never fetches the PDF, so only a real call shows whether the delivery setting is on.
+- Page images are made on the fly (`pg_<n>`), not at upload. If the Cloudinary account has "Strict transformations" on, allow that transformation in the console or make the pages eagerly at upload instead.
+
+**Definition of done:**
+- Tests cover:
+  - The PDF credential: folder, format and size limit.
+  - The lookup: the request shape (with `fetch` faked), pages read, more than 8 refused, not a PDF refused, a failure mapped to try again, and its time counted against the deadline.
+  - `start` with a `pdf` input on the `fake` adapter: the delivery URL passed to the reader, and `pageCount` stored.
+  - The `anthropic` adapter's request with a PDF, with the SDK's HTTP layer faked.
+  - `get`: page image URLs for a PDF import.
+  - Originals: `format` written on create, existing rows `image`, returned by `recipes.get`, kept through soft delete.
+  - Discard and account deletion destroying a PDF, with a failed destroy failing neither.
+  - Frontend: the encryption check, the size limit, the upload with the PDF credential, page images in Import Review, and "View original" opening a PDF.
+- Commit: `feat(recipes): import a recipe from a PDF and keep it as an original`
+- Gate check: manual verification steps 1–5, after the Cloudinary setting is on.
+
+---
+
+### FEAT-66 — Model feature evals: the eval runner and the Recipe Import eval set
 
 **Goal:** Measure a model feature on real inputs before a model, effort or prompt change ships. One runner takes a feature and an adapter and runs that feature's inputs through its real reader; Recipe Import brings the first set, supplied by the user. The first run settles the import model (Opus 5.5 or Sonnet 5.5) and its effort level. (DEC-104, DEC-109, cross-cutting #22)
 
-**Estimate:** 1 day, plus the user's time gathering inputs. **Depends on:** FEAT-60. **Enables:** tuning `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT`; the AI scoring feature's evals.
+**Estimate:** 1 day, plus the user's time gathering inputs. **Depends on:** FEAT-60. **Enables:** tuning `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT`, and FEAT-65's page cap; the AI scoring feature's evals.
 
 **Files:**
 - `backend/evals/` (new): the runner and the Recipe Import inputs. Where the household lists come from, and whether inputs are committed, are decided at kick-off
@@ -2753,6 +2923,7 @@ Steps 1 and 2 moved to FEAT-64 with the eval runner (kick-off, 2026-10-04).
 - Proposals go to the terminal or a gitignored file, never to Axiom or Sentry. No `console.log`: write through Pino or `process.stdout.write`.
 - About ten inputs, chosen to cover what imports will meet: a clean typed recipe, one buried in a blog story, US cup measures, no servings stated, several recipes in one text, a shopping list, and anything the household's own recipes make likely.
 - Inputs that copy a publication's text may not belong in the repo; if not, keep them in a gitignored folder with one committed sample.
+- Amended at Document import scoping (2026-10-05): renumbered from FEAT-64 so the Document import features (FEAT-64, FEAT-65) come first. The inputs also cover Documents: a typed PDF, a scanned PDF, an 8-page PDF timed against the 75-second limit to set FEAT-65's page cap, and a saved web page (DEC-111).
 
 **Manual verification:**
 1. Run the runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
@@ -2907,14 +3078,14 @@ A stored health score (DEC-101) is only trustworthy if it's marked stale when it
 
 ### 22. Model features
 
-**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-63, FEAT-64 (evals), the AI scoring feature, and any future feature that calls a model.
+**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 (evals), the AI scoring feature, and any future feature that calls a model.
 
 Every model feature follows the rules in DEC-110 and is built the same way (DEC-109). A new feature that skips a step drifts from the others, and the drift is costly to undo once a second provider or model is in play. The checklist:
 - **Its own seam.** One narrow, domain-level interface per feature (`RecipeReader`, `RecipeScorer`), never a shared "AI service". It has an adapter per provider and a `fake` adapter for tests and e2e.
 - **Config.** `<FEATURE>_ADAPTER` and `<FEATURE>_MODEL` in `config.ts`, validated by Zod. Config refuses `fake` in production. Where the provider has an effort setting, `<FEATURE>_EFFORT` too, since a level means different things on different models.
 - **Rules outside the seam.** Input preparation happens before the seam, and the feature's normaliser runs after it, on every adapter's output (schema, plain text, household references). Adapters only call the model.
 - **Logging.** Through one shared helper that takes a `feature` field and logs metadata only: `reqId`, feature, adapter, model, tokens, latency, outcome. No prompt or model text in logs or Sentry (DEC-104).
-- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-64.
+- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-66.
 - **Data flow.** The feature's DEC names any new data it sends to a provider.
 - **Shared code is helpers, not seams:** the provider client setup, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
 - **A real call before the first deploy.** The `fake` adapter can't catch a provider's limits. Recipe Import shipped with a schema Anthropic refused on every request, so send one real request through the real adapter before a model feature first deploys.

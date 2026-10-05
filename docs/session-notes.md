@@ -4,6 +4,42 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-05 — Document import: text, Markdown and saved web pages (FEAT-64)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format clean in every workspace. Backend 880 tests and frontend 832 green. e2e: the import spec and the import axe cases pass (16 of 16), including the two new Document specs and the new phone-width Document axe case; the rest of the e2e suite wasn't run. No real model call yet, and manual verification not run. FEAT-64 checkboxes left for the user to tick.
+
+**Agreed at kick-off** (all ten readings approved as proposed; detail in FEAT-64's amended notes):
+- The browser checks both caps (750,000 characters, 900,000 bytes as JSON).
+- `html` joins the input kinds; the in-progress list still shows no kind label.
+- jsdom lacks `File.arrayBuffer()`: the frontend test setup adds it.
+- Document mode has its own state. Drops are ignored offline, while an import runs, and during the several pick.
+- Drop sorting: one Document → Document mode; Document plus anything → "Drop one document, or up to 8 photos."; images → Photos through `addImportImages`; one unaccepted file → the Document refusal.
+- Empty readable text is allowed. Relative canonical links are skipped. The prompt marks a saved page with no address `saved="true"`. Import Review's panel is "Original document".
+
+**Changes:**
+- **Shared:** Document constants, an `html` start input, `recipeImportStoredInputSchema` (now the proposal's `input`), `recipeImportSourceLinkSchema` (https, ≤ 2,000), `html` input kind, and `takeChars` in `lib/`.
+- **Backend:** `page-source-link.ts` (canonical, then `og:url`, then the saved-from comment, wherever it sits); `readPageText` in `page-content.ts`; `start` reads an `html` input with no guard or fetch, overrides `header.sourceUrl` only when a link was found, and stores `{ fileName, sourceUrl, text }`; the reader's page `url` is nullable; the `fake` adapter names a saved page with no link "Saved Page Recipe"; `import-images.ts` parses the stored input.
+- **Frontend:** `lib/import-documents.ts` (sorting, decoding, charset sniffing, pruning, caps, `readImportDocument`, `sortDroppedFiles`); `DocumentPicker`; `useFileDrop`; the Import page's Document mode, drop overlay and `html` wording; the image picker's checks exported as `addImportImages`, with its problems held by the page; Import Review's "Original document" panel.
+- **Tests:** `page-source-link.test.ts` (new), readable-text and surrogate cases in `page-content.test.ts`, a saved-page prompt case, 14 procedure tests (saved pages, old drafts parsing, no Originals), `import-documents.test.ts` (new), page and review tests, two e2e specs and an axe case.
+- **Docs:** FEAT-64 amended, DEC-111 amended, `plan.md` Document flow, README.
+
+**Drift from the kick-off plan:**
+- New shared helper `takeChars`, not in the plan. Postgres refuses a lone UTF-16 surrogate in jsonb (checked against `postgres:17.2-alpine`), so cutting a long text file or a saved page's text at 20,000 right after half an emoji would have failed the draft insert. The link path's reader content uses it too.
+- Text files also honour a UTF-16 BOM and normalise line endings; an HTML `<meta>` naming UTF-16 is read as UTF-8.
+- Several unaccepted files dropped together give the drop refusal rather than the Photos picker's per-file messages, and a refused drop leaves the page in its mode.
+- No separate `DocumentPicker` test file: the page tests drive it end to end.
+- `formatFileSize` moved into `import-documents.ts` and the image picker uses it.
+
+**Live check (no model call):** BBC Good Food's shakshuka and RecipeTin Eats' chicken chasseur, downloaded as a browser would save them, pruned with the real `pruneHtml` in jsdom: 569 KB → 182k characters and 534 KB → 224k, both inside the caps. The server code then found JSON-LD (1,781 and 8,603 characters to the reader) and each page's canonical link, in about 20 ms for all three parses. Allrecipes and Serious Eats served a bot check to curl, so they weren't tried.
+
+**Open:**
+- **Real model call before deploy** (cross-cutting #22): the reader's `page` input and prompt changed. Gate check step 1 is that call.
+- **iOS picker:** whether the Files app lets a `.md` file be chosen with the `accept` list isn't checked on a phone (manual step 3).
+- **Long blog pages:** RecipeTin Eats' readable text fills the 20,000-character cap, so Import Review's panel may stop before the recipe card. The reader still gets the JSON-LD, so only the panel is cut.
+- Manual verification steps 1–4 not run.
+
+---
+
 ## 2026-10-05 — Document import scoped (DEC-111, FEAT-64, FEAT-65); eval runner renumbered FEAT-66
 
 **Status:** Docs only, no code. Scoped in a grilling session with the user. The specs are written to be implemented in a later session from the docs alone: start with FEAT-64's kick-off.

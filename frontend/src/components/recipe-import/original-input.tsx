@@ -1,9 +1,12 @@
-import type { RecipeImageView, RecipeImportInput } from '@loftys-larder/shared';
+import type {
+  RecipeImageView,
+  RecipeImportStoredInput,
+} from '@loftys-larder/shared';
 
 import { OriginalImages } from '@/components/original-images.tsx';
 
 export interface OriginalInputProps {
-  input: RecipeImportInput;
+  input: RecipeImportStoredInput;
   // An image import's images, in page order.
   images: readonly RecipeImageView[];
   // Below `lg` the original folds away above the proposal; at `lg` and wider
@@ -11,10 +14,11 @@ export interface OriginalInputProps {
   collapsible: boolean;
 }
 
-const TITLES: Record<RecipeImportInput['kind'], string> = {
+const TITLES: Record<RecipeImportStoredInput['kind'], string> = {
   text: 'Original text',
   images: 'Original images',
   link: 'Original page',
+  html: 'Original document',
 };
 
 // The import input as the cook gave it, to check the proposal against
@@ -27,13 +31,25 @@ export function OriginalInput({
   const title = TITLES[input.kind];
   const body =
     input.kind === 'text' ? (
-      <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
-        {input.text}
-      </pre>
+      <OriginalText text={input.text} />
     ) : input.kind === 'images' ? (
       <OriginalImages images={images} />
-    ) : (
+    ) : input.kind === 'link' ? (
       <OriginalLink url={input.url} />
+    ) : (
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="break-all text-sm font-medium">{input.fileName}</p>
+          {input.sourceUrl !== null && <OriginalLink url={input.sourceUrl} />}
+        </div>
+        {input.text === '' ? (
+          <p className="text-sm text-muted-foreground">
+            This page has no readable text.
+          </p>
+        ) : (
+          <OriginalText text={input.text} />
+        )}
+      </div>
     );
 
   if (collapsible) {
@@ -62,6 +78,14 @@ export function OriginalInput({
         {body}
       </div>
     </aside>
+  );
+}
+
+function OriginalText({ text }: { text: string }): React.ReactElement {
+  return (
+    <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
+      {text}
+    </pre>
   );
 }
 

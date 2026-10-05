@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PAGE_CONTENT_MAX_LENGTH,
   readPageContent,
+  readPageText,
 } from '../src/lib/recipe-import/page-content.ts';
 
 const RECIPE = {
@@ -265,5 +266,31 @@ describe('readPageContent', () => {
       expect(content.content).toHaveLength(PAGE_CONTENT_MAX_LENGTH);
       expect(content.truncated).toBe(true);
     });
+  });
+
+  it('cuts content short without splitting a character', () => {
+    const html = `<html><body><p>${'a'.repeat(PAGE_CONTENT_MAX_LENGTH - 1)}😀 more</p></body></html>`;
+    const content = readPageContent(html);
+    expect(content.content).toBe('a'.repeat(PAGE_CONTENT_MAX_LENGTH - 1));
+    expect(content.truncated).toBe(true);
+  });
+});
+
+describe('readPageText', () => {
+  it("gives a page's readable text even when it has JSON-LD", () => {
+    expect(
+      readPageText(page([RECIPE], '<main><p>Simmer the eggs.</p></main>')),
+    ).toBe('Shakshuka | Recipes\nSimmer the eggs.');
+  });
+
+  it(`caps the text at ${String(PAGE_CONTENT_MAX_LENGTH)} characters`, () => {
+    const text = readPageText(
+      `<html><body><p>${'a'.repeat(PAGE_CONTENT_MAX_LENGTH + 500)}</p></body></html>`,
+    );
+    expect(text).toHaveLength(PAGE_CONTENT_MAX_LENGTH);
+  });
+
+  it('gives an empty string for a page with no readable text', () => {
+    expect(readPageText(page([RECIPE], '<script>render()</script>'))).toBe('');
   });
 });

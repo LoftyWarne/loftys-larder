@@ -3,7 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 
 import {
   recipeDraftEnvelopeSchema,
-  recipeImportInputSchema,
+  recipeImportStoredInputSchema,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import type { Db } from '../../db/index.ts';
@@ -21,7 +21,7 @@ export function importImagePublicIds(draftData: unknown): string[] {
   const envelope = recipeDraftEnvelopeSchema.safeParse(draftData);
   if (!envelope.success) return [];
   const proposal = envelope.data.fields.proposal;
-  const input = recipeImportInputSchema.safeParse(
+  const input = recipeImportStoredInputSchema.safeParse(
     typeof proposal === 'object' && proposal !== null && 'input' in proposal
       ? proposal.input
       : undefined,

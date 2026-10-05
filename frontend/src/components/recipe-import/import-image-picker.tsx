@@ -4,10 +4,11 @@ import {
   RECIPE_IMPORT_IMAGES_MAX,
 } from '@loftys-larder/shared';
 import { ImageIcon } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 
 import { Button } from '@/components/ui/button.tsx';
 import { fileSizeLimitMessage } from '@/lib/cloudinary-upload.ts';
+import { formatFileSize } from '@/lib/import-documents.ts';
 
 // Browsers don't all give HEIC a MIME type, so the extension counts too.
 const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,.heic';
@@ -26,14 +27,44 @@ function isAllowedImage(file: File): boolean {
   return ALLOWED_TYPES.has(file.type) || ALLOWED_EXTENSIONS.has(extension);
 }
 
-function formatSize(bytes: number): string {
-  return `${(bytes / 1_048_576).toFixed(1)} MB`;
+// Adds the picked or dropped images that pass the checks, up to the limit,
+// and says what was left out and why.
+export function addImportImages(
+  files: readonly File[],
+  picked: readonly File[],
+): { files: File[]; problems: string[] } {
+  const problems: string[] = [];
+  const accepted: File[] = [];
+  let overLimit = false;
+  for (const file of picked) {
+    if (!isAllowedImage(file)) {
+      problems.push(`${file.name} isn’t a JPG, PNG, WebP or HEIC image.`);
+    } else if (file.size > RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE) {
+      problems.push(
+        `${file.name}: ${fileSizeLimitMessage(RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE)}.`,
+      );
+    } else if (files.length + accepted.length >= RECIPE_IMPORT_IMAGES_MAX) {
+      overLimit = true;
+    } else {
+      accepted.push(file);
+    }
+  }
+  if (overLimit) {
+    problems.push(
+      `Up to ${String(RECIPE_IMPORT_IMAGES_MAX)} images can be imported at once, so not all of them were added.`,
+    );
+  }
+  return { files: [...files, ...accepted], problems };
 }
 
 export interface ImportImagePickerProps {
   // In page order.
   files: readonly File[];
   onFilesChange: (files: File[]) => void;
+  // What the last pick, drop or removal left out. The page holds them, so a
+  // drop can report through the picker too.
+  problems: readonly string[];
+  onProblemsChange: (problems: string[]) => void;
   disabled: boolean;
 }
 
@@ -42,36 +73,17 @@ export interface ImportImagePickerProps {
 export function ImportImagePicker({
   files,
   onFilesChange,
+  problems,
+  onProblemsChange,
   disabled,
 }: ImportImagePickerProps): React.ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [problems, setProblems] = useState<string[]>([]);
   const full = files.length >= RECIPE_IMPORT_IMAGES_MAX;
 
   function addFiles(picked: readonly File[]): void {
-    const refused: string[] = [];
-    const accepted: File[] = [];
-    let overLimit = false;
-    for (const file of picked) {
-      if (!isAllowedImage(file)) {
-        refused.push(`${file.name} isn’t a JPG, PNG, WebP or HEIC image.`);
-      } else if (file.size > RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE) {
-        refused.push(
-          `${file.name}: ${fileSizeLimitMessage(RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE)}.`,
-        );
-      } else if (files.length + accepted.length >= RECIPE_IMPORT_IMAGES_MAX) {
-        overLimit = true;
-      } else {
-        accepted.push(file);
-      }
-    }
-    if (overLimit) {
-      refused.push(
-        `Up to ${String(RECIPE_IMPORT_IMAGES_MAX)} images can be imported at once, so not all of them were added.`,
-      );
-    }
-    setProblems(refused);
-    if (accepted.length > 0) onFilesChange([...files, ...accepted]);
+    const added = addImportImages(files, picked);
+    onProblemsChange(added.problems);
+    if (added.files.length > files.length) onFilesChange(added.files);
   }
 
   return (
@@ -79,7 +91,7 @@ export function ImportImagePicker({
       <p className="text-sm text-muted-foreground">
         Up to {RECIPE_IMPORT_IMAGES_MAX} photos, screenshots or scans of one
         recipe, in page order: JPG, PNG, WebP or HEIC, up to{' '}
-        {formatSize(RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE)} each.
+        {formatFileSize(RECIPE_IMPORT_IMAGE_MAX_FILE_SIZE)} each.
       </p>
 
       {files.length > 0 && (
@@ -98,7 +110,7 @@ export function ImportImagePicker({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{file.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  Page {index + 1} · {formatSize(file.size)}
+                  Page {index + 1} · {formatFileSize(file.size)}
                 </p>
               </div>
               <Button
@@ -108,7 +120,7 @@ export function ImportImagePicker({
                 disabled={disabled}
                 aria-label={`Remove ${file.name}`}
                 onClick={() => {
-                  setProblems([]);
+                  onProblemsChange([]);
                   onFilesChange(files.filter((_, at) => at !== index));
                 }}
               >

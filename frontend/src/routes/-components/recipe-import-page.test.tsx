@@ -6,7 +6,14 @@ import {
   type RecipeImportDraftSummary,
   type RecipeImportImageUploadCredentials,
 } from '@loftys-larder/shared';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -612,6 +619,331 @@ describe('RecipeImportPage', () => {
         window.dispatchEvent(new Event('offline'));
       });
       expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    });
+  });
+
+  describe('from a document', () => {
+    const SAVED_PAGE =
+      '<!DOCTYPE html><html><head><script type="application/ld+json">{"@type":"Recipe"}</script><script>track()</script></head><body><p>Lemon Tart</p></body></html>';
+    const PRUNED_PAGE =
+      '<!DOCTYPE html><html><head><script type="application/ld+json">{"@type":"Recipe"}</script></head><body><p>Lemon Tart</p></body></html>';
+
+    async function chooseDocument(
+      user: ReturnType<typeof userEvent.setup>,
+      file: File,
+    ): Promise<void> {
+      await user.click(screen.getByRole('button', { name: 'Document' }));
+      await user.upload(screen.getByLabelText('Choose a document to import'), [
+        file,
+      ]);
+    }
+
+    function documentUser() {
+      return userEvent.setup({ applyAccept: false });
+    }
+
+    it('opens a text file in a box headed with its name, and imports what the cook leaves as pasted text', async () => {
+      startMutateAsyncMock.mockResolvedValue({ kind: 'draft', draftId: 48 });
+      const user = documentUser();
+      render(<RecipeImportPage />);
+
+      await chooseDocument(
+        user,
+        new File([`${RECIPE_TEXT}\r\nA story about pasta.`], 'pasta.md'),
+      );
+
+      const box = await screen.findByLabelText('From pasta.md');
+      expect(box).toHaveValue(`${RECIPE_TEXT}\nA story about pasta.`);
+      expect(screen.getByText(/^Text file ·/)).toBeInTheDocument();
+      await user.clear(box);
+      await user.type(box, 'Weeknight Pasta');
+      await user.click(screen.getByRole('button', { name: 'Import' }));
+
+      expect(startMutateAsyncMock).toHaveBeenCalledWith({
+        input: { kind: 'text', text: 'Weeknight Pasta' },
+      });
+    });
+
+    it('loads only the start of a long text file, and says so', async () => {
+      const user = documentUser();
+      render(<RecipeImportPage />);
+
+      await chooseDocument(
+        user,
+        new File(['a'.repeat(20_500)], 'long.txt', { type: 'text/plain' }),
+      );
+
+      expect(await screen.findByLabelText('From long.txt')).toHaveValue(
+        'a'.repeat(20_000),
+      );
+      expect(
+        screen.getByText(
+          'Only the first 20,000 characters were loaded. Trim it to the recipe.',
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('imports a saved web page as its pruned markup, keeping it for a pick', async () => {
+      startMutateAsyncMock
+        .mockResolvedValueOnce({
+          kind: 'several',
+          names: ['Lemon Tart', 'Shortcrust Pastry'],
+        })
+        .mockResolvedValueOnce({ kind: 'draft', draftId: 49 });
+      const user = documentUser();
+      render(<RecipeImportPage />);
+
+      await chooseDocument(
+        user,
+        new File([SAVED_PAGE], 'Lemon tart.html', { type: 'text/html' }),
+      );
+      expect(await screen.findByText(/^Saved web page ·/)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/^From /)).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Import' }));
+
+      const input = {
+        kind: 'html',
+        fileName: 'Lemon tart.html',
+        html: PRUNED_PAGE,
+      };
+      expect(startMutateAsyncMock).toHaveBeenCalledWith({ input });
+      expect(
+        await screen.findByRole('heading', {
+          name: 'That page has more than one recipe. Which one?',
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Back to the document' }),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Lemon Tart' }));
+      expect(startMutateAsyncMock).toHaveBeenLastCalledWith({
+        input,
+        pick: 'Lemon Tart',
+      });
+    });
+
+    it('suggests pasting the text when a saved page has no recipe', async () => {
+      startMutateAsyncMock.mockRejectedValue(
+        domainError('IMPORT_NOT_A_RECIPE'),
+      );
+      const user = documentUser();
+      render(<RecipeImportPage />);
+
+      await chooseDocument(
+        user,
+        new File([SAVED_PAGE], 'tart.htm', { type: 'text/html' }),
+      );
+      await screen.findByText(/^Saved web page ·/);
+      await user.click(screen.getByRole('button', { name: 'Import' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Couldn’t find a recipe in that. If the page has one, paste the text or a screenshot instead.',
+      );
+    });
+
+    it.each([
+      [
+        'a file it can’t import',
+        new File(['%PDF'], 'tart.pdf', { type: 'application/pdf' }),
+        'That file can’t be imported. Use a text, Markdown or web page (.html) file.',
+      ],
+      [
+        'a file over 10 MB',
+        (() => {
+          const big = new File(['x'], 'tart.txt');
+          Object.defineProperty(big, 'size', { value: 10_485_761 });
+          return big;
+        })(),
+        'That file is too big to import.',
+      ],
+      [
+        'a page still too big once pruned',
+        new File(
+          [`<html><body><p>${'a'.repeat(750_000)}</p></body></html>`],
+          'huge.html',
+        ),
+        'That page is too big to import. Paste the recipe’s text instead.',
+      ],
+    ])('refuses %s', async (_label, file, message) => {
+      const user = documentUser();
+      render(<RecipeImportPage />);
+
+      await chooseDocument(user, file);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(message);
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    });
+
+    it('removes the file, and disables Import until there is one, and while offline', async () => {
+      const user = documentUser();
+      render(<RecipeImportPage />);
+      await user.click(screen.getByRole('button', { name: 'Document' }));
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+
+      await user.upload(screen.getByLabelText('Choose a document to import'), [
+        new File([RECIPE_TEXT], 'pasta.txt'),
+      ]);
+      await screen.findByLabelText('From pasta.txt');
+      expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+
+      act(() => {
+        setOnline(false);
+        window.dispatchEvent(new Event('offline'));
+      });
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+
+      act(() => {
+        setOnline(true);
+        window.dispatchEvent(new Event('online'));
+      });
+      await user.click(
+        screen.getByRole('button', { name: 'Remove pasta.txt' }),
+      );
+      expect(screen.queryByLabelText('From pasta.txt')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    });
+  });
+
+  describe('dropping files', () => {
+    function dragFiles(
+      type: 'dragEnter' | 'dragOver' | 'dragLeave' | 'drop',
+      files: File[] = [],
+    ) {
+      fireEvent[type](window, {
+        dataTransfer: { types: ['Files'], files, dropEffect: 'none' },
+      });
+    }
+
+    function drop(files: File[]): void {
+      dragFiles('dragEnter', files);
+      dragFiles('drop', files);
+    }
+
+    function pressed(): string | undefined {
+      return (
+        within(screen.getByRole('group', { name: 'Import from' }))
+          .getAllByRole('button')
+          .find((button) => button.getAttribute('aria-pressed') === 'true')
+          ?.textContent ?? undefined
+      );
+    }
+
+    it('shows where to drop while files are dragged over the page', () => {
+      render(<RecipeImportPage />);
+      expect(screen.queryByText('Drop to import')).not.toBeInTheDocument();
+
+      dragFiles('dragEnter');
+      expect(screen.getByText('Drop to import')).toBeInTheDocument();
+      dragFiles('dragLeave');
+      expect(screen.queryByText('Drop to import')).not.toBeInTheDocument();
+    });
+
+    it('ignores a drag that carries no files', () => {
+      render(<RecipeImportPage />);
+      fireEvent.dragEnter(window, {
+        dataTransfer: { types: ['text/plain'], files: [] },
+      });
+      expect(screen.queryByText('Drop to import')).not.toBeInTheDocument();
+    });
+
+    it('keeps a dropped file from the browser', () => {
+      render(<RecipeImportPage />);
+      const event = new Event('drop', { cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { types: ['Files'], files: [] },
+      });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('switches to Document mode for a dropped document', async () => {
+      render(<RecipeImportPage />);
+      await userEvent
+        .setup()
+        .click(screen.getByRole('button', { name: 'Link' }));
+
+      drop([new File([RECIPE_TEXT], 'pasta.md')]);
+
+      expect(await screen.findByLabelText('From pasta.md')).toHaveValue(
+        RECIPE_TEXT,
+      );
+      expect(pressed()).toBe('Document');
+      expect(screen.queryByText('Drop to import')).not.toBeInTheDocument();
+    });
+
+    it('switches to Photos for dropped images, adding them to the ones picked', async () => {
+      const user = userEvent.setup();
+      render(<RecipeImportPage />);
+      await user.click(screen.getByRole('button', { name: 'Photos' }));
+      await user.upload(screen.getByLabelText('Choose images to import'), [
+        PAGE_1,
+      ]);
+      await user.click(screen.getByRole('button', { name: 'Link' }));
+
+      drop([PAGE_2, new File(['x'], 'notes.gif', { type: 'image/gif' })]);
+
+      expect(pressed()).toBe('Photos');
+      const chosen = within(
+        screen.getByRole('list', { name: 'Chosen images' }),
+      ).getAllByRole('listitem');
+      expect(
+        chosen.map((item) => item.querySelector('p')?.textContent),
+      ).toEqual(['page-1.heic', 'page-2.jpg']);
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'notes.gif isn’t a JPG, PNG, WebP or HEIC image.',
+      );
+    });
+
+    it.each([
+      ['two documents', [new File(['a'], 'a.md'), new File(['b'], 'b.txt')]],
+      ['a document with images', [new File(['a'], 'a.html'), PAGE_1]],
+    ])('refuses %s, staying where it was', (_label, files) => {
+      render(<RecipeImportPage />);
+
+      drop(files);
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Drop one document, or up to 8 photos.',
+      );
+      expect(pressed()).toBe('Paste text');
+    });
+
+    it('refuses one file it can’t import', () => {
+      render(<RecipeImportPage />);
+
+      drop([new File(['x'], 'tart.docx')]);
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'That file can’t be imported. Use a text, Markdown or web page (.html) file.',
+      );
+      expect(pressed()).toBe('Paste text');
+    });
+
+    it('takes no drop while offline', () => {
+      render(<RecipeImportPage />);
+      act(() => {
+        setOnline(false);
+        window.dispatchEvent(new Event('offline'));
+      });
+
+      dragFiles('dragEnter');
+      expect(screen.queryByText('Drop to import')).not.toBeInTheDocument();
+      drop([PAGE_1]);
+
+      expect(pressed()).toBe('Paste text');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('takes no drop while an import runs', () => {
+      startUseMutationMock.mockReturnValue({
+        mutateAsync: startMutateAsyncMock,
+        isPending: true,
+      });
+      render(<RecipeImportPage />);
+
+      drop([PAGE_1]);
+
+      expect(pressed()).toBe('Paste text');
     });
   });
 

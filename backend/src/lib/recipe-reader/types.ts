@@ -14,7 +14,7 @@ export interface RecipeReaderHousehold {
   sources: { id: number; name: string }[];
 }
 
-// A linked page's recipe data, or its text when it has none, capped.
+// A web page's recipe data, or its text when it has none, capped.
 export interface RecipeReaderPageContent {
   format: 'json_ld' | 'text';
   content: string;
@@ -27,9 +27,11 @@ export type RecipeReaderInput =
   // Delivery URLs in page order, built by the import procedure. Adapters
   // never build or sign image URLs (DEC-109).
   | { kind: 'images'; urls: string[] }
-  // Fetched by the import procedure behind the SSRF guard. Adapters never
-  // fetch pages (DEC-109). `url` is where the page was read from.
-  | ({ kind: 'page'; url: string } & RecipeReaderPageContent);
+  // A linked page, fetched by the import procedure behind the SSRF guard, or
+  // a page the cook saved as a file. Adapters never fetch pages (DEC-109).
+  // `url` is where a linked page was read from, or the address a saved page
+  // names as its own; null when a saved page names none.
+  | ({ kind: 'page'; url: string | null } & RecipeReaderPageContent);
 
 export interface RecipeReadRequest {
   input: RecipeReaderInput;

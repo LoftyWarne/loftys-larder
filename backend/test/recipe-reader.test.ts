@@ -257,6 +257,32 @@ describe('anthropic recipe reader', () => {
     expect(content.match(/<\/recipe_page>/g)).toHaveLength(1);
   });
 
+  it('marks a saved page with no known address as saved', async () => {
+    const fake = fakeFetch(() => textResponse('{"outcome":"not_a_recipe"}'));
+    const reader = createRecipeReader(anthropicConfig, { fetch: fake.fetch });
+    await reader.read(
+      {
+        ...request,
+        input: {
+          kind: 'page',
+          url: null,
+          format: 'text',
+          content: 'Lentil Soup',
+          truncated: false,
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const messages = fake.requests[0]?.body.messages as { content: string }[];
+    expect(messages[0]?.content).toContain(
+      '<recipe_page saved="true" content="text" truncated="false">\nLentil Soup\n</recipe_page>',
+    );
+    expect(String(fake.requests[0]?.body.system)).toContain(
+      'saved="true" instead means the cook saved the page as a file',
+    );
+  });
+
   it('returns the recipe as an unvalidated candidate, with usage', async () => {
     const { read } = readWith(() =>
       textResponse('{"outcome":"recipe","recipe":{"header":{"name":"Soup"}}}', {

@@ -33,6 +33,28 @@ export const RECIPE_IMPORT_TEXT_MAX_LENGTH = 20_000;
 // Fits `sourceUrl`, which the link fills.
 export const RECIPE_IMPORT_LINK_MAX_LENGTH = 2000;
 export const RECIPE_IMPORT_IMAGES_MAX = 8;
+
+// Documents (DEC-111): one file per import, sorted into a kind by its
+// extension. A text or Markdown file is sent as pasted text; a saved web
+// page as pruned markup.
+export const RECIPE_IMPORT_DOCUMENT_EXTENSIONS = {
+  txt: 'text',
+  text: 'text',
+  md: 'text',
+  markdown: 'text',
+  html: 'html',
+  htm: 'html',
+} as const;
+
+export type RecipeImportDocumentKind =
+  (typeof RECIPE_IMPORT_DOCUMENT_EXTENSIONS)[keyof typeof RECIPE_IMPORT_DOCUMENT_EXTENSIONS];
+
+export const RECIPE_IMPORT_DOCUMENT_MAX_FILE_SIZE = 10_485_760;
+export const RECIPE_IMPORT_FILE_NAME_MAX_LENGTH = 255;
+export const RECIPE_IMPORT_HTML_MAX_LENGTH = 750_000;
+// The browser's check on the encoded markup, which keeps a request well
+// inside Fastify's 1 MiB body limit.
+export const RECIPE_IMPORT_HTML_MAX_REQUEST_BYTES = 900_000;
 export const RECIPE_IMPORT_NOTES_MAX = 5;
 export const RECIPE_IMPORT_NOTE_MAX_LENGTH = 300;
 export const RECIPE_IMPORT_SEVERAL_MAX = 10;
@@ -59,39 +81,91 @@ export const recipeImportImagePublicIdSchema = z
     'Not an import image',
   );
 
+const textInputSchema = z.object({
+  kind: z.literal('text'),
+  text: z.string().trim().min(1).max(RECIPE_IMPORT_TEXT_MAX_LENGTH),
+});
+
+// In page order.
+const imagesInputSchema = z.object({
+  kind: z.literal('images'),
+  publicIds: z
+    .array(recipeImportImagePublicIdSchema)
+    .min(1)
+    .max(RECIPE_IMPORT_IMAGES_MAX)
+    .refine(
+      (publicIds) => new Set(publicIds).size === publicIds.length,
+      'Each image can only be used once',
+    ),
+});
+
+// Any web address: the server refuses one it won't fetch with
+// IMPORT_LINK_NOT_ALLOWED, so an http link gets that, not a schema error.
+const linkInputSchema = z.object({
+  kind: z.literal('link'),
+  url: z
+    .string()
+    .trim()
+    .min(1)
+    .max(RECIPE_IMPORT_LINK_MAX_LENGTH)
+    .refine((url) => URL.canParse(url), 'Not a web link'),
+});
+
+const fileNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(RECIPE_IMPORT_FILE_NAME_MAX_LENGTH);
+
+// The link a saved web page names as its own. It's untrusted and never
+// fetched (DEC-111), so only an https link is kept.
+export const recipeImportSourceLinkSchema = z
+  .string()
+  .max(RECIPE_IMPORT_LINK_MAX_LENGTH)
+  .refine(
+    (url) => URL.canParse(url) && new URL(url).protocol === 'https:',
+    'Not an https link',
+  );
+
 export const recipeImportInputSchema = z.discriminatedUnion('kind', [
+  textInputSchema,
+  imagesInputSchema,
+  linkInputSchema,
+  // A saved web page, pruned in the browser. The markup is never stored.
   z.object({
-    kind: z.literal('text'),
-    text: z.string().trim().min(1).max(RECIPE_IMPORT_TEXT_MAX_LENGTH),
-  }),
-  // In page order.
-  z.object({
-    kind: z.literal('images'),
-    publicIds: z
-      .array(recipeImportImagePublicIdSchema)
-      .min(1)
-      .max(RECIPE_IMPORT_IMAGES_MAX)
-      .refine(
-        (publicIds) => new Set(publicIds).size === publicIds.length,
-        'Each image can only be used once',
-      ),
-  }),
-  // Any web address: the server refuses one it won't fetch with
-  // IMPORT_LINK_NOT_ALLOWED, so an http link gets that, not a schema error.
-  z.object({
-    kind: z.literal('link'),
-    url: z
-      .string()
-      .trim()
-      .min(1)
-      .max(RECIPE_IMPORT_LINK_MAX_LENGTH)
-      .refine((url) => URL.canParse(url), 'Not a web link'),
+    kind: z.literal('html'),
+    fileName: fileNameSchema,
+    html: z.string().min(1).max(RECIPE_IMPORT_HTML_MAX_LENGTH),
   }),
 ]);
 
 export type RecipeImportInput = z.infer<typeof recipeImportInputSchema>;
 
-export const recipeImportInputKindSchema = z.enum(['text', 'images', 'link']);
+// The input an import draft keeps (DEC-108). Autosave sends the proposal
+// back on every edit, so a saved page keeps its readable text, not its
+// markup.
+export const recipeImportStoredInputSchema = z.discriminatedUnion('kind', [
+  textInputSchema,
+  imagesInputSchema,
+  linkInputSchema,
+  z.object({
+    kind: z.literal('html'),
+    fileName: fileNameSchema,
+    sourceUrl: recipeImportSourceLinkSchema.nullable(),
+    text: z.string().max(RECIPE_IMPORT_TEXT_MAX_LENGTH),
+  }),
+]);
+
+export type RecipeImportStoredInput = z.infer<
+  typeof recipeImportStoredInputSchema
+>;
+
+export const recipeImportInputKindSchema = z.enum([
+  'text',
+  'images',
+  'link',
+  'html',
+]);
 
 export type RecipeImportInputKind = z.infer<typeof recipeImportInputKindSchema>;
 
@@ -371,7 +445,7 @@ export type RecipeImportReader = z.infer<typeof recipeImportReaderSchema>;
 export const recipeImportProposalSchema =
   recipeImportProposalContentSchema.extend({
     reader: recipeImportReaderSchema,
-    input: recipeImportInputSchema,
+    input: recipeImportStoredInputSchema,
   });
 
 export type RecipeImportProposal = z.infer<typeof recipeImportProposalSchema>;

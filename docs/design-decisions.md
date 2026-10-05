@@ -1345,6 +1345,10 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Any PDF or ZIP in the Cloudinary account can be fetched by its URL; uploads are signed and ids are random, so only the app can put one there. A schema change to `recipe_import_originals`, and a stored-input schema that no longer always matches the start input. The 8-page cap is a guess until a real PDF is timed, and a long e-book has to be cut down by the cook. A PDF page costs more tokens and time than a photo (about 1,500–3,000 text tokens plus the page image). One more Cloudinary call per PDF import. A file with 40 recipes means 40 imports.
 - **Revisit when:** PDF imports come close to 75 seconds, or the cap refuses PDFs the household uses often (the page picker). Cooks keep importing many recipes from one file (bulk import). A provider adapter can't take a PDF by URL (DEC-109's note on downloading applies).
 - **Cross-refs:** CONTEXT.md (Document), DEC-17, DEC-49, DEC-50 (amended), DEC-103 (amended), DEC-104, DEC-107 (amended), DEC-108 (amended), DEC-109 (amended), DEC-110; FEAT-61 to FEAT-66; cross-cutting #22; non-goal: "Bulk recipe import" (new).
+- **Amended (2026-10-05) at FEAT-64 kick-off.** Full detail in FEAT-64's implementation notes.
+  - The browser checks a pruned page against both caps, 750,000 characters and 900,000 bytes as JSON, so the server's schema never refuses one the browser let through.
+  - A drop of one Document goes to Document mode, and images go to Photos through the picker's own checks. Two Documents, or a Document with any other file, are refused. Drops are ignored while offline, while an import runs and during the several-recipes pick.
+  - Text cut to a cap and stored in a draft never ends in half an emoji, because Postgres refuses a lone surrogate in jsonb.
 
 ---
 

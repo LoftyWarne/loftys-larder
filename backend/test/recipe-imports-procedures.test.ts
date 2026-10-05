@@ -97,6 +97,16 @@ const RECIPE_JSON_LD = {
 };
 const JSON_LD_PAGE = `<html><head><title>Shakshuka</title><script type="application/ld+json">${JSON.stringify(RECIPE_JSON_LD)}</script></head><body><p>A long story.</p></body></html>`;
 
+const SAVED_FILE_NAME = 'Shakshuka recipe.html';
+const SAVED_LINK = 'https://www.recipes.example/shakshuka';
+const SAVED_PAGE = `<!DOCTYPE html><!-- saved from url=(0038)${SAVED_LINK} --><html><head><title>Shakshuka | Recipes</title><link rel="canonical" href="${SAVED_LINK}"><script type="application/ld+json">${JSON.stringify(RECIPE_JSON_LD)}</script></head><body><nav>Home</nav><main><h1>Shakshuka</h1><p>Simmer the eggs in the sauce.</p></main></body></html>`;
+const SAVED_PAGE_TEXT =
+  'Shakshuka | Recipes\nShakshuka\nSimmer the eggs in the sauce.';
+
+function savedPage(html = SAVED_PAGE, fileName = SAVED_FILE_NAME) {
+  return { kind: 'html' as const, fileName, html };
+}
+
 describe('recipe imports procedures', () => {
   let testDb: TestDb | undefined;
   let db!: NodePgDatabase<Schema>;
@@ -1015,6 +1025,206 @@ describe('recipe imports procedures', () => {
         expect(output).not.toContain('olive oil');
       });
     });
+
+    describe('from a saved web page', () => {
+      async function startSavedPage(
+        html = SAVED_PAGE,
+        options: ContextOptions = {},
+      ): Promise<number> {
+        const result = await createCaller(
+          makeContext(options),
+        ).recipeImports.start({ input: savedPage(html) });
+        if (result.kind !== 'draft') throw new Error('expected a draft');
+        return result.draftId;
+      }
+
+      // Gives the reader's own source link as `sourceUrl`.
+      function readerWithSourceLink(sourceUrl: string): RecipeReader {
+        const inner = createFakeRecipeReader();
+        return {
+          ...inner,
+          read: async (request, signal) => {
+            const reading = await inner.read(request, signal);
+            if (reading.outcome.kind !== 'candidate') return reading;
+            const candidate = reading.outcome.candidate as {
+              header: Record<string, unknown>;
+            };
+            candidate.header.sourceUrl = sourceUrl;
+            return reading;
+          },
+        };
+      }
+
+      it("reads the page's JSON-LD without fetching anything", async () => {
+        const { fetchPage, calls } = pageFetcher(JSON_LD_PAGE);
+        const { reader, requests } = spyReader();
+        const draftId = await startSavedPage(SAVED_PAGE, {
+          reader,
+          fetchPage,
+        });
+
+        expect(calls).toHaveLength(0);
+        const input = requests[0]?.input;
+        expect(input).toMatchObject({
+          kind: 'page',
+          url: SAVED_LINK,
+          format: 'json_ld',
+          truncated: false,
+        });
+        expect(input?.kind === 'page' && JSON.parse(input.content)).toEqual([
+          {
+            '@type': 'Recipe',
+            name: 'Shakshuka',
+            recipeIngredient: ['2 tbsp olive oil'],
+            recipeInstructions: [
+              { '@type': 'HowToStep', text: 'Simmer the eggs.' },
+            ],
+          },
+        ]);
+        expect((await storedProposal(draftId)).header.sourceUrl).toBe(
+          SAVED_LINK,
+        );
+      });
+
+      it('keeps the file name, source link and readable text, never the markup', async () => {
+        const draftId = await startSavedPage();
+
+        expect((await storedProposal(draftId)).input).toEqual({
+          kind: 'html',
+          fileName: SAVED_FILE_NAME,
+          sourceUrl: SAVED_LINK,
+          text: SAVED_PAGE_TEXT,
+        });
+        const stored = JSON.stringify((await draftRows())[0]?.draftData);
+        expect(stored).not.toContain('<html');
+        expect(stored).not.toContain('ld+json');
+        expect(stored).not.toContain('Simmer the eggs.');
+      });
+
+      it('reads a page without JSON-LD from its text', async () => {
+        const { reader, requests } = spyReader();
+        await startSavedPage(
+          '<html><body><nav>Home</nav><main><h1>Lentil Soup</h1><p>Simmer the lentils.</p></main></body></html>',
+          { reader },
+        );
+
+        const input = requests[0]?.input;
+        expect(input).toMatchObject({ kind: 'page', format: 'text' });
+        expect(input?.kind === 'page' && input.content).toBe(
+          'Lentil Soup\nSimmer the lentils.',
+        );
+      });
+
+      it("puts the page's own link in place of the reader's", async () => {
+        const draftId = await startSavedPage(SAVED_PAGE, {
+          reader: readerWithSourceLink('https://elsewhere.example/'),
+        });
+
+        expect((await storedProposal(draftId)).header.sourceUrl).toBe(
+          SAVED_LINK,
+        );
+      });
+
+      it("keeps the reader's source link when the page names none", async () => {
+        const { reader, requests } = spyReader(
+          readerWithSourceLink('https://elsewhere.example/'),
+        );
+        const draftId = await startSavedPage(
+          '<html><head><link rel="canonical" href="http://recipes.example/soup"></head><body><main><p>Lentil Soup</p></main></body></html>',
+          { reader },
+        );
+
+        expect(requests[0]?.input).toMatchObject({ kind: 'page', url: null });
+        const proposal = await storedProposal(draftId);
+        expect(proposal.header.sourceUrl).toBe('https://elsewhere.example/');
+        expect(proposal.header.name).toBe('Saved Page Recipe');
+        expect(proposal.input).toMatchObject({ kind: 'html', sourceUrl: null });
+      });
+
+      it('imports the picked recipe from the same page', async () => {
+        const { reader, requests } = spyReader();
+        const caller = createCaller(makeContext({ reader }));
+        const input = savedPage(
+          `<html><body><main><p>${FAKE_READER_MARKERS.several} Menu</p></main></body></html>`,
+        );
+
+        expect(await caller.recipeImports.start({ input })).toEqual({
+          kind: 'several',
+          names: ['Fake Soup', 'Fake Salad'],
+        });
+        expect(await draftRows()).toHaveLength(0);
+        const picked = await caller.recipeImports.start({
+          input,
+          pick: 'Fake Salad',
+        });
+
+        expect(picked.kind).toBe('draft');
+        expect(requests[1]?.input).toEqual(requests[0]?.input);
+        expect(requests[1]?.pick).toBe('Fake Salad');
+      });
+
+      it('keeps readable text cut short without splitting a character', async () => {
+        const draftId = await startSavedPage(
+          `<html><body><main><p>${'a'.repeat(19_999)}😀 and more</p></main></body></html>`,
+        );
+
+        const input = (await storedProposal(draftId)).input;
+        expect(input.kind === 'html' && input.text).toBe('a'.repeat(19_999));
+      });
+
+      it.each([
+        ['markup over the cap', savedPage('x'.repeat(750_001))],
+        ['no file name', savedPage(SAVED_PAGE, '  ')],
+        [
+          'a file name over 255 characters',
+          savedPage(SAVED_PAGE, 'a'.repeat(256)),
+        ],
+      ])('refuses %s without calling the reader', async (_label, input) => {
+        const { reader, requests } = spyReader();
+        await expect(
+          createCaller(makeContext({ reader })).recipeImports.start({ input }),
+        ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+        expect(requests).toHaveLength(0);
+        expect(await draftRows()).toHaveLength(0);
+      });
+
+      it("logs the page's size, content and host, never its name, path or text", async () => {
+        const lines: string[] = [];
+        const log = pino(
+          { level: 'info' },
+          { write: (line) => lines.push(line) },
+        );
+        await startSavedPage(SAVED_PAGE, { log });
+        await startSavedPage(
+          '<html><body><main><p>Lentil Soup</p></main></body></html>',
+          { log },
+        );
+
+        const entries = lines
+          .map((line) => JSON.parse(line) as Record<string, unknown>)
+          .filter((entry) => 'modelUsage' in entry);
+        expect(entries[0]?.modelUsage).toMatchObject({
+          inputKind: 'html',
+          htmlChars: SAVED_PAGE.length,
+          pageFormat: 'json_ld',
+          pageTruncated: false,
+          host: 'www.recipes.example',
+          outcome: 'draft',
+        });
+        expect(entries[0]?.modelUsage).toHaveProperty('pageChars');
+        expect(entries[1]?.modelUsage).toMatchObject({
+          inputKind: 'html',
+          pageFormat: 'text',
+          outcome: 'draft',
+        });
+        expect(entries[1]?.modelUsage).not.toHaveProperty('host');
+        const output = lines.join('');
+        expect(output).not.toContain('Shakshuka recipe');
+        expect(output).not.toContain('/shakshuka');
+        expect(output).not.toContain('Simmer');
+        expect(output).not.toContain('Lentil');
+      });
+    });
   });
 
   async function insertManualDraft(): Promise<number> {
@@ -1137,6 +1347,59 @@ describe('recipe imports procedures', () => {
         { url: `${IMPORT_URL_PREFIX}${PAGE_2}` },
         { url: `${IMPORT_URL_PREFIX}${PAGE_1}` },
       ]);
+    });
+
+    it('still reads text, image and link imports started before saved pages', async () => {
+      const proposal = await storedProposal(await startImport());
+      const inputs = [
+        { kind: 'text', text: RECIPE_TEXT },
+        { kind: 'images', publicIds: [PAGE_1, PAGE_2] },
+        { kind: 'link', url: LINK },
+      ];
+      await db.delete(recipeDrafts);
+      const inserted = await db
+        .insert(recipeDrafts)
+        .values(
+          inputs.map((input) => ({
+            userId: USER_ID,
+            recipeId: null,
+            kind: 'import' as const,
+            draftData: {
+              version: RECIPE_DRAFT_VERSION,
+              fields: { proposal: { ...proposal, input } },
+            },
+          })),
+        )
+        .returning({ id: recipeDrafts.id });
+      const caller = createCaller(makeContext());
+
+      const list = await caller.recipeImports.list();
+      expect(list.map((item) => item.inputKind).sort()).toEqual([
+        'images',
+        'link',
+        'text',
+      ]);
+      for (const [index, row] of inserted.entries()) {
+        const result = await caller.recipeImports.get({ draftId: row.id });
+        expect(result.proposal?.input).toEqual(inputs[index]);
+      }
+      const images = await caller.recipeImports.get({
+        draftId: inserted[1]?.id ?? 0,
+      });
+      expect(images.images).toHaveLength(2);
+    });
+
+    it('gets a saved page import with no images', async () => {
+      const result = await createCaller(makeContext()).recipeImports.start({
+        input: savedPage(),
+      });
+      if (result.kind !== 'draft') throw new Error('expected a draft');
+      const caller = createCaller(makeContext());
+
+      const got = await caller.recipeImports.get({ draftId: result.draftId });
+      expect(got.proposal?.input.kind).toBe('html');
+      expect(got.images).toEqual([]);
+      expect((await caller.recipeImports.list())[0]?.inputKind).toBe('html');
     });
 
     it('gets a text import with no images', async () => {
@@ -1646,6 +1909,21 @@ describe('recipe imports procedures', () => {
       expect((await caller.recipes.get({ id: recipeId })).originals).toEqual(
         [],
       );
+    });
+
+    it('keeps no Originals for a saved page', async () => {
+      const started = await createCaller(makeContext()).recipeImports.start({
+        input: savedPage(),
+      });
+      if (started.kind !== 'draft') throw new Error('expected a draft');
+      const { destroyImage, destroyed } = destroySpy();
+      await createCaller(
+        makeContext({ destroyImage }),
+      ).recipeImports.createRecipe(createInput(started.draftId));
+
+      expect(await db.select().from(recipeImportOriginals)).toHaveLength(0);
+      expect(destroyed).toEqual([]);
+      expect(await draftRows()).toHaveLength(0);
     });
 
     it('rolls the whole recipe back when an Original cannot be written', async () => {

@@ -203,6 +203,12 @@ export {
   RECIPE_IMPORT_TEXT_MAX_LENGTH,
   RECIPE_IMPORT_LINK_MAX_LENGTH,
   RECIPE_IMPORT_IMAGES_MAX,
+  RECIPE_IMPORT_DOCUMENT_EXTENSIONS,
+  type RecipeImportDocumentKind,
+  RECIPE_IMPORT_DOCUMENT_MAX_FILE_SIZE,
+  RECIPE_IMPORT_FILE_NAME_MAX_LENGTH,
+  RECIPE_IMPORT_HTML_MAX_LENGTH,
+  RECIPE_IMPORT_HTML_MAX_REQUEST_BYTES,
   RECIPE_IMPORT_NOTES_MAX,
   RECIPE_IMPORT_NOTE_MAX_LENGTH,
   RECIPE_IMPORT_SEVERAL_MAX,
@@ -211,8 +217,11 @@ export {
   RECIPE_IMPORT_NUTRITION_FIELDS,
   type RecipeImportNutritionField,
   recipeImportImagePublicIdSchema,
+  recipeImportSourceLinkSchema,
   recipeImportInputSchema,
   type RecipeImportInput,
+  recipeImportStoredInputSchema,
+  type RecipeImportStoredInput,
   recipeImportInputKindSchema,
   type RecipeImportInputKind,
   startRecipeImportInputSchema,
@@ -338,6 +347,7 @@ export {
 } from './schemas/plants.ts';
 export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export { toTitleCase } from './lib/title-case.ts';
+export { takeChars } from './lib/take-chars.ts';
 export {
   scrubPii,
   type ScrubbableEvent,

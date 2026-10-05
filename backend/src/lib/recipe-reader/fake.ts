@@ -9,8 +9,9 @@ import {
 } from './types.ts';
 
 // Canned outcomes for backend tests and e2e, chosen by markers in the input
-// text or a page's content, or in an image's URL for an image import. Any other input gets a
-// small candidate built from the household it was sent, with one matched
+// text or a page's content, or in an image's URL for an image import. Any
+// other input gets a small candidate named after the input's first line, or
+// after its kind, built from the household it was sent, with one matched
 // ingredient, one proposed new ingredient, and a converted and a nominal
 // Estimate.
 export const FAKE_READER_MARKERS = {
@@ -108,7 +109,9 @@ function fakeCandidate(request: RecipeReadRequest): RecipeImportCandidate {
           .find((line) => line.length > 0) ?? 'Imported Recipe')
       : input.kind === 'images'
         ? 'Photographed Recipe'
-        : 'Linked Recipe';
+        : input.url === null
+          ? 'Saved Page Recipe'
+          : 'Linked Recipe';
   const name = request.pick ?? firstLine.slice(0, 200);
   const known = household.ingredients[0];
   const category = household.categories[0];

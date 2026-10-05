@@ -282,6 +282,53 @@ describe('RecipeImportReviewPage', () => {
     expect(original).toHaveTextContent('javascript:alert(1)');
   });
 
+  function renderSavedPageImport(
+    input: Extract<RecipeImportProposal['input'], { kind: 'html' }>,
+  ): HTMLElement {
+    const proposal: RecipeImportProposal = { ...PROPOSAL, input };
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...importDraft(),
+        proposal,
+        draftData: { version: 1, fields: { proposal } },
+      },
+      error: null,
+    });
+    render(<RecipeImportReviewPage />);
+    const original = screen.getByText('Original document').closest('details');
+    if (!original) throw new Error('no original');
+    return original;
+  }
+
+  it('shows a saved page’s file name, source link and readable text', () => {
+    const original = renderSavedPageImport({
+      kind: 'html',
+      fileName: 'Weeknight pasta.html',
+      sourceUrl: 'https://recipes.example/pasta',
+      text: 'Weeknight Pasta\n2 tbsp olive oil',
+    });
+
+    expect(original).toHaveTextContent('Weeknight pasta.html');
+    expect(
+      within(original).getByRole('link', {
+        name: 'https://recipes.example/pasta (opens in a new tab)',
+      }),
+    ).toHaveAttribute('target', '_blank');
+    expect(original).toHaveTextContent('Weeknight Pasta 2 tbsp olive oil');
+  });
+
+  it('shows a saved page with no source link or readable text', () => {
+    const original = renderSavedPageImport({
+      kind: 'html',
+      fileName: 'Weeknight pasta.html',
+      sourceUrl: null,
+      text: '',
+    });
+
+    expect(within(original).queryByRole('link')).not.toBeInTheDocument();
+    expect(original).toHaveTextContent('This page has no readable text.');
+  });
+
   it('fills every section with the editor’s own controls', () => {
     render(<RecipeImportReviewPage />);
 

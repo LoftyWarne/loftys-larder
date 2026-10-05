@@ -195,6 +195,32 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    test(`recipe import from a document passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto('/recipes/import');
+      await page.getByRole('button', { name: 'Document' }).click();
+      await page.getByLabel('Choose a document to import').setInputFiles({
+        name: 'a-curry-with-a-long-file-name-for-four-people.md',
+        mimeType: 'text/markdown',
+        buffer: Buffer.from('Curry for four\n2 tbsp oil\nPepper to taste'),
+      });
+      await expect(
+        page.getByLabel(
+          'From a-curry-with-a-long-file-name-for-four-people.md',
+        ),
+      ).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            'document.documentElement.scrollWidth <= window.innerWidth',
+          ),
+        )
+        .toBe(true);
+      await runAxe(page, theme);
+    });
+
     test(`import review passes axe in ${theme} theme`, async ({ page }) => {
       await openImportReview(page);
       await runAxe(page, theme);

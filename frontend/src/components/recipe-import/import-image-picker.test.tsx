@@ -4,14 +4,17 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { ImportImagePicker } from './import-image-picker.tsx';
+import { addImportImages, ImportImagePicker } from './import-image-picker.tsx';
 
 function Harness(): React.ReactElement {
   const [files, setFiles] = useState<File[]>([]);
+  const [problems, setProblems] = useState<string[]>([]);
   return (
     <ImportImagePicker
       files={files}
       onFilesChange={setFiles}
+      problems={problems}
+      onProblemsChange={setProblems}
       disabled={false}
     />
   );
@@ -139,5 +142,33 @@ describe('ImportImagePicker', () => {
 
     expect(chosenNames()).toEqual(['second.jpg']);
     expect(screen.getByText(/^Page 1 ·/)).toBeInTheDocument();
+  });
+});
+
+describe('addImportImages', () => {
+  it('adds images after the ones already picked, up to the limit, and says what was left out', () => {
+    const picked = ['1', '2', '3', '4', '5', '6', '7'].map((n) =>
+      image(`${n}.jpg`),
+    );
+    const added = addImportImages(picked, [
+      image('notes.docx', 'application/msword'),
+      image('8.jpg'),
+      image('9.jpg'),
+    ]);
+
+    expect(added.files.map((file) => file.name)).toEqual([
+      '1.jpg',
+      '2.jpg',
+      '3.jpg',
+      '4.jpg',
+      '5.jpg',
+      '6.jpg',
+      '7.jpg',
+      '8.jpg',
+    ]);
+    expect(added.problems).toEqual([
+      'notes.docx isn’t a JPG, PNG, WebP or HEIC image.',
+      'Up to 8 images can be imported at once, so not all of them were added.',
+    ]);
   });
 });

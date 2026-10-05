@@ -1,6 +1,9 @@
 import { DomUtils, ElementType, parseDocument } from 'htmlparser2';
 
-import { RECIPE_IMPORT_TEXT_MAX_LENGTH } from '../../../../shared/src/index.ts';
+import {
+  RECIPE_IMPORT_TEXT_MAX_LENGTH,
+  takeChars,
+} from '../../../../shared/src/index.ts';
 import type { RecipeReaderPageContent } from '../recipe-reader/types.ts';
 
 // What a fetched page gives the reader (DEC-107): its schema.org `Recipe`
@@ -120,6 +123,15 @@ export function readPageContent(html: string): RecipeReaderPageContent {
   return capped('text', pageText(document.children));
 }
 
+// The page's readable text, capped, even when the reader is sent its JSON-LD.
+// Import Review shows it beside a saved page's proposal.
+export function readPageText(html: string): string {
+  return takeChars(
+    pageText(parseDocument(html).children),
+    PAGE_CONTENT_MAX_LENGTH,
+  );
+}
+
 function capped(
   format: RecipeReaderPageContent['format'],
   content: string,
@@ -127,7 +139,7 @@ function capped(
   return content.length > PAGE_CONTENT_MAX_LENGTH
     ? {
         format,
-        content: content.slice(0, PAGE_CONTENT_MAX_LENGTH),
+        content: takeChars(content, PAGE_CONTENT_MAX_LENGTH),
         truncated: true,
       }
     : { format, content, truncated: false };

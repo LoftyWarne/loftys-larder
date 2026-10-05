@@ -2750,6 +2750,7 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 - `frontend/src/components/recipe-import/original-input.tsx`: an HTML Document's file name, source link and readable text
 - e2e: `e2e/specs/recipe-import.spec.ts` (a text file and an HTML file on the `fake` adapter)
 - `docs/plan.md` (a "Document flow" paragraph beside the image and link flows), `README.md`
+- Added at kick-off: `frontend/src/components/recipe-import/use-file-drop.ts` (new: the window drag-and-drop listeners), `frontend/src/components/recipe-import/import-image-picker.tsx` (its checks exported as `addImportImages`, its problems held by the page), `frontend/src/test/setup.ts` (`Blob.arrayBuffer`, which jsdom lacks), and an axe case for Document mode at phone width in `e2e/specs/a11y.spec.ts`. Added while implementing: `shared/src/lib/take-chars.ts` (see the notes below)
 
 **Shapes** (code in `shared/src/schemas/recipe-imports.ts`; names provisional):
 - **Accepted Documents:** `.txt`, `.text`, `.md`, `.markdown`, `.html` and `.htm`. Sort by extension first, then MIME type, because phones often report `.md` as `application/octet-stream` or nothing. FEAT-65 adds `.pdf`.
@@ -2784,6 +2785,21 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 - The drop target is the whole page: listen for `dragenter`, `dragover`, `dragleave` and `drop` on `window` while the Import page is mounted, with `preventDefault` so the browser doesn't open a file dropped outside the form. Route dropped images through the Photos picker's own validation; don't copy it.
 - A saved page and its source link are untrusted input (DEC-104): https only, at most 2,000 characters, and never fetched.
 - Route files stay thin shells (AGENTS.md).
+- Amended at kick-off (2026-10-05):
+  - The browser checks both caps: at most 750,000 characters and 900,000 bytes as JSON. A page the server's schema would refuse gets the "too big" message, not "try again".
+  - `html` joins the input kinds, but the in-progress list shows no kind label, as it shows none today.
+  - jsdom has no `File.arrayBuffer()`, so the frontend test setup adds one. The page reads files with it as above.
+  - Document mode keeps its own file and text; switching modes carries nothing across, and picking or dropping another Document replaces the one loaded.
+  - Drops are ignored, though still kept from the browser, while offline, while an import runs and while the several-recipes pick shows.
+  - Sorting a drop: one Document goes to Document mode. A Document with any other file gives "Drop one document, or up to 8 photos." Images, with anything else among them, go to Photos through the picker's checks, which name each file they refuse. One file that's neither gives the Document refusal, and several give the drop refusal. The page stays in its mode for a refusal.
+  - A saved page's stored `text` may be empty (a page that's all JSON-LD, or rendered by JavaScript). Import Review then says "This page has no readable text."
+  - A relative or protocol-relative canonical link isn't an https URL, so the next candidate is tried.
+  - The prompt marks a saved page with no known address `<recipe_page saved="true" …>`. With a URL, the reader leaves `sourceUrl` empty for the server to fill; without one, it gives the recipe's own address if the page shows it.
+  - Import Review heads an HTML Document "Original document": the file name, the source link if any, then the readable text.
+  - Logs carry `htmlChars` (the pruned size) beside the link path's `pageFormat`, `pageChars`, `pageTruncated` and `host`.
+- Found while implementing (2026-10-05):
+  - Postgres refuses a lone UTF-16 surrogate in jsonb, so text cut to a cap and stored in a draft (a loaded text file, a saved page's readable text, a file name) is cut with the new shared `takeChars`, which never splits an emoji. A cut that split one would have failed the draft insert.
+  - Text files also honour a UTF-16 BOM, and their line endings become "\n". An HTML `<meta>` naming UTF-16 is read as UTF-8, as browsers do. A file name's extension is read after trimming, and a name ending in "." counts as having none, so its type decides.
 
 **Manual verification:**
 1. Save a recipe page from a large recipe site with the browser's "Save Page As… / Webpage, HTML only" and import the file. Import Review opens with the page's link as the source and its text alongside.

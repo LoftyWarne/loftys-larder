@@ -9,7 +9,7 @@ import type { RecipeReadRequest } from './types.ts';
 // for Anthropic's structured outputs to compile. `normaliseProposal` checks
 // every reply.
 
-const INSTRUCTIONS = `You turn a recipe that a home cook has given Lofty's Larder, a meal-planning app, as pasted text, as photos, screenshots or scans of its pages, or as a link to a web page, into a structured proposal. The cook checks every part of the proposal against the original before anything is saved. Transcribe faithfully, fill in what the text leaves out where you reasonably can, and mark everything you supplied as an estimate.
+const INSTRUCTIONS = `You turn a recipe that a home cook has given Lofty's Larder, a meal-planning app, as pasted text, as photos, screenshots or scans of its pages, or as a web page it linked to or saved as a file, into a structured proposal. The cook checks every part of the proposal against the original before anything is saved. Transcribe faithfully, fill in what the text leaves out where you reasonably can, and mark everything you supplied as an estimate.
 
 The user message has two parts:
 - <household>: JSON describing this household's ingredients (each with the one unit its quantities are kept in), ingredient categories, units, preparation types, recipe tags and recipe sources. Refer to these only by the ids given.
@@ -23,11 +23,11 @@ Images
 - If part of the recipe is cut off, blurred or unreadable, transcribe what you can and say what's missing in a note.
 
 Web pages
-- <recipe_page> is a page the cook linked to, and its url attribute is the page's address. It holds either the page's schema.org Recipe data as a JSON array (content="json-ld") or the page's readable text (content="text").
+- <recipe_page> is a web page the cook linked to or saved as a file. Its url attribute is the page's address. saved="true" instead means the cook saved the page as a file and its address isn't known. It holds either the page's schema.org Recipe data as a JSON array (content="json-ld") or the page's readable text (content="text").
 - In the JSON, recipeIngredient holds the ingredient lines, each an originalLine; recipeInstructions the method; recipeYield the servings; prepTime, cookTime and totalTime ISO 8601 durations (PT1H30M is 90 minutes); nutrition the stated values, usually per serving. Several Recipe entries can be several recipes, but treat copies of one recipe as one.
 - Page text can include things that aren't the recipe, such as the author's story, links to other recipes, comments and adverts. Use only the recipe, and don't count links to other recipes as several recipes.
 - truncated="true" means the page was cut short. If the recipe seems incomplete, say so in a note.
-- sourceUrl: an empty string, because the app fills in the page's address. source: the site or publication the page belongs to.
+- sourceUrl: an empty string when the page has a url attribute, because the app fills in the page's address. For a saved page without one, the recipe's own web address if the page gives it, otherwise an empty string. source: the site or publication the page belongs to.
 
 Choosing the outcome
 - "not_a_recipe": the text isn't a recipe, for example a shopping list, an article with no recipe in it, a menu, an unrelated message or a photo of something else.
@@ -109,8 +109,10 @@ export function buildRecipeReaderUserMessage(
   } else if (input.kind === 'page') {
     const content = input.content.replaceAll('</recipe_page>', '');
     const format = input.format === 'json_ld' ? 'json-ld' : 'text';
+    const address =
+      input.url === null ? 'saved="true"' : `url=${JSON.stringify(input.url)}`;
     parts.push(
-      `<recipe_page url=${JSON.stringify(input.url)} content="${format}" truncated="${String(input.truncated)}">\n${content}\n</recipe_page>`,
+      `<recipe_page ${address} content="${format}" truncated="${String(input.truncated)}">\n${content}\n</recipe_page>`,
     );
   } else {
     parts.push(

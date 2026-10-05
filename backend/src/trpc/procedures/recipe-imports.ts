@@ -22,6 +22,7 @@ import {
   type ListRecipeImportsResult,
   type RecipeImportInput,
   type RecipeImportProposal,
+  type RecipeImportStoredInput,
   type StartRecipeImportResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
@@ -52,7 +53,11 @@ import {
 } from '../../lib/recipe-import/import-images.ts';
 import { checkImportLink } from '../../lib/recipe-import/link-guard.ts';
 import { normaliseProposal } from '../../lib/recipe-import/normalise-proposal.ts';
-import { readPageContent } from '../../lib/recipe-import/page-content.ts';
+import {
+  readPageContent,
+  readPageText,
+} from '../../lib/recipe-import/page-content.ts';
+import { findPageSourceLink } from '../../lib/recipe-import/page-source-link.ts';
 import {
   RecipeReaderRequestError,
   RecipeReaderTimeoutError,
@@ -138,7 +143,11 @@ export const recipeImportsRouter = router({
         };
 
         let readerInput: RecipeReaderInput;
+        // Takes the place of the reader's own source link: the link the cook
+        // gave, or the address a saved page names as its own.
+        let sourceUrl: string | null = null;
         if (input.input.kind === 'link') {
+          sourceUrl = input.input.url;
           const link = checkImportLink(input.input.url);
           if (!link.ok) {
             logUsage('IMPORT_LINK_NOT_ALLOWED', null, { reason: link.reason });
@@ -182,6 +191,23 @@ export const recipeImportsRouter = router({
             pageTruncated: content.truncated,
             redirects: page.redirects,
             fetchMs: Math.round(performance.now() - startedAt),
+          };
+        } else if (input.input.kind === 'html') {
+          // A saved page is read as a linked one is, without a fetch, so the
+          // link guard isn't involved (DEC-111).
+          const { html } = input.input;
+          const content = readPageContent(html);
+          sourceUrl = findPageSourceLink(html);
+          readerInput = { kind: 'page', url: sourceUrl, ...content };
+          // Never the file name or the link's path.
+          inputDetails = {
+            htmlChars: html.length,
+            pageFormat: content.format,
+            pageChars: content.content.length,
+            pageTruncated: content.truncated,
+            ...(sourceUrl === null
+              ? {}
+              : { host: new URL(sourceUrl).hostname }),
           };
         } else {
           readerInput = toReaderInput(input.input, ctx.cloudinary.cloudName);
@@ -260,13 +286,12 @@ export const recipeImportsRouter = router({
 
         const proposal: RecipeImportProposal = {
           ...normalised.proposal,
-          // A linked recipe's source is the link the cook gave.
           header:
-            input.input.kind === 'link'
-              ? { ...normalised.proposal.header, sourceUrl: input.input.url }
-              : normalised.proposal.header,
+            sourceUrl === null
+              ? normalised.proposal.header
+              : { ...normalised.proposal.header, sourceUrl },
           reader: { adapter: reader.adapter, model: usage.model },
-          input: input.input,
+          input: toStoredInput(input.input, sourceUrl),
         };
         const inserted = await ctx.db
           .insert(recipeDrafts)
@@ -503,7 +528,7 @@ function ownImportDrafts(userId: string) {
 // Images reach the reader as delivery URLs for their JPEG rendition, never
 // as bytes through Fastify (DEC-50, DEC-107).
 function toReaderInput(
-  input: Exclude<RecipeImportInput, { kind: 'link' }>,
+  input: Extract<RecipeImportInput, { kind: 'text' | 'images' }>,
   cloudName: string,
 ): RecipeReaderInput {
   if (input.kind === 'text') return input;
@@ -512,6 +537,22 @@ function toReaderInput(
     urls: input.publicIds.map((publicId) =>
       importImageUrl(cloudName, publicId),
     ),
+  };
+}
+
+// What the draft keeps of the input (DEC-108). A saved page keeps its file
+// name, source link and readable text, never its markup, which autosave
+// would send back on every edit.
+function toStoredInput(
+  input: RecipeImportInput,
+  sourceUrl: string | null,
+): RecipeImportStoredInput {
+  if (input.kind !== 'html') return input;
+  return {
+    kind: 'html',
+    fileName: input.fileName,
+    sourceUrl,
+    text: readPageText(input.html),
   };
 }
 

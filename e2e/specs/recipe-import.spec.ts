@@ -172,3 +172,114 @@ test.describe('recipe import from pasted text', () => {
     await expect(page.getByLabel('Recipe text')).toHaveValue(text);
   });
 });
+
+// Documents are read in the browser: a text or Markdown file opens in a text
+// box and imports as pasted text; a saved web page is pruned and read like a
+// linked page, without a fetch.
+test.describe('recipe import from a document', () => {
+  const SAVED_LINK = 'https://recipes.example/weeknight-pasta';
+  const SAVED_PAGE = `<!DOCTYPE html>
+<!-- saved from url=(0040)${SAVED_LINK} -->
+<html><head>
+<title>Weeknight Pasta | Recipes</title>
+<link rel="canonical" href="${SAVED_LINK}">
+<script type="application/ld+json">${JSON.stringify({
+    '@type': 'Recipe',
+    name: 'Weeknight Pasta',
+    recipeIngredient: ['2 tbsp olive oil', 'Pepper to taste'],
+    recipeInstructions: [{ '@type': 'HowToStep', text: 'Cook everything.' }],
+  })}</script>
+<script>window.tracking = true;</script>
+</head><body><main><h1>Weeknight Pasta</h1><p>Cook everything together.</p></main></body></html>`;
+
+  test.beforeEach(async () => {
+    await resetHouseholdData();
+    await createIngredient({
+      name: 'Olive oil',
+      unit: 'ml',
+      category: 'Pantry',
+    });
+  });
+
+  async function chooseDocument(
+    page: Page,
+    name: string,
+    mimeType: string,
+    content: string,
+  ): Promise<void> {
+    await page.goto('/recipes/import');
+    await page.getByRole('button', { name: 'Document' }).click();
+    await page.getByLabel('Choose a document to import').setInputFiles({
+      name,
+      mimeType,
+      buffer: Buffer.from(content),
+    });
+  }
+
+  test('a Markdown file, trimmed in its text box, is reviewed and created', async ({
+    page,
+  }) => {
+    await chooseDocument(
+      page,
+      'weeknight-pasta.md',
+      'application/octet-stream',
+      `# Weeknight Pasta\n\nA story about pasta.\n\n${RECIPE_TEXT}`,
+    );
+    const box = page.getByLabel('From weeknight-pasta.md');
+    await expect(box).toHaveValue(/A story about pasta/);
+    await box.fill(RECIPE_TEXT);
+    await page.getByRole('button', { name: 'Import', exact: true }).click();
+
+    await expect(page).toHaveURL(/\/recipes\/import\/\d+$/);
+    await expect(
+      page.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+    const original = page.getByRole('complementary', {
+      name: 'Original text',
+    });
+    await expect(original).toContainText('2 tbsp olive oil');
+    await expect(original).not.toContainText('A story about pasta');
+
+    await page.getByRole('button', { name: 'Create recipe' }).click();
+    await expect(page).toHaveURL(/\/recipes\/\d+$/);
+    await expect(
+      page.getByRole('heading', { name: 'Weeknight Pasta', level: 1 }),
+    ).toBeVisible();
+  });
+
+  test('a saved web page is reviewed beside its text and source link, and created', async ({
+    page,
+  }) => {
+    await chooseDocument(page, 'Weeknight Pasta.html', 'text/html', SAVED_PAGE);
+    await expect(page.getByText(/^Saved web page ·/)).toBeVisible();
+    await page.getByRole('button', { name: 'Import', exact: true }).click();
+
+    await expect(page).toHaveURL(/\/recipes\/import\/\d+$/);
+    const original = page.getByRole('complementary', {
+      name: 'Original document',
+    });
+    await expect(original).toContainText('Weeknight Pasta.html');
+    await expect(
+      original.getByRole('link', {
+        name: `${SAVED_LINK} (opens in a new tab)`,
+      }),
+    ).toHaveAttribute('href', SAVED_LINK);
+    await expect(original).toContainText('Cook everything together.');
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue(
+      'Linked Recipe',
+    );
+
+    const { rows: drafts } = await getPool().query<{ data: string }>(
+      `select draft_data::text as data from recipe_drafts where kind = 'import'`,
+    );
+    expect(drafts[0]?.data).not.toContain('tracking');
+    expect(drafts[0]?.data).not.toContain('ld+json');
+
+    await page.getByRole('button', { name: 'Create recipe' }).click();
+    await expect(page).toHaveURL(/\/recipes\/\d+$/);
+    const { rows } = await getPool().query<{ sourceUrl: string | null }>(
+      `select source_url as "sourceUrl" from recipes`,
+    );
+    expect(rows).toEqual([{ sourceUrl: SAVED_LINK }]);
+  });
+});

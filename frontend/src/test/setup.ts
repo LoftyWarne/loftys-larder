@@ -37,3 +37,23 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     }
   };
 }
+
+// jsdom's Blob has no arrayBuffer(), which the Import page reads Documents
+// with. Browsers all have it.
+if (
+  typeof Blob !== 'undefined' &&
+  typeof Blob.prototype.arrayBuffer !== 'function'
+) {
+  Blob.prototype.arrayBuffer = function arrayBuffer(this: Blob) {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(reader.result as ArrayBuffer);
+      };
+      reader.onerror = () => {
+        reject(reader.error ?? new Error('Could not read the blob'));
+      };
+      reader.readAsArrayBuffer(this);
+    });
+  };
+}

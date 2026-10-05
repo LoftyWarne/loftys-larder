@@ -3,6 +3,7 @@ import type {
   RecipeImportInput,
 } from '@loftys-larder/shared';
 import {
+  RECIPE_IMPORT_IMAGES_MAX,
   RECIPE_IMPORT_LINK_MAX_LENGTH,
   RECIPE_IMPORT_TEXT_MAX_LENGTH,
 } from '@loftys-larder/shared';
@@ -11,17 +12,38 @@ import { Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { DiscardImportButton } from '@/components/recipe-import/discard-import-button.tsx';
-import { ImportImagePicker } from '@/components/recipe-import/import-image-picker.tsx';
+import { DocumentPicker } from '@/components/recipe-import/document-picker.tsx';
+import {
+  addImportImages,
+  ImportImagePicker,
+} from '@/components/recipe-import/import-image-picker.tsx';
+import { useFileDrop } from '@/components/recipe-import/use-file-drop.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { useOnlineStatus } from '@/hooks/use-online-status.ts';
 import { uploadToCloudinary } from '@/lib/cloudinary-upload.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
+import {
+  readImportDocument,
+  sortDroppedFiles,
+  type ImportDocument,
+} from '@/lib/import-documents.ts';
 import { trpc } from '@/lib/trpc.ts';
 
-type InputMode = RecipeImportInput['kind'];
+type InputKind = RecipeImportInput['kind'];
 
-// What "several recipes" and "back" refer to, by input.
-const INPUT_WORDS: Record<InputMode, { several: string; back: string }> = {
+// Document mode sends a text or Markdown file as pasted text, and a saved
+// web page as its markup (DEC-111).
+type ImportMode = 'text' | 'images' | 'link' | 'document';
+
+const MODES: { mode: ImportMode; label: string }[] = [
+  { mode: 'text', label: 'Paste text' },
+  { mode: 'images', label: 'Photos' },
+  { mode: 'link', label: 'Link' },
+  { mode: 'document', label: 'Document' },
+];
+
+// What "several recipes" and "back" refer to, by the input sent.
+const INPUT_WORDS: Record<InputKind, { several: string; back: string }> = {
   text: {
     several: 'That text has more than one recipe. Which one?',
     back: 'Back to the text',
@@ -34,6 +56,10 @@ const INPUT_WORDS: Record<InputMode, { several: string; back: string }> = {
     several: 'That page has more than one recipe. Which one?',
     back: 'Back to the link',
   },
+  html: {
+    several: 'That page has more than one recipe. Which one?',
+    back: 'Back to the document',
+  },
 };
 
 const UPDATED_FORMAT = new Intl.DateTimeFormat('en-GB', {
@@ -43,8 +69,9 @@ const UPDATED_FORMAT = new Intl.DateTimeFormat('en-GB', {
 });
 
 // Choosing an import input and resuming imports in progress (DEC-108): pasted
-// text, images uploaded straight to Cloudinary, or a web link the server
-// fetches (DEC-107).
+// text, images uploaded straight to Cloudinary, a web link the server
+// fetches (DEC-107), or a Document (DEC-111). A file dropped anywhere on the
+// page is taken in every mode.
 export function RecipeImportPage(): React.ReactElement {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
@@ -55,10 +82,13 @@ export function RecipeImportPage(): React.ReactElement {
       enabled: false,
     });
 
-  const [mode, setMode] = useState<InputMode>('text');
+  const [mode, setMode] = useState<ImportMode>('text');
   const [text, setText] = useState('');
   const [link, setLink] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [imageProblems, setImageProblems] = useState<string[]>([]);
+  const [doc, setDoc] = useState<ImportDocument | null>(null);
+  const [docProblem, setDocProblem] = useState<string | null>(null);
   // The chosen images once uploaded, so trying again or picking one of
   // several recipes doesn't upload them again.
   const [uploadedIds, setUploadedIds] = useState<string[] | null>(null);
@@ -74,6 +104,57 @@ export function RecipeImportPage(): React.ReactElement {
   const working = uploading || startMutation.isPending;
   const trimmed = text.trim();
   const trimmedLink = link.trim();
+  const docReady =
+    doc !== null && (doc.kind === 'html' || doc.text.trim() !== '');
+
+  const dragging = useFileDrop(
+    isOnline && !working && several === null,
+    takeDrop,
+  );
+
+  function chooseMode(next: ImportMode): void {
+    setMode(next);
+    setError(null);
+    setImageProblems([]);
+    setDocProblem(null);
+  }
+
+  function changeFiles(next: File[]): void {
+    setFiles(next);
+    setUploadedIds(null);
+    setError(null);
+  }
+
+  // A Document switches to Document mode, and images join the ones already
+  // picked in Photos, through the picker's own checks.
+  function takeDrop(dropped: File[]): void {
+    const sorted = sortDroppedFiles(dropped);
+    if (sorted === null) return;
+    if (sorted.kind === 'refused') {
+      setError(sorted.problem);
+      return;
+    }
+    if (sorted.kind === 'document') {
+      chooseMode('document');
+      void takeDocument(sorted.file);
+      return;
+    }
+    chooseMode('images');
+    const added = addImportImages(files, sorted.files);
+    setImageProblems(added.problems);
+    if (added.files.length > files.length) changeFiles(added.files);
+  }
+
+  async function takeDocument(file: File): Promise<void> {
+    const reading = await readImportDocument(file);
+    if (!reading.ok) {
+      setDocProblem(reading.problem);
+      return;
+    }
+    setDocProblem(null);
+    setError(null);
+    setDoc(reading.document);
+  }
 
   async function start(input: RecipeImportInput, pick?: string): Promise<void> {
     setError(null);
@@ -102,6 +183,15 @@ export function RecipeImportPage(): React.ReactElement {
       return;
     }
     await start({ kind: 'link', url });
+  }
+
+  async function importDocument(): Promise<void> {
+    if (doc === null) return;
+    await start(
+      doc.kind === 'text'
+        ? { kind: 'text', text: doc.text.trim() }
+        : { kind: 'html', fileName: doc.fileName, html: doc.html },
+    );
   }
 
   async function importImages(): Promise<void> {
@@ -137,9 +227,9 @@ export function RecipeImportPage(): React.ReactElement {
         </p>
         <h1 className="text-2xl font-semibold">Import a recipe</h1>
         <p className="text-sm text-muted-foreground">
-          Paste a recipe, add photos of it or give a link to it, and it&rsquo;s
-          turned into a draft for you to check. Nothing is added to your recipes
-          until you create it.
+          Paste a recipe, add photos of it, give a link to it or choose a file
+          holding it, and it&rsquo;s turned into a draft for you to check.
+          Nothing is added to your recipes until you create it.
         </p>
       </header>
 
@@ -182,47 +272,23 @@ export function RecipeImportPage(): React.ReactElement {
           <div
             role="group"
             aria-label="Import from"
-            className="inline-flex gap-1 rounded-md border border-input p-1"
+            className="inline-flex flex-wrap gap-1 rounded-md border border-input p-1"
           >
-            <Button
-              type="button"
-              size="sm"
-              variant={mode === 'text' ? 'secondary' : 'ghost'}
-              aria-pressed={mode === 'text'}
-              disabled={working}
-              onClick={() => {
-                setMode('text');
-                setError(null);
-              }}
-            >
-              Paste text
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={mode === 'images' ? 'secondary' : 'ghost'}
-              aria-pressed={mode === 'images'}
-              disabled={working}
-              onClick={() => {
-                setMode('images');
-                setError(null);
-              }}
-            >
-              Photos
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={mode === 'link' ? 'secondary' : 'ghost'}
-              aria-pressed={mode === 'link'}
-              disabled={working}
-              onClick={() => {
-                setMode('link');
-                setError(null);
-              }}
-            >
-              Link
-            </Button>
+            {MODES.map((option) => (
+              <Button
+                key={option.mode}
+                type="button"
+                size="sm"
+                variant={mode === option.mode ? 'secondary' : 'ghost'}
+                aria-pressed={mode === option.mode}
+                disabled={working}
+                onClick={() => {
+                  chooseMode(option.mode);
+                }}
+              >
+                {option.label}
+              </Button>
+            ))}
           </div>
           {mode === 'text' ? (
             <form
@@ -303,6 +369,50 @@ export function RecipeImportPage(): React.ReactElement {
                 </Button>
               </div>
             </form>
+          ) : mode === 'document' ? (
+            <form
+              className="space-y-3"
+              aria-label="Import from a document"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!docReady || working || !isOnline) return;
+                void importDocument();
+              }}
+            >
+              <DocumentPicker
+                value={doc}
+                problem={docProblem}
+                disabled={working}
+                onFile={(file) => {
+                  void takeDocument(file);
+                }}
+                onTextChange={(next) => {
+                  setDoc((current) =>
+                    current?.kind === 'text'
+                      ? { ...current, text: next }
+                      : current,
+                  );
+                }}
+                onRemove={() => {
+                  setDoc(null);
+                  setDocProblem(null);
+                  setError(null);
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {!isOnline && (
+                  <p className="text-sm text-muted-foreground">
+                    You&rsquo;re offline. Importing needs a connection.
+                  </p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={!docReady || working || !isOnline}
+                >
+                  Import
+                </Button>
+              </div>
+            </form>
           ) : (
             <form
               className="space-y-3"
@@ -315,11 +425,9 @@ export function RecipeImportPage(): React.ReactElement {
             >
               <ImportImagePicker
                 files={files}
-                onFilesChange={(next) => {
-                  setFiles(next);
-                  setUploadedIds(null);
-                  setError(null);
-                }}
+                onFilesChange={changeFiles}
+                problems={imageProblems}
+                onProblemsChange={setImageProblems}
                 disabled={working}
               />
               <div className="flex flex-wrap items-center justify-end gap-3">
@@ -356,6 +464,20 @@ export function RecipeImportPage(): React.ReactElement {
       )}
 
       <ImportsInProgress />
+
+      {dragging && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4"
+        >
+          <div className="rounded-lg border-2 border-dashed border-primary bg-background px-8 py-12 text-center shadow-lg">
+            <p className="text-lg font-semibold">Drop to import</p>
+            <p className="text-sm text-muted-foreground">
+              One document, or up to {RECIPE_IMPORT_IMAGES_MAX} photos
+            </p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -438,10 +560,10 @@ function withScheme(link: string): string {
   return /^[a-z][a-z\d+.-]*:/i.test(link) ? link : `https://${link}`;
 }
 
-function startErrorMessage(err: unknown, kind: InputMode): string {
+function startErrorMessage(err: unknown, kind: InputKind): string {
   switch (getDomainErrorCode(err)) {
     case 'IMPORT_NOT_A_RECIPE':
-      return kind === 'link'
+      return kind === 'link' || kind === 'html'
         ? 'Couldn’t find a recipe in that. If the page has one, paste the text or a screenshot instead.'
         : 'Couldn’t find a recipe in that.';
     case 'IMPORT_LINK_NOT_ALLOWED':

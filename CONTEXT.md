@@ -33,3 +33,17 @@ _Avoid_: origin, input
 **Recipe Generation**:
 Asking a model to invent a recipe that doesn't exist yet from a description of what the cook wants. Distinct from Recipe Import: there is no original to check the result against.
 _Avoid_: AI import, idea import
+
+### Judging recipes
+
+**Health Score**:
+A model's judgement, from 1 to 10, of how healthy one serving of a recipe is as eaten, measured against all food rather than against the dish's role (a light dessert still scores as a dessert). A judgement, not an Estimate: it isn't a value the recipe failed to state.
+_Avoid_: health rating, nutrition score, grade, Nutri-Score
+
+**Suggestion**:
+One change, offered with a Health Score, that would make the recipe healthier while keeping it the same dish. The cook decides whether to make it.
+_Avoid_: tip (a method step's tip), advice, swap
+
+**Out of date**:
+A Health Score whose recipe has changed, in what the score was based on, since it was scored. It's kept and shown as out of date, not removed.
+_Avoid_: stale, expired, invalid

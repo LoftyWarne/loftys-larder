@@ -2321,7 +2321,7 @@ Conventions:
 
 **Goal:** Store a 1–10 AI health score per recipe and mark it stale when the recipe changes, ready for a later feature that produces the scores. Nothing about the score shows in the UI yet. (DEC-101)
 
-**Estimate:** 0.5 day. **Depends on:** FEAT-11 (recipes schema), FEAT-20 (recipe writes), FEAT-23 (serving variations). **Enables:** the AI scoring feature (not yet specced).
+**Estimate:** 0.5 day. **Depends on:** FEAT-11 (recipes schema), FEAT-20 (recipe writes), FEAT-23 (serving variations). **Enables:** FEAT-66 (scoring).
 
 **Files:**
 - `backend/src/db/schema/recipe-health.ts` (new), `backend/src/db/schema/index.ts`, `backend/drizzle/0022_recipe_health_scores.sql` (new)
@@ -2362,7 +2362,7 @@ Conventions:
 
 **Goal:** Show a recipe's per-serving nutrition on its page and let the editor set it, with gram values to 2 decimal places. (DEC-102)
 
-**Estimate:** 0.5 day. **Depends on:** FEAT-19 (recipe page), FEAT-21 (editor). **Enables:** the AI scoring feature (DEC-101) reads these values.
+**Estimate:** 0.5 day. **Depends on:** FEAT-19 (recipe page), FEAT-21 (editor). **Enables:** FEAT-66, whose scorer reads these values (DEC-112).
 
 **Files:**
 - `backend/src/db/schema/recipes.ts`, `backend/drizzle/0021_macro_grams_decimal.sql` (gram columns to `numeric(6,2)`)
@@ -2447,13 +2447,13 @@ Conventions:
 
 **Goal:** The server side of Recipe Import for pasted text. A swappable reader turns the text into a proposal, every proposal is normalised to the data's rules, and procedures start an import, list, read and discard import drafts, and create the reviewed recipe in one transaction. There's no UI yet; FEAT-61 builds Import Review on this. (DEC-103, DEC-104, DEC-105, DEC-106, DEC-108, DEC-109, DEC-110)
 
-**Estimate:** 1.5–2 days. **Depends on:** FEAT-59. **Enables:** FEAT-61, FEAT-62, FEAT-63, and the AI scoring feature (shared helpers).
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-59. **Enables:** FEAT-61, FEAT-62, FEAT-63, and FEAT-66 (shared helpers).
 
 **Files:**
 - `backend/package.json` (`@anthropic-ai/sdk`), `backend/src/config.ts` (`ANTHROPIC_API_KEY`, `RECIPE_IMPORT_ADAPTER`, `RECIPE_IMPORT_MODEL`), `docs/secrets-checklist.md`
 - `backend/src/lib/recipe-reader/` (new): the `RecipeReader` interface, the `anthropic` adapter (prompt, structured outputs), the `fake` adapter, and choosing an adapter from config
 - `backend/src/lib/recipe-import/` (new): `normaliseProposal`
-- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-66 at kick-off
+- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-72 at kick-off
 - `backend/src/trpc/procedures/recipe-imports.ts` (new: start, list, get, discard, create recipe), `backend/src/trpc/router.ts`
 - `backend/src/lib/recipe-writes.ts` (new: write code shared by `recipes.ts` and create recipe), `backend/src/trpc/procedures/recipes.ts` (uses it)
 - `backend/src/plugins/rate-limit.ts` (import limit), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the reader and the limit on the context)
@@ -2508,7 +2508,7 @@ Conventions:
   - The import limit is 14 `start` calls per user per hour, every call counted, checked inside `start` so the refusal is `TOO_MANY_REQUESTS` with `IMPORT_RATE_LIMITED`.
   - Adapters return a candidate shaped by `recipeImportCandidateSchema` (structured-output friendly); its rows refer to household ingredients as `{ id, name }`. A proposed new ingredient keeps a category or unit that wasn't sent as null (DEC-109 amended).
   - Create from import: an existing ingredient's row carries `unitId` for the unit-mismatch check; cost and image are accepted from the cook; a source proposed by name that exists by then is linked; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` carries the `newKey`. The draft is deleted first inside the transaction, so a second "Create recipe" finds nothing and rolls back (DEC-108 amended).
-  - The eval runner and eval set move to FEAT-66, with manual verification steps 1 and 2.
+  - The eval runner and eval set move to FEAT-72, with manual verification steps 1 and 2.
 - Amended after the FEAT-62 deploy (2026-10-04): Anthropic refused the structured-output schema, so every import failed in production. The `anthropic` adapter now describes the reply in its prompt instead of using structured outputs, and a request the provider refuses outright is `IMPORT_REQUEST_REJECTED` rather than "try again" (DEC-104 and DEC-109 amended).
 
 **Manual verification:**
@@ -2516,7 +2516,7 @@ Conventions:
 2. Run it on a shopping list. It reports not a recipe.
 3. Against a signed-in local app with a real key, call `start` and check the `recipe_drafts` row: `kind = 'import'`, the proposal, and the adapter and model.
 
-Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
+Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 **Common gotchas:**
 - `baseServings` is required. If the text doesn't state it, it's an Estimate.
@@ -2531,9 +2531,9 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
   - `start`: a `fake` outcome becoming an import draft that records the reader; several recipes; not a recipe; timeout and provider error; the rate limit; household scoping of the lists sent.
   - Create recipe: one transaction; keys resolved for rows, step links and the source; rollback on a failure partway; `INGREDIENT_NAME_TAKEN`; the draft deleted.
   - `list`, `get` and `discard`: ownership, newest first, and manual drafts untouched.
-- Eval set: moved to FEAT-66 (kick-off, 2026-10-04).
+- Eval set: moved to FEAT-72 (kick-off, 2026-10-04).
 - Commit: `feat(recipes): read a pasted recipe into an import draft and create it in one transaction`
-- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-66).
+- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-72).
 
 ---
 
@@ -2883,7 +2883,7 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 - The encryption check reads the file in the browser and looks for `/Encrypt` in the trailer dictionary near the end of the file (the last 2 KB, and the first 2 KB for linearised files). It's a courtesy, not a guarantee. An encrypted PDF that gets through gives the provider's 400, which stays `IMPORT_REQUEST_REJECTED` so it reaches Sentry.
 - The PDF credential has no eager transformation. The image import preset's `c_limit,…,f_jpg` would make a JPEG of page 1, which nothing uses.
 - Read the `claude-api` skill before changing the `anthropic` adapter. Claude reads each PDF page as text and as an image: about 1,500–3,000 text tokens per page plus the image, so a page costs more time and money than a photo. Claude's own limits (32 MB and 600 pages per request) are far above this feature's caps.
-- 8 pages is provisional. Manual verification step 3 times a real 8-page PDF, and FEAT-66 tunes the cap.
+- 8 pages is provisional. Manual verification step 3 times a real 8-page PDF, and FEAT-72 tunes the cap.
 - Create recipe reads the PDF's public id from the stored input in the draft it deletes, as it does image ids (DEC-108 amended), and keeps it only if it's in the imports folder. A public id kept as an Original is never destroyed, whatever a draft says (DEC-107).
 - The existing signed destroy (`image/destroy`) deletes a PDF, because a PDF is an `image` resource.
 - Household scope for Originals still comes through the join to `recipes` (DEC-17).
@@ -2937,22 +2937,325 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-66 — Model feature evals: the eval runner and the Recipe Import eval set
+### FEAT-66 — Health scoring: the `RecipeScorer`, scores after each save, and the score on recipe cards and the recipe page
 
-**Goal:** Measure a model feature on real inputs before a model, effort or prompt change ships. One runner takes a feature and an adapter and runs that feature's inputs through its real reader; Recipe Import brings the first set, supplied by the user. The first run settles the import model (Opus 5.5 or Sonnet 5.5) and its effort level. (DEC-104, DEC-109, cross-cutting #22)
+**Goal:** A model scores a recipe from 1 to 10, with a summary and an optional Suggestion. The browser scores a recipe automatically after Save & Finish and after an import's "Create recipe". A cook can Score or Rescore from the recipe page. The score shows on recipe cards and the recipe page as an AI health score. (DEC-112, DEC-101, DEC-109, DEC-110)
 
-**Estimate:** 1 day, plus the user's time gathering inputs. **Depends on:** FEAT-60. **Enables:** tuning `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT`, and FEAT-65's page cap; the AI scoring feature's evals.
+**Estimate:** 2 days. **Depends on:** FEAT-57 (storage and staleness), FEAT-58 (nutrition), FEAT-60 (the model-feature helpers). **Enables:** FEAT-67 to FEAT-71, and FEAT-72's Health Score set.
+
+**Files** (names provisional until kick-off):
+- `backend/src/lib/recipe-scorer/` (new): the `RecipeScorer` interface, the `anthropic` adapter and its prompt, the `fake` adapter, and choosing an adapter from config, laid out like `recipe-reader/`
+- `backend/src/lib/health-score/` (new): building the scorer's request from a recipe, used both before the call and again before the write, and `normaliseHealthScore`
+- `backend/src/trpc/procedures/health-scores.ts` (new: `score`, `due`), `backend/src/trpc/router.ts`
+- `backend/src/trpc/procedures/recipes.ts`: `get` returns `suggestion`
+- `backend/src/db/schema/recipe-health.ts` and one migration (new): `suggestion text NULL`
+- `backend/src/config.ts` (`HEALTH_SCORE_ADAPTER`, `HEALTH_SCORE_MODEL`, `HEALTH_SCORE_EFFORT`, `HEALTH_SCORE_SINCE`), `fly.toml`, `backend/.env.example`, `docs/secrets-checklist.md`
+- `backend/src/plugins/rate-limit.ts` (the score limit), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the scorer and the limit on the context)
+- `shared/src/schemas/health-scores.ts` (new: the shapes below), `shared/src/schemas/recipes.ts` (`suggestion` on `get`), `shared/src/schemas/errors.ts`, `shared/src/index.ts`
+- `frontend/src/components/health-score-chip.tsx` and `frontend/src/components/recipe-health-score.tsx` (both new)
+- `frontend/src/hooks/use-health-scoring.ts` (new): scores a list of recipe ids one at a time and holds which are being scored, in a context above the routes, so the recipe page and cards can show "Scoring…" after the edit page has navigated away (DEC-09)
+- `frontend/src/components/recipe-card.tsx`, `frontend/src/routes/-components/recipe-detail-page.tsx`, `recipe-edit-page.tsx` (after Save & Finish) and `recipe-import-review-page.tsx` (after "Create recipe")
+- `docs/plan.md` (the column), `README.md`
+
+**Shapes** (code in `shared/src/schemas/health-scores.ts`; names provisional):
+- **Scorer request:** `{ recipe: { name, kind, baseServings, lines, steps, nutrition, nutritionIsEstimated }, base: { lines, steps } | null }`. A line is `{ name, quantity, unit, prepType, isOptional }`, and a step is its text. `base` is set only for a serving variation.
+- **Scorer outcome:** `{ kind: 'candidate', candidate }` or `{ kind: 'refused' }`, with usage `{ model, inputTokens, outputTokens }`. Timeout and provider-unavailable are typed errors, as for the reader.
+- **Normalised result:** `{ score, summary, suggestion }`: an integer from 1 to 10, plain text of at most 300 characters, and plain text of at most 200 characters or null.
+- **`healthScores.score({ recipeId, rescore })`** returns `{ outcome, healthScore }`, where the outcome is one of:
+  - `scored`: a score was written.
+  - `current`: the score was already current and `rescore` was false, so there was no model call.
+  - `changed`: the recipe changed during the call, so nothing was written.
+  - `nothing_to_score`: the recipe has no ingredient lines, so there was no model call.
+- **`healthScores.due({ recipeId? })`** returns the ids of recipes needing a score, each with a reason: `not_scored`, `out_of_date` or `older_scorer` (scored before `HEALTH_SCORE_SINCE`).
+  - With a `recipeId`: that recipe and, for a base, its serving variations.
+  - Without: every recipe in the household that isn't soft-deleted (FEAT-67).
+  - A recipe with no ingredient lines is never due.
+- **Errors:** `HEALTH_SCORE_RATE_LIMITED` (`TOO_MANY_REQUESTS`, with the seconds until retry), `HEALTH_SCORE_TRY_AGAIN` (a timeout, a provider failure or a result the normaliser refused), and `HEALTH_SCORE_NOT_SCORED` (every model refused). None of them writes.
+
+**Acceptance criteria:**
+- [ ] `score` on an unscored recipe writes its row: a score from 1 to 10, the summary, the Suggestion or null, the model that answered, `scored_at`, and `is_stale = false`
+- [ ] Rescoring an out-of-date score replaces it and clears `is_stale`
+- [ ] Without `rescore`, a recipe with a current score gets it back with no model call
+- [ ] If the recipe is edited while its score is being made, the result is discarded and the recipe keeps the score it had, or none
+- [ ] A recipe with no ingredient lines is never sent to the model, and its page says "Add ingredients to get a health score"
+- [ ] A soft-deleted recipe isn't scored and keeps any score it has
+- [ ] A serving variation's request includes its base's lines and steps. A base or standalone recipe's request has no base
+- [ ] Description, tags, times, cost, source, tips, safety notes, prep-ahead marks, image and plant points are never sent
+- [ ] Every result passes through the normaliser. An out-of-range score, text that's too long or a malformed result gives `HEALTH_SCORE_TRY_AGAIN` and writes nothing. Markdown is stripped
+- [ ] A refusal from every model gives `HEALTH_SCORE_NOT_SCORED`. A timeout or provider failure gives `HEALTH_SCORE_TRY_AGAIN`. Neither writes
+- [ ] More than 30 `score` calls per user per hour are refused with `HEALTH_SCORE_RATE_LIMITED`
+- [ ] After Save & Finish, the browser scores whichever of the recipe and its serving variations `due` returns, one at a time, without the cook waiting. After an import's "Create recipe", it scores the new recipe. Nothing is scored while offline
+- [ ] Recipe cards show a "7/10" chip named as an AI health score. It's muted with "out of date" when stale, and there's no chip when the recipe is unscored
+- [ ] The recipe page has a health score section after "Nutrition per serving" with the score, the summary, the Suggestion when there is one, when it was scored and by which model, and Rescore
+  - [ ] An unscored recipe shows "Not scored yet" with Score
+  - [ ] While a score is being made, the section shows "Scoring…"
+  - [ ] Score and Rescore are off while offline
+- [ ] The score is never called an estimate, and every score uses the same neutral colour
+- [ ] `recipes.get` returns `suggestion`, and `recipes.list` is unchanged
+- [ ] Changing `HEALTH_SCORE_ADAPTER` or `HEALTH_SCORE_MODEL` changes the scorer with no code change, and config refuses `fake` in production
+- [ ] Each `score` call logs `reqId`, the recipe id and kind, the line count, adapter, model, tokens, latency and outcome through the shared usage logger (feature `health_score`). It never logs recipe text, the summary or the Suggestion
+
+**Implementation notes:**
+- Read the `claude-api` skill before writing the `anthropic` adapter. Use structured outputs, since the schema has three fields (DEC-109 amended). Opus 5.5 can't turn thinking off, so set `HEALTH_SCORE_EFFORT` explicitly (default `low`). Turn on the server-side refusal fallback as the reader does, and record the model that answered.
+- **The prompt** carries DEC-112's rubric:
+  - judge one serving as eaten, against all food, anchored to UK guidance;
+  - plant variety is a minor factor, judged from the ingredient lines;
+  - trust estimated nutrition less;
+  - leave optional lines out;
+  - a Suggestion is one change that keeps the dish recognisable, and there's none when nothing is worth suggesting.
+
+  The prompt file's header comment says to change `HEALTH_SCORE_SINCE` with any prompt change.
+- **Order of work in `score`:**
+  1. The cheap checks: soft-deleted, no lines, current.
+  2. The rate limit. Every call counts, as for imports.
+  3. Build the request.
+  4. Call the scorer outside any transaction.
+  5. Normalise the result.
+  6. Inside `withTransaction`, build the request again with the same code and compare it with what was sent. Write only if they're equal. Quantities compare as numbers (FEAT-57).
+- The time limit is 45 seconds, with the adapter's retries inside it. Confirm it at kick-off (DEC-112).
+- Every read is scoped by `CURRENT_HOUSEHOLD_ID` (DEC-17). `recipe_health_scores` is scoped through the join to `recipes`.
+- A base's Save & Finish already marks its variations stale (`markHealthScoreStale`), so `due({ recipeId })` returns them, and the browser scores each.
+- When a score lands, invalidate that recipe's `recipes.get` and `recipes.list`.
+- **Confirm at kick-off:** the `score` and `due` names and outcomes, the error codes, the 45-second limit, whether the server's "which need a score" answer comes from `due` or from the save itself, and where the scoring context sits.
+- No new dependency.
+
+**Manual verification:**
+1. With a real API key, Score a recipe that has nutrition, from its page. A score, summary and Suggestion appear. Record the time and tokens in the session notes. This is cross-cutting #22's real call before the first deploy.
+2. Consistency check until FEAT-72: score a salad, a lasagne and a fry-up three times each with Rescore, and record the scores in the session notes. Each recipe's scores should be within a point of each other, and the salad should score above the fry-up.
+3. Change an ingredient amount and Save & Finish. The recipe page shows "Scoring…", then a current score.
+4. Edit a base with serving variations and Save & Finish. Each variation gets a new score.
+5. Import a recipe and "Create recipe". It's scored with no further step.
+6. At phone width, check the recipe page section and the card chip fit.
+
+**Common gotchas:**
+- A new write path that changes what's scored still calls `markHealthScoreStale` (cross-cutting #21).
+- Never hold a transaction open across the model call.
+- Model output is untrusted. The normaliser is the gate, and the summary and Suggestion render as plain text (DEC-49).
+- A Health Score isn't an Estimate: don't reuse the Estimate mark or its wording.
+- The `fake` adapter can't catch a provider's limits, so manual step 1 is the real call (cross-cutting #22).
+
+**Definition of done:**
+- Tests cover:
+  - The normaliser: range, lengths, a null Suggestion, markdown stripped, a malformed result refused.
+  - Building the request: each recipe kind, a variation with its base, optional lines, and nothing extra sent.
+  - Choosing an adapter: config picks it, and `fake` is refused in production.
+  - The `anthropic` adapter, with the SDK's HTTP layer faked: the request shape, structured output, a refusal, an abort.
+  - `score` on the `fake` adapter: a new score; a rescore clearing `is_stale`; `current` with no call; `changed` discarding the result; `nothing_to_score`; a soft-deleted recipe; the rate limit; try again and not scored writing nothing; household scope.
+  - `due`: one recipe, a base with its variations, `HEALTH_SCORE_SINCE`, no ingredient lines, soft-deleted recipes.
+  - Frontend: the chip (scored, out of date, unscored); the recipe page section in each state and offline; scoring after Save & Finish and after "Create recipe"; nothing scored while offline.
+  - e2e on the `fake` adapter: Save & Finish leads to a score on the recipe page, and an axe scan of a recipe page with a score.
+- Commit: `feat(recipes): score a recipe's health with a model after each save`
+- Gate check: manual verification steps 1–3 against a local database with a real API key.
+
+---
+
+### FEAT-67 — Scoring existing recipes: "Score them" on Settings
+
+**Goal:** Settings shows how many recipes need a health score and scores them from the browser, two at a time, until they're done or the hourly limit stops the run. It also picks up scores from an older scorer after `HEALTH_SCORE_SINCE` changes. (DEC-112)
+
+**Estimate:** 0.5–1 day. **Depends on:** FEAT-66. **Enables:** none specifically.
 
 **Files:**
-- `backend/evals/` (new): the runner and the Recipe Import inputs. Where the household lists come from, and whether inputs are committed, are decided at kick-off
+- `frontend/src/routes/-components/settings-page.tsx`, `frontend/src/components/health-score-backfill.tsx` (new)
+- `frontend/src/hooks/use-health-scoring.ts`: two calls in flight, and Stop
+- `backend/src/trpc/procedures/health-scores.ts`: only if `due` needs counts beyond its ids and reasons
+
+**Acceptance criteria:**
+- [ ] Settings has a Health scores section showing how many recipes aren't scored, are out of date, or were scored by an older scorer, or saying that every recipe has a current score
+- [ ] "Score them" scores those recipes two at a time, showing progress ("12 of 41") with a Stop button
+- [ ] Recipes with no ingredient lines, and soft-deleted recipes, are never counted or scored
+- [ ] At the hourly limit, the run stops and says how many are left and when it can carry on. Running it again later carries on with the rest
+- [ ] A recipe that fails to score is skipped and counted as failed, and the run carries on
+- [ ] Leaving Settings or closing the tab stops the run after the calls in flight. Nothing carries on at the server
+- [ ] After `HEALTH_SCORE_SINCE` moves later, every earlier score counts as from an older scorer here, and nowhere shows those scores as out of date
+- [ ] "Score them" is off while offline
+- [ ] The section works at phone width and passes the axe scan
+
+**Implementation notes:**
+- The browser drives the run: one `healthScores.score` call per recipe, without `rescore`, with two in flight. There's no background work and no new table (DEC-112, which settles cross-cutting #22's named trigger for scoring).
+- Take the list from `due` when the run starts. A recipe edited during the run is scored by its own Save & Finish anyway, and `score` returns `current` for it.
+- The 30-an-hour limit is shared with automatic scoring and Rescore, so a run can use the whole hour's allowance. Say so beside the button.
+- An older scorer's score keeps showing normally on cards and the recipe page until it's rescored.
+
+**Manual verification:**
+1. With a real key and a few unscored recipes, run "Score them". Afterwards, each of their cards on the recipes page shows a score.
+2. Set `HEALTH_SCORE_SINCE` to today and restart. Settings counts every earlier score as from an older scorer, and their recipe pages don't show them as out of date. Run it, then set the date back.
+3. With more than 30 recipes due, the run stops at the limit with a count left.
+
+**Common gotchas:**
+- Two people running it at once each use their own hourly allowance, and `current` keeps them from paying twice for one recipe.
+
+**Definition of done:**
+- Tests cover: the section's counts and its all-scored state; a run with two in flight; Stop; the limit stopping a run with a count left; a failure skipped; offline.
+- Commit: `feat(recipes): score every recipe that needs a health score from settings`
+- Gate check: manual verification steps 1 and 2.
+
+---
+
+### FEAT-68 — Ingredient edits put health scores out of date
+
+**Goal:** Renaming a household ingredient or changing its unit puts the Health Score of every recipe using it out of date, along with those recipes' serving variations. (DEC-112, DEC-101, cross-cutting #21)
+
+**Estimate:** 0.5 day. **Depends on:** FEAT-57; FEAT-66 for the effect to show. **Enables:** none specifically.
+
+**Files:**
+- `backend/src/lib/health-score-staleness.ts`: mark every recipe with a line using an ingredient
+- `backend/src/trpc/procedures/ingredients.ts`: `update`
+
+**Acceptance criteria:**
+- [ ] Renaming an ingredient puts out of date the score of every recipe with a line using it, and the scores of those recipes' serving variations
+- [ ] Changing an ingredient's unit does the same
+- [ ] Changing only its category, plant flag or shelf life, or saving it unchanged, marks nothing
+- [ ] The mark is made in the same transaction as the ingredient write
+- [ ] No recipe is rescored automatically. Their pages show the score out of date, and Settings counts them
+
+**Implementation notes:**
+- Compare the stored name and unit with the new ones before writing. Any change to the name counts, including a change of case only.
+- One `UPDATE` through a subquery on `recipe_ingredients`, scoped by `CURRENT_HOUSEHOLD_ID` (DEC-17). Variations are marked through `base_recipe_id`, as `markHealthScoreStale` already does for one recipe.
+- Soft-deleted recipes are marked too. Their scores stay, out of date (DEC-21).
+- Update the `AGENTS.md` convention line on health-score staleness when this lands.
+
+**Manual verification:**
+1. Rename an ingredient used by a scored recipe. The recipe page shows the score out of date, and Settings counts it.
+
+**Common gotchas:**
+- A future ingredient write that changes the name or unit, a merge for example, must mark too (cross-cutting #21).
+
+**Definition of done:**
+- Tests cover: a rename; a unit change; an unrelated field; an unchanged save; a variation marked through its base; household scope; a rolled-back write marking nothing.
+- Commit: `feat(recipes): mark health scores out of date when an ingredient is renamed or its unit changes`
+- Gate check: manual verification step 1.
+
+---
+
+### FEAT-69 — Health score filter on the recipes page
+
+**Goal:** Filter the recipes page by a minimum Health Score, from the existing row of filter buttons. (DEC-112, DEC-100)
+
+**Estimate:** 0.5 day. **Depends on:** FEAT-56, FEAT-66. **Enables:** none specifically.
+
+**Files:**
+- `shared/src/schemas/recipe-search.ts` (`minHealthScore`)
+- `backend/src/trpc/procedures/recipes.ts` (`list`)
+- `frontend/src/components/recipe-filters/*` (a new panel), `frontend/src/lib/recipe-filters.ts` (the URL)
+- `e2e/specs/recipe-filters.spec.ts`
+
+**Acceptance criteria:**
+- [ ] A "Health score" filter button in the filter row offers Any, 6+, 7+, 8+ or 9+, each including the value itself
+- [ ] While it's set, only recipes scoring at or above the value show. Unscored recipes are hidden, and out-of-date scores count
+- [ ] The button fills in and names its value ("Health 7+"). Its panel has Clear, and "Clear filters" resets it
+- [ ] It's hidden when no listed recipe has a score, as Tags, Source and Ingredients are when there's nothing to pick
+- [ ] It combines with the other filters and the name search, and infinite scroll works under it
+- [ ] It lives in the URL like the other filters, and a malformed value is dropped
+- [ ] No sort control is added, and the Recipe Bank and slot-editor picker are unchanged
+
+**Implementation notes:**
+- One `EXISTS` on `recipe_health_scores` with `score >= n`, scoped through the recipe (DEC-17). A serving variation filters on its own score.
+
+**Manual verification:**
+1. Pick 7+, open a recipe, then press Back. The filter and its results are restored.
+
+**Definition of done:**
+- Tests cover:
+  - Backend: the filter's inclusive limit, unscored recipes hidden, out-of-date scores counted, and the filter combined with the others and the cursor.
+  - Frontend: the panel, the button's label and the URL.
+  - e2e: set the filter, open a recipe, and Back restores it.
+- Commit: `feat(recipes): filter the recipes page by health score`
+- Gate check: manual verification step 1.
+
+---
+
+### FEAT-70 — Health score on planner slot cards and the Recipe Bank
+
+**Goal:** The planner shows each dish's Health Score chip in slot cards and on Recipe Bank cards. (DEC-112)
+
+**Estimate:** 0.5 day. **Depends on:** FEAT-66 (the chip), FEAT-31 (the slot card), FEAT-40 (the bank). **Enables:** none specifically.
+
+**Files:**
+- `frontend/src/components/planner/slot-cell.tsx`, through the slot card's extension slots (cross-cutting #14)
+- `frontend/src/components/planner/recipe-bank.tsx`
+- `frontend/src/components/health-score-chip.tsx` (a compact size)
+- `backend/src/trpc/procedures/plans.ts` (`get` returns each dish's `healthScore: { score, isStale } | null`) and its shared output schema
+
+**Acceptance criteria:**
+- [ ] Each dish in a slot card shows its score chip, number only, at every screen width. It's muted when out of date, and there's no chip when the dish is unscored
+- [ ] Recipe Bank cards show the same chip
+- [ ] The slot-editor picker, the shared combobox, is unchanged
+- [ ] A new score shows on the planner without a reload
+- [ ] Slot cards still fit at phone width, and the planner passes the axe scan
+
+**Implementation notes:**
+- Extend the slot card through its slots; don't rewrite it (cross-cutting #14).
+- The chip's accessible name reads "AI health score 7 out of 10", plus "out of date" when stale.
+- When a score lands, invalidate the plan query as well as the recipe queries.
+
+**Manual verification:**
+1. Open a plan with scored, out-of-date and unscored dishes, at phone width and at `lg`.
+
+**Definition of done:**
+- Tests cover: a slot card with scored, out-of-date and unscored dishes; a Recipe Bank card; `plans.get` returning scores.
+- Commit: `feat(planner): show each dish's health score on slot cards and the recipe bank`
+- Gate check: manual verification step 1.
+
+---
+
+### FEAT-71 — Day and plan Health Score in the planner
+
+**Goal:** Each day row and the plan header show the average Health Score of the dishes eaten, weighted by eaten servings, beside the plant-points badges. (DEC-113)
+
+**Estimate:** 0.5–1 day. **Depends on:** FEAT-41 (the plant-points badges), FEAT-66. **Enables:** none specifically.
+
+**Files:**
+- `backend/src/lib/health-score-average.ts` (new)
+- `backend/src/trpc/procedures/health-scores.ts` (`forDay`, `forPlan`)
+- `shared/src/schemas/health-scores.ts`
+- `frontend/src/components/planner/health-score-average-badge.tsx` (new), `frontend/src/components/planner/planner-grid.tsx`, and the plan header
+
+**Shapes:** `forDay(planId, date)` and `forPlan(planId)` return `{ average, notScored, includesOutOfDate }`. `average` is a number to one decimal place, or null when no scored dish is eaten. `notScored` is the number of eaten dishes with no score.
+
+**Acceptance criteria:**
+- [ ] The average weights each eaten dish's score by its `eaten` servings, to one decimal place. A dish scored 6 eaten by 2 and a dish scored 3 eaten by 2 give 4.5
+- [ ] Items with `eaten = 0` weigh nothing. A plan-meal leftover counts. Eat out, takeaway, other leftovers and empty slots don't count
+- [ ] Unscored dishes are left out and counted ("2 dishes not scored"). An out-of-date score counts and mutes the average
+- [ ] With no scored dish eaten, there's no value to show
+- [ ] The day badge sits on each day row and the plan badge in the plan header, beside the plant-points badges, labelled AI
+- [ ] The badges update after slot edits and new scores without a reload
+- [ ] Nothing is stored
+- [ ] The planner works at phone width and passes the axe scan
+
+**Implementation notes:**
+- One SQL query per granularity: `sum(score * eaten) / sum(eaten)` over slot items joined to their recipe's score, scoped through the plan (DEC-17). Round in one place.
+- No targets and no nutrient totals: the "Nutrition tracking against goals" non-goal keeps those exclusions (DEC-113).
+- Invalidate both queries on slot mutations and when a score lands, as plant points does for slot mutations.
+
+**Manual verification:**
+1. Build a day with two scored dishes and known eaten servings, plus a takeaway. The day badge matches the hand calculation, and the takeaway doesn't count.
+
+**Definition of done:**
+- Tests cover: weighting and rounding; `eaten = 0`; a plan-meal leftover; each slot type; unscored dishes counted; an out-of-date score muting; no value; household scope; the badge's states.
+- Commit: `feat(planner): show a day and plan health score`
+- Gate check: manual verification step 1.
+
+---
+
+### FEAT-72 — Model feature evals: the eval runner, and the Recipe Import and Health Score eval sets
+
+**Goal:** Measure a model feature on real inputs before a model, effort or prompt change ships. One runner takes a feature and an adapter and runs that feature's inputs through its real reader; Recipe Import brings the first set, supplied by the user. The first run settles the import model (Opus 5.5 or Sonnet 5.5) and its effort level. Health scoring brings a second set, which checks that each recipe's score holds steady across runs and that scores fall in the expected order; its run settles the scoring model and effort. (DEC-104, DEC-109, DEC-112, cross-cutting #22)
+
+**Estimate:** 1–1.5 days, plus the user's time gathering inputs. **Depends on:** FEAT-60, FEAT-66. **Enables:** tuning `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT`, and FEAT-65's page cap; tuning `HEALTH_SCORE_MODEL` and `HEALTH_SCORE_EFFORT`.
+
+**Files:**
+- `backend/evals/` (new): the runner, the Recipe Import inputs and the Health Score inputs. Where the household lists come from, and whether inputs are committed, are decided at kick-off
 - `backend/package.json` (an `eval` script: a new script name, so a stop-and-ask)
 - `docs/session-notes.md` (the run's results)
 
 **Acceptance criteria:**
 - [ ] One command runs every input of a named feature through a named adapter, with an optional model and effort, without starting the app or writing to the database
 - [ ] For each input it reports latency, input and output tokens, the model that answered, the outcome, and whether the proposal passed `normaliseProposal`, plus totals
-- [ ] The runner takes a feature name and an adapter, so health scoring can add its inputs without changing the runner
+- [ ] The runner takes a feature name and an adapter, and runs Recipe Import and Health Score inputs through the same code
+- [ ] For Health Score inputs, it scores each recipe a set number of times (three by default) and reports each recipe's scores, their spread, and whether the agreed order holds
 - [ ] A run over the agreed inputs compares Opus 5.5 and Sonnet 5.5 at two effort levels each, with times against the 75-second limit and the corrections each proposal would need, recorded in the session notes
+- [ ] A Health Score run compares Opus 5.5 at `low` with Sonnet 5.5 at two effort levels, recorded in the session notes. `HEALTH_SCORE_MODEL` and `HEALTH_SCORE_EFFORT` are set from it, and `HEALTH_SCORE_SINCE` moves if the model changes
 
 **Implementation notes:**
 - Real provider calls cost money: every run is the user's decision, and the runner never runs in CI.
@@ -2960,20 +3263,26 @@ Steps 1 and 2 moved to FEAT-66 with the eval runner (kick-off, 2026-10-04).
 - About ten inputs, chosen to cover what imports will meet: a clean typed recipe, one buried in a blog story, US cup measures, no servings stated, several recipes in one text, a shopping list, and anything the household's own recipes make likely.
 - Inputs that copy a publication's text may not belong in the repo; if not, keep them in a gitignored folder with one committed sample.
 - Amended at Document import scoping (2026-10-05): renumbered from FEAT-64 so the Document import features (FEAT-64, FEAT-65) come first. The inputs also cover Documents: a typed PDF, a scanned PDF, an 8-page PDF timed against the 75-second limit to set FEAT-65's page cap, and a saved web page (DEC-111).
+- Amended at health score scoping (2026-10-07): renumbered from FEAT-66 to FEAT-72, after the health score features (DEC-112).
+  - Health Score inputs: about ten household recipes chosen to spread across the scale: a salad, a lentil soup, a lasagne, a fry-up, a dessert, a base and one of its serving variations, one with no nutrition, and one with estimated nutrition.
+  - Write the expected order down with the inputs before the first run (the salad above the fry-up, for example). The run checks it.
+  - An input is the scorer's request, exported from the database, so the runner never needs the app or the database.
+  - Scoring ships before this feature with a manual three-recipe consistency check (FEAT-66, manual step 2). Compare that check's numbers with this run's.
 
 **Manual verification:**
 1. Run the runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
 2. Run it on a shopping list. It reports not a recipe.
+3. Run the Health Score set through the `anthropic` adapter. Each recipe is scored three times, and the report shows each recipe's spread.
 
 **Common gotchas:**
 - Effort levels mean different amounts of thinking on different models, so compare each model across its own levels.
 - A classifier refusal can be answered by a fallback model. Check the model that answered in the report.
 
 **Definition of done:**
-- Tests cover: the runner's arguments and its report, on the `fake` adapter.
-- Eval set: run on the agreed inputs, with the comparison recorded in the session notes and `RECIPE_IMPORT_MODEL` / `RECIPE_IMPORT_EFFORT` set from it.
-- Commit: `feat(recipes): add the eval runner and the recipe import eval set`
-- Gate check: manual verification steps 1 and 2.
+- Tests cover: the runner's arguments and its report for both features, on the `fake` adapter.
+- Eval sets: both run on the agreed inputs, with the comparisons recorded in the session notes, and `RECIPE_IMPORT_MODEL` / `RECIPE_IMPORT_EFFORT` and `HEALTH_SCORE_MODEL` / `HEALTH_SCORE_EFFORT` set from them.
+- Commit: `feat(recipes): add the eval runner and the recipe import and health score eval sets`
+- Gate check: manual verification steps 1–3.
 
 ---
 
@@ -3108,25 +3417,25 @@ Every dependency added must support ESM. Encountering a CJS-only package three m
 
 ### 21. Health-score staleness
 
-**Threads through:** FEAT-57 (the helper and the four current write paths), the AI scoring feature, and any future write that changes a recipe's ingredients, method text, servings, nutrition or base link.
+**Threads through:** FEAT-57 (the helper and the four current write paths), FEAT-66 (the scoring write), FEAT-68 (ingredient renames and unit changes), and any future write that changes a recipe's ingredients, method text, servings, nutrition or base link.
 
-A stored health score (DEC-101) is only trustworthy if it's marked stale when its recipe changes. **Every such write calls `markHealthScoreStale` from `backend/src/lib/health-score-staleness.ts` inside its transaction**, comparing old and new first wherever the client re-sends unchanged data. A missed path leaves an out-of-date score looking current.
+A stored health score (DEC-101) is only trustworthy if it's marked stale when its recipe changes. **Every such write calls `markHealthScoreStale` from `backend/src/lib/health-score-staleness.ts` inside its transaction**, comparing old and new first wherever the client re-sends unchanged data. A missed path leaves an out-of-date score looking current. FEAT-68 adds the one such write outside a recipe: renaming a household ingredient or changing its unit marks every recipe using it. The scoring write itself discards a result whose recipe changed while it was being scored (DEC-112).
 
 ### 22. Model features
 
-**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 (evals), the AI scoring feature, and any future feature that calls a model.
+**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 and FEAT-67 (health scoring), FEAT-72 (evals), and any future feature that calls a model.
 
 Every model feature follows the rules in DEC-110 and is built the same way (DEC-109). A new feature that skips a step drifts from the others, and the drift is costly to undo once a second provider or model is in play. The checklist:
 - **Its own seam.** One narrow, domain-level interface per feature (`RecipeReader`, `RecipeScorer`), never a shared "AI service". It has an adapter per provider and a `fake` adapter for tests and e2e.
 - **Config.** `<FEATURE>_ADAPTER` and `<FEATURE>_MODEL` in `config.ts`, validated by Zod. Config refuses `fake` in production. Where the provider has an effort setting, `<FEATURE>_EFFORT` too, since a level means different things on different models.
 - **Rules outside the seam.** Input preparation happens before the seam, and the feature's normaliser runs after it, on every adapter's output (schema, plain text, household references). Adapters only call the model.
 - **Logging.** Through one shared helper that takes a `feature` field and logs metadata only: `reqId`, feature, adapter, model, tokens, latency, outcome. No prompt or model text in logs or Sentry (DEC-104).
-- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-66.
+- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-72.
 - **Data flow.** The feature's DEC names any new data it sends to a provider.
 - **Shared code is helpers, not seams:** the provider client setup, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
 - **A real call before the first deploy.** The `fake` adapter can't catch a provider's limits. Recipe Import shipped with a schema Anthropic refused on every request, so send one real request through the real adapter before a model feature first deploys.
 
-**Named triggers:** the first model feature that can't finish within one request (most likely the health-score backfill) decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
+**Named triggers:** the first model feature that can't finish within one request decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. Health scoring settled it for itself with no background work: the browser drives scoring one request per recipe (DEC-112). The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
 
 ---
 

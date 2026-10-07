@@ -3018,6 +3018,45 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 - When a score lands, invalidate that recipe's `recipes.get` and `recipes.list`.
 - **Confirm at kick-off:** the `score` and `due` names and outcomes, the error codes, the 45-second limit, whether the server's "which need a score" answer comes from `due` or from the save itself, and where the scoring context sits.
 - No new dependency.
+- Amended at kick-off (2026-10-07):
+  - **Names and outcomes:** `healthScores.score` and `healthScores.due` stand. `score` gains a fifth outcome, `deleted`, for a soft-deleted recipe: no call, no write, and its score comes back.
+  - **Current** means not stale and scored on or after `HEALTH_SCORE_SINCE`. So automatic scoring and "Score them", which send `rescore: false`, update an older scorer's score.
+  - **The rate limit** counts only calls that get past the cheap checks (`deleted`, `nothing_to_score`, `current`). `changed` and every error count.
+  - **A variation's request** carries its base's servings: `base: { baseServings, lines, steps } | null`. The model needs it to work out one base serving.
+  - **"No ingredient lines"** counts a variation's base's lines too. The recipe page asks for ingredients only when a recipe with no base has none.
+  - **`recipes.get`** returns `model` as well as `suggestion`. The page shows the stored model id.
+  - **`HEALTH_SCORE_SINCE`** is an ISO date in `fly.toml`. It's required in production and defaults to `2026-10-07` elsewhere. A score whose London day (`todayInLondon(scoredAt)`) falls before it is from an older scorer. No `dateUtils` change.
+  - **Errors:** the three codes stand. `HEALTH_SCORE_TRY_AGAIN` carries a `reason` of `timeout`, `unavailable` or `invalid_result`. A fourth code, `HEALTH_SCORE_REQUEST_REJECTED` (`INTERNAL_SERVER_ERROR`, provider details logged), covers a request the provider refuses outright, as `IMPORT_REQUEST_REJECTED` does.
+  - **Shared helpers:** the reader's provider-error sorting moved into `model-features/anthropic-errors.ts`, and the refusal-fallback beta into `anthropic-client.ts`. Both adapters use them, and each seam keeps its own error classes.
+  - **The 45-second limit** stands.
+  - **"Which need a score"** comes from `due`. "Create recipe" goes through it too.
+  - **The scoring context** sits in `AuthedLayout`, above both shells.
+  - **The browser's queue:**
+    - One call at a time across the app.
+    - A recipe is queued once, and a cook's Rescore wins.
+    - A recipe saved again while it's being scored is scored again.
+    - "Scoring…" shows for queued and in-flight recipes.
+    - Going offline drops whatever is left.
+    - Automatic failures say nothing.
+    - Each outcome invalidates that recipe's `recipes.get` and `recipes.list`.
+  - **A cook's Score or Rescore** shows a message when it fails:
+    - Rate limited: "You've scored a lot of recipes recently. Try again in N minutes."
+    - Try again or request rejected: "The score didn't work. Try again."
+    - Not scored: "This recipe couldn't be scored."
+  - **A soft-deleted recipe's page** shows its score, with no Score or Rescore.
+  - **The chip:**
+    - Reads "7/10", and screen readers hear "AI health score 7 out of 10".
+    - Sits in the card's meta row, outlined in the foreground colour.
+    - Dashed and muted with "· out of date" when stale.
+    - Shows "Scoring…" while the recipe is being scored.
+  - **The `fake` adapter** scores 7 with a fixed summary and Suggestion. Markers in the recipe's name pick other outcomes: `[fake:refused]`, `[fake:timeout]`, `[fake:unavailable]`, `[fake:invalid]`, `[fake:rejected]`, `[fake:no-suggestion]`.
+  - **The normaliser** strips markdown, then checks. `7.0` passes and `7.5` is refused. An empty Suggestion becomes null. Text that's too long is refused, not cut.
+  - **An accepted gap:** an edit that commits between the transaction's re-read and its write could be stored as a current score. Closing it would need a row lock, which DEC-36 rules out.
+- Found while implementing (2026-10-07):
+  - Usage logs use the feature name `health-score`, to match `recipe-import`, rather than `health_score`. They also carry `rescore` and, on `scored`, the score.
+  - The scoring context had to sit above `AuthedLayout`'s switch between the phone and desktop shells. Inside a shell, crossing `lg` would have dropped the queue.
+  - A cook's Score that the server answers with `nothing_to_score` (a variation whose base has no lines either) shows "Add ingredients to get a health score."
+  - e2e gained a `setHealthScore` fixture. The a11y fixture stores two scores, one out of date, so the recipe browse scan covers the chip.
 
 **Manual verification:**
 1. With a real API key, Score a recipe that has nutrition, from its page. A score, summary and Suggestion appear. Record the time and tokens in the session notes. This is cross-cutting #22's real call before the first deploy.
@@ -3432,7 +3471,7 @@ Every model feature follows the rules in DEC-110 and is built the same way (DEC-
 - **Logging.** Through one shared helper that takes a `feature` field and logs metadata only: `reqId`, feature, adapter, model, tokens, latency, outcome. No prompt or model text in logs or Sentry (DEC-104).
 - **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-72.
 - **Data flow.** The feature's DEC names any new data it sends to a provider.
-- **Shared code is helpers, not seams:** the provider client setup, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
+- **Shared code is helpers, not seams:** the provider client setup, provider error sorting, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
 - **A real call before the first deploy.** The `fake` adapter can't catch a provider's limits. Recipe Import shipped with a schema Anthropic refused on every request, so send one real request through the real adapter before a model feature first deploys.
 
 **Named triggers:** the first model feature that can't finish within one request decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. Health scoring settled it for itself with no background work: the browser drives scoring one request per recipe (DEC-112). The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.

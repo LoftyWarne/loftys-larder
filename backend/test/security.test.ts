@@ -50,6 +50,10 @@ const devConfig: Config = {
   RECIPE_IMPORT_ADAPTER: 'fake',
   RECIPE_IMPORT_MODEL: 'claude-opus-5-5',
   RECIPE_IMPORT_EFFORT: 'medium',
+  HEALTH_SCORE_ADAPTER: 'fake',
+  HEALTH_SCORE_MODEL: 'claude-opus-5-5',
+  HEALTH_SCORE_EFFORT: 'low',
+  HEALTH_SCORE_SINCE: '2026-10-07',
   ...baseEnv,
 };
 

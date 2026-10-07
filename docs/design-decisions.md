@@ -1410,6 +1410,15 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - Rescore lets a cook re-roll a score they dislike.
 - **Revisit when:** FEAT-72 shows the same recipe's score varying by more than a point between runs, or a cheaper model holding up. Also if cooks keep rescoring hoping for a different number, the cap gets in the way of ordinary editing, or Suggestions are routinely ignored or wrong.
 - **Cross-refs:** CONTEXT.md (Health Score, Out of date, Suggestion), DEC-17, DEC-21, DEC-23, DEC-32, DEC-49, DEC-64, DEC-88, DEC-91, DEC-100, DEC-101 (amended), DEC-103 (amended), DEC-104, DEC-106, DEC-109 (amended), DEC-110 (amended); FEAT-57, FEAT-58, FEAT-66 to FEAT-70, FEAT-72; cross-cutting #6, #14, #16, #21, #22; non-goal: "AI / LLM features" (adjacency note amended).
+- **Amended (2026-10-07) at FEAT-66 kick-off.** Full detail in FEAT-66's amended notes.
+  - `healthScores.score` gains a `deleted` outcome for a soft-deleted recipe: no call, no write.
+  - A score is current when it isn't stale and was scored on or after `HEALTH_SCORE_SINCE`, so a save or "Score them" updates an older scorer's score without a Rescore.
+  - The limit counts only calls that get past the cheap checks (deleted, no lines, current).
+  - A serving variation's request carries its base's `baseServings` beside its lines and steps, so the model can work out one base serving. "No ingredient lines" counts the base's lines too.
+  - `recipes.get` returns the model that answered, as well as the Suggestion.
+  - `HEALTH_SCORE_SINCE` is compared with the London day a score was made, and is required in production.
+  - A fourth error, `HEALTH_SCORE_REQUEST_REJECTED`, covers a request the provider refuses outright, as for imports. The provider-error sorting and the refusal-fallback beta are now shared helpers in `backend/src/lib/model-features/` (cross-cutting #22).
+  - An edit that commits between the write's re-read and its upsert could be stored as current. The gap is two statements wide, and closing it would need a row lock (DEC-36), so it's accepted.
 
 ### DEC-113 — Day and plan Health Scores: the eaten dishes' scores averaged by eaten servings, computed on read
 

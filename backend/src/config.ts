@@ -18,6 +18,13 @@ export const recipeImportAdapterSchema = z.enum(['anthropic', 'fake']);
 
 export type RecipeImportAdapter = z.infer<typeof recipeImportAdapterSchema>;
 
+export const healthScoreAdapterSchema = z.enum(['anthropic', 'fake']);
+
+export type HealthScoreAdapter = z.infer<typeof healthScoreAdapterSchema>;
+
+// Outside production, where config doesn't name one.
+const DEFAULT_HEALTH_SCORE_SINCE = '2026-10-07';
+
 export const modelEffortSchema = z.enum([
   'low',
   'medium',
@@ -89,6 +96,13 @@ const configSchema = z
     // Read only by the `anthropic` adapter. Levels mean different amounts of
     // thinking on different models, so it moves with RECIPE_IMPORT_MODEL.
     RECIPE_IMPORT_EFFORT: modelEffortSchema.default('medium'),
+    // Health scoring (DEC-112), set up the same way as the reader.
+    HEALTH_SCORE_ADAPTER: healthScoreAdapterSchema.optional(),
+    HEALTH_SCORE_MODEL: z.string().min(1).default('claude-opus-5-5'),
+    HEALTH_SCORE_EFFORT: modelEffortSchema.default('low'),
+    // The date the scoring model or prompt last changed. Scores from London
+    // days before it are due again as "from an older scorer".
+    HEALTH_SCORE_SINCE: z.iso.date().optional(),
     ANTHROPIC_API_KEY: z.string().min(1).optional(),
   })
   .refine(
@@ -136,9 +150,40 @@ const configSchema = z
         'ANTHROPIC_API_KEY is required when RECIPE_IMPORT_ADAPTER is anthropic.',
     },
   )
+  .refine(
+    (value) =>
+      value.NODE_ENV !== 'production' ||
+      (value.HEALTH_SCORE_ADAPTER !== undefined &&
+        value.HEALTH_SCORE_ADAPTER !== 'fake'),
+    {
+      path: ['HEALTH_SCORE_ADAPTER'],
+      message:
+        'HEALTH_SCORE_ADAPTER must be set to a real adapter in production (DEC-112).',
+    },
+  )
+  .refine(
+    (value) =>
+      value.HEALTH_SCORE_ADAPTER !== 'anthropic' ||
+      Boolean(value.ANTHROPIC_API_KEY),
+    {
+      path: ['ANTHROPIC_API_KEY'],
+      message:
+        'ANTHROPIC_API_KEY is required when HEALTH_SCORE_ADAPTER is anthropic.',
+    },
+  )
+  .refine(
+    (value) =>
+      value.NODE_ENV !== 'production' || value.HEALTH_SCORE_SINCE !== undefined,
+    {
+      path: ['HEALTH_SCORE_SINCE'],
+      message: 'HEALTH_SCORE_SINCE is required in production (DEC-112).',
+    },
+  )
   .transform((value) => ({
     ...value,
     RECIPE_IMPORT_ADAPTER: value.RECIPE_IMPORT_ADAPTER ?? 'fake',
+    HEALTH_SCORE_ADAPTER: value.HEALTH_SCORE_ADAPTER ?? 'fake',
+    HEALTH_SCORE_SINCE: value.HEALTH_SCORE_SINCE ?? DEFAULT_HEALTH_SCORE_SINCE,
   }));
 
 export type Config = z.infer<typeof configSchema>;

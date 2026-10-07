@@ -253,6 +253,30 @@ export async function createRecipe(
   }
 }
 
+// A stored AI health score, as the scoring mutation would write it.
+export async function setHealthScore(
+  recipeId: number,
+  spec: {
+    score: number;
+    summary: string;
+    suggestion: string | null;
+    isStale?: boolean;
+  },
+): Promise<void> {
+  await getPool().query(
+    `insert into recipe_health_scores
+       (recipe_id, score, summary, suggestion, model, is_stale)
+     values ($1, $2, $3, $4, 'claude-opus-5-5', $5)`,
+    [
+      recipeId,
+      spec.score,
+      spec.summary,
+      spec.suggestion,
+      spec.isStale ?? false,
+    ],
+  );
+}
+
 export interface CreatedPlan {
   id: number;
   startDate: string;

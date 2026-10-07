@@ -1,5 +1,6 @@
 import { router } from './init.ts';
 import { healthRouter } from './procedures/health.ts';
+import { healthScoresRouter } from './procedures/health-scores.ts';
 import { ingredientsRouter } from './procedures/ingredients.ts';
 import { plansRouter } from './procedures/plans.ts';
 import { plantsRouter } from './procedures/plants.ts';
@@ -18,6 +19,7 @@ export const appRouter = router({
   recipes: recipesRouter,
   recipeDrafts: recipeDraftsRouter,
   recipeImports: recipeImportsRouter,
+  healthScores: healthScoresRouter,
   uploads: uploadsRouter,
   plans: plansRouter,
   plants: plantsRouter,

@@ -65,7 +65,8 @@ import {
   type RecipeReader,
   type RecipeReading,
 } from '../src/lib/recipe-reader/types.ts';
-import type { ImportRateLimitVerdict } from '../src/plugins/rate-limit.ts';
+import { createFakeRecipeScorer } from '../src/lib/recipe-scorer/fake.ts';
+import type { ModelRateLimitVerdict } from '../src/plugins/rate-limit.ts';
 import type { AppContext } from '../src/trpc/context.ts';
 import {
   RECIPE_IMPORT_PDF_LOOKUP_TIMEOUT_MS,
@@ -253,7 +254,7 @@ describe('recipe imports procedures', () => {
     authenticated?: boolean;
     userId?: string;
     reader?: RecipeReader;
-    allowStart?: () => Promise<ImportRateLimitVerdict>;
+    allowStart?: () => Promise<ModelRateLimitVerdict>;
     log?: AppContext['log'];
     destroyImage?: DestroyImage;
     fetchPage?: PageFetcher;
@@ -308,6 +309,12 @@ describe('recipe imports procedures', () => {
         allowStart:
           options.allowStart ??
           (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
+      },
+      healthScore: {
+        scorer: createFakeRecipeScorer(),
+        since: '2026-10-07',
+        allowScore: () =>
+          Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
       },
     };
   }

@@ -389,6 +389,8 @@ export const recipesRouter = router({
             healthScore: recipeHealthScores.score,
             healthScoreIsStale: recipeHealthScores.isStale,
             healthScoreSummary: recipeHealthScores.summary,
+            healthScoreSuggestion: recipeHealthScores.suggestion,
+            healthScoreModel: recipeHealthScores.model,
             healthScoredAt: recipeHealthScores.scoredAt,
           })
           .from(recipes)
@@ -494,12 +496,15 @@ export const recipesRouter = router({
         healthScore:
           header.healthScore === null ||
           header.healthScoreIsStale === null ||
+          header.healthScoreModel === null ||
           header.healthScoredAt === null
             ? null
             : {
                 score: header.healthScore,
                 isStale: header.healthScoreIsStale,
                 summary: header.healthScoreSummary,
+                suggestion: header.healthScoreSuggestion,
+                model: header.healthScoreModel,
                 scoredAt: header.healthScoredAt.toISOString(),
               },
       };

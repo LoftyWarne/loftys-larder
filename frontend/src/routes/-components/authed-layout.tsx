@@ -9,6 +9,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { HealthScoringProvider } from '@/components/health-scoring-provider.tsx';
 import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { authClient } from '@/lib/auth-client.ts';
 import { cn } from '@/lib/utils.ts';
@@ -48,12 +49,15 @@ const ALL_NAV: NavItem[] = [
   { to: '/settings', label: 'Settings', Icon: SettingsIcon },
 ];
 
+// Health scoring sits above both shells, so crossing the `lg` breakpoint
+// doesn't drop recipes waiting to be scored.
 export function AuthedLayout(): React.ReactElement {
   const isLargeViewport = useIsLargeViewport();
-  if (isLargeViewport) {
-    return <DesktopShell />;
-  }
-  return <PhoneShell />;
+  return (
+    <HealthScoringProvider>
+      {isLargeViewport ? <DesktopShell /> : <PhoneShell />}
+    </HealthScoringProvider>
+  );
 }
 
 function DesktopShell(): React.ReactElement {

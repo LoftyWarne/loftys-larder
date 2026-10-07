@@ -382,6 +382,16 @@ describe('RecipesPage', () => {
     expect(screen.getByLabelText(/plant points/i)).toHaveTextContent('3');
   });
 
+  it('shows an AI health score chip on a scored card only', () => {
+    setup({
+      items: [{ ...TOMATO, healthScore: { score: 7, isStale: true } }, ROAST],
+    });
+    render(<RecipesPage />);
+    expect(screen.getAllByText('AI health score 7 out of 10')).toHaveLength(1);
+    expect(screen.getByText('7/10')).toBeInTheDocument();
+    expect(screen.getByText('· out of date')).toBeInTheDocument();
+  });
+
   it('renders the average rating chip when the recipe has ratings', () => {
     setup({ items: [TOMATO] });
     render(<RecipesPage />);

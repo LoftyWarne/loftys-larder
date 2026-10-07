@@ -428,6 +428,68 @@ describe('RecipeDetailPage', () => {
     ).toBeNull();
   });
 
+  it('shows the AI health score after nutrition per serving', () => {
+    getUseQueryMock.mockReturnValue({
+      data: {
+        ...FULL_RECIPE,
+        caloriesPerServing: 410,
+        healthScore: {
+          score: 7,
+          isStale: false,
+          summary: 'Lots of veg.',
+          suggestion: null,
+          model: 'claude-opus-5-5',
+          scoredAt: '2026-10-07T09:30:00.000Z',
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    const nutrition = screen.getByRole('region', {
+      name: 'Nutrition per serving',
+    });
+    const health = screen.getByRole('region', { name: 'AI health score' });
+    expect(health).toHaveTextContent('Lots of veg.');
+    expect(
+      nutrition.compareDocumentPosition(health) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('asks for ingredients for a recipe with none, but not for a serving variation', () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, ingredients: [] },
+      isLoading: false,
+      error: null,
+    });
+    const { unmount } = render(<RecipeDetailPage />);
+    expect(
+      screen.getByText('Add ingredients to get a health score'),
+    ).toBeInTheDocument();
+    unmount();
+
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, ingredients: [], baseRecipeId: 3 },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    expect(screen.getByText('Not scored yet')).toBeInTheDocument();
+  });
+
+  it('offers no Score on a soft-deleted recipe', () => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, isDeleted: true },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+    expect(
+      screen.queryByRole('button', { name: 'Score' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders the average summary when there is at least one rating', () => {
     getUseQueryMock.mockReturnValue({
       data: { ...FULL_RECIPE, averageRating: 4.25, ratingCount: 4 },

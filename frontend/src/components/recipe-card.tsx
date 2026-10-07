@@ -2,7 +2,9 @@ import type { RecipeListItem } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 import { Fragment } from 'react';
 
+import { HealthScoreChip } from '@/components/health-score-chip.tsx';
 import { RecipeTagList } from '@/components/recipe-tag-list.tsx';
+import { useHealthScoring } from '@/hooks/use-health-scoring.ts';
 import { formatAverageRating } from '@/lib/format-rating.ts';
 
 export interface RecipeCardProps {
@@ -10,6 +12,7 @@ export interface RecipeCardProps {
 }
 
 export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
+  const isScoring = useHealthScoring().scoringIds.has(recipe.id);
   const timeLabels = [
     recipe.activeTimeMins !== null
       ? `${String(recipe.activeTimeMins)} min active`
@@ -73,6 +76,10 @@ export function RecipeCard({ recipe }: RecipeCardProps): React.ReactElement {
               <span aria-label="average rating">{ratingLabel}</span>
             </>
           )}
+          <HealthScoreChip
+            healthScore={recipe.healthScore}
+            isScoring={isScoring}
+          />
         </div>
         <RecipeTagList tags={recipe.tags} className="pt-1" />
       </div>

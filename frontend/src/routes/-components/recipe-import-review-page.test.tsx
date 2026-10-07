@@ -49,6 +49,19 @@ const INGREDIENTS: IngredientListItem[] = [
   },
 ];
 
+const { scoreAfterSaveMock } = vi.hoisted(() => ({
+  scoreAfterSaveMock: vi.fn(),
+}));
+
+vi.mock('@/hooks/use-health-scoring.ts', () => ({
+  useHealthScoring: () => ({
+    scoringIds: new Set(),
+    failures: new Map(),
+    scoreAfterSave: scoreAfterSaveMock,
+    score: vi.fn(),
+  }),
+}));
+
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     useUtils: () => ({
@@ -598,6 +611,7 @@ describe('RecipeImportReviewPage', () => {
         params: { recipeId: '77' },
       });
     });
+    expect(scoreAfterSaveMock).toHaveBeenCalledWith(77);
     const input = lastCreateInput();
     expect(input.draftId).toBe(41);
     expect(input.header.name).toBe('Pasta for two');
@@ -657,6 +671,7 @@ describe('RecipeImportReviewPage', () => {
       ),
     ).toBeInTheDocument();
     expect(navigateMock).not.toHaveBeenCalled();
+    expect(scoreAfterSaveMock).not.toHaveBeenCalled();
   });
 
   it('resumes from the sections saved so far', () => {

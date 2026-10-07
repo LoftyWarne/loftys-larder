@@ -99,8 +99,8 @@ export const recipeTagSchema = z.object({
 
 export type RecipeTag = z.infer<typeof recipeTagSchema>;
 
-// Stored AI health score (DEC-101); `null` until the recipe has been scored.
-// Not shown in the UI yet.
+// Stored AI health score (DEC-101, DEC-112); `null` until the recipe has been
+// scored.
 export const recipeHealthScoreSchema = z.object({
   score: z.number().int().min(1).max(10),
   isStale: z.boolean(),
@@ -109,8 +109,11 @@ export const recipeHealthScoreSchema = z.object({
 export type RecipeHealthScore = z.infer<typeof recipeHealthScoreSchema>;
 
 // `scoredAt` is an ISO-8601 string on the wire, like comment timestamps.
+// `model` is the model that answered.
 export const recipeHealthScoreDetailSchema = recipeHealthScoreSchema.extend({
   summary: z.string().nullable(),
+  suggestion: z.string().nullable(),
+  model: z.string(),
   scoredAt: z.string(),
 });
 

@@ -8,6 +8,7 @@ import {
   E2E_USER_NAME,
   resetHouseholdData,
   setCooksBaseOnSlot,
+  setHealthScore,
   type CreatedPlan,
 } from '../fixtures/db.ts';
 
@@ -26,6 +27,8 @@ const THEMES: readonly Theme[] = ['light', 'dark'];
 
 interface SeededAuthedFixture {
   planId: number;
+  // Has an AI health score with a Suggestion.
+  scoredRecipeId: number;
 }
 
 // Authed views share one seeded fixture across the inner theme loop — we
@@ -75,8 +78,19 @@ async function seedAuthedFixture(): Promise<SeededAuthedFixture> {
     recipeId: batchMeal.id,
     numberOfServings: batchMeal.baseServings,
   });
+  await setHealthScore(batchMeal.id, {
+    score: 6,
+    summary: 'Plenty of protein and tomato, but a creamy, salty sauce.',
+    suggestion: 'Swap half the cream for yoghurt.',
+  });
+  await setHealthScore(base.id, {
+    score: 7,
+    summary: 'Mostly vegetables.',
+    suggestion: null,
+    isStale: true,
+  });
 
-  return { planId: plan.id };
+  return { planId: plan.id, scoredRecipeId: batchMeal.id };
 }
 
 async function runAxe(page: Page, theme: Theme): Promise<void> {
@@ -164,6 +178,16 @@ test.describe('a11y — authed views', () => {
       await expect(
         page.getByRole('heading', { name: 'Recipes' }),
       ).toBeVisible();
+      await runAxe(page, theme);
+    });
+
+    test(`recipe page with an AI health score passes axe in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.goto(`/recipes/${String(fixture.scoredRecipeId)}`);
+      await expect(
+        page.getByRole('region', { name: 'AI health score' }),
+      ).toContainText('Swap half the cream for yoghurt.');
       await runAxe(page, theme);
     });
 

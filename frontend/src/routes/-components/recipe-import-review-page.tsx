@@ -34,6 +34,7 @@ import { OriginalInput } from '@/components/recipe-import/original-input.tsx';
 import { ReaderNotes } from '@/components/recipe-import/reader-notes.tsx';
 import type { SearchableComboboxOption } from '@/components/searchable-combobox.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useHealthScoring } from '@/hooks/use-health-scoring.ts';
 import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { useImportRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
@@ -145,6 +146,7 @@ function ImportReviewEditor({
 }: ImportReviewEditorProps): React.ReactElement {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
+  const healthScoring = useHealthScoring();
   const createMutation = trpc.recipeImports.createRecipe.useMutation();
   const isLarge = useIsLargeViewport();
 
@@ -407,6 +409,8 @@ function ImportReviewEditor({
         utils.recipes.references.invalidate(),
         utils.recipes.listTags.invalidate(),
       ]);
+      // In the background, with no further step (DEC-112).
+      healthScoring.scoreAfterSave(result.recipeId);
       await navigate({
         to: '/recipes/$recipeId',
         params: { recipeId: String(result.recipeId) },

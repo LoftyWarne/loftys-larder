@@ -56,9 +56,10 @@ export interface RateLimitOptions {
   ipMaxPerMinute?: number;
   sessionMaxPerMinute?: number;
   importStartsPerHour?: number;
+  healthScoresPerHour?: number;
 }
 
-export interface ImportRateLimitVerdict {
+export interface ModelRateLimitVerdict {
   allowed: boolean;
   retryAfterSeconds: number;
 }
@@ -68,8 +69,23 @@ declare module 'fastify' {
     // Counts one Recipe Import `start` for the request's user.
     limitRecipeImportStart: (
       req: FastifyRequest,
-    ) => Promise<ImportRateLimitVerdict>;
+    ) => Promise<ModelRateLimitVerdict>;
+    // Counts one `healthScores.score` that reaches the model for the
+    // request's user.
+    limitHealthScore: (req: FastifyRequest) => Promise<ModelRateLimitVerdict>;
   }
+}
+
+type RateLimitResult = Awaited<
+  ReturnType<ReturnType<FastifyInstance['createRateLimit']>>
+>;
+
+function toVerdict(result: RateLimitResult): ModelRateLimitVerdict {
+  // `isAllowed` means allow-listed; under the limit is `!isExceeded`.
+  if (result.isAllowed || !result.isExceeded) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  return { allowed: false, retryAfterSeconds: result.ttlInSeconds };
 }
 
 export async function registerRateLimit(
@@ -114,16 +130,20 @@ export async function registerRateLimit(
     keyGenerator: (req) =>
       req.user ? `import:${req.user.id}` : `import-ip:${req.ip}`,
   });
-  app.decorate(
-    'limitRecipeImportStart',
-    async (req: FastifyRequest): Promise<ImportRateLimitVerdict> => {
-      const result = await checkImportStart(req);
-      // `isAllowed` means allow-listed; under the limit is `!isExceeded`.
-      if (result.isAllowed || !result.isExceeded) {
-        return { allowed: true, retryAfterSeconds: 0 };
-      }
-      return { allowed: false, retryAfterSeconds: result.ttlInSeconds };
-    },
+  app.decorate('limitRecipeImportStart', async (req: FastifyRequest) =>
+    toVerdict(await checkImportStart(req)),
+  );
+
+  // Each score calls a paid model too (DEC-112): every call that gets past
+  // the cheap checks counts, bulk runs included.
+  const checkHealthScore = app.createRateLimit({
+    max: options.healthScoresPerHour ?? 30,
+    timeWindow: '1 hour',
+    keyGenerator: (req) =>
+      req.user ? `health-score:${req.user.id}` : `health-score-ip:${req.ip}`,
+  });
+  app.decorate('limitHealthScore', async (req: FastifyRequest) =>
+    toVerdict(await checkHealthScore(req)),
   );
 
   // preHandler (not onRequest) so the auth plugin has already hydrated

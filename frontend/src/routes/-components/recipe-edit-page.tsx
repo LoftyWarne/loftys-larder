@@ -41,6 +41,7 @@ import type { RecipeSectionHandle } from '@/components/recipe-editor/section-han
 import { TagFields } from '@/components/recipe-editor/tag-fields.tsx';
 import type { SearchableComboboxOption } from '@/components/searchable-combobox.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useHealthScoring } from '@/hooks/use-health-scoring.ts';
 import { useRecipeDraft } from '@/hooks/use-recipe-draft.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { toMethodIngredients } from '@/lib/method-ingredients.ts';
@@ -63,6 +64,7 @@ export function RecipeEditPage(): React.ReactElement {
 
   const navigate = useNavigate();
   const utils = trpc.useUtils();
+  const healthScoring = useHealthScoring();
   const recipeQuery = trpc.recipes.get.useQuery(
     { id: recipeId },
     { enabled: idIsValid, retry: false },
@@ -414,6 +416,8 @@ export function RecipeEditPage(): React.ReactElement {
         const saved = (await section.current?.submit()) ?? false;
         if (!saved) return;
       }
+      // In the background: the cook doesn't wait for a score (DEC-112).
+      healthScoring.scoreAfterSave(recipeId);
       await navigate({
         to: '/recipes/$recipeId',
         params: { recipeId: String(recipeId) },

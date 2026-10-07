@@ -11,6 +11,8 @@ import { createDestroyImage, createLookUpImportPdf } from './lib/cloudinary.ts';
 import { createPageFetcher } from './lib/recipe-import/fetch-page.ts';
 import { createRecipeReader } from './lib/recipe-reader/index.ts';
 import type { RecipeReader } from './lib/recipe-reader/types.ts';
+import { createRecipeScorer } from './lib/recipe-scorer/index.ts';
+import type { RecipeScorer } from './lib/recipe-scorer/types.ts';
 import { buildLoggerBundle } from './plugins/logger.ts';
 import type { AxiomDestination } from './plugins/axiom-destination.ts';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +46,9 @@ export interface BuildAppOptions {
   // Inject a Recipe Import reader in tests; production builds the one
   // config names (DEC-109).
   recipeReader?: RecipeReader;
+  // Inject a health scorer in tests; production builds the one config names
+  // (DEC-112).
+  recipeScorer?: RecipeScorer;
 }
 
 export interface BuiltApp {
@@ -116,6 +121,11 @@ export async function buildAppWithLogger(
   );
   app.decorate('fetchPage', createPageFetcher());
   app.decorate('lookUpImportPdf', createLookUpImportPdf(cloudinary));
+  app.decorate(
+    'recipeScorer',
+    options.recipeScorer ?? createRecipeScorer(config),
+  );
+  app.decorate('healthScoreSince', config.HEALTH_SCORE_SINCE);
 
   registerHealth(app);
 
@@ -142,6 +152,7 @@ export async function buildAppWithLogger(
           ipMaxPerMinute: 10_000,
           sessionMaxPerMinute: 30_000,
           importStartsPerHour: 1_000,
+          healthScoresPerHour: 1_000,
         }
       : {},
   );

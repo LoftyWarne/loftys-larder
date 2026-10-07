@@ -1,6 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 
 import type { ModelEffort } from '../../config.ts';
+import { ANTHROPIC_REFUSAL_FALLBACK_BETA } from '../model-features/anthropic-client.ts';
+import { classifyAnthropicError } from '../model-features/anthropic-errors.ts';
 import {
   buildRecipeReaderUserMessage,
   RECIPE_READER_SYSTEM_PROMPT,
@@ -16,16 +18,6 @@ import {
 // Room for thinking plus a long proposal, and still under the SDK's limit for
 // a non-streaming request.
 const MAX_TOKENS = 16_000;
-
-// A classifier refusal is re-run on the model Anthropic recommends for its
-// category, inside the same call. A recipe tripping one is almost certainly
-// a false positive. A refusal from the whole chain is still not a recipe.
-const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
-
-// Client errors that mean the request was wrong, as opposed to a timeout
-// (408), a conflict (409) or a rate limit (429), which can pass.
-const TRANSIENT_CLIENT_STATUSES = new Set([408, 409, 429]);
-const PROVIDER_MESSAGE_MAX_LENGTH = 500;
 
 export interface AnthropicRecipeReaderOptions {
   client: Anthropic;
@@ -47,7 +39,7 @@ export function createAnthropicRecipeReader(
           {
             model,
             max_tokens: MAX_TOKENS,
-            betas: [REFUSAL_FALLBACK_BETA],
+            betas: [ANTHROPIC_REFUSAL_FALLBACK_BETA],
             fallbacks: 'default',
             output_config: { effort },
             system: RECIPE_READER_SYSTEM_PROMPT,
@@ -69,6 +61,9 @@ export function createAnthropicRecipeReader(
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,
       };
+      // A recipe tripping a classifier is almost certainly a false positive,
+      // which the fallback re-runs. A refusal from the whole chain is still
+      // not a recipe.
       if (response.stop_reason === 'refusal') {
         return { outcome: { kind: 'not_a_recipe' }, usage };
       }
@@ -112,45 +107,20 @@ function toOutcome(text: string): RecipeReaderOutcome {
 }
 
 function toReaderError(error: unknown, signal: AbortSignal): unknown {
-  if (
-    signal.aborted ||
-    error instanceof Anthropic.APIUserAbortError ||
-    error instanceof Anthropic.APIConnectionTimeoutError
-  ) {
-    return new RecipeReaderTimeoutError();
-  }
-  if (error instanceof Anthropic.APIError) {
-    const status: unknown = error.status;
-    if (
-      typeof status === 'number' &&
-      status >= 400 &&
-      status < 500 &&
-      !TRANSIENT_CLIENT_STATUSES.has(status)
-    ) {
+  const failure = classifyAnthropicError(error, signal);
+  switch (failure?.kind) {
+    case 'timeout':
+      return new RecipeReaderTimeoutError();
+    case 'unavailable':
+      return new RecipeReaderUnavailableError(failure.status);
+    case 'rejected':
       return new RecipeReaderRequestError(
-        status,
-        error.type,
-        providerMessage(error.error),
-        error.requestID ?? null,
+        failure.status,
+        failure.providerErrorType,
+        failure.providerMessage,
+        failure.providerRequestId,
       );
-    }
-    return new RecipeReaderUnavailableError(
-      typeof status === 'number' ? status : null,
-    );
+    case undefined:
+      return error;
   }
-  return error;
-}
-
-// The `error.message` of the provider's error body, if it has one.
-function providerMessage(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null || !('error' in body)) {
-    return null;
-  }
-  const detail: unknown = body.error;
-  if (typeof detail !== 'object' || detail === null || !('message' in detail)) {
-    return null;
-  }
-  return typeof detail.message === 'string'
-    ? detail.message.slice(0, PROVIDER_MESSAGE_MAX_LENGTH)
-    : null;
 }

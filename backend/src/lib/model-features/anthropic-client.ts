@@ -3,6 +3,11 @@ import Anthropic from '@anthropic-ai/sdk';
 // Shared Anthropic client setup for model features (cross-cutting #22). A
 // helper, not a seam: each feature's adapter owns its prompt and request.
 
+// A classifier refusal is re-run on the model Anthropic recommends for its
+// category, inside the same call. The response names the model that answered.
+export const ANTHROPIC_REFUSAL_FALLBACK_BETA =
+  'server-side-fallback-2026-07-01';
+
 export interface AnthropicClientOptions {
   apiKey: string;
   // Tests fake the SDK's HTTP layer here.

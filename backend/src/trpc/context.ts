@@ -9,7 +9,8 @@ import type {
 } from '../lib/cloudinary.ts';
 import type { PageFetcher } from '../lib/recipe-import/fetch-page.ts';
 import type { RecipeReader } from '../lib/recipe-reader/types.ts';
-import type { ImportRateLimitVerdict } from '../plugins/rate-limit.ts';
+import type { RecipeScorer } from '../lib/recipe-scorer/types.ts';
+import type { ModelRateLimitVerdict } from '../plugins/rate-limit.ts';
 
 // Module augmentation lives here (rather than in the auth plugin) so it's
 // always part of any compilation unit that pulls the AppRouter type — notably
@@ -34,6 +35,8 @@ declare module 'fastify' {
     recipeReader: RecipeReader;
     fetchPage: PageFetcher;
     lookUpImportPdf: LookUpImportPdf;
+    recipeScorer: RecipeScorer;
+    healthScoreSince: string;
   }
 }
 
@@ -43,7 +46,14 @@ export interface RecipeImportContext {
   fetchPage: PageFetcher;
   // Looks an uploaded PDF up in Cloudinary for its page count (DEC-111).
   lookUpPdf: LookUpImportPdf;
-  allowStart: () => Promise<ImportRateLimitVerdict>;
+  allowStart: () => Promise<ModelRateLimitVerdict>;
+}
+
+export interface HealthScoreContext {
+  scorer: RecipeScorer;
+  // HEALTH_SCORE_SINCE (DEC-112).
+  since: string;
+  allowScore: () => Promise<ModelRateLimitVerdict>;
 }
 
 export interface AppContext {
@@ -59,6 +69,7 @@ export interface AppContext {
   // The request logger, which carries `reqId` (DEC-77).
   log: FastifyBaseLogger;
   recipeImport: RecipeImportContext;
+  healthScore: HealthScoreContext;
 }
 
 export function createContext({
@@ -82,6 +93,11 @@ export function createContext({
       fetchPage: req.server.fetchPage,
       lookUpPdf: req.server.lookUpImportPdf,
       allowStart: () => req.server.limitRecipeImportStart(req),
+    },
+    healthScore: {
+      scorer: req.server.recipeScorer,
+      since: req.server.healthScoreSince,
+      allowScore: () => req.server.limitHealthScore(req),
     },
   };
 }

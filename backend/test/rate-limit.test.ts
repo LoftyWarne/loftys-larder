@@ -365,3 +365,55 @@ describe('rate limit — Recipe Import starts per user', () => {
     expect((await start(app, 'user-b')).allowed).toBe(true);
   });
 });
+
+describe('rate limit — health scores per user', () => {
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+    app = undefined;
+  });
+
+  async function buildScoreApp(): Promise<FastifyInstance> {
+    const instance = Fastify({ logger: false, trustProxy: true });
+    instance.decorateRequest('session', null);
+    instance.decorateRequest('user', null);
+    instance.addHook('preHandler', (req, _reply, done) => {
+      const raw = req.headers['x-test-user'];
+      if (typeof raw === 'string') {
+        // Structural stub: the score limiter only reads `user.id`.
+        req.user = { id: raw } as unknown as typeof req.user;
+      }
+      done();
+    });
+    await registerRateLimit(instance);
+    instance.post('/score-probe', (req) => instance.limitHealthScore(req));
+    await instance.ready();
+    return instance;
+  }
+
+  async function score(instance: FastifyInstance, userId: string) {
+    const response = await instance.inject({
+      method: 'POST',
+      url: '/score-probe',
+      headers: { 'x-test-user': userId },
+    });
+    return response.json<{ allowed: boolean; retryAfterSeconds: number }>();
+  }
+
+  it('allows 30 scores an hour per user and refuses the 31st', async () => {
+    app = await buildScoreApp();
+    for (let i = 0; i < 30; i += 1) {
+      expect((await score(app, 'user-a')).allowed).toBe(true);
+    }
+    const refused = await score(app, 'user-a');
+    expect(refused.allowed).toBe(false);
+    expect(refused.retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  it('keeps a separate count for each user', async () => {
+    app = await buildScoreApp();
+    for (let i = 0; i < 30; i += 1) await score(app, 'user-a');
+    expect((await score(app, 'user-b')).allowed).toBe(true);
+  });
+});

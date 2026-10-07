@@ -12,6 +12,7 @@ import { PlanAheadSummary } from '@/components/plan-ahead-summary.tsx';
 import { PortionsStepper } from '@/components/portions-stepper.tsx';
 import { PrepAheadBadge } from '@/components/prep-ahead-badge.tsx';
 import { RecipeComments } from '@/components/recipe-comments.tsx';
+import { RecipeHealthScore } from '@/components/recipe-health-score.tsx';
 import { RecipeNutrition } from '@/components/recipe-nutrition.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { RecipeTagList } from '@/components/recipe-tag-list.tsx';
@@ -218,6 +219,15 @@ export function RecipeDetailPage(): React.ReactElement {
       <RecipeNutrition
         values={recipe}
         estimated={recipe.nutritionIsEstimated}
+      />
+
+      <RecipeHealthScore
+        recipeId={recipe.id}
+        healthScore={recipe.healthScore}
+        hasIngredients={
+          recipe.ingredients.length > 0 || recipe.baseRecipeId !== null
+        }
+        isDeleted={recipe.isDeleted}
       />
 
       <PlanAheadSummary

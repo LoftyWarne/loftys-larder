@@ -60,6 +60,19 @@ const {
   useLocationMock: vi.fn(),
 }));
 
+const { scoreAfterSaveMock } = vi.hoisted(() => ({
+  scoreAfterSaveMock: vi.fn(),
+}));
+
+vi.mock('@/hooks/use-health-scoring.ts', () => ({
+  useHealthScoring: () => ({
+    scoringIds: new Set(),
+    failures: new Map(),
+    scoreAfterSave: scoreAfterSaveMock,
+    score: vi.fn(),
+  }),
+}));
+
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
     useUtils: () => ({
@@ -591,6 +604,7 @@ describe('RecipeEditPage', () => {
     });
     expect(replaceIngredientsMutateAsyncMock).toHaveBeenCalledTimes(1);
     expect(replaceMethodMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(scoreAfterSaveMock).toHaveBeenCalledWith(7);
   });
 
   it('does not navigate on Save & Finish when a section save fails', async () => {
@@ -604,6 +618,7 @@ describe('RecipeEditPage', () => {
 
     expect(await screen.findByText('header boom')).toBeVisible();
     expect(navigateMock).not.toHaveBeenCalled();
+    expect(scoreAfterSaveMock).not.toHaveBeenCalled();
   });
 
   it('keeps other sections enabled when one section save fails', async () => {

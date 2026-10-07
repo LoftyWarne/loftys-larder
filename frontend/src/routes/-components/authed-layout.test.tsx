@@ -41,6 +41,12 @@ vi.mock('@tanstack/react-router', async () => {
   };
 });
 
+vi.mock('@/components/health-scoring-provider.tsx', () => ({
+  HealthScoringProvider: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="health-scoring-provider">{children}</div>
+  ),
+}));
+
 import { authClient } from '@/lib/auth-client.ts';
 import { AuthedLayout, authedBeforeLoad } from './authed-layout.tsx';
 
@@ -104,6 +110,17 @@ describe('authedBeforeLoad', () => {
 });
 
 describe('AuthedLayout', () => {
+  it.each([true, false])(
+    'holds health scoring above the shell (large viewport: %s)',
+    (isLarge) => {
+      mockIsLargeViewport(isLarge);
+      render(<AuthedLayout />);
+      expect(screen.getByTestId('health-scoring-provider')).toContainElement(
+        screen.getByTestId('outlet'),
+      );
+    },
+  );
+
   it('renders the top-row nav with all six destinations at lg+', () => {
     mockIsLargeViewport(true);
     render(<AuthedLayout />);

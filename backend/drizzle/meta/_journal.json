@@ -183,6 +183,13 @@
       "when": 1791225362935,
       "tag": "0025_recipe_import_original_format",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791395452944,
+      "tag": "0026_recipe_health_score_suggestion",
+      "breakpoints": true
     }
   ]
 }

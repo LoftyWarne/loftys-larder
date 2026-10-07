@@ -4,6 +4,62 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-07 — Health scoring: the `RecipeScorer`, scores after each save, the chip and the recipe page section (FEAT-66)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,004 tests green. Frontend: 897 green. e2e: 50 of 50, including the two new health score specs and the new recipe page axe scan in both themes. No real model call yet, and manual verification hasn't been run. The FEAT-66 checkboxes are left for the user to tick.
+
+**Agreed at kick-off:** all nineteen readings approved as proposed. Detail is in FEAT-66's amended notes and DEC-112's amendment. In short:
+- A `deleted` outcome.
+- Current means not stale and on or after `HEALTH_SCORE_SINCE`.
+- The limit counts only calls past the cheap checks.
+- `base.baseServings` in the request.
+- A variation's base lines count as lines.
+- `recipes.get` returns `model`.
+- `HEALTH_SCORE_SINCE` is compared by London day.
+- `HEALTH_SCORE_REQUEST_REJECTED` is a fourth error code.
+- Provider-error sorting is a shared helper.
+- 45 seconds.
+- "Which need a score" comes from `due`.
+- The scoring context sits in `AuthedLayout`.
+
+**Changes:**
+- **Shared:**
+  - `schemas/health-scores.ts`: request, candidate, result, `score` and `due` shapes.
+  - `suggestion` and `model` on the `recipes.get` health score.
+  - Four error codes.
+- **Backend:**
+  - Migration `0026` (`suggestion text NULL`).
+  - `lib/recipe-scorer/`: types, the `anthropic` adapter with structured outputs, the refusal fallback and its prompt, the `fake` adapter, and the factory.
+  - `lib/health-score/`: `request.ts` (`loadScoredRecipe`, `scoredLineCount`), `normalise.ts` and `due.ts`.
+  - `model-features/anthropic-errors.ts`. The reader adapter now uses it, with unchanged behaviour.
+  - `procedures/health-scores.ts`.
+  - The `HEALTH_SCORE_*` config.
+  - `limitHealthScore` (30 an hour; 1,000 under test). `ImportRateLimitVerdict` was renamed `ModelRateLimitVerdict`.
+  - The scorer and its date on the context.
+- **Frontend:**
+  - `use-health-scoring.ts` (the context and queue) and `HealthScoringProvider` in `AuthedLayout`.
+  - `HealthScoreChip` on recipe cards.
+  - `RecipeHealthScore` after "Nutrition per serving".
+  - Scoring after Save & Finish and after "Create recipe".
+- **Config files:** `fly.toml [env]`, `backend/.env.example`, `secrets-checklist.md`.
+- **Docs:** FEAT-66 amended, DEC-112 amended, cross-cutting #22's helper list, README.
+
+**Drift from the kick-off plan:**
+- The usage log's feature name is `health-score` (matching `recipe-import`), not the spec's `health_score`.
+- The provider had to wrap `AuthedLayout`'s shell switch, not sit inside a shell.
+- Things added that the kick-off didn't spell out:
+  - The prompt gives the FSA's per-portion red thresholds (21 g fat, 6 g saturates, 27 g sugars, 1.8 g salt) and 30 g of fibre a day. I wrote these from memory of the guidance, so check them against the FSA's current figures.
+  - The prompt says a balanced, home-cooked everyday meal scores "around 6 or 7".
+  - A cook's Score answered with `nothing_to_score` shows "Add ingredients to get a health score."
+
+**Open:**
+- **Real model call before deploy** (cross-cutting #22). Gate check steps 1–3. Step 1 should record the time and tokens here, and step 2 the three-recipe consistency scores.
+- `ANTHROPIC_API_KEY` is already a Fly secret for imports. The new `fly.toml` settings select `anthropic` for scoring too.
+- The recipe page shows the stored model id as it is (`claude-opus-5-5`). Revisit if it reads badly.
+- Manual verification steps 1–6 not run.
+
+---
+
 ## 2026-10-07 — Health scoring scoped (DEC-112, DEC-113, FEAT-66 to FEAT-71); eval runner renumbered FEAT-72
 
 **Status:** Docs only, committed to `main`, not pushed. No code. Nothing ticked.

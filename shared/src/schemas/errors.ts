@@ -46,6 +46,14 @@ export const DOMAIN_ERROR_CODES = [
   // Metadata `pageCount` and `maxPages`: a PDF with more pages than an
   // import reads.
   'IMPORT_DOCUMENT_TOO_LONG',
+  // Metadata `retryAfterSeconds`.
+  'HEALTH_SCORE_RATE_LIMITED',
+  // Metadata `reason`: `timeout`, `unavailable` or `invalid_result`.
+  'HEALTH_SCORE_TRY_AGAIN',
+  // Every model refused to score the recipe.
+  'HEALTH_SCORE_NOT_SCORED',
+  // The provider refused the request itself, so trying again won't help.
+  'HEALTH_SCORE_REQUEST_REJECTED',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

@@ -19,9 +19,12 @@ const baseEnv = {
   CLOUDINARY_API_SECRET: 'test-secret',
 } as const;
 
-// Production refuses to start without a real Recipe Import reader.
-const prodReaderEnv = {
+// Production refuses to start without a real Recipe Import reader and health
+// scorer.
+const prodModelEnv = {
   RECIPE_IMPORT_ADAPTER: 'anthropic',
+  HEALTH_SCORE_ADAPTER: 'anthropic',
+  HEALTH_SCORE_SINCE: '2026-10-07',
   ANTHROPIC_API_KEY: 'sk-test',
 } as const;
 
@@ -53,7 +56,7 @@ describe('loadConfig', () => {
   it('allows missing ALLOWED_ORIGIN in production', () => {
     const config = loadConfig({
       ...envWithout('ALLOWED_ORIGIN'),
-      ...prodReaderEnv,
+      ...prodModelEnv,
       NODE_ENV: 'production',
       AXIOM_TOKEN: 'xaat-test',
       AXIOM_DATASET: 'lofty-prod',
@@ -148,7 +151,7 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({
         ...baseEnv,
-        ...prodReaderEnv,
+        ...prodModelEnv,
         NODE_ENV: 'production',
         AXIOM_DATASET: 'lofty-prod',
       }),
@@ -159,7 +162,7 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({
         ...baseEnv,
-        ...prodReaderEnv,
+        ...prodModelEnv,
         NODE_ENV: 'production',
         AXIOM_TOKEN: 'xaat-test',
       }),
@@ -169,7 +172,7 @@ describe('loadConfig', () => {
   it('accepts production with both AXIOM_TOKEN and AXIOM_DATASET set', () => {
     const config = loadConfig({
       ...baseEnv,
-      ...prodReaderEnv,
+      ...prodModelEnv,
       NODE_ENV: 'production',
       AXIOM_TOKEN: 'xaat-test',
       AXIOM_DATASET: 'lofty-prod',
@@ -205,6 +208,8 @@ describe('loadConfig — Recipe Import reader', () => {
     NODE_ENV: 'production',
     AXIOM_TOKEN: 'axiom-token',
     AXIOM_DATASET: 'axiom-dataset',
+    HEALTH_SCORE_ADAPTER: 'anthropic',
+    HEALTH_SCORE_SINCE: '2026-10-07',
   } as const;
 
   it('defaults to the fake adapter, Opus 5.5 and medium effort outside production', () => {
@@ -257,6 +262,81 @@ describe('loadConfig — Recipe Import reader', () => {
   it.each([
     ['an unknown adapter', { RECIPE_IMPORT_ADAPTER: 'openai' }],
     ['an unknown effort', { RECIPE_IMPORT_EFFORT: 'extreme' }],
+  ])('rejects %s', (_label, env) => {
+    expect(() => loadConfig({ ...baseEnv, ...env })).toThrowError(
+      ConfigValidationError,
+    );
+  });
+});
+
+describe('loadConfig — health scorer', () => {
+  const prodEnv = {
+    ...baseEnv,
+    NODE_ENV: 'production',
+    AXIOM_TOKEN: 'axiom-token',
+    AXIOM_DATASET: 'axiom-dataset',
+    RECIPE_IMPORT_ADAPTER: 'anthropic',
+    ANTHROPIC_API_KEY: 'sk-test',
+  } as const;
+
+  it('defaults to the fake adapter, Opus 5.5, low effort and a fixed date outside production', () => {
+    const config = loadConfig({ ...baseEnv });
+    expect(config.HEALTH_SCORE_ADAPTER).toBe('fake');
+    expect(config.HEALTH_SCORE_MODEL).toBe('claude-opus-5-5');
+    expect(config.HEALTH_SCORE_EFFORT).toBe('low');
+    expect(config.HEALTH_SCORE_SINCE).toBe('2026-10-07');
+  });
+
+  it('takes the adapter, model, effort and date from the environment', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      HEALTH_SCORE_ADAPTER: 'anthropic',
+      HEALTH_SCORE_MODEL: 'claude-sonnet-5-5',
+      HEALTH_SCORE_EFFORT: 'medium',
+      HEALTH_SCORE_SINCE: '2026-11-01',
+      ANTHROPIC_API_KEY: 'sk-test',
+    });
+    expect(config.HEALTH_SCORE_ADAPTER).toBe('anthropic');
+    expect(config.HEALTH_SCORE_MODEL).toBe('claude-sonnet-5-5');
+    expect(config.HEALTH_SCORE_EFFORT).toBe('medium');
+    expect(config.HEALTH_SCORE_SINCE).toBe('2026-11-01');
+  });
+
+  it('refuses the fake adapter in production', () => {
+    expect(() =>
+      loadConfig({
+        ...prodEnv,
+        HEALTH_SCORE_ADAPTER: 'fake',
+        HEALTH_SCORE_SINCE: '2026-10-07',
+      }),
+    ).toThrowError(/HEALTH_SCORE_ADAPTER/);
+  });
+
+  it('requires an adapter and a date to be named in production', () => {
+    expect(() => loadConfig({ ...prodEnv })).toThrowError(
+      /HEALTH_SCORE_ADAPTER[\s\S]*HEALTH_SCORE_SINCE/,
+    );
+  });
+
+  it('accepts the anthropic adapter with a date in production', () => {
+    const config = loadConfig({
+      ...prodEnv,
+      HEALTH_SCORE_ADAPTER: 'anthropic',
+      HEALTH_SCORE_SINCE: '2026-10-07',
+    });
+    expect(config.HEALTH_SCORE_ADAPTER).toBe('anthropic');
+  });
+
+  it('requires ANTHROPIC_API_KEY for the anthropic adapter', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, HEALTH_SCORE_ADAPTER: 'anthropic' }),
+    ).toThrowError(/ANTHROPIC_API_KEY is required when HEALTH_SCORE_ADAPTER/);
+  });
+
+  it.each([
+    ['an unknown adapter', { HEALTH_SCORE_ADAPTER: 'openai' }],
+    ['an unknown effort', { HEALTH_SCORE_EFFORT: 'extreme' }],
+    ['a date that isn’t a date', { HEALTH_SCORE_SINCE: '7 October 2026' }],
   ])('rejects %s', (_label, env) => {
     expect(() => loadConfig({ ...baseEnv, ...env })).toThrowError(
       ConfigValidationError,

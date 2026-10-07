@@ -1,0 +1,1 @@
+ALTER TABLE "recipe_health_scores" ADD COLUMN "suggestion" text;

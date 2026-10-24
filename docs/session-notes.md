@@ -10,10 +10,8 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 **Changes:**
 - `hooks/use-swipe.ts` (new): window-level touch listeners, passive, so scrolling is untouched. A swipe needs 50 px of travel, must be at least twice as wide as tall, can't use more than one finger, and can't start within 24 px of either screen edge (left free for the iOS and Android edge-swipe Back).
-- `cook-mode-page.tsx`: swipe left goes to Next and swipe right to Back. Swipe is off while the step list is open, and does nothing on the gather screen (right) or the last step (left), so a swipe never exits or finishes. Back on the gather screen is no longer disabled: it closes cook mode as Exit does (recipe page, same servings, `replace`). The Left arrow key on the gather screen still does nothing.
+- `cook-mode-page.tsx`: swipe left goes to Next and swipe right to Back. Swipe is off while the step list is open, and does nothing on the gather screen (right) or the last step (left), so a swipe never exits or finishes. Back on the gather screen is no longer disabled: it closes cook mode as Exit does (recipe page, same servings, `replace`). The Left arrow key on the gather screen also closes cook mode, matching Back. A right swipe there still does nothing (user's call: a stray swipe shouldn't lose the ticks).
 - Horizontal only, no vertical swipe: vertical movement already scrolls a long step or the gather list, and a pull down at the top of the page means refresh in mobile Chrome.
-
-**Open:** say if a right swipe on the gather screen should exit too, or if the Left arrow key should match the Back button there.
 
 ---
 

@@ -75,8 +75,9 @@ export function CookModePage(): React.ReactElement {
       }
       if (event.key === 'ArrowRight' && step < lastStep) {
         goTo(step + 1);
-      } else if (event.key === 'ArrowLeft' && step > 0) {
-        goTo(step - 1);
+      } else if (event.key === 'ArrowLeft') {
+        if (step === 0) leave();
+        else goTo(step - 1);
       }
     }
     window.addEventListener('keydown', onKeyDown);

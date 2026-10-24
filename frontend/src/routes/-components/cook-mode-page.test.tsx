@@ -270,6 +270,19 @@ describe('CookModePage', () => {
       });
     });
 
+    it('closes cook mode with the Left arrow key, as Back does', async () => {
+      const user = userEvent.setup();
+      renderAt({ servings: 4 });
+
+      await user.keyboard('{ArrowLeft}');
+
+      expect(lastNavigation()).toMatchObject({
+        to: '/recipes/$recipeId',
+        search: { servings: 4 },
+        replace: true,
+      });
+    });
+
     it('says when a recipe has no ingredients', () => {
       renderAt({}, { ...RECIPE, ingredients: [] });
       expect(

@@ -3403,7 +3403,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 - Reuse, don't copy: `scale-quantity`, `StepIngredientChips`, `StepInstruction`, `StepNoteCallout`, `PrepAheadBadge` and the chip-amount rules. Move the recipe page's step body into one shared component instead of writing it a second time.
 - Step changes use `navigate({ search, replace: true })`, as the portions stepper does (DEC-98).
 - The wake lock is released when the page is hidden, so take it again on `visibilitychange`. Release it on unmount. Treat a rejected request as unsupported, not an error for Sentry.
-- No swipe, so nothing clashes with iOS's edge swipe for Back. Left and Right arrow keys move between steps on a keyboard.
+- Left and Right arrow keys move between steps on a keyboard. Swipe was added afterwards (DEC-116 amendment, 2026-10-24): it's horizontal only, ignores touches that start near the screen edges so the system's edge-swipe Back still works, and never leaves cook mode. Back on the gather screen closes cook mode, as Exit does.
 - No `new Date()`: cook mode has no date logic.
 
 **Agreed at kick-off (2026-10-24):**

@@ -4,6 +4,19 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-24 — Cook mode swipe, and Back on the gather screen exits (DEC-116 amendment)
+
+**Status:** Committed and pushed to `ccr-34067350-yc6g57`. Frontend typecheck and lint are clean, and the cook mode and `useSwipe` tests pass. e2e not run. Not checked on a real phone.
+
+**Changes:**
+- `hooks/use-swipe.ts` (new): window-level touch listeners, passive, so scrolling is untouched. A swipe needs 50 px of travel, must be at least twice as wide as tall, can't use more than one finger, and can't start within 24 px of either screen edge (left free for the iOS and Android edge-swipe Back).
+- `cook-mode-page.tsx`: swipe left goes to Next and swipe right to Back. Swipe is off while the step list is open, and does nothing on the gather screen (right) or the last step (left), so a swipe never exits or finishes. Back on the gather screen is no longer disabled: it closes cook mode as Exit does (recipe page, same servings, `replace`). The Left arrow key on the gather screen still does nothing.
+- Horizontal only, no vertical swipe: vertical movement already scrolls a long step or the gather list, and a pull down at the top of the page means refresh in mobile Chrome.
+
+**Open:** say if a right swipe on the gather screen should exit too, or if the Left arrow key should match the Back button there.
+
+---
+
 ## 2026-10-24 — Sign-in code field redesign (DEC-114 follow-up)
 
 **Status:** Committed and pushed to `ccr-e19acb66-2qz6gf`. Typecheck, lint and format are clean in every workspace. Frontend: 977 tests green. Backend: the new `resend.test.ts` passes; the full backend suite and e2e were not run (no Docker in the session). Not checked on a real phone or with iOS/Android code autofill.

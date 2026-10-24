@@ -15,6 +15,7 @@ import {
 } from '@/components/cook-mode/step-list-dialog.tsx';
 import { StepScreen } from '@/components/cook-mode/step-screen.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useSwipe } from '@/hooks/use-swipe.ts';
 import { useWakeLock } from '@/hooks/use-wake-lock.ts';
 import { stepIngredientChips } from '@/lib/step-ingredient-amounts.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -54,7 +55,7 @@ export function CookModePage(): React.ReactElement {
     });
   }
 
-  function finish(): void {
+  function leave(): void {
     void navigate({
       to: '/recipes/$recipeId',
       params: { recipeId: params.recipeId },
@@ -82,6 +83,16 @@ export function CookModePage(): React.ReactElement {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
+  });
+
+  useSwipe({
+    enabled: recipe !== undefined && !isStepListOpen,
+    onSwipeLeft: () => {
+      if (step < lastStep) goTo(step + 1);
+    },
+    onSwipeRight: () => {
+      if (step > 0) goTo(step - 1);
+    },
   });
 
   if (!idIsValid) return <NotFound />;
@@ -186,9 +197,9 @@ export function CookModePage(): React.ReactElement {
               type="button"
               variant="outline"
               className="h-14 text-lg"
-              disabled={step === 0}
               onClick={() => {
-                goTo(step - 1);
+                if (step === 0) leave();
+                else goTo(step - 1);
               }}
             >
               Back
@@ -204,7 +215,7 @@ export function CookModePage(): React.ReactElement {
                 {step === 0 ? 'Start' : 'Next'}
               </Button>
             ) : (
-              <Button type="button" className="h-14 text-lg" onClick={finish}>
+              <Button type="button" className="h-14 text-lg" onClick={leave}>
                 Finish
               </Button>
             )}

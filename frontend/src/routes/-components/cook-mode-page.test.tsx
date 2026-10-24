@@ -1,5 +1,5 @@
 import type { Recipe } from '@loftys-larder/shared';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -153,6 +153,13 @@ function lastNavigation(): { search?: SearchFn; replace?: boolean } & Record<
   return call[0];
 }
 
+function swipe(fromX: number, toX: number): void {
+  fireEvent.touchStart(window, { touches: [{ clientX: fromX, clientY: 200 }] });
+  fireEvent.touchEnd(window, {
+    changedTouches: [{ clientX: toX, clientY: 200 }],
+  });
+}
+
 function renderAt(
   search: { servings?: number; step?: number },
   recipe = RECIPE,
@@ -211,7 +218,7 @@ describe('CookModePage', () => {
       const list = screen.getByRole('list', { name: 'Ingredients' });
       expect(within(list).getByText(/600 g/)).toBeInTheDocument();
       expect(within(list).getByText(/100 g/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
       expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
       expect(screen.getByTestId('cook-next-preview')).toHaveTextContent(
         'Next: Melt the butter and soften the onions.',
@@ -247,6 +254,20 @@ describe('CookModePage', () => {
       const nav = lastNavigation();
       expect(nav.replace).toBe(true);
       expect(nav.search?.({})).toEqual({ servings: undefined, step: 1 });
+    });
+
+    it('closes cook mode with Back, back to the recipe page at the same servings', async () => {
+      const user = userEvent.setup();
+      renderAt({ servings: 4 });
+
+      await user.click(screen.getByRole('button', { name: 'Back' }));
+
+      expect(lastNavigation()).toMatchObject({
+        to: '/recipes/$recipeId',
+        params: { recipeId: '7' },
+        search: { servings: 4 },
+        replace: true,
+      });
     });
 
     it('says when a recipe has no ingredients', () => {
@@ -370,6 +391,30 @@ describe('CookModePage', () => {
       expect(lastNavigation().search?.({ step: 1 })).toEqual({
         servings: undefined,
       });
+    });
+
+    it('moves with a horizontal swipe', () => {
+      renderAt({ step: 1 });
+
+      swipe(300, 100);
+      expect(lastNavigation().search?.({ step: 1 })).toEqual({
+        servings: undefined,
+        step: 2,
+      });
+
+      swipe(100, 300);
+      expect(lastNavigation().search?.({ step: 1 })).toEqual({
+        servings: undefined,
+      });
+    });
+
+    it("doesn't leave cook mode by swiping past either end", () => {
+      const { unmount } = renderAt({});
+      swipe(100, 300);
+      unmount();
+      renderAt({ step: 2 });
+      swipe(300, 100);
+      expect(navigateMock).not.toHaveBeenCalled();
     });
 
     it('moves focus to the step heading when the step changes', () => {

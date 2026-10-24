@@ -4,6 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-24 — Fastify-level 4xx errors stopped reaching Sentry
+
+**Status:** Fixed in `349ce07`, pushed to `main`. `sentry.test.ts` 22 green; server, security and not-found tests 30 green. Typecheck, lint and format clean. No schema, dependency or tRPC URL shape change.
+
+**The event:** an unhandled `FastifyError: Body cannot be empty when content-type is set to 'application/json'`, transaction `POST undefined`, reqId `03ea504f-fa1b-4684-aa58-c5f7f5646406`, seven seconds after a cold start at 01:32 UTC. `POST undefined` means no route matched (`routeOptions.url` is undefined in the not-found path), so it wasn't the SPA. Most likely a bot POSTing an empty JSON body to a path we don't serve, which also woke the machine. The client correctly got a 400.
+
+**Root cause:** Sentry's default Fastify filter is `reply.statusCode >= 500 || <= 299`, but Fastify 5 runs `onError` hooks before `handleError` applies the error's status (`fastify/lib/reply.js` `onErrorHook` → `lib/error-handler.js`). So every 4xx thrown before a handler runs (an empty or malformed JSON body, an unsupported content type, an oversized payload) still reads 200 and gets reported, on routed paths as well as unrouted ones. The tRPC path was already filtered by `shouldReportToSentry`; the Fastify path wasn't.
+
+**Fix:** `registerSentryHooks` passes `setupFastifyErrorHandler` the new `shouldReportFastifyError`. It reads the error's own `statusCode` and reports only 5xx, treating an error with no status as a 500. The same option sets the filter on Sentry's Fastify 5 diagnostics-channel path, so one change covers both. The new tests run a real Fastify app with a stand-in handler that falls back to Sentry's default filter. Without the fix, the two empty-body tests fail.
+
+**Open:** look up the reqId in Axiom (`['loftys-larder-prod'] | where reqId == "03ea504f-…"`) to confirm the path and user agent. Not done.
+
+---
+
 ## 2026-10-07 — Health scoring: the `RecipeScorer`, scores after each save, the chip and the recipe page section (FEAT-66)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,004 tests green. Frontend: 897 green. e2e: 50 of 50, including the two new health score specs and the new recipe page axe scan in both themes. No real model call yet, and manual verification hasn't been run. The FEAT-66 checkboxes are left for the user to tick.

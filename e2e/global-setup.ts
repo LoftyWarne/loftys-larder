@@ -47,8 +47,8 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     await page.goto(`${baseURL}/sign-in`);
     await page.getByLabel('Email').fill(E2E_EMAIL);
     await page.getByRole('button', { name: 'Send sign-in code' }).click();
+    // The form signs in by itself once the eighth digit is in.
     await page.getByLabel('Sign-in code').fill(E2E_SIGN_IN_CODE);
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.waitForURL((url) => url.pathname !== '/sign-in');
     await context.storageState({ path: STORAGE_STATE_PATH });
 

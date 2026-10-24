@@ -393,6 +393,11 @@ export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
 export { toTitleCase } from './lib/title-case.ts';
 export { takeChars } from './lib/take-chars.ts';
 export {
+  SIGN_IN_CODE_LENGTH,
+  groupSignInCode,
+  signInCodeDigits,
+} from './lib/sign-in-code.ts';
+export {
   scrubPii,
   type ScrubbableEvent,
   type ScrubbableRequest,

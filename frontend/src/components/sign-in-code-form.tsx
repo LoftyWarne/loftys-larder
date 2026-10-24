@@ -1,6 +1,12 @@
-import { signInCodeSchema, type SignInCodeInput } from '@loftys-larder/shared';
+import {
+  SIGN_IN_CODE_LENGTH,
+  groupSignInCode,
+  signInCodeDigits,
+  signInCodeSchema,
+  type SignInCodeInput,
+} from '@loftys-larder/shared';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
@@ -34,26 +40,63 @@ export function SignInCodeForm({
     defaultValues: { code: '' },
   });
   const { setFocus } = form;
+  // isSubmitting only updates on the next render, too late to stop an
+  // auto-submit landing while a click's submit is already running.
+  const inFlight = useRef(false);
 
   const submitting = form.formState.isSubmitting;
 
   // The step replaces the email form, and the field is disabled while a code
-  // is checked; either way focus would otherwise fall to <body>.
+  // is checked; either way focus would otherwise fall to <body>. After a
+  // rejected code the text is selected so the next code replaces it.
   useEffect(() => {
-    if (!submitting) setFocus('code');
+    if (!submitting) setFocus('code', { shouldSelect: submitError !== null });
   }, [setFocus, submitting, submitError]);
 
   const submit = form.handleSubmit(async ({ code }) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setSubmitError(null);
-    const { error } = await authClient.signIn.emailOtp({ email, otp: code });
-    if (error) {
-      setSubmitError(
-        signInErrorMessage(error, 'Could not sign you in. Try again.'),
-      );
-      return;
+    try {
+      const { error } = await authClient.signIn.emailOtp({ email, otp: code });
+      if (error) {
+        setSubmitError(
+          signInErrorMessage(error, 'Could not sign you in. Try again.'),
+        );
+        return;
+      }
+      await onSignedIn();
+    } finally {
+      inFlight.current = false;
     }
-    await onSignedIn();
   });
+
+  const codeField = form.register('code');
+
+  // Keeps only digits (so a pasted "Code: 1234 5678" works), shows them as
+  // "1234 5678", and keeps the caret after the same digit it followed.
+  // Submits as soon as the eighth digit arrives, which is what makes an
+  // autofilled code sign straight in.
+  const onCodeChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const input = event.target;
+    const before = form.getValues('code');
+    const digitsBeforeCaret = signInCodeDigits(
+      input.value.slice(0, input.selectionStart ?? input.value.length),
+    ).length;
+    const digits = signInCodeDigits(input.value);
+    const grouped = groupSignInCode(digits);
+    input.value = grouped;
+    const caret =
+      digitsBeforeCaret > 4 ? digitsBeforeCaret + 1 : digitsBeforeCaret;
+    input.setSelectionRange(caret, caret);
+    void codeField.onChange(event);
+    if (
+      digits.length === SIGN_IN_CODE_LENGTH &&
+      signInCodeDigits(before) !== digits
+    ) {
+      void submit();
+    }
+  };
 
   const resendCode = async (): Promise<void> => {
     setResend({ kind: 'sending' });
@@ -85,11 +128,19 @@ export function SignInCodeForm({
           id="sign-in-code"
           type="text"
           inputMode="numeric"
+          pattern="[0-9 ]*"
           autoComplete="one-time-code"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          enterKeyHint="go"
+          placeholder="0000 0000"
           disabled={submitting}
           aria-invalid={codeError ? true : undefined}
           aria-describedby={codeError ? 'sign-in-code-error' : undefined}
-          {...form.register('code')}
+          className="h-12 max-w-[14ch] text-center font-mono text-xl tracking-widest tabular-nums"
+          {...codeField}
+          onChange={onCodeChange}
         />
         {codeError && (
           <p

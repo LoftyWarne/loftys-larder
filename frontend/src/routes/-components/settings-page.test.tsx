@@ -405,7 +405,6 @@ describe('SettingsPage', () => {
         await screen.findByLabelText(/sign-in code/i),
         '12345678',
       );
-      await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
       await waitFor(() => {
         expect(signInOtpMock).toHaveBeenCalledWith({

@@ -19,16 +19,19 @@ import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { RecipeTagList } from '@/components/recipe-tag-list.tsx';
 import { RelatedRecipes } from '@/components/related-recipes.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { formatAverageRating } from '@/lib/format-rating.ts';
 import { formatScaledQuantity } from '@/lib/scale-quantity.ts';
 import { stepIngredientChips } from '@/lib/step-ingredient-amounts.ts';
 import { mentionsQuantity } from '@/lib/step-highlights.ts';
 import { trpc } from '@/lib/trpc.ts';
+import { cn } from '@/lib/utils.ts';
 
 export function RecipeDetailPage(): React.ReactElement {
   const params = useParams({ from: '/_authed/recipes/$recipeId/' });
   const search = useSearch({ from: '/_authed/recipes/$recipeId/' });
   const navigate = useNavigate();
+  const isLargeViewport = useIsLargeViewport();
   const recipeId = Number.parseInt(params.recipeId, 10);
   const idIsValid = Number.isInteger(recipeId) && recipeId > 0;
 
@@ -86,8 +89,18 @@ export function RecipeDetailPage(): React.ReactElement {
     });
   }
 
+  // Below `lg`, "Start cooking" is pinned just above the phone shell's tab bar
+  // (3.5625rem tall) so it stays in thumb reach; the article's bottom padding
+  // keeps it off the last content.
+  const canCook = recipe.method.length > 0 && !recipe.isDeleted;
+
   return (
-    <article className="mx-auto max-w-3xl space-y-6">
+    <article
+      className={cn(
+        'mx-auto max-w-3xl space-y-6',
+        canCook && !isLargeViewport && 'pb-16',
+      )}
+    >
       <header className="space-y-2">
         <p className="flex items-center justify-between text-sm">
           <Link to="/recipes" className="text-muted-foreground hover:underline">
@@ -150,17 +163,29 @@ export function RecipeDetailPage(): React.ReactElement {
             </span>
           )}
         </p>
-        {recipe.method.length > 0 && !recipe.isDeleted && (
-          <Button asChild size="lg">
-            <Link
-              to="/recipes/$recipeId/cook"
-              params={{ recipeId: String(recipe.id) }}
-              search={isScaled ? { servings } : {}}
+        {canCook && (
+          <div
+            className={
+              isLargeViewport
+                ? undefined
+                : 'fixed inset-x-0 bottom-[calc(3.5625rem+env(safe-area-inset-bottom))] z-10 border-t bg-background px-3 py-2'
+            }
+          >
+            <Button
+              asChild
+              size="lg"
+              className={isLargeViewport ? undefined : 'w-full'}
             >
-              <ChefHat aria-hidden className="size-5" />
-              Start cooking
-            </Link>
-          </Button>
+              <Link
+                to="/recipes/$recipeId/cook"
+                params={{ recipeId: String(recipe.id) }}
+                search={isScaled ? { servings } : {}}
+              >
+                <ChefHat aria-hidden className="size-5" />
+                Start cooking
+              </Link>
+            </Button>
+          </div>
         )}
         {recipe.originals.length > 0 && (
           <ViewOriginalButton originals={recipe.originals} />

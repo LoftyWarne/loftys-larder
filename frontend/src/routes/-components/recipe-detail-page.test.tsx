@@ -4,13 +4,23 @@ import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getUseQueryMock, useParamsMock, useSearchMock, navigateMock } =
-  vi.hoisted(() => ({
-    getUseQueryMock: vi.fn(),
-    useParamsMock: vi.fn(),
-    useSearchMock: vi.fn(),
-    navigateMock: vi.fn(),
-  }));
+const {
+  getUseQueryMock,
+  useParamsMock,
+  useSearchMock,
+  navigateMock,
+  useIsLargeViewportMock,
+} = vi.hoisted(() => ({
+  getUseQueryMock: vi.fn(),
+  useParamsMock: vi.fn(),
+  useSearchMock: vi.fn(),
+  navigateMock: vi.fn(),
+  useIsLargeViewportMock: vi.fn(),
+}));
+
+vi.mock('@/hooks/use-is-large-viewport.ts', () => ({
+  useIsLargeViewport: useIsLargeViewportMock,
+}));
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
@@ -179,6 +189,7 @@ function makeNotFoundError(): TRPCClientError<never> {
 
 beforeEach(() => {
   getUseQueryMock.mockReset();
+  useIsLargeViewportMock.mockReturnValue(false);
   useParamsMock.mockReset();
   useParamsMock.mockReturnValue({ recipeId: '7' });
   useSearchMock.mockReset();
@@ -345,6 +356,24 @@ describe('RecipeDetailPage', () => {
       'href',
       '/recipes/$recipeId/cook',
     );
+  });
+
+  it('pins Start cooking to the bottom below lg, and keeps it inline at lg', () => {
+    getUseQueryMock.mockReturnValue({
+      data: FULL_RECIPE,
+      isLoading: false,
+      error: null,
+    });
+    const { rerender } = render(<RecipeDetailPage />);
+    expect(
+      screen.getByRole('link', { name: 'Start cooking' }).parentElement,
+    ).toHaveClass('fixed');
+
+    useIsLargeViewportMock.mockReturnValue(true);
+    rerender(<RecipeDetailPage />);
+    expect(
+      screen.getByRole('link', { name: 'Start cooking' }).parentElement,
+    ).not.toHaveClass('fixed');
   });
 
   it.each([

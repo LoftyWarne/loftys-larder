@@ -1,4 +1,8 @@
-import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
+import {
+  type PlanSlot,
+  type PlanSlotItem,
+  RECIPE_VIEW_SERVINGS_MAX,
+} from '@loftys-larder/shared';
 
 // Shared, presentation-only slot labels used by both the planner card
 // (`SlotCell`) and the home page meal list. Pure string helpers — no JSX, no
@@ -35,4 +39,16 @@ export function leftoversSummary(slot: PlanSlot): string {
     return LEFTOVERS_SOURCE_LABEL[slot.leftoversSource];
   }
   return '—';
+}
+
+// The portions a dish's recipe opens at (DEC-98), on its recipe page or in
+// cook mode: a dish being cooked opens scaled to the portions prepared; one
+// only eaten here (leftovers, `prepared = 0`) opens at the recipe's own
+// servings.
+export function dishServingsSearch(item: Pick<PlanSlotItem, 'prepared'>): {
+  servings?: number;
+} {
+  return item.prepared > 0 && item.prepared <= RECIPE_VIEW_SERVINGS_MAX
+    ? { servings: item.prepared }
+    : {};
 }

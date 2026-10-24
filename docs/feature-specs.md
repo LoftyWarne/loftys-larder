@@ -3406,11 +3406,14 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 - No swipe, so nothing clashes with iOS's edge swipe for Back. Left and Right arrow keys move between steps on a keyboard.
 - No `new Date()`: cook mode has no date logic.
 
-**Open, for the kick-off:**
-1. Planner and home page entry: a small "Cook" link beside a dish's name changes the slot card, which is a stop-and-ask (cross-cutting #14). Proposed reading: use the slot card's existing slot for extra content, and add the same link on the home page's dishes for today.
-2. Recipes with no method: proposed reading is to hide "Start cooking".
-3. Unsupported wake lock: proposed reading is a one-line muted note on the gather screen ("This browser may let the screen sleep"), not silence.
-4. Recipes with no ingredients: proposed reading is that the gather screen still shows, saying there are none, so `?step=1` is always the first method step.
+**Agreed at kick-off (2026-10-24):**
+1. Planner entry: a chef's-hat "Cook" icon link on each dish row of the slot card, beside its name, for a dish with `prepared > 0` (the user's choice over linking from the home page alone). The home page's meals carry the same link. Both use one `CookLink` component, and the dish link and cook link share `dishServingsSearch` (`lib/slot-display.ts`).
+2. Cook mode has no app shell: `AuthedLayout` renders only the page on the cook route, so the header and bottom tab bar don't collide with the Back/Next bar. Cook mode has its own "Exit".
+3. "Start cooking" is hidden for a recipe with no method, and for a soft-deleted recipe.
+4. Where the wake lock is missing or refused, the gather screen says "This browser may let the screen sleep."
+5. A recipe with no ingredients still has its gather screen, saying so, so `?step=1` is always the first method step.
+6. The gather screen has no `step` in the URL. Finish and Exit go to the recipe page with `replace`, so Back afterwards doesn't land in cook mode.
+7. The step body moves into `MethodStepBody`, used by the recipe page and cook mode. `StepIngredientChips` takes a `size` and `StepNoteCallout` a `className` for the large type.
 
 **Manual verification:**
 1. On a phone, open a planner dish cooked for 4 portions of a 2-serving recipe in cook mode. Tick some ingredients, step through, and leave the phone untouched for longer than its auto-lock time on a step. The screen stays on.

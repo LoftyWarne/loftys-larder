@@ -9,7 +9,12 @@ vi.mock('@tanstack/react-router', () => ({
   Link: (props: {
     children: React.ReactNode;
     to?: string;
-  }): React.ReactElement => <a href={props.to ?? '#'}>{props.children}</a>,
+    'aria-label'?: string;
+  }): React.ReactElement => (
+    <a href={props.to ?? '#'} aria-label={props['aria-label']}>
+      {props.children}
+    </a>
+  ),
 }));
 
 vi.mock('@/lib/trpc.ts', () => ({
@@ -121,6 +126,13 @@ describe('IndexPage', () => {
     expect(screen.getByText('(deleted)')).toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /old stew/i }),
+    ).not.toBeInTheDocument();
+    // Dishes being cooked open in cook mode; a deleted recipe doesn't.
+    expect(
+      screen.getByRole('link', { name: 'Cook Thai curry' }),
+    ).toHaveAttribute('href', '/recipes/$recipeId/cook');
+    expect(
+      screen.queryByRole('link', { name: 'Cook Old stew' }),
     ).not.toBeInTheDocument();
     // Open planner deep-links to the active plan.
     expect(screen.getByRole('link', { name: /open planner/i })).toHaveAttribute(

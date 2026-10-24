@@ -22,12 +22,14 @@ interface StepNoteCalloutProps {
   children: React.ReactNode;
   // Rendered at the end of the label row, e.g. the editor's remove button.
   action?: React.ReactNode;
+  className?: string;
 }
 
 export function StepNoteCallout({
   kind,
   children,
   action,
+  className: extraClassName,
 }: StepNoteCalloutProps): React.ReactElement {
   const { label, Icon, className } = KIND_STYLES[kind];
   return (
@@ -37,6 +39,7 @@ export function StepNoteCallout({
       className={cn(
         'flex gap-2 rounded-md border px-3 py-2 text-sm',
         className,
+        extraClassName,
       )}
     >
       <Icon aria-hidden className="mt-0.5 size-4 shrink-0" />

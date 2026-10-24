@@ -53,7 +53,7 @@ test.describe('recipe portions and step ingredients', () => {
     await page.goto(`/plans/${String(plan.id)}`);
     await page
       .locator(`[data-slot-id="${String(slotId)}"]`)
-      .getByRole('link', { name: 'Buttered carrots' })
+      .getByRole('link', { name: 'Buttered carrots', exact: true })
       .click();
 
     await expect(page).toHaveURL(

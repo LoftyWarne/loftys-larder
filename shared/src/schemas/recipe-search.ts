@@ -24,6 +24,14 @@ export const recipeSearchSchema = z.object({
 });
 export type RecipeSearch = z.infer<typeof recipeSearchSchema>;
 
+// URL search-param schema for cook mode (DEC-116): the recipe page's
+// `servings`, plus `step`, the screen being shown. 0 (or absent) is the gather
+// screen and N is method step N; the page clamps a step past the last.
+export const cookSearchSchema = recipeSearchSchema.extend({
+  step: z.number().int().min(0).optional().catch(undefined),
+});
+export type CookSearch = z.infer<typeof cookSearchSchema>;
+
 function idListParam(max: number) {
   return z
     .array(z.number().int().positive())

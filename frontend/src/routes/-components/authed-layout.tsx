@@ -1,4 +1,4 @@
-import { Link, Outlet, redirect } from '@tanstack/react-router';
+import { Link, Outlet, redirect, useMatchRoute } from '@tanstack/react-router';
 import {
   BookOpen,
   CalendarDays,
@@ -50,12 +50,22 @@ const ALL_NAV: NavItem[] = [
 ];
 
 // Health scoring sits above both shells, so crossing the `lg` breakpoint
-// doesn't drop recipes waiting to be scored.
+// doesn't drop recipes waiting to be scored. Cook mode has no shell: its own
+// Back/Next bar takes the bottom of the screen, and it has its own Exit
+// (DEC-116).
 export function AuthedLayout(): React.ReactElement {
   const isLargeViewport = useIsLargeViewport();
+  const matchRoute = useMatchRoute();
+  const isCookMode = matchRoute({ to: '/recipes/$recipeId/cook' }) !== false;
   return (
     <HealthScoringProvider>
-      {isLargeViewport ? <DesktopShell /> : <PhoneShell />}
+      {isCookMode ? (
+        <Outlet />
+      ) : isLargeViewport ? (
+        <DesktopShell />
+      ) : (
+        <PhoneShell />
+      )}
     </HealthScoringProvider>
   );
 }

@@ -372,6 +372,8 @@ export {
 export { plansSearchSchema, type PlansSearch } from './schemas/plans-search.ts';
 export {
   RECIPE_VIEW_SERVINGS_MAX,
+  cookSearchSchema,
+  type CookSearch,
   recipeSearchSchema,
   type RecipeSearch,
   recipeListSearchSchema,

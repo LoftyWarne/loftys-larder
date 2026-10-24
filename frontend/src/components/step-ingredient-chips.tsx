@@ -6,6 +6,7 @@ interface StepIngredientChipsProps {
   stepNumber: number;
   chips: readonly StepIngredientChip[];
   factor: number;
+  size?: 'default' | 'large';
 }
 
 // The ingredients a method step uses, as chips under its text (DEC-99).
@@ -14,18 +15,23 @@ export function StepIngredientChips({
   stepNumber,
   chips,
   factor,
+  size = 'default',
 }: StepIngredientChipsProps): React.ReactElement | null {
   if (chips.length === 0) return null;
   return (
     <ul
       aria-label={`Step ${String(stepNumber)} ingredients`}
-      className="mt-2 flex flex-wrap gap-1.5"
+      className={cn(
+        'mt-2 flex flex-wrap gap-1.5',
+        size === 'large' && 'mt-4 gap-2',
+      )}
     >
       {chips.map((chip) => (
         <li
           key={chip.ingredientId}
           className={cn(
             'rounded-full border px-2.5 py-0.5 text-xs',
+            size === 'large' && 'px-3 py-1 text-base',
             chip.isOptional && 'border-dashed',
           )}
         >

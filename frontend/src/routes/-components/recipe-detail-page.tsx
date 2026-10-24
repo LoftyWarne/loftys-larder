@@ -1,5 +1,6 @@
 import { RECIPE_VIEW_SERVINGS_MAX } from '@loftys-larder/shared';
 import { TRPCClientError } from '@trpc/client';
+import { ChefHat } from 'lucide-react';
 import {
   Link,
   useNavigate,
@@ -8,18 +9,16 @@ import {
 } from '@tanstack/react-router';
 
 import { ViewOriginalButton } from '@/components/original-images.tsx';
+import { MethodStepBody } from '@/components/method-step-body.tsx';
 import { PlanAheadSummary } from '@/components/plan-ahead-summary.tsx';
 import { PortionsStepper } from '@/components/portions-stepper.tsx';
-import { PrepAheadBadge } from '@/components/prep-ahead-badge.tsx';
 import { RecipeComments } from '@/components/recipe-comments.tsx';
 import { RecipeHealthScore } from '@/components/recipe-health-score.tsx';
 import { RecipeNutrition } from '@/components/recipe-nutrition.tsx';
 import { RecipeRating } from '@/components/recipe-rating.tsx';
 import { RecipeTagList } from '@/components/recipe-tag-list.tsx';
 import { RelatedRecipes } from '@/components/related-recipes.tsx';
-import { StepIngredientChips } from '@/components/step-ingredient-chips.tsx';
-import { StepInstruction } from '@/components/step-instruction.tsx';
-import { StepNoteCallout } from '@/components/step-note-callout.tsx';
+import { Button } from '@/components/ui/button.tsx';
 import { formatAverageRating } from '@/lib/format-rating.ts';
 import { formatScaledQuantity } from '@/lib/scale-quantity.ts';
 import { stepIngredientChips } from '@/lib/step-ingredient-amounts.ts';
@@ -151,6 +150,18 @@ export function RecipeDetailPage(): React.ReactElement {
             </span>
           )}
         </p>
+        {recipe.method.length > 0 && !recipe.isDeleted && (
+          <Button asChild size="lg">
+            <Link
+              to="/recipes/$recipeId/cook"
+              params={{ recipeId: String(recipe.id) }}
+              search={isScaled ? { servings } : {}}
+            >
+              <ChefHat aria-hidden className="size-5" />
+              Start cooking
+            </Link>
+          </Button>
+        )}
         {recipe.originals.length > 0 && (
           <ViewOriginalButton originals={recipe.originals} />
         )}
@@ -253,37 +264,14 @@ export function RecipeDetailPage(): React.ReactElement {
           <ol className="space-y-2 list-decimal pl-5">
             {recipe.method.map((step) => (
               <li key={step.id} className="text-sm">
-                {step.prepAhead !== null && (
-                  <PrepAheadBadge
-                    prepAhead={step.prepAhead}
-                    className="mb-1 flex w-fit"
-                  />
-                )}
-                <StepInstruction
-                  text={step.instruction}
+                <MethodStepBody
+                  step={step}
+                  chips={chipsByStep.get(step.id) ?? []}
+                  factor={factor}
                   ingredientNames={ingredientNames}
                   unitNames={unitNames}
                   boldQuantities={!isScaled}
                 />
-                <StepIngredientChips
-                  stepNumber={step.stepNumber}
-                  chips={chipsByStep.get(step.id) ?? []}
-                  factor={factor}
-                />
-                {(step.safetyNote !== null || step.tip !== null) && (
-                  <div className="mt-2 space-y-2">
-                    {step.safetyNote !== null && (
-                      <StepNoteCallout kind="safety">
-                        <p>{step.safetyNote}</p>
-                      </StepNoteCallout>
-                    )}
-                    {step.tip !== null && (
-                      <StepNoteCallout kind="tip">
-                        <p>{step.tip}</p>
-                      </StepNoteCallout>
-                    )}
-                  </div>
-                )}
               </li>
             ))}
           </ol>

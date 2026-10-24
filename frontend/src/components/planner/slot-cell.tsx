@@ -3,6 +3,7 @@ import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
 import { Plus, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { CookLink } from '@/components/cook-link.tsx';
 import { RecipeNameLink } from '@/components/recipe-name-link.tsx';
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
 import { SlotCommentLine } from '@/components/planner/slot-comment-line.tsx';
@@ -12,7 +13,8 @@ import { cn } from '@/lib/utils.ts';
 // Reusable slot card (DEC-89). A slot's dishes — the eaten meal and any base
 // cooked ahead — are one list now: tapping the card opens the slot editor where
 // both are managed. FEAT-40 adds optional DnD on the card (the drag handle);
-// click semantics are untouched. Live dish names link to their recipe.
+// click semantics are untouched. Live dish names link to their recipe, and a
+// dish being cooked links to cook mode (DEC-116).
 export interface SlotCellProps {
   slot: PlanSlot;
   onClick: () => void;
@@ -170,6 +172,7 @@ function SlotBody({
                     {dishQtyLabel(item)}
                   </span>
                 </span>
+                <CookLink item={item} />
                 <RecipeTypeBadge recipe={item} className="ml-auto" />
               </span>
               {short !== undefined && short > 0 && (

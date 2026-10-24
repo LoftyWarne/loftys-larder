@@ -333,6 +333,36 @@ describe('RecipeDetailPage', () => {
     expect(screen.queryByText('Base recipe')).not.toBeInTheDocument();
   });
 
+  it('offers Start cooking, opening cook mode', () => {
+    getUseQueryMock.mockReturnValue({
+      data: FULL_RECIPE,
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    expect(screen.getByRole('link', { name: 'Start cooking' })).toHaveAttribute(
+      'href',
+      '/recipes/$recipeId/cook',
+    );
+  });
+
+  it.each([
+    ['has no method', { method: [] }],
+    ['is soft-deleted', { isDeleted: true }],
+  ])('offers no Start cooking when the recipe %s', (_label, overrides) => {
+    getUseQueryMock.mockReturnValue({
+      data: { ...FULL_RECIPE, ...overrides },
+      isLoading: false,
+      error: null,
+    });
+    render(<RecipeDetailPage />);
+
+    expect(
+      screen.queryByRole('link', { name: 'Start cooking' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows a not-found state when the get query returns NOT_FOUND', () => {
     getUseQueryMock.mockReturnValue({
       data: undefined,

@@ -1,6 +1,7 @@
 import type { PlanSlot } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 
+import { CookLink } from '@/components/cook-link.tsx';
 import { RecipeNameLink } from '@/components/recipe-name-link.tsx';
 import { SlotCommentLine } from '@/components/planner/slot-comment-line.tsx';
 import { SlotDinersChip } from '@/components/planner/slot-diners-chip.tsx';
@@ -81,18 +82,27 @@ function MealContent({ slot }: { slot: PlanSlot }): React.ReactElement {
       const [item] = items;
       if (items.length === 1 && item) {
         return (
-          <span className="text-sm">
-            <RecipeNameLink item={item} />
-            <DishQty item={item} />
+          <span className="inline-flex items-center gap-1 text-sm">
+            <span>
+              <RecipeNameLink item={item} />
+              <DishQty item={item} />
+            </span>
+            <CookLink item={item} />
           </span>
         );
       }
       return (
         <ul className="flex flex-col gap-0.5 text-right text-sm">
           {items.map((item) => (
-            <li key={item.id}>
-              <RecipeNameLink item={item} />
-              <DishQty item={item} />
+            <li
+              key={item.id}
+              className="inline-flex items-center justify-end gap-1"
+            >
+              <span>
+                <RecipeNameLink item={item} />
+                <DishQty item={item} />
+              </span>
+              <CookLink item={item} />
             </li>
           ))}
         </ul>

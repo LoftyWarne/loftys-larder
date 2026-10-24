@@ -4,6 +4,32 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-24 — Cook mode (FEAT-74)
+
+**Status:** Committed and pushed to `main`, rebased onto the emailed-code sign-in (DEC-114) and planner day cards (FEAT-73, DEC-115). Cook mode was scoped as DEC-114 and FEAT-73 on its branch; both numbers were taken on `main` first, so it's DEC-116 and FEAT-74. Typecheck, lint and format are clean in every workspace. Frontend: 971 tests green. e2e: 56 of 56, including the new cook mode spec and the cook mode axe scans at phone width in both themes. Backend unchanged. Manual verification (a real phone, the iOS home-screen PWA) not run. The FEAT-74 checkboxes are left for the user to tick. The day cards reuse the slot card, so the cook link shows there too; it has no phone-width e2e of its own.
+
+**Agreed at kick-off:** the readings are in FEAT-74's "Agreed at kick-off" block. The user chose a cook link on the slot card itself (not the home page alone), and no app shell in cook mode.
+
+**Changes:**
+- **Shared:** `cookSearchSchema` (`servings` plus `step`) in `schemas/recipe-search.ts`.
+- **Frontend:**
+  - Route `/_authed/recipes/$recipeId/cook` and `cook-mode-page.tsx`, with `components/cook-mode/` (gather screen, step screen, step list dialog).
+  - `hooks/use-wake-lock.ts`: `pending` / `held` / `unavailable`; taken again on `visibilitychange`, let go on unmount.
+  - `MethodStepBody` now renders each step on both the recipe page and in cook mode. `StepIngredientChips` takes `size`, and `StepNoteCallout` takes `className`.
+  - `CookLink` on slot card dish rows and home page meals. `dishServingsSearch` in `lib/slot-display.ts` is shared with `RecipeNameLink`.
+  - `AuthedLayout` renders only the outlet on the cook route.
+- **e2e:** `specs/cook-mode.spec.ts`. `recipe-portions.spec.ts` now finds the dish link with `exact: true`, because "Cook Buttered carrots" also matched the name.
+
+**Gotchas:**
+- Playwright's `getByRole('link', { name })` matches substrings. Any new spec that finds a planner or home page dish link by recipe name needs `exact: true` now.
+- The local e2e run here used a throwaway Postgres 16 on port 5433, and a symlink so the repo's Playwright 1.61 found the container's newer headless Chromium. Neither is in the repo.
+
+**Open:**
+- A dish whose recipe has no method still gets a cook link on the planner, because slot items don't carry the method. Cook mode then shows the gather screen and Finish. Say if that should change; it would need a field on the slot item.
+- Manual verification steps 1–3, especially Wake Lock in the iOS home-screen PWA.
+
+---
+
 ## 2026-10-24 — Cook mode scoped (DEC-116, FEAT-74); cook-mode non-goal narrowed
 
 **Status:** Docs only, no code. Scoped with the user. Start with FEAT-74's kick-off.

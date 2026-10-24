@@ -268,6 +268,50 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    // Cook mode is used on a phone; scan both of its screens at phone width.
+    test(`cook mode passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      const recipe = await createRecipe({
+        name: 'Garlic toast',
+        baseServings: 2,
+        ingredients: [
+          { name: 'Bread', quantity: '2', unit: 'piece', category: 'Bakery' },
+          { name: 'Butter', quantity: '30', unit: 'g', category: 'Dairy' },
+        ],
+        method: [
+          {
+            instruction: 'Toast the bread.',
+            ingredients: [{ name: 'Bread' }],
+          },
+          {
+            instruction: 'Spread with the butter.',
+            ingredients: [{ name: 'Butter' }],
+          },
+        ],
+      });
+      await page.setViewportSize({ width: 375, height: 812 });
+
+      for (const step of [0, 1]) {
+        await page.goto(
+          `/recipes/${String(recipe.id)}/cook${step === 0 ? '' : `?step=${String(step)}`}`,
+        );
+        await expect(
+          page.getByRole('heading', {
+            name: step === 0 ? 'Gather ingredients' : 'Step 1 of 2',
+          }),
+        ).toBeVisible();
+        await expect
+          .poll(() =>
+            page.evaluate(
+              'document.documentElement.scrollWidth <= window.innerWidth',
+            ),
+          )
+          .toBe(true);
+        await runAxe(page, theme);
+      }
+    });
+
     test(`plan list passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto('/plans');
       await expect(page.getByRole('heading', { name: /plans/i })).toBeVisible();

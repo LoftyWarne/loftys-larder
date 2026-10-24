@@ -1,6 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { matchRouteMock } = vi.hoisted(() => ({
+  matchRouteMock: vi.fn(),
+}));
+
 vi.mock('@/lib/auth-client.ts', () => ({
   authClient: {
     getSession: vi.fn(),
@@ -38,6 +42,7 @@ vi.mock('@tanstack/react-router', async () => {
       );
     },
     Outlet: () => <div data-testid="outlet" />,
+    useMatchRoute: () => matchRouteMock,
   };
 });
 
@@ -73,6 +78,8 @@ function mockIsLargeViewport(isLarge: boolean): void {
 
 beforeEach(() => {
   getSessionMock.mockReset();
+  matchRouteMock.mockReset();
+  matchRouteMock.mockReturnValue(false);
 });
 
 describe('authedBeforeLoad', () => {
@@ -167,6 +174,27 @@ describe('AuthedLayout', () => {
       ).not.toBeNull();
     }
   });
+});
+
+describe('AuthedLayout in cook mode', () => {
+  it.each([true, false])(
+    'renders the page without the app shell (large viewport: %s)',
+    (isLarge) => {
+      mockIsLargeViewport(isLarge);
+      matchRouteMock.mockImplementation(({ to }: { to: string }) =>
+        to === '/recipes/$recipeId/cook' ? { recipeId: '7' } : false,
+      );
+      render(<AuthedLayout />);
+
+      expect(screen.getByTestId('health-scoring-provider')).toContainElement(
+        screen.getByTestId('outlet'),
+      );
+      expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('link', { name: /lofty's larder/i }),
+      ).not.toBeInTheDocument();
+    },
+  );
 });
 
 function labelToPath(label: string): string {

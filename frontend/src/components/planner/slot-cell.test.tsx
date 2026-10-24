@@ -8,8 +8,12 @@ vi.mock('@tanstack/react-router', () => ({
     children: React.ReactNode;
     to?: string;
     params?: Record<string, string>;
+    'aria-label'?: string;
   }): React.ReactElement => (
-    <a href={props.to?.replace('$recipeId', props.params?.recipeId ?? '')}>
+    <a
+      href={props.to?.replace('$recipeId', props.params?.recipeId ?? '')}
+      aria-label={props['aria-label']}
+    >
       {props.children}
     </a>
   ),
@@ -135,6 +139,41 @@ describe('SlotCell', () => {
       'href',
       '/recipes/22',
     );
+  });
+
+  it('links each dish being cooked to cook mode, off the editor button', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(
+      <SlotCell
+        slot={{ ...RECIPE_SLOT, items: [eatItem(), cookItem()] }}
+        onClick={onClick}
+      />,
+    );
+    const cookPasta = screen.getByRole('link', { name: 'Cook Tomato pasta' });
+    expect(cookPasta).toHaveAttribute('href', '/recipes/10/cook');
+    expect(
+      screen.getByRole('link', { name: 'Cook Curry Base' }),
+    ).toHaveAttribute('href', '/recipes/22/cook');
+    await user.click(cookPasta);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('gives a leftovers dish no cook link', () => {
+    render(
+      <SlotCell
+        slot={{
+          ...BASE_SLOT,
+          slotType: 'leftovers',
+          leftoversSource: 'plan_meal',
+          items: [eatItem({ prepared: 0 })],
+        }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(
+      screen.queryByRole('link', { name: /^Cook / }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps dish links off the editor button so tapping a name does not open the editor', async () => {

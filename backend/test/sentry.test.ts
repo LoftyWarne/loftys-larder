@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import Fastify from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from 'fastify';
 import { TRPCError } from '@trpc/server';
 import {
   initSentry,
   registerSentryHooks,
+  shouldReportFastifyError,
   shouldReportToSentry,
 } from '../src/plugins/sentry.ts';
 import type { Config } from '../src/config.ts';
@@ -172,6 +177,100 @@ describe('registerSentryHooks', () => {
     }
     expect(firstCapture.reqId).not.toBe(secondCapture.reqId);
     expect(firstCapture.scopeId).not.toBe(secondCapture.scopeId);
+  });
+});
+
+describe('Fastify-level error reporting', () => {
+  // Mirrors Sentry's real handler: an `onError` hook that captures when
+  // `shouldHandleError` says so, falling back to Sentry's own default filter
+  // when none is supplied. Running it on a real Fastify app keeps Fastify's
+  // hook ordering — `onError` fires before the error's status is applied to
+  // the reply — in the loop.
+  async function buildProbeApp(): Promise<{
+    app: FastifyInstance;
+    captured: Error[];
+  }> {
+    const captured: Error[] = [];
+    const sentryDefault = (
+      _error: Error,
+      _req: FastifyRequest,
+      reply: FastifyReply,
+    ): boolean => reply.statusCode >= 500 || reply.statusCode <= 299;
+    const setupFastifyErrorHandler = (
+      fastify: FastifyInstance,
+      options?: {
+        shouldHandleError?: (
+          error: Error,
+          req: FastifyRequest,
+          reply: FastifyReply,
+        ) => boolean;
+      },
+    ): void => {
+      const shouldHandleError = options?.shouldHandleError ?? sentryDefault;
+      fastify.addHook('onError', async (req, reply, error) => {
+        if (shouldHandleError(error, req, reply)) captured.push(error);
+        await Promise.resolve();
+      });
+    };
+    const app = Fastify({ logger: false });
+    registerSentryHooks(app, {
+      getIsolationScope: (() => ({
+        setTag: vi.fn(),
+      })) as unknown as typeof import('@sentry/node').getIsolationScope,
+      setupFastifyErrorHandler:
+        setupFastifyErrorHandler as unknown as typeof import('@sentry/node').setupFastifyErrorHandler,
+    });
+    app.post('/probe', () => ({ ok: true }));
+    app.get('/boom', () => {
+      throw new Error('unexpected');
+    });
+    app.setNotFoundHandler((_req, reply) => reply.code(404).send({}));
+    await app.ready();
+    return { app, captured };
+  }
+
+  it.each(['/', '/probe'])(
+    'does not report an empty JSON body POSTed to %s',
+    async (url) => {
+      const { app, captured } = await buildProbeApp();
+      const res = await app.inject({
+        method: 'POST',
+        url,
+        headers: { 'content-type': 'application/json' },
+        payload: '',
+      });
+      await app.close();
+
+      expect(res.statusCode).toBe(400);
+      expect(captured).toHaveLength(0);
+    },
+  );
+
+  it('reports an unexpected throw from a handler', async () => {
+    const { app, captured } = await buildProbeApp();
+    const res = await app.inject({ method: 'GET', url: '/boom' });
+    await app.close();
+
+    expect(res.statusCode).toBe(500);
+    expect(captured).toHaveLength(1);
+  });
+});
+
+describe('shouldReportFastifyError', () => {
+  it('reports an error without a status code', () => {
+    expect(shouldReportFastifyError(new Error('boom'))).toBe(true);
+  });
+
+  it('reports an error carrying a 5xx status', () => {
+    expect(
+      shouldReportFastifyError(Object.assign(new Error(), { statusCode: 503 })),
+    ).toBe(true);
+  });
+
+  it.each([400, 404, 413, 415])('skips an error carrying %i', (statusCode) => {
+    expect(
+      shouldReportFastifyError(Object.assign(new Error(), { statusCode })),
+    ).toBe(false);
   });
 });
 

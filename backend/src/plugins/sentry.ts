@@ -70,7 +70,22 @@ export function registerSentryHooks(
     done();
   });
 
-  setupFastifyErrorHandler(app);
+  setupFastifyErrorHandler(app, {
+    shouldHandleError: shouldReportFastifyError,
+  });
+}
+
+// Sentry's default filter reads `reply.statusCode`, but Fastify runs `onError`
+// hooks before it applies the error's status — so every pre-handler 4xx (an
+// empty or malformed JSON body, an oversized payload) still reads 200 and gets
+// reported. The error's own status is the reliable signal; an error without
+// one is an unexpected throw and counts as a 500.
+export function shouldReportFastifyError(error: Error): boolean {
+  const statusCode =
+    'statusCode' in error && typeof error.statusCode === 'number'
+      ? error.statusCode
+      : 500;
+  return statusCode >= 500;
 }
 
 // tRPC catches procedure errors itself and never lets them reach Fastify's

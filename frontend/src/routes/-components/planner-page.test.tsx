@@ -219,7 +219,12 @@ const noop = (): void => undefined;
 function mockIsLargeViewport(isLarge: boolean): void {
   window.matchMedia = (query: string): MediaQueryList => {
     const mql: Partial<MediaQueryList> = {
-      matches: query === '(min-width: 64rem)' ? isLarge : false,
+      // `lg` implies `md`: the large branch gets the grid, the compact branch
+      // the day cards.
+      matches:
+        query === '(min-width: 64rem)' || query === '(min-width: 48rem)'
+          ? isLarge
+          : false,
       media: query,
       onchange: null,
       addEventListener: noop,
@@ -473,6 +478,19 @@ describe('PlannerPage', () => {
       expect(
         screen.queryByRole('list', { name: /pickable recipes/i }),
       ).not.toBeInTheDocument();
+    });
+
+    it('shows day cards and an icon Shopping list link below `md`', () => {
+      mockIsLargeViewport(false);
+      setup();
+      render(<PlannerPage />);
+
+      expect(
+        screen.getByRole('list', { name: 'Meal plan' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+      // The router mock renders an <a> without href, so it has no link role.
+      expect(screen.getByLabelText('Shopping list').tagName).toBe('A');
     });
 
     it('opens the editor when an empty slot is tapped below `lg`', async () => {

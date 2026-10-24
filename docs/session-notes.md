@@ -4,6 +4,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-24 — Planner day cards at phone width (FEAT-73, DEC-115)
+
+**Status:** Committed and pushed to `main`, rebased onto the emailed-code change (DEC-114). Typecheck, lint and format clean in every workspace. Frontend: 916 tests green. e2e: every planner test passes, including the new phone-width scan in both themes, and `planner.spec.ts` passes. Manual verification hasn't been run, so the FEAT-73 checkboxes are left for the user to tick.
+
+**Agreed at kick-off:** layout A from the mobile mockups, with all five readings as proposed: `md` (768 px) as the cut-off; a media-query hook rather than CSS `hidden`; the slot card unchanged; scroll to today once on load; trash button, editor sheet and "Move to…" left for a follow-up FEAT.
+
+**Changes:**
+- `use-is-large-viewport.ts`: a private `useMinWidth(query)` backs `useIsLargeViewport` and the new `useIsMediumViewport`. The outdated "no drag affordances below `lg`" comment is gone.
+- `planner-grid.tsx`: one `renderSlot` feeds both layouts. Below `md` an `<ol aria-label="Meal plan">` of `PlannerDayCard`s replaces the table. Today's card is scrolled into view once on mount, unless it's the first day.
+- `planner-day-card.tsx` (new): a `<section>` named by its `h2` day label, with a "Today" pill, the plant-points badge, and a row per occasion.
+- `planner-page.tsx`: the title is `text-lg` below `md`, and Shopping list is an icon button there, with its accessible name kept.
+- Tests: `planner-grid.test.tsx` and `planner-day-card.test.tsx` (new), hook tests for `md`, a compact-branch page test, and `planner passes axe at phone width` in `a11y.spec.ts` (no sideways scroll, axe in both themes). The page test's `matchMedia` mock now matches `md` along with `lg`.
+
+**Open:**
+- `recipe import from a document passes axe at phone width in dark theme` fails every time on this branch (3 of 3), on a `color-contrast` hit for `.px-4.h-9.border, .bg-primary`. This branch doesn't touch the import page. Not yet checked on `main`.
+- `recipe filters pass axe in dark theme` failed once, then passed 3 of 3: the known dark-theme flake.
+- Running e2e from a worktree needs `DATABASE_URL=postgres://lofty:lofty@localhost:5433/lofty_e2e` for `prepare-db`, because `e2e/.env` is gitignored.
+
+---
+
 ## 2026-10-24 — Sign-in by emailed code instead of magic link (DEC-114)
 
 **Status:** Implemented on `main`, not committed. Review and lockout fixes applied (below). Typecheck, lint and format clean in every workspace. Backend 1,042 green, frontend 911 green. e2e: sign-in via the code UI works in every run; of the last two full runs one was 50/50 and one failed a dark-theme axe `color-contrast` scan (settings). Across eight full runs on this branch, the failure was a different dark-theme scan each time, each passes alone, and one full run on `main` was 50/50. Read as a pre-existing order/timing flake, not proven. No real-email or on-device check yet.

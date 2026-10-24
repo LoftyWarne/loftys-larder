@@ -280,6 +280,25 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    // Below `md` the planner shows one card per day (FEAT-73), which must fit
+    // the width without sideways scrolling.
+    test(`planner passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`/plans/${String(fixture.planId)}`);
+      await expect(page.getByRole('list', { name: 'Meal plan' })).toBeVisible();
+      await expect(page.locator('[data-slot-id]').first()).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            'document.documentElement.scrollWidth <= window.innerWidth',
+          ),
+        )
+        .toBe(true);
+      await runAxe(page, theme);
+    });
+
     test(`shopping list passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto(`/plans/${String(fixture.planId)}/shopping`);
       await expect(

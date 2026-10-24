@@ -3329,6 +3329,45 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
+### FEAT-73 — Planner day cards at phone width
+
+**Goal:** Below `md` (768 px) the planner shows one card per day instead of the days-by-occasions grid, so dish names fit and nothing scrolls sideways. At `md` and up the grid is unchanged. (DEC-115, DEC-53)
+
+**Estimate:** 0.5–1 day. **Depends on:** FEAT-31 (the slot card), FEAT-40 (the planner's viewport gating), FEAT-41 (the plant-points badges). **Enables:** FEAT-70 and FEAT-71 place their chips and badges in the day card as well as the grid.
+
+**Files:**
+- `frontend/src/hooks/use-is-large-viewport.ts` (a private `useMinWidth`, and `useIsMediumViewport` beside `useIsLargeViewport`)
+- `frontend/src/components/planner/planner-grid.tsx` (picks the layout; the table moves into an internal component)
+- `frontend/src/components/planner/planner-day-card.tsx` (new)
+- `frontend/src/routes/-components/planner-page.tsx` (a compact header below `md`)
+- `e2e/specs/a11y.spec.ts` (the planner at phone width)
+
+**Acceptance criteria:**
+- [ ] Below `md`, each visible day is a card headed by its day label and plant-points badge, with one row per occasion: the occasion name, then the slot card
+- [ ] At `md` and up the grid renders as before
+- [ ] Each slot renders once, whichever layout shows; drag-and-drop between slots works in both
+- [ ] Today's card is marked "Today", and the page scrolls to it once on load when today is in the visible range
+- [ ] Below `md` the plan title is smaller and Shopping list is an icon button that keeps its accessible name
+- [ ] At 375 px wide the planner doesn't scroll sideways and passes the axe scan in both themes
+
+**Implementation notes:**
+- Switch layouts with a media-query hook, not CSS `hidden`: both layouts mounted at once would register every slot's dnd-kit ids twice.
+- The slot card is used unchanged inside the day card (cross-cutting #14).
+- Today comes from `todayInLondon` (DEC-33). Scroll only on first mount, so edits don't jump the page.
+- Trash-button, editor-sheet and "Move to…" changes are out of scope.
+
+**Manual verification:**
+1. On a phone, open a plan that includes today. The page lands on today's card, names aren't cut off, and nothing scrolls sideways.
+2. Touch and hold a slot and drop it on another day's slot. It moves or swaps, and the list still scrolls normally.
+3. Rotate the phone or resize across 768 px. The layout switches without a reload.
+
+**Definition of done:**
+- Tests cover: the layout at each width; every slot once; empty slots; today marked; the day badge; the compact header; the phone-width axe scan and no sideways scroll.
+- Commit: `feat(planner): show one card per day at phone width`
+- Gate check: manual verification steps 1–3.
+
+---
+
 ## Cross-feature concerns and reuse-from-day-one
 
 The 53 features above are sequenced for incremental delivery, but several concerns thread through many of them. Each item below is something where a *decision or pattern made in an early feature locks in costs or affordances for later ones*. Surfacing them now prevents the small inconsistencies that compound over a project of this size.

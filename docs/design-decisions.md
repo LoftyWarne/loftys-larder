@@ -1458,6 +1458,16 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** Guessing shows up in logs (429s on the code-entry route), Cloudflare's IP ranges change, or the household finds typing codes a burden; passkeys would be the next step, not a return to links. If guessing does appear, lower the entry limits or lengthen the window. If someone is locked out more than once, do (d).
 - **Cross-refs:** DEC-29, DEC-41 (superseded in part), DEC-42, DEC-43, DEC-45, DEC-58, DEC-93; FEAT-14, FEAT-15, FEAT-35; cross-cutting #17; non-goal: "Password authentication".
 
+### DEC-115 — Planner shows one card per day below `md`; the grid stays at `md` and up
+
+- **Chosen:** Below `md` (768 px) the planner renders a vertical list of day cards: a header with the day and its plant-points badge, then one row per occasion holding the existing slot card. From `md` up it renders the days-by-occasions grid. The layout is chosen by a media-query hook (`useIsMediumViewport`), so only one layout is ever mounted. This adds a second breakpoint to the planner; the Recipe Bank and bank → slot drag keep their `lg` gate (DEC-84, DEC-85).
+- **Alternatives:** (a) Keep the grid and tighten it: a slimmer date column and wrapping names. Cheapest, and it fits with two occasions, but names still wrap into narrow cells and a third occasion brings sideways scrolling back. (b) One day at a time with a day strip and swipe. Most room per meal, but slot ↔ slot drag across days goes. (c) Both layouts in the DOM, switched with Tailwind `hidden`. Simpler, but every slot's dnd-kit ids register twice.
+- **Why it won:** The main phone use is one-handed in the kitchen (DEC-53). Full-width rows give dish names, diners and comments room, scale to any number of occasions, keep the whole week scrollable, and keep slot ↔ slot drag.
+- **Consequences (+):** No sideways scrolling and no cut-off names on phones. The slot card is unchanged. Room in the day header for FEAT-71's day badge.
+- **Consequences (−):** A week takes more vertical scrolling than the grid, and you can't scan one occasion down the week at a glance. Two layouts to keep in step. Three widths now matter to the planner (`md`, `lg`, and below `md`).
+- **Revisit when:** The household misses comparing one occasion across the week on a phone, or long plans make the list tiring to scroll.
+- **Cross-refs:** FEAT-73, FEAT-31, FEAT-40, FEAT-41, FEAT-70, FEAT-71; DEC-53, DEC-84, DEC-85.
+
 ---
 
 ## Most Worth Deep Consideration on Revisit

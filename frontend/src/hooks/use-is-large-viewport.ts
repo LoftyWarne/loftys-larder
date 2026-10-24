@@ -1,31 +1,39 @@
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
-// FEAT-40 — the planner has two interaction shapes gated on a single
-// breakpoint. At `lg` (1024 px) and wider, the Recipe Bank renders alongside
-// the grid and `@dnd-kit/core` mounts for click-to-assign + drag-and-drop.
-// Below `lg`, the bank is hidden and slot assignment routes exclusively
-// through the editor sheet (no drag affordances anywhere). The two were
-// originally separate decisions but the layout-coupling makes one boolean
-// the cleanest expression.
+// The planner gates on two breakpoints. At `lg` (1024 px) and wider the Recipe
+// Bank renders alongside the grid and bank → slot drag is live (FEAT-40,
+// DEC-84 / DEC-85); slot ↔ slot drag works at every width. Below `md`
+// (768 px) the grid gives way to one card per day (FEAT-73, DEC-115).
 
 const LG_QUERY = '(min-width: 64rem)';
+const MD_QUERY = '(min-width: 48rem)';
 
 const noop = (): void => undefined;
 
-function getSnapshot(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.matchMedia(LG_QUERY).matches;
-}
-
-function subscribe(callback: () => void): () => void {
-  if (typeof window === 'undefined') return noop;
-  const mql = window.matchMedia(LG_QUERY);
-  mql.addEventListener('change', callback);
-  return () => {
-    mql.removeEventListener('change', callback);
-  };
+function useMinWidth(query: string): boolean {
+  const subscribe = useCallback(
+    (callback: () => void) => {
+      if (typeof window === 'undefined') return noop;
+      const mql = window.matchMedia(query);
+      mql.addEventListener('change', callback);
+      return () => {
+        mql.removeEventListener('change', callback);
+      };
+    },
+    [query],
+  );
+  const getSnapshot = useCallback(
+    () =>
+      typeof window === 'undefined' ? false : window.matchMedia(query).matches,
+    [query],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
 
 export function useIsLargeViewport(): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot, () => false);
+  return useMinWidth(LG_QUERY);
+}
+
+export function useIsMediumViewport(): boolean {
+  return useMinWidth(MD_QUERY);
 }

@@ -5,6 +5,7 @@ import type {
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { Link, useParams, useSearch } from '@tanstack/react-router';
+import { ShoppingCart } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { DndProvider } from '@/components/planner/dnd-provider.tsx';
@@ -206,9 +207,9 @@ export function PlannerPage(): React.ReactElement {
         </div>
       )}
       <div className="space-y-4">
-        <header className="flex flex-wrap items-baseline justify-between gap-2">
-          <div className="flex flex-wrap items-baseline gap-2">
-            <h1 className="text-2xl font-semibold">
+        <header className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+            <h1 className="text-lg font-semibold md:text-2xl">
               {formatDayRangeLabel(plan.startDate, plan.endDate)}
             </h1>
             <PlantPointsBadge
@@ -220,8 +221,10 @@ export function PlannerPage(): React.ReactElement {
             <Link
               to="/plans/$planId/shopping"
               params={{ planId: String(plan.id) }}
+              aria-label="Shopping list"
             >
-              Shopping list
+              <ShoppingCart className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden md:inline">Shopping list</span>
             </Link>
           </Button>
         </header>

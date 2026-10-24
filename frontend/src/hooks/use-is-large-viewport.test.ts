@@ -1,7 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useIsLargeViewport } from './use-is-large-viewport.ts';
+import {
+  useIsLargeViewport,
+  useIsMediumViewport,
+} from './use-is-large-viewport.ts';
 
 const listeners: (() => void)[] = [];
 const noop = (): void => undefined;
@@ -55,6 +58,35 @@ describe('useIsLargeViewport', () => {
   it('re-evaluates when matchMedia change events fire (rotation)', () => {
     setLarge(false);
     const { result } = renderHook(() => useIsLargeViewport());
+    expect(result.current).toBe(false);
+
+    act(() => {
+      setLarge(true);
+      fireChange();
+    });
+
+    expect(result.current).toBe(true);
+  });
+});
+
+describe('useIsMediumViewport', () => {
+  beforeEach(() => {
+    listeners.length = 0;
+  });
+
+  it('reads the md query, not the lg one', () => {
+    window.matchMedia = (q: string): MediaQueryList =>
+      buildMql(q, q === '(min-width: 48rem)');
+    const { result } = renderHook(() => ({
+      md: useIsMediumViewport(),
+      lg: useIsLargeViewport(),
+    }));
+    expect(result.current).toEqual({ md: true, lg: false });
+  });
+
+  it('re-evaluates when matchMedia change events fire', () => {
+    setLarge(false);
+    const { result } = renderHook(() => useIsMediumViewport());
     expect(result.current).toBe(false);
 
     act(() => {

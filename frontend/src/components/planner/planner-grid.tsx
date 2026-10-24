@@ -1,10 +1,17 @@
 import type { HouseholdMember, PlanSlot } from '@loftys-larder/shared';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 
+import { PlannerDayCard } from '@/components/planner/planner-day-card.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { SlotCell } from '@/components/planner/slot-cell.tsx';
 import { SlotDinersChip } from '@/components/planner/slot-diners-chip.tsx';
-import { eachDateInRange, formatDayLabel } from '@/lib/date-utils.ts';
+import { useIsMediumViewport } from '@/hooks/use-is-large-viewport.ts';
+import {
+  eachDateInRange,
+  formatDayLabel,
+  todayInLondon,
+} from '@/lib/date-utils.ts';
 
 export interface PlannerGridProps {
   slots: readonly PlanSlot[];
@@ -46,6 +53,9 @@ export function PlannerGrid({
   onSlotClick,
   onSlotClear,
 }: PlannerGridProps): React.ReactElement {
+  // Below `md` the grid gives way to one card per day (FEAT-73, DEC-115). Only
+  // one layout mounts, so each slot registers its dnd-kit ids once.
+  const isMediumViewport = useIsMediumViewport();
   const visibleDates = useMemo(
     () => eachDateInRange(rangeStart, rangeEnd),
     [rangeStart, rangeEnd],
@@ -85,15 +95,60 @@ export function PlannerGrid({
     );
   }
 
+  function renderSlot(date: string, occasionId: number): ReactNode {
+    const slot = slotIndex.get(slotKey(date, occasionId));
+    if (!slot) {
+      return (
+        <div className="h-full min-h-20 rounded-md border border-dashed border-input bg-muted/30" />
+      );
+    }
+    return (
+      <SlotCell
+        slot={slot}
+        dndEnabled={dndEnabled}
+        shortBy={shortfallBySlot?.get(slot.id)}
+        shortfallByItem={shortfallByItem}
+        chefChip={
+          <SlotDinersChip
+            dinerNames={slot.dinerUserIds.map(
+              (id) => memberNameById.get(id) ?? 'Unknown',
+            )}
+            guestCount={slot.guestCount}
+          />
+        }
+        onClick={() => {
+          onSlotClick(slot);
+        }}
+        onClear={
+          onSlotClear
+            ? () => {
+                onSlotClear(slot);
+              }
+            : undefined
+        }
+      />
+    );
+  }
+
+  if (!isMediumViewport) {
+    return (
+      <PlannerDayList
+        dates={visibleDates}
+        occasions={occasions}
+        dayPlantCounts={dayPlantCounts}
+        renderSlot={renderSlot}
+      />
+    );
+  }
+
   return (
     <div role="table" aria-label="Meal plan" className="w-full overflow-x-auto">
       <div
         role="rowgroup"
         className="grid gap-2"
         style={{
-          // Column minima are mobile-first: a phone at 360 px can fit a
-          // 4rem date label + two 7rem occasion columns (18rem total) with
-          // breathing room. Larger viewports expand via the 1fr terms.
+          // Column minima: a 4rem date label + 7rem per occasion. Below `md`
+          // the day list takes over, so these only need to fit a tablet.
           gridTemplateColumns: `minmax(4rem, max-content) repeat(${String(
             occasions.length,
           )}, minmax(7rem, 1fr))`,
@@ -125,45 +180,58 @@ export function PlannerGrid({
                 />
               )}
             </div>
-            {occasions.map((occasion) => {
-              const slot = slotIndex.get(slotKey(date, occasion.id));
-              return (
-                <div role="cell" key={`${date}:${String(occasion.id)}`}>
-                  {slot ? (
-                    <SlotCell
-                      slot={slot}
-                      dndEnabled={dndEnabled}
-                      shortBy={shortfallBySlot?.get(slot.id)}
-                      shortfallByItem={shortfallByItem}
-                      chefChip={
-                        <SlotDinersChip
-                          dinerNames={slot.dinerUserIds.map(
-                            (id) => memberNameById.get(id) ?? 'Unknown',
-                          )}
-                          guestCount={slot.guestCount}
-                        />
-                      }
-                      onClick={() => {
-                        onSlotClick(slot);
-                      }}
-                      onClear={
-                        onSlotClear
-                          ? () => {
-                              onSlotClear(slot);
-                            }
-                          : undefined
-                      }
-                    />
-                  ) : (
-                    <div className="h-full min-h-20 rounded-md border border-dashed border-input bg-muted/30" />
-                  )}
-                </div>
-              );
-            })}
+            {occasions.map((occasion) => (
+              <div role="cell" key={`${date}:${String(occasion.id)}`}>
+                {renderSlot(date, occasion.id)}
+              </div>
+            ))}
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+function PlannerDayList({
+  dates,
+  occasions,
+  dayPlantCounts,
+  renderSlot,
+}: {
+  dates: readonly string[];
+  occasions: readonly OccasionColumn[];
+  dayPlantCounts?: ReadonlyMap<string, number | null>;
+  renderSlot: (date: string, occasionId: number) => ReactNode;
+}): React.ReactElement {
+  const today = todayInLondon();
+  const todayRef = useRef<HTMLElement>(null);
+
+  // Land on today once, on mount. Later renders (slot edits, refetches) must
+  // not yank the page back. When today is the first day the page is already
+  // there, and scrolling would only hide the plan header.
+  useEffect(() => {
+    todayRef.current?.scrollIntoView({ block: 'start' });
+  }, []);
+
+  return (
+    <ol aria-label="Meal plan" className="flex flex-col gap-3">
+      {dates.map((date, index) => (
+        <li key={date}>
+          <PlannerDayCard
+            ref={date === today && index > 0 ? todayRef : undefined}
+            date={date}
+            isToday={date === today}
+            occasions={occasions}
+            plantCount={
+              dayPlantCounts?.has(date)
+                ? (dayPlantCounts.get(date) ?? null)
+                : undefined
+            }
+            renderSlot={(occasionId) => renderSlot(date, occasionId)}
+          />
+        </li>
+      ))}
+    </ol>
   );
 }
 

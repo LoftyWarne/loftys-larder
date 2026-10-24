@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createAuth, type Auth } from './auth/index.ts';
 import { createResendSender, withAllowList } from './auth/resend.ts';
-import type { MagicLinkSender } from './auth/resend.ts';
+import type { SignInCodeSender } from './auth/resend.ts';
 import { ConfigValidationError, loadConfig, type Config } from './config.ts';
 import { getDb, type Db } from './db/index.ts';
 import { createDestroyImage, createLookUpImportPdf } from './lib/cloudinary.ts';
@@ -19,6 +19,8 @@ import { randomUUID } from 'node:crypto';
 import { registerAuth } from './plugins/auth.ts';
 import { registerRateLimit } from './plugins/rate-limit.ts';
 import { registerSecurity } from './plugins/security.ts';
+import { registerSignInLimits } from './plugins/sign-in-limits.ts';
+import { TRUSTED_PROXIES } from './plugins/trusted-proxies.ts';
 import type { TRPCError } from '@trpc/server';
 import {
   captureException,
@@ -33,8 +35,8 @@ import { appRouter } from './trpc/router.ts';
 export interface BuildAppOptions {
   // Inject a Drizzle handle in tests; production uses the singleton pool.
   db?: Db;
-  // Inject a magic-link sender in tests; production wraps Resend's REST API.
-  sendMagicLink?: MagicLinkSender;
+  // Inject a sign-in code sender in tests; production wraps Resend's REST API.
+  sendSignInCode?: SignInCodeSender;
   // Inject the Axiom HTTP transport in tests so the destination can be
   // observed without touching the real ingest endpoint.
   fetchImpl?: typeof fetch;
@@ -89,10 +91,10 @@ export async function buildAppWithLogger(
     loggerInstance: baseLogger,
     genReqId: () => randomUUID(),
     disableRequestLogging: false,
-    // Honour Cloudflare's forwarded IP headers so rate-limit buckets per
-    // real client rather than per CDN edge. We're orange-clouded (DEC-72),
-    // so a spoofed header requires bypassing Cloudflare.
-    trustProxy: true,
+    // Rate limits bucket per real client, not per CDN edge, without letting a
+    // client pick its own address: `*.fly.dev` is reachable around
+    // Cloudflare, so only Fly's proxy and Cloudflare's edges are trusted.
+    trustProxy: [...TRUSTED_PROXIES],
     // A batched tRPC query encodes every procedure name into a single
     // `/api/trpc/:path` route param (comma-joined). The planner alone fans out
     // one `plants.forDay` per visible day, so a week-long plan blows past
@@ -129,20 +131,30 @@ export async function buildAppWithLogger(
 
   registerHealth(app);
 
-  const transport: MagicLinkSender =
-    options.sendMagicLink ??
-    createResendSender({
-      apiKey: config.RESEND_API_KEY,
-      from: config.MAGIC_LINK_FROM,
-      log: app.log,
-    });
-  const sendMagicLink = withAllowList(
+  const transport: SignInCodeSender =
+    options.sendSignInCode ??
+    // With a fixed code there's nothing to deliver; config keeps it out of
+    // production.
+    (config.SIGN_IN_CODE_FIXED
+      ? ({ to }) => {
+          app.log.info(
+            { email: to },
+            'sign-in code not emailed: SIGN_IN_CODE_FIXED is set',
+          );
+          return Promise.resolve();
+        }
+      : createResendSender({
+          apiKey: config.RESEND_API_KEY,
+          from: config.MAGIC_LINK_FROM,
+          log: app.log,
+        }));
+  const sendSignInCode = withAllowList(
     transport,
     config.MAGIC_LINK_ALLOWED_EMAILS,
     app.log,
   );
 
-  const auth: Auth = createAuth({ config, db, sendMagicLink });
+  const auth: Auth = createAuth({ config, db, sendSignInCode });
   registerAuth(app, { auth, config });
 
   await registerRateLimit(
@@ -156,6 +168,19 @@ export async function buildAppWithLogger(
         }
       : {},
   );
+  // After the general limits, so a flood is turned away before it reaches
+  // the database. The e2e database outlives a run, so its counts would
+  // otherwise carry over between runs.
+  registerSignInLimits(app, {
+    allowedEmails: config.MAGIC_LINK_ALLOWED_EMAILS,
+    ...(config.NODE_ENV === 'test'
+      ? {
+          sendsPerHour: 1_000,
+          entriesPerClientPerHour: 1_000,
+          entriesPerHour: 1_000,
+        }
+      : {}),
+  });
 
   await app.register(fastifyTRPCPlugin, {
     prefix: '/api/trpc',

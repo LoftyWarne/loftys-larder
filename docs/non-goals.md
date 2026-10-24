@@ -46,8 +46,8 @@ Not covered by this exclusion: structured per-step safety notes and tips (DEC-94
 Also not covered: automatic bold on times, temperatures, quantities and ingredient names in method steps (DEC-95). That emphasis is worked out when the step is displayed; nothing is stored and users can't type any markup, so the stored text stays plain.
 
 ### Password authentication
-What it is: traditional email + password sign-in alongside or instead of magic links.
-Why not: passwordless removes credential management entirely — no hashing, no reset flow, no breach surface, no password-strength UX. Cross-device magic links match the cross-device autosave story for the recipe editor.
+What it is: traditional email + password sign-in alongside or instead of emailed sign-in codes.
+Why not: passwordless removes credential management entirely — no hashing, no reset flow, no breach surface, no password-strength UX. Emailed codes (DEC-114, which replaced magic links) work on any device the user can read email on.
 Revisit: if Resend deliverability degrades persistently and Postmark migration also fails — at which point password fallback becomes a recovery mechanism, not a primary path.
 `[→ decision log]`
 
@@ -142,7 +142,7 @@ Revisit: Phase 6 measurement is the decision point. Also revisit if the househol
 `[→ decision log]`
 
 ### Rate limits sized for household traffic, not adversarial scale
-Where it's held: 100 req/min unauth, 300 req/min auth, 5 magic-link requests per email per hour.
+Where it's held: 100 req/min unauth, 300 req/min auth, 5 sign-in code requests per email per hour; code entries capped at 10 per client and 50 in all per email per hour (DEC-114).
 Why not higher: nobody legitimate hits 300 req/min from a single session. Higher limits just expand the abuse surface.
 Why not lower: the planner with optimistic updates can fire bursts of slot-assignment mutations during bulk planning; 300/min keeps that comfortable.
 Revisit: if Cloudflare's edge sees patterns that suggest these are wrong in either direction.
@@ -195,7 +195,7 @@ Trigger: substring + trigram search becoming visibly inadequate — ranking comp
 
 ### Email-provider fallback
 What's deferred: a Postmark integration as backup for Resend.
-Trigger: Resend deliverability issues that affect magic-link receipt. Status-page monitoring is the early-warning system. Implementation cost is bounded — Better Auth's provider abstraction makes the swap a configuration change.
+Trigger: Resend deliverability issues that affect sign-in code receipt. Status-page monitoring is the early-warning system. Implementation cost is bounded — Better Auth's provider abstraction makes the swap a configuration change.
 `[→ decision log]`
 
 ### Better Auth migration path

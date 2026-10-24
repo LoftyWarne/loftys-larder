@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, count, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import {
   deleteAccountInputSchema,
   deleteAccountResultSchema,
@@ -14,6 +14,7 @@ import {
   listHouseholdMembersResultSchema,
   type ListHouseholdMembersResult,
 } from '../../../../shared/src/schemas/users.ts';
+import { signInLimitKeys } from '../../auth/sign-in-email.ts';
 import { sessions, users, verifications } from '../../db/schema/auth.ts';
 import { mealPlans, mealPlanSlots } from '../../db/schema/meal-plans.ts';
 import { recipeDrafts } from '../../db/schema/recipe-drafts.ts';
@@ -21,6 +22,7 @@ import {
   recipeComments,
   recipeRatings,
 } from '../../db/schema/recipe-social.ts';
+import { rateLimitHits } from '../../db/schema/rate-limits.ts';
 import { recipes } from '../../db/schema/recipes.ts';
 import { makeWithTransaction } from '../../db/withTransaction.ts';
 import {
@@ -230,15 +232,29 @@ export const userRouter = router({
             draftData: recipeDrafts.draftData,
           });
 
-        // Sweep unused magic links for this address, or one clicked after
-        // deletion would sign the user straight back up. The magic-link plugin
-        // stores the token in `identifier` and `{ email, name }` JSON in
-        // `value`; the CASE guards the cast against non-JSON rows from other
-        // verification kinds.
+        // Sweep an unused sign-in code for this address, or one entered after
+        // deletion would sign the user straight back up. The email-OTP plugin
+        // keys the row as `sign-in-otp-<lowercased email>`.
         await tx
           .delete(verifications)
           .where(
-            sql`case when pg_input_is_valid(${verifications.value}, 'jsonb') then lower(${verifications.value}::jsonb ->> 'email') end = lower(${email})`,
+            eq(verifications.identifier, `sign-in-otp-${email.toLowerCase()}`),
+          );
+
+        // Sign-in rate-limit counters are keyed by the email, so they'd keep
+        // it after the account is gone. `starts_with`, not LIKE: an email
+        // can contain LIKE's wildcards.
+        const lowered = email.toLowerCase();
+        await tx
+          .delete(rateLimitHits)
+          .where(
+            or(
+              inArray(rateLimitHits.key, [
+                signInLimitKeys.send(lowered),
+                signInLimitKeys.enter(lowered),
+              ]),
+              sql`starts_with(${rateLimitHits.key}, ${signInLimitKeys.enterFromClient(lowered, '')})`,
+            ),
           );
 
         // 7. Delete the user row. `sessions` and `accounts` cascade.

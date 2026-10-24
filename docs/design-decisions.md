@@ -456,6 +456,10 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 ### DEC-41 — Magic-link authentication only; no passwords
 
+> **Superseded in part by DEC-114.** Passwordless email sign-in stands, but the
+> email now carries an 8-digit code typed into the app rather than a link.
+> Retained for history.
+
 - **Chosen:** Better Auth's magic-link provider via Resend. 10-minute link expiry. Cross-device delivery (request on phone, click on laptop) and same-device both supported. No password fields anywhere in the app.
 - **Alternatives:** Email + password; OAuth providers; password + magic-link both.
 - **Why it won:** Passwordless removes credential management entirely — no hashing, no reset flow, no breach surface, no password-strength UX. Matches the cross-device story for the recipe-editor autosave.
@@ -478,7 +482,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 - **Chosen:** Better Auth's default session cookie posture — `HttpOnly`, `Secure`, `SameSite=lax`. CSRF token validation enabled on state-changing requests.
 - **Alternatives:** Bearer tokens in `Authorization` header; `SameSite=strict`; no CSRF tokens (relying on SameSite alone).
-- **Why it won:** HttpOnly cookies are unreachable from JavaScript — eliminates token-exfiltration via XSS as an attack on session theft. SameSite=lax allows top-level GETs (the magic-link click) while blocking cross-site POSTs. CSRF tokens cover the residual gap for browsers that don't enforce SameSite consistently.
+- **Why it won:** HttpOnly cookies are unreachable from JavaScript — eliminates token-exfiltration via XSS as an attack on session theft. SameSite=lax allows top-level GETs (originally the magic-link click; sign-in is now a same-origin code entry, DEC-114) while blocking cross-site POSTs. CSRF tokens cover the residual gap for browsers that don't enforce SameSite consistently.
 - **Consequences (+):** Defense in depth on session theft.
 - **Consequences (−):** Same-origin assumption is load-bearing (DEC-44). Browser cookie quirks can occasionally surprise (Safari ITP, third-party cookie deprecation drift).
 - **Revisit when:** Browser cookie policy shifts make the current posture unworkable.
@@ -496,7 +500,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 
 ### DEC-45 — Rate limits sized for household traffic
 
-- **Chosen:** `@fastify/rate-limit` configured: 100 req/min per IP for unauthenticated routes, 300 req/min per session for authenticated, 5 magic-link requests per email per hour.
+- **Chosen:** `@fastify/rate-limit` configured: 100 req/min per IP for unauthenticated routes, 300 req/min per session for authenticated, 5 magic-link requests per email per hour (now 5 code sends and up to 50 code entries per email per hour, DEC-114).
 - **Alternatives:** Higher limits ("won't ever hit"); lower limits (tighter abuse resistance); per-procedure custom limits.
 - **Why it won:** Nobody legitimate hits 300 req/min from a single session, but the planner with optimistic updates can fire bursts of slot-assignment mutations during bulk planning — 300/min keeps that comfortable. The tighter magic-link-per-email rate is specifically the email-spam abuse vector.
 - **Consequences (+):** Smaller abuse surface. Magic-link spam from a single email address is bounded.
@@ -1435,6 +1439,25 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** The household starts reading the average as a target or asks for targets, which the non-goal still excludes. Also if the takeaway gap misleads.
 - **Cross-refs:** CONTEXT.md (Health Score), DEC-32, DEC-88, DEC-89, DEC-90, DEC-91, DEC-101, DEC-110, DEC-112; FEAT-41, FEAT-71; non-goal: "Nutrition tracking against goals" (adjacency note amended).
 
+### DEC-114 — Email one-time code replaces the magic link
+
+- **Chosen:** Sign-in emails an 8-digit code that the user types into the app, through Better Auth's `emailOTP` plugin in place of its `magicLink` plugin. Codes last 10 minutes, allow 3 wrong tries, and are stored hashed in `verifications`; a resend replaces the earlier code. No link appears in the email. Still passwordless: DEC-41's no-passwords rule stands.
+  - **The allow-list moves in front of Better Auth.** The plugin stores a code for any address and signs up whoever enters it, so wrapping the sender (enough for a 32-character link token) no longer protects anything. The Fastify auth route answers send and sign-in for a non-allow-listed email itself, with the same replies the plugin gives (a silent 200; `INVALID_OTP`), and a Better Auth `user.create.before` hook refuses any non-allow-listed user as a backstop. The replies don't hide membership: only listed addresses are rate-limited (a 6th send gets a 429) and reach the database and Resend (slower replies), so anyone can test whether an address is on the list, using up that person's sends as they do. Accepted at household scale; knowing an address is a member doesn't help guess its code. The gate logs only the domain of a refused address, never the request's raw text. Removing someone from the list now really locks them out once their sessions are deleted (DEC-93).
+  - **Limits, per allow-listed email an hour:** 5 code sends (DEC-45, moved to the send route); 10 code entries per client (an IPv4 address or an IPv6 /64); 50 code entries in all. The entry limits are needed because the plugin's 3-tries count is read-then-write, so guesses sent at once all see zero tries. Counting per client first means one attacker can't use up a person's entries; the overall 50 bounds guessing across many clients.
+  - **Counted in Postgres** (`rate_limit_hits`, `plugins/sign-in-limits.ts`), one atomic upsert per limit, so every Fly machine (two run in `lhr` today, `docs/measurements.md`) shares the counts and a burst can't outrun them. The upsert commits on its own; expired rows are cleared in a separate statement that skips locked rows. This is a deliberate exception to cross-cutting #4 (multi-statement writes through `withTransaction`): the two statements don't need to succeed together, and sharing a transaction deadlocked under load. Account deletion clears the person's counters, since their keys hold the email (DEC-29). The general per-IP limits stay in memory; putting every request through the database isn't worth it for flood control.
+  - **8 digits, not 6,** so the overall entry cap can sit at 50 without guessing becoming realistic. The env var names stay to avoid a `fly secrets` change.
+  - **Client IP:** Fastify trusts `X-Forwarded-For` only from Fly's private proxy addresses and Cloudflare's published ranges (`plugins/trusted-proxies.ts`), not `trustProxy: true`. `*.fly.dev` is reachable around Cloudflare, so trusting every hop let a client choose its own IP. A value that isn't an IP address counts as one shared client. Better Auth's own limiter reads the resolved IP from a header we set, not the client's leftmost `X-Forwarded-For`. **Known gap:** anyone can send from Cloudflare's network (their own Worker fetching `*.fly.dev`) with a forged header, dodging the per-client limits; the 50-per-email entry cap doesn't depend on the IP and still holds. Follow-up: trust Cloudflare hops only when they carry a secret header set by a Cloudflare rule on the custom domain.
+  - **One spelling per route:** the auth route only forwards paths made of plain segments (letters, digits, `-`, `_`) and 404s anything else. Forwarding goes through `new URL`, which tidies `./`, `\` and `%2e`; without this, a tidied-up spelling reached Better Auth after the allow-list gate and the limits had matched the untidied path and let it through.
+  - **Smaller surface:** the plugin also mounts password-reset, email-change and verification routes. The Fastify auth route 404s all of them, and Better Auth's `disabledPaths` blocks them again on its own normalised path; only send and sign-in reach Better Auth, and send is refused unless `type` is `sign-in`.
+  - **Re-sign-in before account deletion (DEC-93)** uses the same code form on Settings; the code mints a fresh session, which is what the 24-hour check reads.
+  - **e2e** can't read a hashed code back, so `SIGN_IN_CODE_FIXED` makes every code a known value and skips the email. Config refuses it in production. The e2e email is on the allow-list like any real user.
+- **Alternatives:** (a) Keep the link and add a code alongside it. (b) Keep the link and have the installed app poll for a session approved in the browser. (c) Web app manifest link capturing. For the lockout: (d) bind each code to the browser that requested it, with a cookie, so other clients can neither use up its tries nor replace it.
+- **Why it won:** A link opens the default browser, not the installed PWA. On iOS a home-screen app has its own cookie storage, separate from Safari, so the session landed in Safari and the PWA stayed signed out. A code is entered where the user started, so the cookie lands there on every platform. (a) keeps the broken path as the obvious one to tap. (b) is bespoke auth code with more to secure. (c) is Android-only and unreliable from mail apps. (d) is the only complete fix for lockout, but the plugin keys codes by email and only the latest one works, so it means writing our own send and verify endpoints; held back until lockout is a real problem.
+- **Consequences (+):** Sign-in works in the installed PWA on iOS and Android. The deletion sweep matches one `identifier` instead of parsing JSON. The `/auth/verify` page and the redirect-URL rules for Better Auth go away.
+- **Consequences (−):** Signing in on one device from an email read on another means reading the code across, rather than tapping a link there. An 8-digit code is still guessable in a way a long token isn't: only allow-listed addresses can be attacked, at most 50 guesses an hour each against 100 million codes, about 0.4% over a year of non-stop guessing. Lockout is harder but not impossible: blocking someone's code entry for an hour takes five or more clients, which an attacker holding an IPv6 /48 has. Anyone can also request codes for an address, which replaces the pending code and can use up its 5 sends an hour. Unlocking a household member is a one-line `DELETE` (OPERATIONS.md). Phishing shifts from a fake link to a page asking for the code.
+- **Revisit when:** Guessing shows up in logs (429s on the code-entry route), Cloudflare's IP ranges change, or the household finds typing codes a burden; passkeys would be the next step, not a return to links. If guessing does appear, lower the entry limits or lengthen the window. If someone is locked out more than once, do (d).
+- **Cross-refs:** DEC-29, DEC-41 (superseded in part), DEC-42, DEC-43, DEC-45, DEC-58, DEC-93; FEAT-14, FEAT-15, FEAT-35; cross-cutting #17; non-goal: "Password authentication".
+
 ---
 
 ## Most Worth Deep Consideration on Revisit
@@ -1447,7 +1470,7 @@ The following decisions are genuine tradeoffs whose costs are accepted today but
 
 - **DEC-36 — Last-write-wins on shopping-list check-state.** The plan accepts "last device to sync wins" for line items in the offline mutation queue. The likely first user-visible bug — "I just checked that and it came back unchecked" — is the trigger to design CRDT-lite for this surface. Until then, this is the explicitly-named MVP limitation most likely to actually bite.
 
-- **DEC-41 / DEC-42 — Magic-link only auth on Better Auth.** Two coupled bets: passwordless removes a class of risk in exchange for total dependence on email deliverability; Better Auth saves time today at the cost of young-library risk. Either failure has a documented escape path (Postmark fallback; Lucia migration). Both should be reviewed if Better Auth's release cadence stalls *or* if a Resend deliverability incident materially degrades sign-in.
+- **DEC-41 / DEC-42 / DEC-114 — Passwordless email-code auth on Better Auth.** Two coupled bets: passwordless removes a class of risk in exchange for total dependence on email deliverability; Better Auth saves time today at the cost of young-library risk. Either failure has a documented escape path (Postmark fallback; Lucia migration). Both should be reviewed if Better Auth's release cadence stalls *or* if a Resend deliverability incident materially degrades sign-in.
 
 - **DEC-64 — Auto-stop with 3-second cold-start budget.** A measurement-gated decision. Phase 6 measurement is the formal trigger, but lived experience may diverge from measured budgets. Worth a follow-up after a month of real use, not just the measurement run. Interacts with pool size (DEC-71) and machine class (cross-cutting concern #18).
 

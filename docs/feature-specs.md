@@ -556,6 +556,8 @@ Conventions:
 
 ### FEAT-14 — Better Auth integration (server)
 
+> **Amended by DEC-114.** Sign-in now uses an emailed 8-digit code typed into the app (Better Auth `emailOTP`) instead of a magic link; read "magic link" below as "sign-in code". The `/auth/verify` route is gone.
+
 **Goal:** Mount Better Auth at `/api/auth/*` with the magic-link provider via Resend, the Drizzle adapter, session cookies with `HttpOnly`/`SameSite=lax`/CSRF, and a Fastify pre-handler hook that rejects unauthenticated requests outside `/api/auth/*`. `[DEC-TBD: magic-link only, no passwords]` `[DEC-TBD: HttpOnly session cookies, SameSite=lax, CSRF enabled]` `[DEC-TBD: pre-handler hook enforces auth outside /api/auth/*]` `[DEC-TBD: Better Auth choice — young library, migration plan documented]`
 
 **Estimate:** 3–4 hr. **Depends on:** FEAT-10, 13. **Enables:** FEAT-15, every subsequent procedure (which assumes a session in context).
@@ -599,6 +601,8 @@ Conventions:
 ---
 
 ### FEAT-15 — Sign-in UI + verification + protected routing
+
+> **Amended by DEC-114.** Sign-in now uses an emailed 8-digit code typed into the app (Better Auth `emailOTP`) instead of a magic link; read "magic link" below as "sign-in code". The `/auth/verify` route is gone.
 
 **Goal:** Frontend flow — email entry → "magic link sent" confirmation; verification handler route extracts the token, calls Better Auth, redirects to the app; a TanStack Router protected layout that redirects unauthenticated users to sign-in.
 

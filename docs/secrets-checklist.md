@@ -67,10 +67,10 @@ bootstrap, stage everything then run the deploy workflow.
 | `DATABASE_URL` | Set automatically by `flyctl postgres attach` (FEAT-09); only override for an external Postgres | Fly Postgres |
 | `BETTER_AUTH_SECRET` | ≥32 bytes; `openssl rand -hex 32` | Generated |
 | `BETTER_AUTH_URL` | Backend origin, e.g. `https://loftys-larder.co.uk` | Domain (FEAT-05) |
-| `MAGIC_LINK_TRUSTED_ORIGIN` | Origin the magic-link callback is allowed to land on | Domain |
+| `MAGIC_LINK_TRUSTED_ORIGIN` | The only origin Better Auth trusts (the app's own origin). Name predates sign-in codes (DEC-114) | Domain |
 | `MAGIC_LINK_ALLOWED_EMAILS` | Comma-separated allow-list (single-household, DEC-17) | Manual |
 | `MAGIC_LINK_FROM` | Optional; defaults to `magic@loftys-larder.co.uk` | Manual |
-| `RESEND_API_KEY` | Magic-link sender (DEC-69) | Resend dashboard |
+| `RESEND_API_KEY` | Sign-in code sender (DEC-69, DEC-114) | Resend dashboard |
 | `CLOUDINARY_CLOUD_NAME` | Direct browser upload (DEC-50, DEC-68) | Cloudinary |
 | `CLOUDINARY_API_KEY` | | Cloudinary |
 | `CLOUDINARY_API_SECRET` | Server-side signature only — never shipped to the client | Cloudinary |

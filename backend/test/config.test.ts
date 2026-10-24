@@ -147,6 +147,30 @@ describe('loadConfig', () => {
     ).toThrowError(ConfigValidationError);
   });
 
+  it('rejects SIGN_IN_CODE_FIXED in production', () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        ...prodModelEnv,
+        NODE_ENV: 'production',
+        AXIOM_TOKEN: 'xaat-test',
+        AXIOM_DATASET: 'lofty-prod',
+        SIGN_IN_CODE_FIXED: '42424242',
+      }),
+    ).toThrowError(/SIGN_IN_CODE_FIXED/);
+  });
+
+  it('accepts an 8-digit SIGN_IN_CODE_FIXED outside production', () => {
+    const config = loadConfig({ ...baseEnv, SIGN_IN_CODE_FIXED: '42424242' });
+    expect(config.SIGN_IN_CODE_FIXED).toBe('42424242');
+  });
+
+  it('rejects a SIGN_IN_CODE_FIXED that is not 8 digits', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, SIGN_IN_CODE_FIXED: '4242' }),
+    ).toThrowError(ConfigValidationError);
+  });
+
   it('rejects production without AXIOM_TOKEN', () => {
     expect(() =>
       loadConfig({

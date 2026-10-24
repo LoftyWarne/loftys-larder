@@ -26,6 +26,7 @@ import {
   recipeComments,
   recipeRatings,
 } from '../src/db/schema/recipe-social.ts';
+import { rateLimitHits } from '../src/db/schema/rate-limits.ts';
 import { recipes } from '../src/db/schema/recipes.ts';
 import { mealOccasions } from '../src/db/schema/reference.ts';
 import type { DestroyImage } from '../src/lib/cloudinary.ts';
@@ -74,7 +75,8 @@ describe('user procedures', () => {
         ${users},
         ${sessions},
         ${accounts},
-        ${verifications}
+        ${verifications},
+        ${rateLimitHits}
       restart identity cascade
     `);
     await db
@@ -449,30 +451,45 @@ describe('user procedures', () => {
         id: 'acct-1',
         userId: USER_ID,
         accountId: 'acct-1',
-        providerId: 'magic-link',
+        providerId: 'email-otp',
       });
-      // Magic-link rows as the plugin writes them: token in `identifier`,
-      // JSON payload in `value`. Plus rows that must survive the sweep.
+      // Sign-in code rows as the email-OTP plugin writes them: the lowercased
+      // email in `identifier`, `<hash>:<attempts>` in `value`. Plus rows that
+      // must survive the sweep.
       await db.insert(verifications).values([
         {
           id: 'ver-1',
-          identifier: 'magic-token-mine',
-          value: JSON.stringify({ email: USER_EMAIL, name: '' }),
+          identifier: `sign-in-otp-${USER_EMAIL}`,
+          value: 'hashed-code:0',
           expiresAt: new Date(Date.now() + 60_000),
         },
         {
           id: 'ver-other',
-          identifier: 'magic-token-theirs',
-          value: JSON.stringify({ email: 'someone-else@example.com' }),
+          identifier: 'sign-in-otp-someone-else@example.com',
+          value: 'hashed-code:0',
           expiresAt: new Date(Date.now() + 60_000),
         },
         {
           id: 'ver-plain',
-          identifier: 'non-json-row',
-          value: 'not json',
+          identifier: 'unrelated-row',
+          value: 'not a code',
           expiresAt: new Date(Date.now() + 60_000),
         },
       ]);
+      // Sign-in counters keyed by this email, plus ones that must survive.
+      const inAnHour = sql`now() + interval '1 hour'`;
+      await db
+        .insert(rateLimitHits)
+        .values(
+          [
+            `sign-in-send:${USER_EMAIL}`,
+            `sign-in-enter:${USER_EMAIL}`,
+            `sign-in-enter:${USER_EMAIL}:203.0.113.9`,
+            `sign-in-enter:${USER_EMAIL}:2001:db8:1:2::/64`,
+            'sign-in-send:someone-else@example.com',
+            `sign-in-enter:${USER_EMAIL}.other:203.0.113.9`,
+          ].map((key) => ({ key, count: 1, resetAt: inAnHour })),
+        );
       return { recipeId, planId, slotId: slot.id, occasionId };
     }
 
@@ -552,6 +569,15 @@ describe('user procedures', () => {
       expect(verificationRows).toEqual([
         { id: 'ver-other' },
         { id: 'ver-plain' },
+      ]);
+
+      const counterKeys = await db
+        .select({ key: rateLimitHits.key })
+        .from(rateLimitHits)
+        .orderBy(rateLimitHits.key);
+      expect(counterKeys).toEqual([
+        { key: `sign-in-enter:${USER_EMAIL}.other:203.0.113.9` },
+        { key: 'sign-in-send:someone-else@example.com' },
       ]);
     });
 

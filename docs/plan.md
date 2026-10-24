@@ -75,7 +75,7 @@ Manually-linked pairs. Symmetric (showing on both recipes), no self-links, no du
 
 ### Account & auth
 
-**Magic-link auth via Better Auth.** Users sign in by entering their email; Better Auth sends a magic link via Resend that expires in 10 minutes. Clicking the link establishes a session. There are no passwords — credential management is removed entirely. Magic links work cross-device (request on phone, click on laptop) and same-device.
+**Emailed sign-in codes via Better Auth.** Users sign in by entering their email; Better Auth sends an 8-digit code via Resend that expires in 10 minutes. Typing the code into the app establishes a session there, including in the installed PWA. There are no passwords — credential management is removed entirely. (Originally magic links; replaced by codes in DEC-114 because a link opens the browser, not the PWA.)
 
 A user can update their profile (name, theme preference) and delete their account.
 
@@ -101,7 +101,7 @@ This preserves household data integrity when a member leaves or rage-quits.
 - **Theming.** System / light / dark with explicit toggle, persisted per-user in the DB so preference follows the user across devices.
 - **Auth:** HttpOnly session cookies (Better Auth defaults); `SameSite=lax`; CSRF token validation enabled.
 - **CORS:** restricted to the deployed frontend origin in **dev only** — production is same-origin via `@fastify/static`, so CORS plays no role in prod.
-- **Rate limiting** via `@fastify/rate-limit`: 100 req/min per IP for unauthenticated routes, 300 req/min per session for authenticated. Magic-link request endpoint has its own tighter limit (5 requests per email per hour) to prevent email-spam abuse.
+- **Rate limiting** via `@fastify/rate-limit`: 100 req/min per IP for unauthenticated routes, 300 req/min per session for authenticated. The sign-in code request endpoint has its own tighter limit (5 requests per email per hour) to prevent email-spam abuse.
 - **Security headers** via `@fastify/helmet`: HSTS, X-Frame-Options, secure-cookie flags. CSP is configured explicitly rather than relying on defaults: `img-src` includes `res.cloudinary.com` and `data:`; `connect-src` includes Sentry's browser ingest endpoint; `script-src` and `style-src` allow `'self'` plus the minimum needed for shadcn's styles; everything else defaults to `'self'`.
 - **PII handling in error tracking.** Sentry's `beforeSend` strips cookies, authorization headers, and email addresses from captured payloads. Session replay is disabled in v1 — keeps the GDPR posture simple and avoids a cookie-consent banner.
 - **Request tracing.** Pino HTTP generates a `req.id` per request and logs it on every entry; attached to Sentry events as a tag for cross-reference between logs and errors.

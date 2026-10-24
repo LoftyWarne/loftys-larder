@@ -256,13 +256,26 @@ rm -f /tmp/restore.dump
 
 ## Rate limits
 
-`@fastify/rate-limit` (`backend/src/plugins/rate-limit.ts`) applies three buckets:
+General limits come from `@fastify/rate-limit` (`backend/src/plugins/rate-limit.ts`), held in memory:
 
 | Scope | Limit | Window | Key |
 |---|---|---|---|
-| Unauthenticated traffic | 100 requests | 1 minute | `ip:<client IP>` (Cloudflare's forwarded IP) |
+| Unauthenticated traffic | 100 requests | 1 minute | `ip:<client IP>` |
 | Authenticated traffic | 300 requests | 1 minute | `session:<session id>` |
-| Magic-link send (`POST /api/auth/sign-in/magic-link`) | 5 requests | 1 hour | `magic-email:<lowercased email>` (falls back to `magic-ip:<ip>` if the body has no email) |
+
+Sign-in limits (`backend/src/plugins/sign-in-limits.ts`, DEC-114) are held in Postgres (`rate_limit_hits`) so every machine shares them, and only count allow-listed emails — the auth route refuses any other address outright:
+
+| Scope | Limit | Window | Key |
+|---|---|---|---|
+| Code send (`POST /api/auth/email-otp/send-verification-otp`) | 5 requests | 1 hour | `sign-in-send:<email>` |
+| Code entry (`POST /api/auth/sign-in/email-otp`), per client | 10 requests | 1 hour | `sign-in-enter:<email>:<IPv4, or IPv6 /64>` |
+| Code entry, per email | 50 requests | 1 hour | `sign-in-enter:<email>` |
+
+The client IP is the first `X-Forwarded-For` hop, reading from the right, that isn't Fly's proxy or a Cloudflare edge (`backend/src/plugins/trusted-proxies.ts`). A value that isn't an IP address counts as one shared client.
+
+**Limits of that trust:**
+- Anyone can send requests *from* Cloudflare's network, for example their own Cloudflare Worker fetching `*.fly.dev`. Such a request can carry a forged `X-Forwarded-For`, so the per-client limits can be dodged that way. The 50-per-email cap on code entry doesn't depend on the IP and still holds. The fix is to only trust Cloudflare hops that carry a secret header set by a Cloudflare rule on the custom domain (DEC-114 follow-up).
+- Trusting private addresses (`uniquelocal`) assumes Fly's proxy reaches the app from one, and also trusts other apps on the Fly organisation's private network. **After deploying, check one request's `req.ip` in Axiom is a real client address, not a private one.** If it's private, every user shares one IP bucket.
 
 `/api/health` is exempt — Fly's liveness probe hits it on a tight cadence.
 
@@ -276,9 +289,19 @@ and a `Retry-After` header. The body is an HTTP-level envelope, not a tRPC one �
 
 **Operational notes:**
 
-- Store is in-memory. The single Fly machine in `lhr` plus auto-stop (DEC-63 / DEC-64) means counters reset whenever the machine wakes from sleep. Accepted v1 trade-off — if scaled out, plug Redis via the plugin's `redis` option.
+- The general limits are in memory, per machine, and reset when a machine wakes from auto-stop (DEC-63 / DEC-64). Accepted: they guard against floods, not guessing. The sign-in limits are in Postgres for exactly that reason.
+- **A household member locked out of signing in** (someone used up their code entries or sends): clear their counters. At the `flyctl postgres connect --app loftys-larder-prod-db` prompt (lowercase the email):
+
+  ```sql
+  DELETE FROM rate_limit_hits
+  WHERE key IN ('sign-in-send:person@example.com', 'sign-in-enter:person@example.com')
+     OR starts_with(key, 'sign-in-enter:person@example.com:');
+  ```
+
+  `starts_with`, not `LIKE`, because `_` in an email is a `LIKE` wildcard. If it keeps happening, check Axiom for 429s on `/api/auth/sign-in/email-otp`. Account deletion clears these rows itself.
+- **Cloudflare's IP ranges** are copied into `trusted-proxies.ts` (from cloudflare.com/ips). If Cloudflare adds ranges, clients behind them share an IP bucket until the list is updated.
 - Limits sized for household traffic, not adversarial scale (`docs/non-goals.md`). If Cloudflare's edge surfaces patterns that suggest these are wrong in either direction, revisit.
-- Under `NODE_ENV=test` the caps are raised to 10 000 IP / 30 000 session per minute (`backend/src/server.ts`) so the e2e suite — particularly the axe-core spot-check, which does many navigations in quick succession and pays IP-bucket cost on every `/api/auth/get-session` call — does not trip the limiter. Production sizing is unaffected.
+- Under `NODE_ENV=test` the caps are raised to 10 000 IP / 30 000 session per minute and 1 000 an hour for each sign-in limit (`backend/src/server.ts`) so the e2e suite — particularly the axe-core spot-check, which does many navigations in quick succession and pays IP-bucket cost on every `/api/auth/get-session` call — does not trip the limiter. Production sizing is unaffected.
 
 ---
 
@@ -319,10 +342,10 @@ Generic rotation procedure for both stores is in `docs/secrets-checklist.md` § 
 | Secret | Rotation gotcha |
 |---|---|
 | `DATABASE_URL` | Managed by Fly Postgres; rotate via `flyctl postgres users` + `flyctl postgres attach`. Hand-editing risks drift from the cluster's actual password |
-| `BETTER_AUTH_SECRET` | Rotating invalidates every existing session cookie (DEC-43). Users get signed out and have to magic-link in again. Schedule with awareness, or accept the blast |
-| `BETTER_AUTH_URL`, `MAGIC_LINK_TRUSTED_ORIGIN` | Must match the actual frontend / backend origins; mismatch breaks magic-link callback (AGENTS.md trap row) |
-| `MAGIC_LINK_ALLOWED_EMAILS` | Comma-separated, lowercased internally. Removing an email immediately blocks future magic-link sends for that address; existing sessions remain (up to 30 days idle, indefinitely if in use — DEC-93). Follow with [§ Revoking a user's sessions](#revoking-a-users-sessions) |
-| `RESEND_API_KEY` | Rotate at Resend dashboard first, then set in Fly. A stale key fails magic-link sends silently from the user's perspective (they see a generic "sent" UI per FEAT-15) — watch Axiom for `magic-link.send.error` |
+| `BETTER_AUTH_SECRET` | Rotating invalidates every existing session cookie (DEC-43). Users get signed out and have to sign in with a code again. Schedule with awareness, or accept the blast |
+| `BETTER_AUTH_URL`, `MAGIC_LINK_TRUSTED_ORIGIN` | Must match the actual frontend / backend origins; a mismatch fails Better Auth's origin check on sign-in. (Names predate sign-in codes, DEC-114) |
+| `MAGIC_LINK_ALLOWED_EMAILS` | Comma-separated, lowercased internally. Removing an email immediately blocks code sends and code sign-in for that address; existing sessions remain (up to 30 days idle, indefinitely if in use — DEC-93). Follow with [§ Revoking a user's sessions](#revoking-a-users-sessions) |
+| `RESEND_API_KEY` | Rotate at Resend dashboard first, then set in Fly. A stale key fails code sends: the user sees an error on the sign-in page — watch Axiom for `Resend rejected sign-in code send` |
 | `CLOUDINARY_API_SECRET` | Signs short-lived upload credentials (DEC-50). In-flight uploads keep working until their signed URL expires; rotate during a quiet window |
 | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` | Rarely rotate — usually only when migrating Cloudinary accounts |
 | `AXIOM_TOKEN`, `AXIOM_DATASET` | A bad value crashes boot (config refinement is strict in production). Stage and verify the new token at the Axiom dashboard before restarting |
@@ -345,10 +368,9 @@ DELETE FROM sessions
 WHERE user_id = (SELECT id FROM users WHERE lower(email) = lower('person@example.com'));
 -- Expect: DELETE n, one row per signed-in device.
 DELETE FROM verifications
-WHERE CASE WHEN pg_input_is_valid(value, 'jsonb')
-        THEN lower(value::jsonb ->> 'email') END = lower('person@example.com');
--- Clears any unused magic link sent before the allow-list change. The magic-link
--- plugin stores the token in `identifier` and the email inside the `value` JSON.
+WHERE identifier = 'sign-in-otp-' || lower('person@example.com');
+-- Clears any unused sign-in code sent before the allow-list change. The code
+-- is stored hashed, keyed by the lowercased email (DEC-114).
 \q
 ```
 

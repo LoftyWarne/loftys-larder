@@ -10,7 +10,8 @@ const {
   deleteAccountMock,
   useUtilsMock,
   signOutMock,
-  magicLinkMock,
+  sendCodeMock,
+  signInOtpMock,
   refreshSessionMock,
   navigateMock,
 } = vi.hoisted(() => ({
@@ -20,7 +21,8 @@ const {
   deleteAccountMock: vi.fn(),
   useUtilsMock: vi.fn(),
   signOutMock: vi.fn(),
-  magicLinkMock: vi.fn(),
+  sendCodeMock: vi.fn(),
+  signInOtpMock: vi.fn(),
   refreshSessionMock: vi.fn(),
   navigateMock: vi.fn(),
 }));
@@ -37,13 +39,20 @@ vi.mock('@/lib/trpc.ts', () => ({
   },
 }));
 
-vi.mock('@/lib/auth-client.ts', () => ({
-  authClient: {
-    signOut: signOutMock,
-    signIn: { magicLink: magicLinkMock },
-  },
-  refreshSession: refreshSessionMock,
-}));
+vi.mock('@/lib/auth-client.ts', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/auth-client.ts')>(
+    '@/lib/auth-client.ts',
+  );
+  return {
+    authClient: {
+      signOut: signOutMock,
+      signIn: { emailOtp: signInOtpMock },
+    },
+    refreshSession: refreshSessionMock,
+    sendSignInCode: sendCodeMock,
+    signInErrorMessage: actual.signInErrorMessage,
+  };
+});
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigateMock,
@@ -124,7 +133,8 @@ beforeEach(() => {
   deleteAccountMock.mockReset();
   useUtilsMock.mockReset();
   signOutMock.mockReset();
-  magicLinkMock.mockReset();
+  sendCodeMock.mockReset();
+  signInOtpMock.mockReset();
   refreshSessionMock.mockReset();
   navigateMock.mockReset();
 });
@@ -360,14 +370,15 @@ describe('SettingsPage', () => {
       expect(signOutMock).not.toHaveBeenCalled();
     });
 
-    it('closes the dialog and offers a fresh sign-in link when the session is too old', async () => {
+    it('closes the dialog and signs in again with a code when the session is too old', async () => {
       const deleteMutateAsync = vi
         .fn()
         .mockRejectedValue(
           makeTrpcError({ code: 'ACCOUNT_DELETE_REAUTH_REQUIRED' }),
         );
       setup({ deleteMutateAsync });
-      magicLinkMock.mockResolvedValue({ data: {}, error: null });
+      sendCodeMock.mockResolvedValue(null);
+      signInOtpMock.mockResolvedValue({ data: {}, error: null });
       const user = userEvent.setup();
       render(<SettingsPage />);
       await screen.findByLabelText('Name');
@@ -386,21 +397,50 @@ describe('SettingsPage', () => {
       expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument();
 
       await user.click(
-        screen.getByRole('button', { name: /email me a sign-in link/i }),
+        screen.getByRole('button', { name: /email me a sign-in code/i }),
       );
+      expect(sendCodeMock).toHaveBeenCalledWith('me@example.com');
 
-      expect(magicLinkMock).toHaveBeenCalledWith({
-        email: 'me@example.com',
-        callbackURL: `${window.location.origin}/settings`,
-        errorCallbackURL: `${window.location.origin}/auth/verify`,
-      });
+      await user.type(
+        await screen.findByLabelText(/sign-in code/i),
+        '12345678',
+      );
+      await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+
       await waitFor(() => {
-        expect(screen.getByRole('status')).toHaveTextContent(
-          /we sent a sign-in link to me@example.com/i,
-        );
+        expect(signInOtpMock).toHaveBeenCalledWith({
+          email: 'me@example.com',
+          otp: '12345678',
+        });
       });
+      // Back in the confirm dialog, ready to try the deletion again.
+      expect(await screen.findByLabelText(/your email/i)).toBeInTheDocument();
       expect(navigateMock).not.toHaveBeenCalled();
       expect(signOutMock).not.toHaveBeenCalled();
+    });
+
+    it('shows why a re-sign-in code could not be sent', async () => {
+      const deleteMutateAsync = vi
+        .fn()
+        .mockRejectedValue(
+          makeTrpcError({ code: 'ACCOUNT_DELETE_REAUTH_REQUIRED' }),
+        );
+      setup({ deleteMutateAsync });
+      sendCodeMock.mockResolvedValue('Too many attempts. Try again later.');
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      await screen.findByLabelText('Name');
+
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      await user.type(screen.getByLabelText(/your email/i), 'me@example.com');
+      await user.click(
+        await screen.findByRole('button', { name: /^delete account$/i }),
+      );
+      await user.click(
+        await screen.findByRole('button', { name: /email me a sign-in code/i }),
+      );
+
+      expect(await screen.findByText(/too many attempts/i)).toBeInTheDocument();
     });
 
     it('disables the confirm button while the mutation is pending', async () => {

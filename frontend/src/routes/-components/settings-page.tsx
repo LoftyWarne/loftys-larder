@@ -9,9 +9,14 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { DangerConfirmDialog } from '@/components/danger-confirm-dialog.tsx';
+import { SignInCodeForm } from '@/components/sign-in-code-form.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
-import { authClient, refreshSession } from '@/lib/auth-client.ts';
+import {
+  authClient,
+  refreshSession,
+  sendSignInCode,
+} from '@/lib/auth-client.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
 
@@ -161,22 +166,18 @@ export function SettingsPage(): React.ReactElement {
     }
   };
 
-  const sendReauthLink = async (): Promise<void> => {
+  const sendReauthCode = async (): Promise<void> => {
     setReauth({ kind: 'sending' });
-    const { error } = await authClient.signIn.magicLink({
-      email: me.email,
-      callbackURL: `${window.location.origin}/settings`,
-      errorCallbackURL: `${window.location.origin}/auth/verify`,
-    });
-    setReauth(
-      error
-        ? {
-            kind: 'error',
-            message:
-              error.message ?? 'Could not send the sign-in link. Try again.',
-          }
-        : { kind: 'sent' },
-    );
+    const message = await sendSignInCode(me.email);
+    setReauth(message === null ? { kind: 'sent' } : { kind: 'error', message });
+  };
+
+  // The code mints a fresh session, which is what the deletion check wants;
+  // reopen the dialog so the user can carry on where they were.
+  const onReauthed = (): void => {
+    setReauth({ kind: 'idle' });
+    setDeleteError(null);
+    setDeleteOpen(true);
   };
 
   return (
@@ -276,7 +277,8 @@ export function SettingsPage(): React.ReactElement {
         pending={deleteAccount.isPending}
         errorMessage={deleteError}
         reauth={reauth}
-        onSendReauthLink={sendReauthLink}
+        onSendReauthCode={sendReauthCode}
+        onReauthed={onReauthed}
         onConfirm={confirmDeleteAccount}
       />
     </section>
@@ -294,7 +296,8 @@ interface DangerZoneProps {
   pending: boolean;
   errorMessage: string | null;
   reauth: ReauthState;
-  onSendReauthLink: () => Promise<void>;
+  onSendReauthCode: () => Promise<void>;
+  onReauthed: () => void;
   onConfirm: () => Promise<void>;
 }
 
@@ -307,7 +310,8 @@ function DangerZone({
   pending,
   errorMessage,
   reauth,
-  onSendReauthLink,
+  onSendReauthCode,
+  onReauthed,
   onConfirm,
 }: DangerZoneProps): React.ReactElement {
   return (
@@ -353,7 +357,8 @@ function DangerZone({
         <ReauthPrompt
           email={email}
           reauth={reauth}
-          onSendReauthLink={onSendReauthLink}
+          onSendReauthCode={onSendReauthCode}
+          onReauthed={onReauthed}
         />
       )}
       <Button
@@ -397,23 +402,21 @@ function DangerZone({
 interface ReauthPromptProps {
   email: string;
   reauth: Exclude<ReauthState, { kind: 'idle' }>;
-  onSendReauthLink: () => Promise<void>;
+  onSendReauthCode: () => Promise<void>;
+  onReauthed: () => void;
 }
 
 function ReauthPrompt({
   email,
   reauth,
-  onSendReauthLink,
+  onSendReauthCode,
+  onReauthed,
 }: ReauthPromptProps): React.ReactElement {
   if (reauth.kind === 'sent') {
     return (
-      <p
-        role="status"
-        className="rounded-md border border-border bg-muted p-3 text-sm"
-      >
-        We sent a sign-in link to <strong>{email}</strong>. Open it on this
-        device, then delete your account again.
-      </p>
+      <div className="rounded-md border border-border bg-muted p-3 text-sm">
+        <SignInCodeForm email={email} onSignedIn={onReauthed} />
+      </div>
     );
   }
   return (
@@ -434,10 +437,10 @@ function ReauthPrompt({
         size="sm"
         disabled={reauth.kind === 'sending'}
         onClick={() => {
-          void onSendReauthLink();
+          void onSendReauthCode();
         }}
       >
-        {reauth.kind === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
+        {reauth.kind === 'sending' ? 'Sending…' : 'Email me a sign-in code'}
       </Button>
     </div>
   );

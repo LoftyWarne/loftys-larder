@@ -66,9 +66,15 @@ const configSchema = z
     MAGIC_LINK_FROM: z.string().min(1).default('magic@loftys-larder.co.uk'),
     MAGIC_LINK_TRUSTED_ORIGIN: z.url(),
     // Allow-list gate (single-household MVP). Comma-separated emails; the
-    // magic-link send fn silently drops requests for any address not on the
+    // sign-in code send fn silently drops requests for any address not on the
     // list so anyone guessing the sign-in URL cannot create an account.
     MAGIC_LINK_ALLOWED_EMAILS: allowedEmailsSchema,
+    // Every sign-in code is this value instead of a random one, so e2e can
+    // sign in without reading email. Refused in production below.
+    SIGN_IN_CODE_FIXED: z
+      .string()
+      .regex(/^\d{8}$/)
+      .optional(),
     CLOUDINARY_CLOUD_NAME: z.string().min(1),
     CLOUDINARY_API_KEY: z.string().min(1),
     CLOUDINARY_API_SECRET: z.string().min(1),
@@ -127,6 +133,15 @@ const configSchema = z
       path: ['AXIOM_DATASET'],
       message:
         'AXIOM_DATASET is required in production (Pino → Axiom transport, DEC-75).',
+    },
+  )
+  .refine(
+    (value) =>
+      value.NODE_ENV !== 'production' || value.SIGN_IN_CODE_FIXED === undefined,
+    {
+      path: ['SIGN_IN_CODE_FIXED'],
+      message:
+        'SIGN_IN_CODE_FIXED must not be set in production: it would make every sign-in code guessable.',
     },
   )
   .refine(

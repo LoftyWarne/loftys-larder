@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type InjectOptions } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { registerRateLimit } from '../src/plugins/rate-limit.ts';
+import { TRUSTED_PROXIES } from '../src/plugins/trusted-proxies.ts';
 // Side-effect import: pulls in the `req.session` / `req.user` module
 // augmentation declared in trpc/context.ts so the rate-limit plugin's
 // `req.session?.id` access typechecks here too.
@@ -23,7 +24,7 @@ async function buildTestApp(
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
-    trustProxy: true,
+    trustProxy: [...TRUSTED_PROXIES],
   });
 
   app.decorateRequest('session', null);
@@ -49,7 +50,6 @@ async function buildTestApp(
 
   app.get('/probe', () => ({ ok: true }));
   app.get('/api/health', () => ({ ok: true }));
-  app.post('/api/auth/sign-in/magic-link', () => ({ ok: true }));
 
   await app.ready();
   return app;
@@ -158,112 +158,6 @@ describe('rate limit — authenticated session bucket', () => {
       headers: { 'x-test-session': 'session-b' },
     });
     expect(otherSession.statusCode).toBe(200);
-  });
-});
-
-describe('rate limit — magic-link per-email bucket', () => {
-  let app: FastifyInstance | undefined;
-
-  afterEach(async () => {
-    if (app) await app.close();
-    app = undefined;
-  });
-
-  it('allows 5 sends per email per hour and blocks the 6th', async () => {
-    app = await buildTestApp();
-
-    for (let i = 0; i < 5; i += 1) {
-      const ok = await app.inject({
-        method: 'POST',
-        url: '/api/auth/sign-in/magic-link',
-        headers: {
-          'content-type': 'application/json',
-          'x-forwarded-for': '203.0.113.40',
-        },
-        payload: { email: 'a@example.com', callbackURL: '/' },
-      });
-      expect(ok.statusCode).toBe(200);
-    }
-
-    const blocked = await app.inject({
-      method: 'POST',
-      url: '/api/auth/sign-in/magic-link',
-      headers: {
-        'content-type': 'application/json',
-        'x-forwarded-for': '203.0.113.40',
-      },
-      payload: { email: 'a@example.com', callbackURL: '/' },
-    });
-    expect(blocked.statusCode).toBe(429);
-    expect(blocked.headers['retry-after']).toBeDefined();
-    const body = blocked.json<{
-      error: string;
-      code: string;
-      retryAfterSeconds: number;
-    }>();
-    expect(body.error).toBe('TooManyRequests');
-    expect(body.code).toBe('RATE_LIMITED');
-
-    const otherEmail = await app.inject({
-      method: 'POST',
-      url: '/api/auth/sign-in/magic-link',
-      headers: {
-        'content-type': 'application/json',
-        'x-forwarded-for': '203.0.113.40',
-      },
-      payload: { email: 'b@example.com', callbackURL: '/' },
-    });
-    expect(otherEmail.statusCode).toBe(200);
-  });
-
-  it('normalises the email so casing and whitespace share a bucket', async () => {
-    app = await buildTestApp();
-
-    for (let i = 0; i < 5; i += 1) {
-      const ok = await app.inject({
-        method: 'POST',
-        url: '/api/auth/sign-in/magic-link',
-        headers: { 'content-type': 'application/json' },
-        payload: { email: 'casing@example.com' },
-      });
-      expect(ok.statusCode).toBe(200);
-    }
-
-    const blocked = await app.inject({
-      method: 'POST',
-      url: '/api/auth/sign-in/magic-link',
-      headers: { 'content-type': 'application/json' },
-      payload: { email: '  CASING@example.com  ' },
-    });
-    expect(blocked.statusCode).toBe(429);
-  });
-
-  it('falls back to IP when the request body omits the email', async () => {
-    app = await buildTestApp();
-
-    for (let i = 0; i < 5; i += 1) {
-      const ok = await app.inject({
-        method: 'POST',
-        url: '/api/auth/sign-in/magic-link',
-        headers: {
-          'content-type': 'application/json',
-          'x-forwarded-for': '203.0.113.50',
-        },
-        payload: { callbackURL: '/' },
-      });
-      expect(ok.statusCode).toBe(200);
-    }
-
-    const blocked = await app.inject({
-      method: 'POST',
-      url: '/api/auth/sign-in/magic-link',
-      headers: {
-        'content-type': 'application/json',
-        'x-forwarded-for': '203.0.113.50',
-      },
-      payload: { callbackURL: '/' },
-    });
-    expect(blocked.statusCode).toBe(429);
   });
 });
 

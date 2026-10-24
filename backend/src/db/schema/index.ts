@@ -2,6 +2,7 @@ export * from './auth.ts';
 export * from './household.ts';
 export * from './ingredients.ts';
 export * from './meal-plans.ts';
+export * from './rate-limits.ts';
 export * from './recipe-drafts.ts';
 export * from './recipe-health.ts';
 export * from './recipe-import-originals.ts';

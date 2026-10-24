@@ -4,6 +4,52 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-24 — Sign-in by emailed code instead of magic link (DEC-114)
+
+**Status:** Implemented on `main`, not committed. Review and lockout fixes applied (below). Typecheck, lint and format clean in every workspace. Backend 1,042 green, frontend 911 green. e2e: sign-in via the code UI works in every run; of the last two full runs one was 50/50 and one failed a dark-theme axe `color-contrast` scan (settings). Across eight full runs on this branch, the failure was a different dark-theme scan each time, each passes alone, and one full run on `main` was 50/50. Read as a pre-existing order/timing flake, not proven. No real-email or on-device check yet.
+
+**Why:** on mobile, signing in from the installed PWA and tapping the emailed link signed the *browser* in, not the PWA. A link opens the default browser; on iOS a home-screen app has storage separate from Safari, so the cookie can never reach the PWA. A code typed into the PWA sets the cookie where the user started.
+
+**Independent review (same day) found two blockers, both fixed:**
+- **The allow-list didn't gate sign-in any more.** `withAllowList` only stopped the email; the plugin still stored a code for any address and signed up whoever entered it. Fine for a 32-character link token, not for a guessable 6-digit code. Now `plugins/auth.ts` answers send/sign-in for non-allow-listed emails itself (silent 200 / `INVALID_OTP`), and a Better Auth `user.create.before` hook refuses non-allow-listed users as a backstop.
+- **3 tries per code didn't hold under concurrency.** The plugin's attempt count is read-then-write; 40 parallel guesses all got checked. Added a 10-per-email-per-hour limit on `/api/auth/sign-in/email-otp` (reverses the kick-off's "no extra entry limit", which assumed the 3 tries held). Also replaced `trustProxy: true` with Fly private ranges + Cloudflare's published ranges (`plugins/trusted-proxies.ts`), since `*.fly.dev` bypasses Cloudflare and the leftmost `X-Forwarded-For` was client-controlled; Better Auth's limiter now reads our resolved IP via `x-lofty-client-ip`.
+- Also from the review: send refused unless `type: 'sign-in'`; production refusal of `SIGN_IN_CODE_FIXED` tested; code field accepts pasted codes with spaces, takes focus, and links its error via `aria-describedby`; `sendSignInCode` payload tested; e2e email now on the allow-list, with `SIGN_IN_CODE_FIXED` also skipping the email.
+
+**Lockout follow-up (same day):** the 10-per-email entry limit let anyone block a person's sign-in for an hour, and it was in memory per machine (two `lhr` machines, so really 20, reset on auto-stop). Now:
+- **8-digit codes** (`otpLength: 8`, schema, `SIGN_IN_CODE_FIXED`, e2e `42424242`).
+- **Two-tier entry limit:** 10 per (email, client) where client is the IPv4 address or IPv6 /64, then 50 per email. Sends stay 5 per email.
+- **Postgres counters:** new `rate_limit_hits` table (migration `0027_sign_in_rate_limit_hits`) and `plugins/sign-in-limits.ts`, one atomic upsert per limit, expired rows cleared when a key starts a fresh window. Only allow-listed emails are counted. `rate-limit.ts` keeps only the in-memory general/model limits; its sign-in tests moved to `sign-in-limits.test.ts` (Testcontainers).
+- `OPERATIONS.md` updated (it still described magic links; the revoke SQL now clears `sign-in-otp-<email>`), with a one-line unlock for a locked-out member.
+- **Still open by design:** an attacker with many /64s can still block entry; anyone can request codes for an address, replacing the pending one. The full fix is binding codes to the requesting browser (DEC-114 alternative d).
+
+**Second independent review (same day), fixed:**
+- **Path spellings bypassed everything.** The gate, block list and limits matched raw `req.url`; forwarding via `new URL` tidied `./`, `\` and `%2e`, so e.g. `/api/auth/./sign-in/email-otp` reached Better Auth uncounted. Now the auth route only forwards plain-segment paths (`PLAIN_AUTH_PATH` in `plugins/auth.ts`) and Better Auth's `disabledPaths` blocks the unused routes on its normalised path. Tests send the variants over a real socket; 5 of them fail without the check.
+- **`countHit` deadlocked** when several keys opened new windows at once (upsert then prune in one transaction). Now the upsert commits alone and the prune is a separate `FOR UPDATE SKIP LOCKED` delete. A 16-key concurrent test reproduces `deadlock detected` against the old code.
+- `clientNetwork` maps non-IP values to one `invalid` bucket; account deletion clears the person's `rate_limit_hits` rows (`starts_with`, not `LIKE`); rate-limit copy says "Too many attempts" with the retry time; focus returns to the code field after an error and to the email field on "Use a different email"; "an 8-digit"; OPERATIONS.md corrected.
+- **Open follow-ups:** (1) spoofing via a Cloudflare Worker to `*.fly.dev` still dodges per-client limits; fix with a secret header from a Cloudflare rule (needs the Cloudflare dashboard and a Fly secret). (2) After deploy, confirm `req.ip` in Axiom is a real client address, not a Fly private one. (Checked: Better Auth's client spreads the 429 body into `error`, so the retry minutes come through.)
+
+**Third independent review (same day): no blockers.** Fixed its suggestions: the gate logged the raw `email` field for refused addresses (up to the 1 MB body limit, straight into Axiom); it now logs only the domain of a valid address (`emailDomainForLog`). Added a direct Better Auth test for `disabledPaths` (fails without it). Docs now say the allow-list can be probed (only listed addresses get 429s and reach the database), mark `countHit`'s separate statements as a deliberate exception to cross-cutting #4, and say "only the latest code works". Left: no index on `reset_at` (prune is a full scan; fine at this size); a pre-existing gap where an absolute-form GET (`GET http://host/api/...`) skips the 401 hook in `plugins/auth.ts` `isExempt` — procedures still refuse, worth tightening separately.
+
+**Agreed at kick-off (all recommendations taken):** replace the link entirely (no link in the email); 10-minute codes, 3 tries, hashed; keep the `MAGIC_LINK_*` env names (no `fly secrets` change); no extra limit on code entry; 404 the plugin's unused routes; e2e uses a fixed code.
+
+**Changes:**
+- **Backend:** `emailOTP` replaces `magicLink` in `auth/index.ts`; only `type: 'sign-in'` sends. `resend.ts` sends codes (`SignInCodeSender`). `plugins/auth.ts` 404s `/api/auth/email-otp/*` (except send) and `/api/auth/forget-password/*`. The per-email limit moves to `/api/auth/email-otp/send-verification-otp`. Account deletion sweeps `verifications` by `identifier = 'sign-in-otp-<email>'`. New `SIGN_IN_CODE_FIXED` config, refused in production.
+- **Shared:** `signInCodeSchema`.
+- **Frontend:** new `components/sign-in-code-form.tsx` used by `/sign-in` and the Settings re-sign-in before deletion (which reopens the delete dialog after the code). `sendSignInCode` + `signInErrorMessage` in `lib/auth-client.ts`. `/auth/verify` route and `verify-page.tsx` deleted.
+- **e2e:** global setup types the fixed code (now `42424242`) through the UI. `getLatestVerificationFor` removed.
+- **Docs:** DEC-114; DEC-41 marked superseded in part; amendment notes on FEAT-14/15 (checkboxes untouched); README, plan, non-goals, secrets checklist, env examples.
+
+**Cloudflare ranges** in `plugins/trusted-proxies.ts` were copied from cloudflare.com/ips on 2026-10-24. If they change, affected clients just share a rate-limit bucket keyed by the edge address.
+
+**Gotcha:** e2e runs the prebuilt `backend/dist/server.js`. After backend changes, `pnpm --filter backend build` before `pnpm --filter e2e e2e`, or global setup runs against the old bundle.
+
+**Open:**
+- Manual check on an iPhone: request a code in the installed PWA, enter it, confirm the PWA is signed in. Also confirm a real Resend email arrives with the code.
+- After deploy, a signed-out user on an old cached PWA shell would call the removed magic-link route until the service worker updates (reopening the app fixes it).
+- Historical magic-link wording in `plan.md` phase descriptions and older FEAT bodies (Resend, rate limits, Playwright) left as history.
+
+---
+
 ## 2026-10-24 — Fastify-level 4xx errors stopped reaching Sentry
 
 **Status:** Fixed in `349ce07`, pushed to `main`. `sentry.test.ts` 22 green; server, security and not-found tests 30 green. Typecheck, lint and format clean. No schema, dependency or tRPC URL shape change.
@@ -3751,7 +3797,7 @@ flyctl secrets set \
   BETTER_AUTH_URL="https://loftys-larder.co.uk" \
   RESEND_API_KEY="re_XXXXXXXX" \
   MAGIC_LINK_TRUSTED_ORIGIN="https://loftys-larder.co.uk" \
-  MAGIC_LINK_ALLOWED_EMAILS="conorwarne92@gmail.com" \
+  MAGIC_LINK_ALLOWED_EMAILS="you@example.com" \
   --app loftys-larder-prod
 ```
 
@@ -3885,7 +3931,7 @@ If any of the three reads `fail` or `neutral`, do **not** declare done — the c
 - **FEAT-14 (Better Auth server)** — consumes the verified domain. Sender constant should be `magic@loftys-larder.co.uk`; `RESEND_API_KEY` lands then via `flyctl secrets set` (do **not** set it now — no consumer yet, and an unused secret in Fly drift-checks adds noise).
 - **FEAT-51 (`OPERATIONS.md` + restore drills)** — lifts this runbook into the operations doc. The live record values stay in Cloudflare DNS / Resend dashboard; don't duplicate them into the doc.
 - **DMARC tightening watch.** Once FEAT-14 is live and we have a few weeks of real magic-link sends with no SPF/DKIM failures, revisit DMARC `p=none` → `quarantine`. Not now.
-- **`rua` watch.** If we ever suspect domain spoofing or want visibility into receiver behaviour, add `rua=mailto:conorwarne92@gmail.com` to the `_dmarc` TXT. Single-record edit, no other change.
+- **`rua` watch.** If we ever suspect domain spoofing or want visibility into receiver behaviour, add `rua=mailto:you@example.com` to the `_dmarc` TXT. Single-record edit, no other change.
 
 ### Deferred (do NOT do as part of FEAT-13)
 

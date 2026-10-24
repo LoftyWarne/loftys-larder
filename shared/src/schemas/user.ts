@@ -22,7 +22,7 @@ export const updateProfileInputSchema = z
 
 export type UpdateProfileInput = z.infer<typeof updateProfileInputSchema>;
 
-// First-run onboarding: a new magic-link user is created with an empty name,
+// First-run onboarding: a new user is created with an empty name,
 // so the /welcome gate makes them choose one before entering the app. The form
 // requires a name (unlike `updateProfileInputSchema`, where it's optional); the
 // submission routes through `user.updateProfile`.

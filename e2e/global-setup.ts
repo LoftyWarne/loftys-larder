@@ -2,12 +2,11 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium, request, type FullConfig } from '@playwright/test';
+import { chromium, type FullConfig } from '@playwright/test';
 
 import {
   closePool,
   E2E_USER_NAME,
-  getLatestVerificationFor,
   resetHouseholdData,
   setUserName,
 } from './fixtures/db.ts';
@@ -17,16 +16,17 @@ const AUTH_DIR = path.resolve(here, '.auth');
 const STORAGE_STATE_PATH = path.join(AUTH_DIR, 'storage-state.json');
 
 const E2E_EMAIL = process.env.E2E_EMAIL ?? 'e2e@example.com';
+// Matches SIGN_IN_CODE_FIXED in playwright.config.ts.
+const E2E_SIGN_IN_CODE = '42424242';
 
-// One round of magic-link sign-in via the UI:
-//   1. Visit /sign-in, fill the email field, submit.
-//   2. Backend POSTs /api/auth/sign-in/magic-link which writes a verification
-//      row (and silently drops the Resend send via `withAllowList`).
-//   3. Read the latest verification row for E2E_EMAIL out of Postgres — the
-//      magic-link plugin stores the raw token in `verifications.identifier`.
-//   4. Hit /api/auth/magic-link/verify?token=... with a Playwright request
-//      context so the session cookie is captured.
-//   5. Persist storageState — every spec inherits it from playwright.config.
+// One round of code sign-in via the UI:
+//   1. Visit /sign-in, fill the email field, submit. The backend stores a
+//      code and, with SIGN_IN_CODE_FIXED set, skips the email.
+//   2. Type the code. The webServer runs with SIGN_IN_CODE_FIXED, so every
+//      code is the known value; codes are stored hashed and can't be read
+//      back out of Postgres.
+//   3. Wait to leave /sign-in, then persist storageState — every spec
+//      inherits it from playwright.config.
 //
 // The flow exercises the real sign-in handler end-to-end exactly once; later
 // specs reuse the cookie, matching DEC-58's storageState contract.
@@ -46,34 +46,16 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   try {
     await page.goto(`${baseURL}/sign-in`);
     await page.getByLabel('Email').fill(E2E_EMAIL);
-    await page.getByRole('button', { name: 'Send sign-in link' }).click();
-    await page.getByRole('heading', { name: 'Check your email' }).waitFor();
+    await page.getByRole('button', { name: 'Send sign-in code' }).click();
+    await page.getByLabel('Sign-in code').fill(E2E_SIGN_IN_CODE);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.waitForURL((url) => url.pathname !== '/sign-in');
+    await context.storageState({ path: STORAGE_STATE_PATH });
 
-    const verification = await getLatestVerificationFor(E2E_EMAIL);
-    const verifyURL = new URL(`${baseURL}/api/auth/magic-link/verify`);
-    verifyURL.searchParams.set('token', verification.identifier);
-    verifyURL.searchParams.set('callbackURL', '/');
-
-    // A fresh request context — driving the GET through the page would let
-    // the SPA re-render mid-flight; we want the raw cookie. `maxRedirects: 0`
-    // is irrelevant here because Better Auth issues 302 to the callbackURL on
-    // success, but the cookie lands on the verify response itself.
-    const apiContext = await request.newContext({ baseURL });
-    const response = await apiContext.get(verifyURL.toString(), {
-      maxRedirects: 0,
-    });
-    if (![200, 302].includes(response.status())) {
-      throw new Error(
-        `Verify endpoint returned ${String(response.status())}: ${await response.text()}`,
-      );
-    }
-    await apiContext.storageState({ path: STORAGE_STATE_PATH });
-    await apiContext.dispose();
-
-    // The magic-link sign-up leaves `name` blank; without this the authed
-    // gate redirects every spec to /welcome. getSession reads the name live
-    // from the DB, so stamping it after storageState is saved still takes
-    // effect for every spec.
+    // A new user's `name` is blank; without this the authed gate redirects
+    // every spec to /welcome. getSession reads the name live from the DB, so
+    // stamping it after storageState is saved still takes effect for every
+    // spec.
     await setUserName(E2E_EMAIL, E2E_USER_NAME);
   } finally {
     await context.close();

@@ -24,7 +24,7 @@ export async function closePool(): Promise<void> {
 // the home greeting against it, so it lives next to the writer to stay in sync.
 export const E2E_USER_NAME = 'E2E Tester';
 
-// Better Auth creates the magic-link user with an empty `name`. The authed
+// Better Auth creates a code-signed-in user with an empty `name`. The authed
 // gate (authed-layout) bounces every authed route to /welcome until a name is
 // set, so specs that expect to land on the app need one stamped in. Auth
 // tables survive resetHouseholdData, so a single call in global-setup holds
@@ -428,40 +428,4 @@ function enumerateDates(startDate: string, endDate: string): string[] {
     out.push(cursor.toISOString().slice(0, 10));
   }
   return out;
-}
-
-export interface VerificationRow {
-  identifier: string;
-  value: string;
-  expiresAt: Date;
-}
-
-// The magic-link plugin stores the raw token as `identifier` (see
-// node_modules/better-auth/.../magic-link/index.mjs) and the JSON-encoded
-// {email, name} payload as `value`. Filtering by email keeps us robust even
-// if other verifications appear (e.g. from earlier test runs).
-export async function getLatestVerificationFor(
-  email: string,
-): Promise<VerificationRow> {
-  const rows = await getPool().query<{
-    identifier: string;
-    value: string;
-    expires_at: Date;
-  }>(
-    `select identifier, value, expires_at
-     from verifications
-     where value::jsonb ->> 'email' = $1
-     order by created_at desc
-     limit 1`,
-    [email],
-  );
-  const row = rows.rows[0];
-  if (!row) {
-    throw new Error(`No verification row found for ${email}`);
-  }
-  return {
-    identifier: row.identifier,
-    value: row.value,
-    expiresAt: row.expires_at,
-  };
 }

@@ -25,10 +25,9 @@ const PORT = Number(new URL(BASE_URL).port);
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://lofty:lofty@localhost:5433/lofty_e2e';
 
-// The magic-link sender is silenced via the existing `withAllowList` filter —
-// the e2e email is deliberately NOT in MAGIC_LINK_ALLOWED_EMAILS, so the
-// Resend call never fires while Better Auth still writes the verification row
-// global-setup needs.
+// The e2e email has to be on MAGIC_LINK_ALLOWED_EMAILS to sign in at all
+// (DEC-114). SIGN_IN_CODE_FIXED makes every code a known value and also stops
+// the backend emailing it, so Resend is never called.
 const E2E_EMAIL = process.env.E2E_EMAIL ?? 'e2e@example.com';
 
 export default defineConfig({
@@ -78,9 +77,10 @@ export default defineConfig({
       BETTER_AUTH_URL: BASE_URL,
       MAGIC_LINK_TRUSTED_ORIGIN: BASE_URL,
       RESEND_API_KEY: 're_unused_for_e2e',
-      // E2E_EMAIL is deliberately omitted from this allowlist — the magic-link
-      // send is silently dropped (see top-of-file comment).
-      MAGIC_LINK_ALLOWED_EMAILS: 'blocked@example.com',
+      MAGIC_LINK_ALLOWED_EMAILS: E2E_EMAIL,
+      // Every sign-in code is this value so global-setup can type it, and no
+      // email is sent (see top-of-file comment).
+      SIGN_IN_CODE_FIXED: '42424242',
       MAGIC_LINK_FROM: 'magic@loftys-larder.co.uk',
       CLOUDINARY_CLOUD_NAME: 'e2e-cloud',
       CLOUDINARY_API_KEY: 'e2e-key',

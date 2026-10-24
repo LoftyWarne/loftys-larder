@@ -19,7 +19,7 @@ export async function authedBeforeLoad(): Promise<void> {
   if (!data) {
     throw redirect({ to: '/sign-in' });
   }
-  // New magic-link users are created with an empty name. Gate the app behind
+  // New users are created with an empty name. Gate the app behind
   // the onboarding step until they've chosen one.
   if (data.user.name.trim() === '') {
     throw redirect({ to: '/welcome' });

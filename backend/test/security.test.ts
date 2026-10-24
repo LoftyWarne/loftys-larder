@@ -23,7 +23,7 @@ const fakeDb: NodePgDatabase<typeof schema> = drizzle(fakeDbPool, {
 
 const buildOptions: BuildAppOptions = {
   db: fakeDb,
-  sendMagicLink: () => Promise.resolve(),
+  sendSignInCode: () => Promise.resolve(),
 };
 
 const baseEnv = {

@@ -47,7 +47,7 @@ Also not covered: automatic bold on times, temperatures, quantities and ingredie
 
 ### Password authentication
 What it is: traditional email + password sign-in alongside or instead of emailed sign-in codes.
-Why not: passwordless removes credential management entirely — no hashing, no reset flow, no breach surface, no password-strength UX. Emailed codes (DEC-114, which replaced magic links) work on any device the user can read email on.
+Why not: passwordless removes credential management entirely — no hashing, no reset flow, no breach surface, no password-strength UX. Emailed codes (DEC-116, which replaced magic links) work on any device the user can read email on.
 Revisit: if Resend deliverability degrades persistently and Postmark migration also fails — at which point password fallback becomes a recovery mechanism, not a primary path.
 `[→ decision log]`
 
@@ -142,7 +142,7 @@ Revisit: Phase 6 measurement is the decision point. Also revisit if the househol
 `[→ decision log]`
 
 ### Rate limits sized for household traffic, not adversarial scale
-Where it's held: 100 req/min unauth, 300 req/min auth, 5 sign-in code requests per email per hour; code entries capped at 10 per client and 50 in all per email per hour (DEC-114).
+Where it's held: 100 req/min unauth, 300 req/min auth, 5 sign-in code requests per email per hour; code entries capped at 10 per client and 50 in all per email per hour (DEC-116).
 Why not higher: nobody legitimate hits 300 req/min from a single session. Higher limits just expand the abuse surface.
 Why not lower: the planner with optimistic updates can fire bursts of slot-assignment mutations during bulk planning; 300/min keeps that comfortable.
 Revisit: if Cloudflare's edge sees patterns that suggest these are wrong in either direction.
@@ -242,10 +242,10 @@ What it would be: comparing ingredient prices across stores, tracking price hist
 Why not part of this: `estimated_cost_per_serving` exists as a recipe field for informational display. Price intelligence requires price data the app doesn't have and wouldn't pay for at this scale.
 Adjacency note: the field is stored, not computed. Manual entry only. Recipe Import leaves it blank (DEC-106).
 
-### Cook-mode / step-by-step / timer integration
-What it would be: a kitchen mode that walks through method steps with built-in timers, screen-wake-lock, hands-free advance.
-Why not part of this: method is rendered as plain text steps. Cook-mode is a real product opportunity but a different product. The plan's offline shopping-list mode is the kitchen-use feature that earned its way in.
-Adjacency note: revisitable as a Phase-7+ feature against real cooking-with-the-app behaviour, not against imagined demand.
+### Cook-mode timers, hands-free advance and shared progress
+What it would be: step timers in cook mode, started from the times in a method step and alerting even when the phone is locked; moving to the next step by voice or gesture; cook-mode progress kept across reloads or shared between the two cooks.
+Why not part of this: DEC-116 builds cook mode itself (one step per screen, a gather screen, the screen kept awake) because cooking with the app showed the screen locking, cooks losing their place and text hard to read at a distance. None of that called for timers, voice control or stored progress. Background timer alerts need notification permission and service-worker work, and home-screen web apps on iOS support them unevenly.
+Adjacency note: this entry used to exclude all of cook mode. Its revisit trigger, real cooking-with-the-app behaviour, was met for the step view and wake lock only. DEC-95 already finds the times in step text, so in-page timers would be the cheap first step if a separate kitchen timer starts getting in the way. DEC-116 names the triggers.
 
 ### Calendar / external integrations
 What it would be: pushing the meal plan to Google Calendar, Apple Calendar, Notion, etc.

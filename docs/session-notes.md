@@ -4,6 +4,24 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-24 — Cook mode scoped (DEC-116, FEAT-74); cook-mode non-goal narrowed
+
+**Status:** Docs only, no code. Scoped with the user. Start with FEAT-74's kick-off.
+
+**Why now:** the non-goal's trigger was real cooking with the app. Cooking from the recipe page, the screen locks partway through, the cook loses their place in the method, and the text is hard to read at arm's length.
+
+**Decided:**
+- First cut: a gather screen with ingredient tick boxes, one method step per screen, and the screen kept awake. No timers, no hands-free advance.
+- One step per screen rather than a focused scrolling list, with a "Next: …" preview line, fixed Back/Next buttons, a "Step N of M" step list, and no swipe.
+- `?servings=` and `?step=` in the URL. Ticks are kept in React state only. Nothing is stored.
+- Prep-ahead steps appear inline with their badge, and cook mode has no Plan ahead block. A variation walks through its own method only.
+- Ways in: the recipe page's "Start cooking" button, and planner and home page dishes being cooked.
+- New glossary term **Cook mode** (`CONTEXT.md`). The non-goal is renamed "Cook-mode timers, hands-free advance and shared progress", and DEC-96's and DEC-99's cross-references now point to the new name.
+
+**Open, for the kick-off:** FEAT-74 lists four proposed readings: the planner entry's change to the slot card (a stop-and-ask), no method, unsupported wake lock, and no ingredients. Wake Lock in the iOS home-screen PWA is unverified, which is manual verification step 3.
+
+---
+
 ## 2026-10-24 — Planner day cards at phone width (FEAT-73, DEC-115)
 
 **Status:** Committed and pushed to `main`, rebased onto the emailed-code change (DEC-114). Typecheck, lint and format clean in every workspace. Frontend: 916 tests green. e2e: every planner test passes, including the new phone-width scan in both themes, and `planner.spec.ts` passes. Manual verification hasn't been run, so the FEAT-73 checkboxes are left for the user to tick.

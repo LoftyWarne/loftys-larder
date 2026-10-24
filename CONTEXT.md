@@ -34,6 +34,12 @@ _Avoid_: origin, input
 Asking a model to invent a recipe that doesn't exist yet from a description of what the cook wants. Distinct from Recipe Import: there is no original to check the result against.
 _Avoid_: AI import, idea import
 
+### Cooking
+
+**Cook mode**:
+A view of one recipe for use while cooking. It starts with a gather screen of the ingredients, then shows one method step per screen in large type and keeps the screen on.
+_Avoid_: kitchen mode, step mode, recipe player
+
 ### Judging recipes
 
 **Health Score**:

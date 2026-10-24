@@ -3368,6 +3368,66 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
+### FEAT-74 — Cook mode: a gather screen, one method step per screen, and the screen kept awake
+
+**Goal:** A cook can open a recipe in cook mode and work through it on a phone propped up in the kitchen. A gather screen with tick boxes on the scaled ingredients comes first, then one method step per screen in large type, with large Back and Next buttons. The screen stays on throughout, and nothing is stored. (DEC-116)
+
+**Estimate:** 1–1.5 days. **Depends on:** FEAT-55 (portions and step chips), FEAT-31 (planner dish links). **Enables:** in-page step timers, if DEC-116's trigger is met.
+
+**Files:**
+- `shared/src/schemas/recipe-search.ts`: a `cookSearchSchema` with `servings` (as `recipeSearchSchema`) and `step`
+- `frontend/src/routes/_authed/recipes/$recipeId.cook.tsx` (new, a thin shell)
+- `frontend/src/routes/-components/cook-mode-page.tsx` (new)
+- `frontend/src/components/cook-mode/` (new): the gather screen, the step screen, the step-list sheet
+- `frontend/src/hooks/use-wake-lock.ts` (new)
+- The step body (badge, text, chips, notes) moved out of `routes/-components/recipe-detail-page.tsx` into a component both pages use
+- Entry points: `recipe-detail-page.tsx` ("Start cooking"), and the planner and home page dish links (`components/recipe-name-link.tsx`, `components/planner/slot-cell.tsx`, `routes/-components/index-page.tsx`), with the exact shape settled at kick-off
+
+**Acceptance criteria:**
+- [ ] The recipe page has a "Start cooking" button that opens `/recipes/$recipeId/cook` at the page's current `?servings=`
+- [ ] A dish being cooked (`prepared > 0`) on the planner and the home page can open cook mode at `?servings=<prepared>`. A leftovers dish (`prepared = 0`) and a deleted recipe have no way in
+- [ ] `?servings=` follows the recipe page's schema and fallbacks. `?step=` is a whole number from 0. A missing or malformed value opens the gather screen, and a step past the last opens the last step
+- [ ] Step 0 is the gather screen: the recipe's ingredients, scaled as on the recipe page, each with a tick box. Ticks never block "Start", and they survive moving back and forth between steps
+- [ ] Each later screen shows one method step in large type: its prep-ahead badge, its text with the recipe page's highlighting rules, its scaled ingredient chips, and its safety note and tip
+- [ ] While scaled, a step that states an amount in its text shows the recipe page's note that those amounts are for the original servings
+- [ ] Back and Next are large buttons fixed to the bottom of the screen. Next on the last step reads "Finish" and returns to the recipe page at the same servings. A "Next: …" line previews the following step's text, cut to one line
+- [ ] "Step N of M" opens a list of every step. Choosing one goes to it
+- [ ] Moving between screens replaces the history entry: browser Back leaves cook mode, and Forward returns to the same step
+- [ ] The screen is kept on with the Screen Wake Lock API while cook mode is open, taken again when the page becomes visible, and let go on leaving. Where the API is missing or refused, cook mode works the same
+- [ ] Reloading keeps the step and servings and clears the ticks. Nothing is written to the server or browser storage
+- [ ] A serving variation walks through its own method only, as its recipe page shows it
+- [ ] Each step change is announced to screen readers and moves focus to the step. Cook mode works at phone width in both themes and passes the axe scan
+
+**Implementation notes:**
+- Frontend only. Everything shown comes from `recipes.get`, so no procedure, schema change or migration.
+- Reuse, don't copy: `scale-quantity`, `StepIngredientChips`, `StepInstruction`, `StepNoteCallout`, `PrepAheadBadge` and the chip-amount rules. Move the recipe page's step body into one shared component instead of writing it a second time.
+- Step changes use `navigate({ search, replace: true })`, as the portions stepper does (DEC-98).
+- The wake lock is released when the page is hidden, so take it again on `visibilitychange`. Release it on unmount. Treat a rejected request as unsupported, not an error for Sentry.
+- No swipe, so nothing clashes with iOS's edge swipe for Back. Left and Right arrow keys move between steps on a keyboard.
+- No `new Date()`: cook mode has no date logic.
+
+**Open, for the kick-off:**
+1. Planner and home page entry: a small "Cook" link beside a dish's name changes the slot card, which is a stop-and-ask (cross-cutting #14). Proposed reading: use the slot card's existing slot for extra content, and add the same link on the home page's dishes for today.
+2. Recipes with no method: proposed reading is to hide "Start cooking".
+3. Unsupported wake lock: proposed reading is a one-line muted note on the gather screen ("This browser may let the screen sleep"), not silence.
+4. Recipes with no ingredients: proposed reading is that the gather screen still shows, saying there are none, so `?step=1` is always the first method step.
+
+**Manual verification:**
+1. On a phone, open a planner dish cooked for 4 portions of a 2-serving recipe in cook mode. Tick some ingredients, step through, and leave the phone untouched for longer than its auto-lock time on a step. The screen stays on.
+2. Mid-recipe, lock and unlock the phone, then swipe Back and Forward. The step is the same, and the screen still stays on.
+3. Repeat step 1 from the home-screen PWA on the household's iPhone. Wake Lock support in installed web apps on iOS has lagged behind Safari, so check it there rather than assume.
+
+**Common gotchas:**
+- The wake lock needs a visible page and, in some browsers, a recent user action. Opening cook mode by a tap gives one.
+- Step text amounts are never rewritten (FEAT-55). Only the chips and the gather list scale.
+
+**Definition of done:**
+- Tests cover: `cookSearchSchema` fallbacks; the step clamp; the wake-lock hook (taken, taken again on becoming visible, released on unmount, a missing or refused API); gather ticks surviving step changes and clearing on reload; Back, Next, Finish and the preview line; the step list; history replacement; scaled chips and the amounts note; the entry points' links and their absence for leftovers and deleted recipes; focus and the announcement; e2e planner → cook mode → Finish; the axe scan in both themes.
+- Commit: `feat(recipes): add cook mode`
+- Gate check: manual verification steps 1–3.
+
+---
+
 ## Cross-feature concerns and reuse-from-day-one
 
 The 53 features above are sequenced for incremental delivery, but several concerns thread through many of them. Each item below is something where a *decision or pattern made in an early feature locks in costs or affordances for later ones*. Surfacing them now prevents the small inconsistencies that compound over a project of this size.

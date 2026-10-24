@@ -133,14 +133,13 @@ describe('SignInPage submission', () => {
 });
 
 describe('SignInPage code entry', () => {
-  it('signs in with the code and goes to the planner', async () => {
+  it('signs in as soon as the eighth digit is entered', async () => {
     signInOtpMock.mockResolvedValue({ data: {}, error: null });
     const user = userEvent.setup();
     render(<SignInPage />);
     await requestCode(user);
 
     await user.type(screen.getByLabelText(/sign-in code/i), '12345678');
-    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
     await waitFor(() => {
       expect(signInOtpMock).toHaveBeenCalledWith({
@@ -149,6 +148,92 @@ describe('SignInPage code entry', () => {
       });
     });
     expect(navigateMock).toHaveBeenCalledWith({ to: '/' });
+    expect(signInOtpMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('signs in from the button too', async () => {
+    signInOtpMock.mockResolvedValue({
+      data: null,
+      error: { code: 'INVALID_OTP' },
+    });
+    const user = userEvent.setup();
+    render(<SignInPage />);
+    await requestCode(user);
+    await user.type(screen.getByLabelText(/sign-in code/i), '12345678');
+    await screen.findByRole('alert');
+
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(signInOtpMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('shows the digits as two groups of four and drops anything else', async () => {
+    const user = userEvent.setup();
+    render(<SignInPage />);
+    await requestCode(user);
+    const field = screen.getByLabelText(/sign-in code/i);
+
+    await user.type(field, '12a3-45');
+
+    expect(field).toHaveValue('1234 5');
+    expect(signInOtpMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the caret after the digit it followed when editing mid-code', async () => {
+    const user = userEvent.setup();
+    render(<SignInPage />);
+    await requestCode(user);
+    const field = screen.getByLabelText<HTMLInputElement>(/sign-in code/i);
+    await user.type(field, '123567');
+
+    await user.type(field, '4', {
+      initialSelectionStart: 3,
+      initialSelectionEnd: 3,
+    });
+
+    expect(field).toHaveValue('1234 567');
+    expect(field.selectionStart).toBe(4);
+  });
+
+  it('does not send the code again when more digits are typed', async () => {
+    signInOtpMock.mockResolvedValue({
+      data: null,
+      error: { code: 'INVALID_OTP' },
+    });
+    const user = userEvent.setup();
+    render(<SignInPage />);
+    await requestCode(user);
+    const field = screen.getByLabelText(/sign-in code/i);
+    await user.type(field, '12345678');
+    await screen.findByRole('alert');
+
+    await user.type(field, '9', {
+      initialSelectionStart: 9,
+      initialSelectionEnd: 9,
+    });
+
+    expect(field).toHaveValue('1234 5678');
+    expect(signInOtpMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects a rejected code so the next one replaces it', async () => {
+    signInOtpMock.mockResolvedValue({
+      data: null,
+      error: { code: 'INVALID_OTP' },
+    });
+    const user = userEvent.setup();
+    render(<SignInPage />);
+    await requestCode(user);
+    const field = screen.getByLabelText<HTMLInputElement>(/sign-in code/i);
+    await user.type(field, '12345678');
+    await screen.findByRole('alert');
+
+    await waitFor(() => {
+      expect(field).toHaveFocus();
+    });
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, 9]);
   });
 
   it('moves focus to the code field', async () => {
@@ -161,30 +246,32 @@ describe('SignInPage code entry', () => {
     });
   });
 
-  it('accepts a pasted code with spaces in it', async () => {
-    signInOtpMock.mockResolvedValue({ data: {}, error: null });
-    const user = userEvent.setup();
-    render(<SignInPage />);
-    await requestCode(user);
+  it.each([' 1234 5678 ', 'Code: 1234-5678'])(
+    'signs in with a pasted %j',
+    async (pasted) => {
+      signInOtpMock.mockResolvedValue({ data: {}, error: null });
+      const user = userEvent.setup();
+      render(<SignInPage />);
+      await requestCode(user);
 
-    await user.click(screen.getByLabelText(/sign-in code/i));
-    await user.paste(' 1234 5678 ');
-    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+      await user.click(screen.getByLabelText(/sign-in code/i));
+      await user.paste(pasted);
 
-    await waitFor(() => {
-      expect(signInOtpMock).toHaveBeenCalledWith({
-        email: 'cook@example.com',
-        otp: '12345678',
+      await waitFor(() => {
+        expect(signInOtpMock).toHaveBeenCalledWith({
+          email: 'cook@example.com',
+          otp: '12345678',
+        });
       });
-    });
-  });
+    },
+  );
 
   it('rejects a code that is not 8 digits without calling sign-in', async () => {
     const user = userEvent.setup();
     render(<SignInPage />);
     await requestCode(user);
 
-    await user.type(screen.getByLabelText(/sign-in code/i), '12a');
+    await user.type(screen.getByLabelText(/sign-in code/i), '12');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/8-digit code/i);
@@ -202,7 +289,6 @@ describe('SignInPage code entry', () => {
     await requestCode(user);
 
     await user.type(screen.getByLabelText(/sign-in code/i), '12345678');
-    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
     expect(navigateMock).not.toHaveBeenCalled();

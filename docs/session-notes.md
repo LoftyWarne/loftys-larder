@@ -4,6 +4,20 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-24 — Sign-in code field redesign (DEC-114 follow-up)
+
+**Status:** Committed and pushed to `ccr-e19acb66-2qz6gf`. Typecheck, lint and format are clean in every workspace. Frontend: 977 tests green. Backend: the new `resend.test.ts` passes; the full backend suite and e2e were not run (no Docker in the session). Not checked on a real phone or with iOS/Android code autofill.
+
+**Agreed:** keep one `<input>` (not separate boxes, which break autofill and paste and are tight at phone width; no `input-otp` dependency), auto-submit on the eighth digit, and show the code as `1234 5678` in the email too.
+
+**Changes:**
+- **Shared:** `lib/sign-in-code.ts` (`SIGN_IN_CODE_LENGTH`, `signInCodeDigits`, `groupSignInCode`), so the field and the email group the code the same way. `signInCodeSchema` unchanged; it still strips spaces.
+- **Frontend:** `sign-in-code-form.tsx`: larger centred monospace field with a `0000 0000` placeholder, drops non-digits, caps at 8 digits, groups as you type and keeps the caret after the digit it followed. Submits when the eighth digit arrives (not again if a ninth is typed onto a full code), with a ref so two submits can't overlap. After a rejection the code is selected so the next one replaces it. Added `pattern`, `autoCorrect`, `autoCapitalize`, `spellCheck`, `enterKeyHint`. Settings re-sign-in shares the component, so it changes too.
+- **Backend:** `resend.ts` body shows `groupSignInCode(code)`.
+- **Tests:** sign-in page tests for auto-submit, grouping/filtering, caret position, no re-submit, selection after rejection, pasted `Code: 1234-5678`. The settings re-sign-in test and e2e global setup no longer click Sign in after entering the code (it would race the auto-submit). e2e not run.
+
+---
+
 ## 2026-10-24 — Cook mode (FEAT-74)
 
 **Status:** Committed and pushed to `main`, rebased onto the emailed-code sign-in (DEC-114) and planner day cards (FEAT-73, DEC-115). Cook mode was scoped as DEC-114 and FEAT-73 on its branch; both numbers were taken on `main` first, so it's DEC-116 and FEAT-74. Typecheck, lint and format are clean in every workspace. Frontend: 971 tests green. e2e: 56 of 56, including the new cook mode spec and the cook mode axe scans at phone width in both themes. Backend unchanged. Manual verification (a real phone, the iOS home-screen PWA) not run. The FEAT-74 checkboxes are left for the user to tick. The day cards reuse the slot card, so the cook link shows there too; it has no phone-width e2e of its own.

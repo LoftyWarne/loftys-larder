@@ -1,3 +1,4 @@
+import { groupSignInCode } from '../../../shared/src/index.ts';
 import type { FastifyBaseLogger } from 'fastify';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
@@ -21,7 +22,7 @@ function buildBody(code: string): string {
   return [
     'Your Lofty’s Larder sign-in code is:',
     '',
-    code,
+    groupSignInCode(code),
     '',
     'Enter it in the app to sign in. It expires in 10 minutes. If you did not request it, ignore this email.',
   ].join('\n');

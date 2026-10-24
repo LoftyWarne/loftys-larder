@@ -137,7 +137,7 @@ function SlotBody({
     return (
       <div className="flex flex-col gap-0.5">
         <span className="text-xs text-muted-foreground">Leftovers</span>
-        <span className="min-w-0 truncate font-medium">
+        <span className="min-w-0 font-medium break-words">
           {dish ? (
             <>
               <RecipeNameLink item={dish} /> {dishQtyLabel(dish)}
@@ -163,10 +163,10 @@ function SlotBody({
           return (
             <div key={item.id} className="flex flex-col gap-0.5">
               <span
-                className="flex items-center gap-1 leading-tight"
+                className="flex items-start gap-1 leading-tight"
                 data-testid="slot-item-row"
               >
-                <span className="min-w-0 truncate">
+                <span className="min-w-0 self-center break-words">
                   <RecipeNameLink item={item} />
                   <span className="ml-1 text-xs text-muted-foreground">
                     {dishQtyLabel(item)}

@@ -55,8 +55,12 @@ Optional plain text a cook writes to steer a Plan Proposal, such as the mood of 
 _Avoid_: prompt, instructions, notes
 
 **Fixed meal**:
-A slot the cook settles before a Plan Proposal is made: a specific recipe, eat out, takeaway, or a batch to cook for later. The model plans around it and never changes it.
+A slot the cook settles before a Plan Proposal is made: a specific recipe, eat out, takeaway, or a Batch. The model plans around it and never changes it.
 _Avoid_: pinned slot, locked slot
+
+**Batch**:
+A dish cooked at one slot for more portions than that slot eats, so the rest is eaten later in the plan. Nobody may eat it at the slot where it's cooked.
+_Avoid_: cook-ahead, extra portions, meal prep
 
 ### Judging recipes
 

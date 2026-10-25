@@ -4,6 +4,41 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-25 — AI meal planning grilled before the kick-offs (FEAT-74 to FEAT-77, DEC-117 refined)
+
+**Status:** Docs only, no code. Seventeen questions settled with the user in two rounds. Nothing ticked. FEAT-71 comes first, then FEAT-74's kick-off.
+
+**Settled** (recorded in DEC-117's "Refined" bullet and in the FEATs):
+- **Review:**
+  - Every suggestion counts as kept unless the cook changes it. There's no keep action.
+  - "Restore suggestion" undoes a swap or discard.
+  - Suggest again works on any slot that isn't fixed.
+  - Review offers nothing else: everything else is done in the planner after Apply.
+- **"Another go":** swapped slots are sent as Fixed recipes, and discarded slots as fixed empty slots (a new `{ kind: 'empty' }` on FEAT-74's input, sent only on a rerun).
+- **Going back from review** keeps the proposal. Continuing after a changed input asks first, then needs a new proposal.
+- **Who's eating:** every household member and 0 guests by default. It can be changed for all slots, then by occasion, then by slot.
+- **Batch** is the glossary term for a dish cooked for later. It replaces "cook-ahead" and "extra portions" in FEAT-76. DEC-91's older wording is left as written.
+- **A Batch Fixed meal:**
+  - `portions` is the total cooked.
+  - People eating at its slot eat it there.
+  - It's refused below the slot's headcount.
+  - For a fixed serving variation, the model is asked to Batch-cook its base earlier in the plan.
+- **Apply's log:** the client sends counts from the review, logged as metadata only, so "cooks discard most of a proposal" can be seen.
+- **Release order:**
+  - FEAT-71 first.
+  - FEAT-75 ships `/plans/propose` unlinked.
+  - FEAT-76 adds the "Plan with AI" entry (moved from FEAT-75) and its offline state.
+- **FEAT-74's readings 2–4 accepted.** The time limit is still measured at kick-off, aiming for a 75-second hard timeout under Cloudflare's 100-second limit.
+- **FEAT-75's three stop-and-asks** are approved in principle. Kick-off confirms names and the split of shared rule code.
+
+**Still open:**
+- **A recipe-only Fixed meal** gets `prepared = eaten =` headcount. Not asked in this session; confirm at FEAT-75 kick-off, as the entry below says.
+- **The diners junction's DEC-29 flag** (2026-06-29 entry) is unchanged. It predates this work, and Apply doesn't widen it.
+
+**Docs changed:** `CONTEXT.md` (Batch; Fixed meal uses it), FEAT-74 to FEAT-77, DEC-117 (a "Refined" bullet, and DEC-72 and Batch added to its cross-refs).
+
+---
+
 ## 2026-10-25 — AI meal planning scoped (DEC-117, FEAT-74 to FEAT-77); "meal-plan suggestions" non-goal narrowed; eval runner renumbered FEAT-78
 
 **Status:** Docs only, no code. Requirements shaped with the user over 2026-10-24 and 2026-10-25, then written up. Nothing ticked. Start with FEAT-74's kick-off.
@@ -69,7 +104,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
   - a create-with-slots mutation for Apply
   - a date check for the wizard's first step
   - figures over unsaved slots, sharing the rule code
-- **FEAT-76:** whether a batch Fixed meal is also eaten at its own slot.
+- **FEAT-76:** whether a batch Fixed meal is also eaten at its own slot. (Settled later the same day: yes, by rule. See the entry above.)
 - **A recipe-only Fixed meal:** a recipe fixed in place gets `prepared = eaten =` headcount. Confirm at FEAT-75 kick-off.
 - **Not checked:** the "who's eating" junction's DEC-29 flag (2026-06-29 entry) is still open, and Apply writes attendance.
 

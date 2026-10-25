@@ -1619,7 +1619,32 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - The storage feature lands (freezer surplus).
   - Briefs are often misread (clarifying questions).
   - The cooks want to plan with AI on an existing plan.
-- **Cross-refs:** CONTEXT.md (Plan Proposal, Plan Review, Brief, Fixed meal), DEC-09, DEC-17, DEC-21, DEC-32, DEC-33, DEC-38, DEC-49, DEC-64, DEC-88, DEC-89, DEC-90, DEC-91, DEC-97, DEC-104, DEC-109, DEC-110 (amended), DEC-112, DEC-113; FEAT-19, FEAT-21, FEAT-27, FEAT-31, FEAT-41, FEAT-71, FEAT-78 (amended), FEAT-74 to FEAT-77; cross-cutting #5, #6, #16, #22; non-goals: "AI / LLM features" (adjacency note amended), "AI meal planning follow-ons" (new).
+- **Refined (2026-10-25), settled with the user before the kick-offs.** These narrow the decision above without reversing it:
+  - **Review:**
+    - Every suggestion counts as kept unless the cook swaps or discards it, so there's no keep action.
+    - A swapped or discarded slot can have its suggestion restored.
+    - Suggest again works on any slot that isn't fixed, including swapped and discarded ones.
+    - Review offers nothing else. Changing a slot's type or attendance, or adding sides, happens in the planner after Apply.
+  - **"Another go":** swapped slots are sent as Fixed recipes and discarded slots as fixed empty slots, so both survive. Only slots still as suggested are proposed again.
+  - **Going back a step** keeps the proposal. Continuing after a changed input asks first, then needs a new proposal.
+  - **Who's eating:** it starts as every household member and 0 guests at every slot. It can be changed for all slots, then by occasion, then by slot.
+  - **A Batch Fixed meal** (CONTEXT.md):
+    - `portions` is the total cooked.
+    - People eating at its slot eat it there. At headcount 0 it's prepared-only.
+    - Fewer portions than the slot's headcount is refused.
+    - For a fixed serving variation, the model is asked to cook a Batch of its base earlier in the plan. A shortfall otherwise shows as the usual warning.
+  - **Apply logs metadata only:** counts from the review (slots suggested, swapped, discarded and suggested again, and how many times "Another go" was used), sent by the client, logged under feature `meal_plan` and never stored. This lets the first revisit trigger be seen.
+  - **Release order:**
+    - FEAT-71 is built first.
+    - FEAT-75 ships `/plans/propose` with no link to it.
+    - FEAT-76 adds the plans page's "Plan with AI" entry, so the wizard doesn't go live before batch cooking.
+  - **FEAT-74's readings:**
+    - The Brief is capped at 500 characters and the note at 200.
+    - Recency counts the 28 days before `startDate`.
+    - Effort defaults to `medium`.
+    - The time limit aims for a 75-second hard timeout, under Cloudflare's 100-second origin limit (DEC-72).
+  - **FEAT-75's three stop-and-asks** (`createWithSlots`, the step 1 date check, figures over unsaved slots) are approved in principle. Kick-off confirms names and the split of shared rule code.
+- **Cross-refs:** CONTEXT.md (Plan Proposal, Plan Review, Brief, Fixed meal, Batch), DEC-09, DEC-17, DEC-21, DEC-32, DEC-33, DEC-38, DEC-49, DEC-64, DEC-72, DEC-88, DEC-89, DEC-90, DEC-91, DEC-97, DEC-104, DEC-109, DEC-110 (amended), DEC-112, DEC-113; FEAT-19, FEAT-21, FEAT-27, FEAT-31, FEAT-41, FEAT-71, FEAT-78 (amended), FEAT-74 to FEAT-77; cross-cutting #5, #6, #16, #22; non-goals: "AI / LLM features" (adjacency note amended), "AI meal planning follow-ons" (new).
 
 ---
 

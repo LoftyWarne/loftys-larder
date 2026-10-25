@@ -14,6 +14,8 @@ const {
   cancelMock,
   plantsForDayInvalidateMock,
   plantsForPlanInvalidateMock,
+  healthForDayInvalidateMock,
+  healthForPlanInvalidateMock,
 } = vi.hoisted(() => ({
   updateMutateMock: vi.fn(),
   getDataMock: vi.fn(),
@@ -21,6 +23,8 @@ const {
   cancelMock: vi.fn().mockResolvedValue(undefined),
   plantsForDayInvalidateMock: vi.fn().mockResolvedValue(undefined),
   plantsForPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  healthForDayInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  healthForPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 let mutationOptions: Record<string, unknown> = {};
@@ -38,6 +42,10 @@ vi.mock('@/lib/trpc.ts', () => ({
       plants: {
         forDay: { invalidate: plantsForDayInvalidateMock },
         forPlan: { invalidate: plantsForPlanInvalidateMock },
+      },
+      healthScores: {
+        forDay: { invalidate: healthForDayInvalidateMock },
+        forPlan: { invalidate: healthForPlanInvalidateMock },
       },
     }),
     slots: {
@@ -179,6 +187,14 @@ describe('useOptimisticSlotUpdate', () => {
     if (!call) throw new Error('expected setData call');
     const reconciled = call[1] as GetPlanResult;
     expect(reconciled.slots[0]).toEqual(serverSlot);
+  });
+
+  it('refetches the day and plan health scores on settle', () => {
+    renderHook(() => useOptimisticSlotUpdate({ planId: 9 }));
+    const onSettled = mutationOptions.onSettled as (data: undefined) => void;
+    onSettled(undefined);
+    expect(healthForDayInvalidateMock).toHaveBeenCalledWith({ planId: 9 });
+    expect(healthForPlanInvalidateMock).toHaveBeenCalledWith({ planId: 9 });
   });
 
   it('invokes the caller onError when the mutation fails', () => {

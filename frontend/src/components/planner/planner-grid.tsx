@@ -1,8 +1,13 @@
-import type { HouseholdMember, PlanSlot } from '@loftys-larder/shared';
+import type {
+  HealthScoreAverage,
+  HouseholdMember,
+  PlanSlot,
+} from '@loftys-larder/shared';
 import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 
 import { PlannerDayCard } from '@/components/planner/planner-day-card.tsx';
+import { HealthScoreAverageBadge } from '@/components/planner/health-score-average-badge.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { SlotCell } from '@/components/planner/slot-cell.tsx';
 import { SlotDinersChip } from '@/components/planner/slot-diners-chip.tsx';
@@ -31,6 +36,8 @@ export interface PlannerGridProps {
    * hidden). Read-only, derived externally, no business logic in the grid.
    */
   dayPlantCounts?: ReadonlyMap<string, number | null>;
+  /** Day Health Scores (DEC-113), with the same keys contract as above. */
+  dayHealthScores?: ReadonlyMap<string, HealthScoreAverage | null>;
   dndEnabled?: boolean;
   onSlotClick: (slot: PlanSlot) => void;
   onSlotClear?: (slot: PlanSlot) => void;
@@ -49,6 +56,7 @@ export function PlannerGrid({
   shortfallBySlot,
   shortfallByItem,
   dayPlantCounts,
+  dayHealthScores,
   dndEnabled = false,
   onSlotClick,
   onSlotClear,
@@ -136,6 +144,7 @@ export function PlannerGrid({
         dates={visibleDates}
         occasions={occasions}
         dayPlantCounts={dayPlantCounts}
+        dayHealthScores={dayHealthScores}
         renderSlot={renderSlot}
       />
     );
@@ -179,6 +188,12 @@ export function PlannerGrid({
                   variant="day"
                 />
               )}
+              {dayHealthScores?.has(date) && (
+                <HealthScoreAverageBadge
+                  value={dayHealthScores.get(date) ?? null}
+                  variant="day"
+                />
+              )}
             </div>
             {occasions.map((occasion) => (
               <div role="cell" key={`${date}:${String(occasion.id)}`}>
@@ -196,11 +211,13 @@ function PlannerDayList({
   dates,
   occasions,
   dayPlantCounts,
+  dayHealthScores,
   renderSlot,
 }: {
   dates: readonly string[];
   occasions: readonly OccasionColumn[];
   dayPlantCounts?: ReadonlyMap<string, number | null>;
+  dayHealthScores?: ReadonlyMap<string, HealthScoreAverage | null>;
   renderSlot: (date: string, occasionId: number) => ReactNode;
 }): React.ReactElement {
   const today = todayInLondon();
@@ -225,6 +242,11 @@ function PlannerDayList({
             plantCount={
               dayPlantCounts?.has(date)
                 ? (dayPlantCounts.get(date) ?? null)
+                : undefined
+            }
+            healthScore={
+              dayHealthScores?.has(date)
+                ? (dayHealthScores.get(date) ?? null)
                 : undefined
             }
             renderSlot={(occasionId) => renderSlot(date, occasionId)}

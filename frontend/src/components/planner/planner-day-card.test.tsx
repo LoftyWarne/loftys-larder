@@ -59,6 +59,18 @@ describe('PlannerDayCard', () => {
     expect(screen.getByLabelText('Loading plant points')).toBeInTheDocument();
   });
 
+  it('shows the health score badge beside the plant points', () => {
+    renderCard({
+      plantCount: 7,
+      healthScore: { average: 5.5, notScored: 1, includesOutOfDate: true },
+    });
+    expect(
+      screen.getByText(
+        'AI health score 5.5 out of 10, out of date, 1 dish not scored',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('hides the badge when there is no count', () => {
     renderCard();
     expect(screen.queryByTestId('plant-points-badge')).not.toBeInTheDocument();

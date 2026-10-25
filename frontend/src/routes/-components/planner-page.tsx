@@ -9,11 +9,13 @@ import { ShoppingCart } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { DndProvider } from '@/components/planner/dnd-provider.tsx';
+import { HealthScoreAverageBadge } from '@/components/planner/health-score-average-badge.tsx';
 import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useDayHealthScores } from '@/hooks/use-day-health-scores.ts';
 import { useDayPlantPoints } from '@/hooks/use-day-plant-points.ts';
 import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { useOptimisticSlotRelocate } from '@/hooks/use-optimistic-slot-relocate.ts';
@@ -112,6 +114,11 @@ export function PlannerPage(): React.ReactElement {
     { enabled: idIsValid && Boolean(planQuery.data) },
   );
   const dayPlantCounts = useDayPlantPoints(planId, visibleDates);
+  const planHealthScoreQuery = trpc.healthScores.forPlan.useQuery(
+    { planId },
+    { enabled: idIsValid && Boolean(planQuery.data) },
+  );
+  const dayHealthScores = useDayHealthScores(planId, visibleDates);
 
   if (!idIsValid) {
     return <p role="alert">Invalid plan id.</p>;
@@ -216,6 +223,10 @@ export function PlannerPage(): React.ReactElement {
               count={planTotalQuery.data?.count ?? null}
               variant="plan"
             />
+            <HealthScoreAverageBadge
+              value={planHealthScoreQuery.data ?? null}
+              variant="plan"
+            />
           </div>
           <Button asChild size="sm" variant="outline">
             <Link
@@ -242,6 +253,7 @@ export function PlannerPage(): React.ReactElement {
             shortfallBySlot={baseBalances.shortfallBySlot}
             shortfallByItem={baseBalances.shortfallByItem}
             dayPlantCounts={dayPlantCounts}
+            dayHealthScores={dayHealthScores}
             // Slot ↔ slot drag works at every viewport — touch-and-hold
             // (200 ms) lifts a populated slot, drops on another slot to
             // move or swap. Bank → slot still only at `lg+`, since the

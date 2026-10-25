@@ -308,6 +308,12 @@ export {
   type HealthScoreDueReason,
   healthScoresDueResultSchema,
   type HealthScoresDueResult,
+  getDayHealthScoreInputSchema,
+  type GetDayHealthScoreInput,
+  getPlanHealthScoreInputSchema,
+  type GetPlanHealthScoreInput,
+  healthScoreAverageSchema,
+  type HealthScoreAverage,
 } from './schemas/health-scores.ts';
 export {
   PLAN_MAX_RANGE_DAYS,

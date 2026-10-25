@@ -4,6 +4,24 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-25 — Day and plan Health Score in the planner (FEAT-71)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,094 tests green. Frontend: 1,000 green. e2e: 56 of 56, including both planner axe scans. The e2e seed has no scored dishes on the planner, so the scan doesn't see a badge with a value; the badge's states are covered by component tests. Manual verification step 1 hasn't been run. The FEAT-71 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (all six readings as proposed):
+- The helper is `backend/src/lib/health-score/average.ts`, not the spec's `lib/health-score-average.ts`, beside FEAT-66's other health-score files.
+- `notScored` counts distinct unscored recipes, not item rows.
+- A soft-deleted recipe still counts, with its stored score.
+- The badge reads "AI 6.4", dashed and muted when `includesOutOfDate`. The day badge keeps "N dishes not scored" to its accessible name and tooltip; the plan header shows it.
+- No scored dish: no day badge. The plan header shows only "N dishes not scored" if N > 0, otherwise nothing.
+- `useDayHealthScores` is a sibling of `useDayPlantPoints`, not a generalised hook.
+
+**Drift from the spec's file list:** `planner-day-card.tsx` also shows the day badge, because below `md` the day card replaces the grid (DEC-115). The household-plan guard is copied into `health-scores.ts` from `plants.ts`, not shared.
+
+**Invalidation:** both optimistic slot hooks invalidate `healthScores.forDay` and `forPlan` for the plan. `useHealthScoringQueue` invalidates them for every plan after each score. A recipe edit that only marks a score stale is picked up when you come back to the planner (5 s `staleTime`).
+
+**Seen, not touched:** during the e2e run, `healthScores.score` logged a Postgres "deadlock detected" inside `loadScoredRecipe` (FEAT-66 code), and the specs still passed. Worth a look separately.
+
 ## 2026-10-25 — AI meal planning grilled before the kick-offs (FEAT-74 to FEAT-77, DEC-117 refined)
 
 **Status:** Docs only, no code. Seventeen questions settled with the user in two rounds. Nothing ticked. FEAT-71 comes first, then FEAT-74's kick-off.

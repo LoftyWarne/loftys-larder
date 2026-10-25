@@ -228,6 +228,34 @@ describe('PlannerGrid', () => {
         within(wednesday).queryByTestId('plant-points-badge'),
       ).not.toBeInTheDocument();
     });
+
+    it('shows each day’s health score badge', () => {
+      renderGrid({
+        dayHealthScores: new Map([
+          [
+            '2026-06-15',
+            { average: 6.4, notScored: 0, includesOutOfDate: false },
+          ],
+          ['2026-06-16', null],
+        ]),
+      });
+      const monday = screen.getByRole('region', { name: 'Mon 15th Jun 2026' });
+      expect(
+        within(monday).getByText('AI health score 6.4 out of 10'),
+      ).toBeInTheDocument();
+      const tuesday = screen.getByRole('region', {
+        name: 'Tue 16th Jun 2026',
+      });
+      expect(
+        within(tuesday).getByTestId('health-score-average-loading'),
+      ).toBeInTheDocument();
+      const wednesday = screen.getByRole('region', {
+        name: 'Wed 17th Jun 2026',
+      });
+      expect(
+        within(wednesday).queryByTestId('health-score-average'),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it('switches layout when the viewport crosses md', () => {

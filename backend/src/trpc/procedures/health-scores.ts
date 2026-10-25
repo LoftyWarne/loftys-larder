@@ -4,20 +4,29 @@ import { TRPCError } from '@trpc/server';
 import { and, asc, eq, or, sql } from 'drizzle-orm';
 
 import {
+  getDayHealthScoreInputSchema,
+  getPlanHealthScoreInputSchema,
+  healthScoreAverageSchema,
   healthScoresDueInputSchema,
   healthScoresDueResultSchema,
   scoreRecipeHealthInputSchema,
   scoreRecipeHealthResultSchema,
   type DomainErrorCode,
+  type HealthScoreAverage,
   type HealthScoresDueResult,
   type RecipeHealthScoreDetail,
   type ScoreRecipeHealthResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import type { Db } from '../../db/index.ts';
+import { mealPlans } from '../../db/schema/meal-plans.ts';
 import { recipeHealthScores } from '../../db/schema/recipe-health.ts';
 import { recipeIngredients, recipes } from '../../db/schema/recipes.ts';
 import { makeWithTransaction } from '../../db/withTransaction.ts';
+import {
+  selectDayHealthScore,
+  selectPlanHealthScore,
+} from '../../lib/health-score/average.ts';
 import { healthScoreDueReason } from '../../lib/health-score/due.ts';
 import { normaliseHealthScore } from '../../lib/health-score/normalise.ts';
 import {
@@ -262,7 +271,49 @@ export const healthScoresRouter = router({
         }),
       };
     }),
+
+  // The day and plan Health Score (DEC-113), beside the plant points.
+  forDay: protectedProcedure
+    .input(getDayHealthScoreInputSchema)
+    .output(healthScoreAverageSchema)
+    .query(async ({ ctx, input }): Promise<HealthScoreAverage> => {
+      await assertHouseholdPlan(ctx.db, input.planId);
+      return await selectDayHealthScore(ctx.db, {
+        planId: input.planId,
+        householdId: CURRENT_HOUSEHOLD_ID,
+        date: input.date,
+      });
+    }),
+
+  forPlan: protectedProcedure
+    .input(getPlanHealthScoreInputSchema)
+    .output(healthScoreAverageSchema)
+    .query(async ({ ctx, input }): Promise<HealthScoreAverage> => {
+      await assertHouseholdPlan(ctx.db, input.planId);
+      return await selectPlanHealthScore(ctx.db, {
+        planId: input.planId,
+        householdId: CURRENT_HOUSEHOLD_ID,
+      });
+    }),
 });
+
+// Fails fast with NOT_FOUND for another household's plan, as `plants.*` does,
+// rather than returning no value (DEC-17).
+async function assertHouseholdPlan(db: Db, planId: number): Promise<void> {
+  const rows = await db
+    .select({ id: mealPlans.id })
+    .from(mealPlans)
+    .where(
+      and(
+        eq(mealPlans.id, planId),
+        eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .limit(1);
+  if (rows.length === 0) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Plan not found' });
+  }
+}
 
 interface HealthScoreRow {
   score: number;

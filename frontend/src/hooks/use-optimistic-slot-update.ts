@@ -80,6 +80,9 @@ export function useOptimisticSlotUpdate({
       // (LWW, no invalidate) + plants.* invalidated to drive a refetch.
       void utils.plants.forDay.invalidate({ planId });
       void utils.plants.forPlan.invalidate({ planId });
+      // The day and plan Health Scores are derived the same way (DEC-113).
+      void utils.healthScores.forDay.invalidate({ planId });
+      void utils.healthScores.forPlan.invalidate({ planId });
       // Swap the server-returned row into the cache without invalidating —
       // LWW reconciliation (DEC-36). The server result mirrors
       // `selectPlanSlots` exactly so the shape lines up.

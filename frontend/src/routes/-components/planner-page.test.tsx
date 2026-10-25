@@ -25,6 +25,8 @@ const {
   plantsForDayUseQueriesMock,
   plantsForDayInvalidateMock,
   plantsForPlanInvalidateMock,
+  healthForPlanUseQueryMock,
+  healthForDayUseQueriesMock,
 } = vi.hoisted(() => ({
   planUseQueryMock: vi.fn(),
   recipesUseInfiniteQueryMock: vi.fn(),
@@ -40,6 +42,8 @@ const {
   plantsForDayUseQueriesMock: vi.fn(),
   plantsForDayInvalidateMock: vi.fn().mockResolvedValue(undefined),
   plantsForPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  healthForPlanUseQueryMock: vi.fn(),
+  healthForDayUseQueriesMock: vi.fn(),
 }));
 
 let mutationOptions: Record<string, unknown> = {};
@@ -71,6 +75,10 @@ vi.mock('@/lib/trpc.ts', () => ({
         forDay: { invalidate: plantsForDayInvalidateMock },
         forPlan: { invalidate: plantsForPlanInvalidateMock },
       },
+      healthScores: {
+        forDay: { invalidate: vi.fn().mockResolvedValue(undefined) },
+        forPlan: { invalidate: vi.fn().mockResolvedValue(undefined) },
+      },
       recipes: {
         list: {
           fetch: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
@@ -81,7 +89,20 @@ vi.mock('@/lib/trpc.ts', () => ({
     plants: {
       forPlan: { useQuery: plantsForPlanUseQueryMock },
     },
-    useQueries: plantsForDayUseQueriesMock,
+    healthScores: {
+      forPlan: { useQuery: healthForPlanUseQueryMock },
+    },
+    // Both day hooks call `useQueries`; route each to its own mock by the
+    // procedure its builder asks for.
+    useQueries: (build: (t: unknown) => string[]): unknown => {
+      const procedures = build({
+        plants: { forDay: () => 'plants' },
+        healthScores: { forDay: () => 'healthScores' },
+      });
+      return procedures[0] === 'healthScores'
+        ? healthForDayUseQueriesMock()
+        : plantsForDayUseQueriesMock();
+    },
     recipes: {
       list: { useInfiniteQuery: recipesUseInfiniteQueryMock },
       listTags: { useQuery: () => ({ data: [] }) },
@@ -213,6 +234,18 @@ function setup(options: SetupOptions = {}): void {
   plantsForDayUseQueriesMock.mockReturnValue([
     { data: { count: 3 }, isLoading: false, error: null },
   ]);
+  healthForPlanUseQueryMock.mockReturnValue({
+    data: { average: 5.8, notScored: 1, includesOutOfDate: false },
+    isLoading: false,
+    error: null,
+  });
+  healthForDayUseQueriesMock.mockReturnValue([
+    {
+      data: { average: 6.4, notScored: 0, includesOutOfDate: false },
+      isLoading: false,
+      error: null,
+    },
+  ]);
 }
 
 const noop = (): void => undefined;
@@ -249,6 +282,8 @@ beforeEach(() => {
   searchMock.mockReset();
   plantsForPlanUseQueryMock.mockReset();
   plantsForDayUseQueriesMock.mockReset();
+  healthForPlanUseQueryMock.mockReset();
+  healthForDayUseQueriesMock.mockReset();
   plantsForDayInvalidateMock.mockClear();
   plantsForPlanInvalidateMock.mockClear();
   mutationOptions = {};
@@ -284,6 +319,25 @@ describe('PlannerPage', () => {
     render(<PlannerPage />);
     expect(
       screen.getByLabelText('5 plant points in this plan'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the plan health score in the header beside the plant points', () => {
+    setup();
+    render(<PlannerPage />);
+    expect(
+      screen.getByText(
+        'AI health score 5.8 out of 10 for this plan, 1 dish not scored',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('1 dish not scored')).toBeInTheDocument();
+  });
+
+  it('renders a health score badge for each visible day', () => {
+    setup();
+    render(<PlannerPage />);
+    expect(
+      screen.getByText('AI health score 6.4 out of 10'),
     ).toBeInTheDocument();
   });
 

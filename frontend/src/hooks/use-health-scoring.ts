@@ -130,9 +130,12 @@ export function useHealthScoringQueue(): HealthScoring {
             return ids;
           });
         }
+        // The day and plan Health Scores of any plan may use this recipe.
         await Promise.all([
           utils.recipes.get.invalidate({ id: item.recipeId }),
           utils.recipes.list.invalidate(),
+          utils.healthScores.forDay.invalidate(),
+          utils.healthScores.forPlan.invalidate(),
         ]);
       }
     } finally {

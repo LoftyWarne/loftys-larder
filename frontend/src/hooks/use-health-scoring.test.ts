@@ -7,16 +7,28 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { TRPCClientError } from '@trpc/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { scoreMock, dueFetchMock, getInvalidateMock, listInvalidateMock } =
-  vi.hoisted(() => ({
-    scoreMock: vi.fn(),
-    dueFetchMock: vi.fn(),
-    getInvalidateMock: vi.fn().mockResolvedValue(undefined),
-    listInvalidateMock: vi.fn().mockResolvedValue(undefined),
-  }));
+const {
+  scoreMock,
+  dueFetchMock,
+  getInvalidateMock,
+  listInvalidateMock,
+  forDayInvalidateMock,
+  forPlanInvalidateMock,
+} = vi.hoisted(() => ({
+  scoreMock: vi.fn(),
+  dueFetchMock: vi.fn(),
+  getInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  listInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  forDayInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  forPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
+}));
 
 const utils = {
-  healthScores: { due: { fetch: dueFetchMock } },
+  healthScores: {
+    due: { fetch: dueFetchMock },
+    forDay: { invalidate: forDayInvalidateMock },
+    forPlan: { invalidate: forPlanInvalidateMock },
+  },
   recipes: {
     get: { invalidate: getInvalidateMock },
     list: { invalidate: listInvalidateMock },
@@ -136,6 +148,8 @@ describe('useHealthScoringQueue', () => {
     expect([...result.current.scoringIds]).toEqual([6]);
     expect(getInvalidateMock).toHaveBeenCalledWith({ id: 5 });
     expect(listInvalidateMock).toHaveBeenCalled();
+    expect(forDayInvalidateMock).toHaveBeenCalled();
+    expect(forPlanInvalidateMock).toHaveBeenCalled();
 
     await act(async () => {
       held[1]?.resolve(scored());

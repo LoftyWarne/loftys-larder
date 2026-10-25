@@ -156,3 +156,34 @@ export const healthScoresDueResultSchema = z.object({
 });
 
 export type HealthScoresDueResult = z.infer<typeof healthScoresDueResultSchema>;
+
+// The day and plan Health Score (DEC-113): the eaten dishes' scores averaged
+// by eaten servings, computed on read and never stored. `average` is to one
+// decimal place, or null when no scored dish is eaten. `notScored` counts the
+// distinct eaten recipes with no score.
+const planIdSchema = z.number().int().positive();
+
+export const getDayHealthScoreInputSchema = z.object({
+  planId: planIdSchema,
+  date: z.iso.date(),
+});
+
+export type GetDayHealthScoreInput = z.infer<
+  typeof getDayHealthScoreInputSchema
+>;
+
+export const getPlanHealthScoreInputSchema = z.object({
+  planId: planIdSchema,
+});
+
+export type GetPlanHealthScoreInput = z.infer<
+  typeof getPlanHealthScoreInputSchema
+>;
+
+export const healthScoreAverageSchema = z.object({
+  average: z.number().min(1).max(10).nullable(),
+  notScored: z.number().int().nonnegative(),
+  includesOutOfDate: z.boolean(),
+});
+
+export type HealthScoreAverage = z.infer<typeof healthScoreAverageSchema>;

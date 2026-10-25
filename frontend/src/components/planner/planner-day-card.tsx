@@ -1,6 +1,8 @@
+import type { HealthScoreAverage } from '@loftys-larder/shared';
 import { useId } from 'react';
 import type { ReactNode, Ref } from 'react';
 
+import { HealthScoreAverageBadge } from '@/components/planner/health-score-average-badge.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { formatLongDayLabel } from '@/lib/date-utils.ts';
 import { cn } from '@/lib/utils.ts';
@@ -14,6 +16,7 @@ export interface PlannerDayCardProps {
   renderSlot: (occasionId: number) => ReactNode;
   // Same contract as the grid: `null` is loading, `undefined` hides the badge.
   plantCount?: number | null;
+  healthScore?: HealthScoreAverage | null;
   ref?: Ref<HTMLElement>;
 }
 
@@ -23,6 +26,7 @@ export function PlannerDayCard({
   occasions,
   renderSlot,
   plantCount,
+  healthScore,
   ref,
 }: PlannerDayCardProps): React.ReactElement {
   const headingId = useId();
@@ -45,9 +49,14 @@ export function PlannerDayCard({
             </span>
           )}
         </h2>
-        {plantCount !== undefined && (
-          <PlantPointsBadge count={plantCount} variant="day" />
-        )}
+        <div className="flex items-center gap-1">
+          {plantCount !== undefined && (
+            <PlantPointsBadge count={plantCount} variant="day" />
+          )}
+          {healthScore !== undefined && (
+            <HealthScoreAverageBadge value={healthScore} variant="day" />
+          )}
+        </div>
       </div>
       <div className="divide-y divide-border">
         {occasions.map((occasion) => (

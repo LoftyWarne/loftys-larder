@@ -62,6 +62,9 @@ export function useOptimisticSlotRelocate({
       // plants.* to force a refetch (FEAT-41).
       void utils.plants.forDay.invalidate({ planId });
       void utils.plants.forPlan.invalidate({ planId });
+      // The day and plan Health Scores are derived the same way (DEC-113).
+      void utils.healthScores.forDay.invalidate({ planId });
+      void utils.healthScores.forPlan.invalidate({ planId });
       if (!data) return;
       const current = utils.plans.get.getData({ id: planId });
       if (!current) return;

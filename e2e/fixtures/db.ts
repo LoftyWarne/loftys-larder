@@ -43,7 +43,28 @@ export const HOUSEHOLD_ID = '00000000-0000-4000-8000-000000000001';
 // Wipe every household-scoped row between specs while leaving auth (users /
 // sessions), the seeded household, and reference data untouched. RESTART
 // IDENTITY keeps serial PKs deterministic across specs.
+//
+// The previous spec's automatic health score can still be in its write
+// transaction, holding a read lock on `recipes` while waiting for
+// `recipe_method`, which the truncate has already locked. Postgres breaks the
+// cycle by cancelling one side; if it picks the truncate, try again.
 export async function resetHouseholdData(): Promise<void> {
+  const attempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await truncateHouseholdData();
+      return;
+    } catch (err) {
+      if (!isDeadlock(err) || attempt >= attempts) throw err;
+    }
+  }
+}
+
+function isDeadlock(err: unknown): boolean {
+  return err instanceof pg.DatabaseError && err.code === '40P01';
+}
+
+async function truncateHouseholdData(): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query(`

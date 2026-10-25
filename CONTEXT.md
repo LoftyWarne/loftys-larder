@@ -40,6 +40,24 @@ _Avoid_: AI import, idea import
 A view of one recipe for use while cooking. It starts with a gather screen of the ingredients, then shows one method step per screen in large type and keeps the screen on.
 _Avoid_: kitchen mode, step mode, recipe player
 
+### Planning
+
+**Plan Proposal**:
+A model's proposed meals for a new plan's slots, made from the cook's dates, who's eating, Fixed meals and Brief, and drawn only from the household's own recipes. Nothing in it exists until the cook applies it.
+_Avoid_: AI plan, generated plan, auto-plan, meal suggestions
+
+**Plan Review**:
+The step where a cook keeps, swaps or discards each slot of a Plan Proposal, or asks for another go, before the plan exists.
+_Avoid_: preview, approval
+
+**Brief**:
+Optional plain text a cook writes to steer a Plan Proposal, such as the mood of the week, how much effort to spend, or ingredients to use up.
+_Avoid_: prompt, instructions, notes
+
+**Fixed meal**:
+A slot the cook settles before a Plan Proposal is made: a specific recipe, eat out, takeaway, or a batch to cook for later. The model plans around it and never changes it.
+_Avoid_: pinned slot, locked slot
+
 ### Judging recipes
 
 **Health Score**:

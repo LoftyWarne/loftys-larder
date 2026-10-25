@@ -1341,6 +1341,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** A proposed feature is worth building but breaks a rule.
 - **Cross-refs:** DEC-32 (plant points are computed), DEC-101, DEC-103, DEC-104, DEC-106, DEC-109; cross-cutting #22; non-goal: "AI / LLM features" (now points here).
 - **Amended (2026-10-07) by DEC-112 and DEC-113.** The health score's Suggestion narrowly reverses the "substitution advice" exclusion: one suggested change attached to a recipe's Health Score, which the cook decides whether to make (rule 1) and which is labelled AI (rule 2). There's still no standalone substitution feature. The day and plan Health Score is worked out by rule from stored scores (rule 3).
+- **Amended (2026-10-25) by DEC-117.** The "meal-plan suggestions" exclusion is narrowly reversed. A planning wizard creates a plan from a Plan Proposal. The cook reviews each slot in Plan Review, and nothing exists until they apply it (rule 1). Proposed meals are badged as AI during review (rule 2). Plant points, balances and Health Scores in review are worked out by rule (rule 3). A Brief may name ingredients to use up, which narrowly reverses "what can I cook with X", within planning only. This rule 1 consequence still holds: a model never fills a plan by itself.
 
 ### DEC-111 — Document import: text files import as pasted text, saved web pages are pruned in the browser and read like links, and PDFs go through Cloudinary to the model and are kept as Originals
 
@@ -1486,6 +1487,139 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Revisit when:** The cooks reach for timers often enough that a separate timer gets in the way, which is the trigger for in-page timers first. Also if losing ticks on reload annoys in practice, or if the two cooks cook one recipe together and want shared progress.
 - **Amended (2026-10-24).** Cook mode now has a horizontal swipe: swipe left for Next, right for Back. Touches that start within 24 px of either screen edge are ignored, so the iOS and Android edge-swipe Back still works. A gesture needs 50 px of travel and must be at least twice as wide as it is tall, so scrolling a long step or the gather list isn't read as a swipe. Swiping never leaves cook mode: it does nothing past the gather screen or the last step, and Finish and Exit stay buttons. There's no vertical swipe, because vertical movement is already how a long step or the gather list scrolls, and a pull down at the top of the page means refresh in mobile Chrome. Back on the gather screen now closes cook mode, as Exit does, instead of being disabled, and so does the Left arrow key there. A right swipe on the gather screen still does nothing, so a stray swipe can't lose the ticks.
 - **Cross-refs:** CONTEXT.md (Cook mode), DEC-23, DEC-36, DEC-49, DEC-94, DEC-95, DEC-96, DEC-98, DEC-99; FEAT-31 (slot card), FEAT-55, FEAT-74; non-goal: "Cook-mode timers, hands-free advance and shared progress" (renamed from "Cook-mode / step-by-step / timer integration" and narrowed: the step view and wake lock are built; timers, hands-free advance and stored progress stay out).
+
+### DEC-117 — AI meal planning: a wizard creates a plan from a Plan Proposal, which the cook reviews slot by slot, through a `MealPlanner` seam
+
+- **Chosen:** A planning wizard creates a new plan. A model proposes meals for it, and nothing exists until the cook applies what they kept in Plan Review. **Plan Proposal**, **Plan Review**, **Brief** and **Fixed meal** are defined in `CONTEXT.md`.
+  - **What it's for:** five problems, all named by the household:
+    - a blank-page week
+    - the same recipes coming round
+    - balancing plant variety and Health Scores
+    - making batch cooking flow across the week
+    - varying taste profiles
+  - **The wizard:**
+    1. **Dates.** The same rules as any new plan: at most 14 days (`PLAN_MAX_RANGE_DAYS`) and no overlap with an active or future plan (DEC-38).
+    2. **Who's eating.** Each slot's attendance, as the slot editor records it: named household members plus a guest count. It's set once for every slot, then changed per slot. The headcount is diners plus guests, as on the planner.
+    3. **Fixed meals.** For any slot, one of:
+       - a specific recipe
+       - eat out
+       - takeaway
+       - a batch to cook for later (a recipe and a number of portions)
+
+       The model plans around Fixed meals and never changes them. Leftovers can't be fixed: the model proposes them.
+    4. **Brief.** Optional plain text (DEC-49). It may steer by mood, effort, cuisine or health, and may name ingredients to use up.
+
+    Then the model makes a Plan Proposal and Plan Review opens.
+  - **What the model may propose,** for each slot that isn't fixed:
+    - A recipe slot with **one main dish** from the household's pickable recipes (cross-cutting #5), eaten by the slot's headcount. Sides and desserts stay manual.
+    - Extra portions of a dish to eat later (`prepared > eaten`, DEC-91), and `plan_meal` leftovers slots that eat them (DEC-90).
+    - A batch cooked at a slot where nobody eats (headcount 0), as a prepared-only dish (DEC-91), when that helps the week. Otherwise a headcount-0 slot stays empty.
+    - **Never** eat out, takeaway, or `takeaway` / `other` leftovers. **Never** a recipe outside the library: it never invents one, because Recipe Generation stays deferred.
+    - A batch, fixed or proposed, is planned to be used up within the plan. Portions left over for the freezer wait for the storage feature, which will record which recipes freeze well. The model doesn't guess.
+  - **What the model is told:**
+    - **Each pickable recipe:**
+      - id, name and tags (DEC-97)
+      - kind (standalone, base or serving variation, with its base) and `baseServings`
+      - active and total time
+      - average rating
+      - Health Score, and whether it's out of date
+      - ingredient names, without quantities, so it can judge taste and plant variety
+      - the date it was last planned, and how many times it was planned in the 4 weeks before the plan starts, both worked out by rule from non-deleted plans
+    - **The plan:** its dates and occasions, each slot's headcount, the Fixed meals and the Brief.
+    - **On "Another go":** the previous proposal and the cook's added note.
+    - **Not sent:** method text, comments, cost, images, nutrition, the plant-points count (DEC-112 alternative (f)), and who the diners are (headcounts only).
+  - **What comes back:**
+    - For each unfixed slot, its dishes and a reason of up to 120 characters.
+    - A summary of the week of up to 300 characters. The summary also says how the model read the Brief ("I took 'light' to mean under 30 minutes and no cream"), so a misreading shows and "Another go" can correct it.
+  - **Plan Review:**
+    - The proposed week, laid out like the planner. Each proposed slot is badged as an AI suggestion, with its reason.
+    - For each slot the cook can:
+      - keep it
+      - swap it for a recipe they pick in the shared combobox (cross-cutting #6)
+      - suggest again for that slot alone
+      - discard it, leaving the slot empty
+    - **Another go** reruns the whole week with an added note.
+    - Review shows the planner's shortfall and "left in plan" warnings (DEC-88, DEC-91), plant points (FEAT-41) and the day and plan Health Score (DEC-113). The app works them out by rule over the proposal as it stands, and they update as the cook edits (DEC-110 rule 3).
+    - **Apply** creates the plan in one `withTransaction`: every slot's attendance, the Fixed meals, and the proposals that were kept. Then it opens the plan in the planner.
+  - **Nothing is stored before Apply.**
+    - The proposal lives in React state (DEC-09) and is lost on reload, at the cost of one rerun. There's no draft table.
+    - Abandoning the wizard leaves no plan behind.
+    - Reasons and summaries are never stored.
+  - **Labelling (DEC-110 rule 2):** proposed meals are badged in review. Once applied they carry no label: a planned meal is the cook's choice, not a claim a reader could take for fact. So there's no schema change.
+  - **Seam:** `MealPlanner`, with `propose(request, signal)` for a whole plan and `proposeSlot(request, signal)` for one slot, following DEC-109's pattern.
+    - **Adapters:** `anthropic` and `fake`.
+    - **Config:** `MEAL_PLAN_ADAPTER`, `MEAL_PLAN_MODEL` (default `claude-opus-5-5`) and `MEAL_PLAN_EFFORT`. The default effort is set at FEAT-75 kick-off, and FEAT-72 tunes it. Config refuses `fake` in production.
+    - **Provider settings:** structured outputs, and Anthropic's refusal fallback on, as for scoring.
+    - **Normaliser, after the seam, on every adapter's output:**
+      - Every recipe id is pickable and in the household.
+      - Fixed slots are never changed.
+      - Every recipe slot has exactly one eaten dish, eaten by its headcount.
+      - Every item follows DEC-91's rules.
+      - Every `plan_meal` leftover eats a dish prepared earlier in the plan.
+      - No eat out or takeaway.
+      - Reasons and summary are plain text within their lengths.
+      - A slot that fails is dropped to empty and counted, and review says so. A shortfall is never a failure: it shows as the usual warning.
+  - **Calls:** one synchronous tRPC mutation per proposal and per single-slot suggestion, on `httpBatchLink` (cross-cutting #16), as for imports (DEC-104). Neither writes anything. The time limit is set at FEAT-75 kick-off, from a real call against the household's library for a 14-day plan. If a 14-day proposal can't finish within one request, cross-cutting #22's background-work trigger fires, and this DEC is amended before building goes on.
+  - **Limits:**
+    - 5 whole-plan proposals per user per hour, counting the first and every "Another go".
+    - 30 single-slot suggestions per user per hour, counted separately.
+    - Only calls that reach the model count.
+    - Over a limit, the call is refused with `TOO_MANY_REQUESTS` and a domain code.
+    - The wizard's model calls are off while offline.
+    - The monthly spend cap in Anthropic's console stays the backstop.
+  - **Data flow (cross-cutting #22):**
+    - **New to Anthropic:** average ratings, how recently and how often each recipe was planned, headcounts, Fixed meals and the Brief.
+    - **Already sent by other features:** recipe names, ingredient names and Health Scores.
+    - **Logs carry metadata only:** `reqId`, feature `meal_plan`, adapter, model, tokens, latency, outcome, the number of slots, Fixed meals and library recipes, the Brief's length, and how many slots were dropped. They never carry the Brief, the note, reasons, the summary or recipe names.
+  - **The non-goals:**
+    - This narrowly reverses "meal-plan suggestions": Plan Proposals made in the wizard only.
+    - A Brief naming ingredients to use up narrowly reverses "what can I cook with X", within planning only.
+    - **Still excluded:**
+      - recipe recommendations (a standalone "you might like" feed)
+      - "what can I cook with X" outside planning
+      - a model inventing recipes
+    - **Deferred to a later version** (non-goal "AI meal planning follow-ons"):
+      - planning with AI on an existing plan
+      - clarifying questions when a Brief is unclear
+      - freezer surplus
+  - **Delivery:**
+    - FEAT-75: the seam and whole-plan proposals, dishes only
+    - FEAT-76: the wizard, Plan Review and Apply
+    - FEAT-77: batch cooking in proposals
+    - FEAT-78: suggest again for one slot
+    - FEAT-72 gains a Plan Proposal eval set.
+- **Alternatives:**
+  - (a) Keep the exclusion.
+  - (b) A rule-based helper with no model ("not planned in 4 weeks, rated 4+, scored 7+"). It covers the rut and some of the balance, but it can't read a Brief, judge taste variety or sequence batch cooking.
+  - (c) Suggestions in the slot editor only. Smallest, but blind to the week's balance and batch flow.
+  - (d) "Plan with AI" on an existing plan. It could rerun on a half-filled week, but slots already filled and Fixed meals would blur. The household chose a wizard that creates the plan, and this is deferred.
+  - (e) Fill the plan and let the cook undo. This breaks rule 1.
+  - (f) Store the proposal as a draft. It would survive a reload, but costs a table, and losing a proposal only costs one rerun.
+  - (g) Clarifying questions when the Brief is unclear. They add a step and a model call before any plan appears. The summary's reading of the Brief, plus "Another go", covers it for now.
+  - (h) Let the model judge which recipes freeze well. That's a guess presented as fact, so freezer surplus waits for the storage feature.
+  - (i) Propose sides and desserts. More to review, and it depends on side recipes existing.
+  - (j) Label applied meals as AI. A planned meal isn't a claim of fact, and the label would need a column.
+- **Why it won:** A model earns its place here only for what rules can't do: reading a Brief, judging taste variety, and sequencing batch cooking across a fortnight. A wizard that creates the plan keeps the cook's inputs (who's eating, what's fixed) explicit. Plan Review keeps every meal the cook's decision. The app's own rules show the numbers, so a proposal can't misreport plant points, Health Scores or balances.
+- **Consequences (+):**
+  - No schema change.
+  - It reuses attendance, slot items and their rules, the consumption balance, plant points, the combobox, `pickable-recipes`, `withTransaction` and the model-feature helpers.
+  - Changing the model is a config change.
+- **Consequences (−):**
+  - A 14-day proposal is the largest model call in the app, and may not fit in one request (the named trigger).
+  - Ratings and plan history now leave the app.
+  - A proposal is lost on reload.
+  - Review needs plant points and the day and plan Health Score for slots that aren't saved yet. Today both are computed only over saved slots. The rule code has to be shared rather than copied, which is a stop-and-ask on those helpers at kick-off.
+  - Review's day and plan Health Score needs FEAT-71 first.
+  - A reason can be wrong or flattering. It's labelled and never kept.
+  - Proposals can only be as varied as the library and its tags.
+- **Revisit when:**
+  - Cooks discard most of a proposal most of the time, so it isn't earning its cost.
+  - "Another go" keeps hitting the limit.
+  - Proposals run out of time.
+  - The storage feature lands (freezer surplus).
+  - Briefs are often misread (clarifying questions).
+  - The cooks want to plan with AI on an existing plan.
+- **Cross-refs:** CONTEXT.md (Plan Proposal, Plan Review, Brief, Fixed meal), DEC-09, DEC-17, DEC-21, DEC-32, DEC-33, DEC-38, DEC-49, DEC-64, DEC-88, DEC-89, DEC-90, DEC-91, DEC-97, DEC-104, DEC-109, DEC-110 (amended), DEC-112, DEC-113; FEAT-19, FEAT-21, FEAT-27, FEAT-31, FEAT-41, FEAT-71, FEAT-72 (amended), FEAT-75 to FEAT-78; cross-cutting #5, #6, #16, #22; non-goals: "AI / LLM features" (adjacency note amended), "AI meal planning follow-ons" (new).
 
 ---
 

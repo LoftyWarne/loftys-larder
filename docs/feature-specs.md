@@ -3311,6 +3311,21 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
   - Write the expected order down with the inputs before the first run (the salad above the fry-up, for example). The run checks it.
   - An input is the scorer's request, exported from the database, so the runner never needs the app or the database.
   - Scoring ships before this feature with a manual three-recipe consistency check (FEAT-66, manual step 2). Compare that check's numbers with this run's.
+- Amended at AI meal planning scoping (2026-10-25): a Plan Proposal set, added once FEAT-75 lands (DEC-117). This doesn't block the Recipe Import and Health Score sets.
+  - **About six inputs, each a planner request exported from real wizard inputs:**
+    - a plain week with no Brief
+    - a Brief naming ingredients to use up
+    - a week with many Fixed meals
+    - a batch-cooking week with a fixed batch
+    - a 14-day plan
+    - a misleading Brief
+  - **The report adds, per input:**
+    - slots dropped by the normaliser
+    - recipes repeated from the 4 weeks before the plan
+    - whether a fixed batch was used up
+    - whether the summary's reading of the Brief matches the Brief
+    - time against the time limit
+  - The run settles `MEAL_PLAN_MODEL` and `MEAL_PLAN_EFFORT`.
 
 **Manual verification:**
 1. Run the runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
@@ -3428,6 +3443,281 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 - Tests cover: `cookSearchSchema` fallbacks; the step clamp; the wake-lock hook (taken, taken again on becoming visible, released on unmount, a missing or refused API); gather ticks surviving step changes and clearing on reload; Back, Next, Finish and the preview line; the step list; history replacement; scaled chips and the amounts note; the entry points' links and their absence for leftovers and deleted recipes; focus and the announcement; e2e planner → cook mode → Finish; the axe scan in both themes.
 - Commit: `feat(recipes): add cook mode`
 - Gate check: manual verification steps 1–3.
+
+---
+
+### FEAT-75 — AI meal planning backend: the `MealPlanner` seam and whole-plan Plan Proposals
+
+**Goal:** Given a plan's dates, who's eating at each slot, the Fixed meals and an optional Brief, return a normalised Plan Proposal for the slots that aren't fixed. This first cut proposes one main dish per slot, with no batch cooking. Nothing is written. (DEC-117, DEC-109, DEC-110)
+
+**Estimate:** 2 days. **Depends on:** FEAT-19 (`pickable-recipes`), FEAT-27 (plan creation's date rules), FEAT-60 (the model-feature helpers), FEAT-66 (Health Scores). **Enables:** FEAT-76, FEAT-77, FEAT-78, and FEAT-72's Plan Proposal set.
+
+**Files** (names provisional until kick-off):
+- `backend/src/lib/meal-planner/` (new): the `MealPlanner` interface, the `anthropic` adapter and its prompt, the `fake` adapter, and choosing an adapter from config. Laid out like `recipe-scorer/`.
+- `backend/src/lib/plan-proposal/` (new):
+  - building the planner's request: the library summary, with recency worked out from past plans
+  - `normalisePlanProposal`
+- `backend/src/trpc/procedures/plan-proposals.ts` (new: `propose`), `backend/src/trpc/router.ts`
+- `backend/src/config.ts` (`MEAL_PLAN_ADAPTER`, `MEAL_PLAN_MODEL`, `MEAL_PLAN_EFFORT`), `fly.toml`, `backend/.env.example`, `docs/secrets-checklist.md`
+- `backend/src/plugins/rate-limit.ts` (the proposal limit), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the planner and the limit on the context)
+- `shared/src/schemas/plan-proposals.ts` (new: the shapes below), `shared/src/schemas/errors.ts`, `shared/src/index.ts`
+
+**Shapes** (code in `shared/src/schemas/plan-proposals.ts`; names provisional):
+- **`planProposals.propose` input:**
+  - `startDate`, `endDate`
+  - `slots`: one entry per (date × occasion) in the range, each `{ date, occasionId, dinerUserIds, guestCount, fixed }`. `fixed` is one of:
+    - `null`
+    - `{ kind: 'recipe', recipeId }`
+    - `{ kind: 'eat_out' }`
+    - `{ kind: 'takeaway' }`
+    - `{ kind: 'batch', recipeId, portions }` (accepted from FEAT-77)
+  - `brief`: plain text or null
+  - `note` and `previous`: set only on "Another go" (FEAT-76)
+- **Planner request** (what the seam gets):
+  - `slots: [{ date, occasion, headcount, fixed }]`
+  - `recipes: [{ id, name, tags, kind, baseRecipeId, baseServings, activeMins, totalMins, averageRating, healthScore, healthScoreOutOfDate, ingredientNames, lastPlannedOn, timesPlannedLast4Weeks }]`
+  - `brief`, `note`, `previous`
+  - Headcounts only: never who the diners are.
+- **Planner outcome:** `{ kind: 'candidate', candidate }` or `{ kind: 'refused' }`, with usage `{ model, inputTokens, outputTokens }`. Timeout and provider-unavailable are typed errors, as for the reader and the scorer.
+- **Normalised Plan Proposal:**
+  - `slots: [{ date, occasionId, slotType, leftoversSource, items: [{ recipeId, prepared, eaten }], reason }]` for the unfixed slots
+  - `summary`
+  - `dropped`: the number of slots the normaliser emptied
+- **Errors:**
+  - `MEAL_PLAN_RATE_LIMITED`: `TOO_MANY_REQUESTS`, with the seconds until retry.
+  - `MEAL_PLAN_TRY_AGAIN`: a timeout, a provider failure, or a result the normaliser refused entirely.
+  - `MEAL_PLAN_NOT_PROPOSED`: every model refused.
+  - `MEAL_PLAN_REQUEST_REJECTED`: the provider refused the request outright.
+  - `MEAL_PLAN_NO_RECIPES`: there are no pickable recipes, so no model call is made.
+  - Plan creation's `PLAN_RANGE_TOO_LONG` and `PLAN_DATE_OVERLAP`, checked before any call.
+  - None of them writes.
+
+**Acceptance criteria:**
+- [ ] `propose` returns a proposal for every slot that isn't fixed, and nothing for fixed slots. It writes nothing
+- [ ] Every proposed recipe is pickable and in the household (DEC-17, cross-cutting #5). A soft-deleted recipe, or one from outside the household, is dropped by the normaliser
+- [ ] Each proposed recipe slot has exactly one dish, with `prepared = eaten =` the slot's headcount. FEAT-77 relaxes this to allow extra portions
+- [ ] A slot with headcount 0 is left empty. FEAT-77 relaxes this to allow a prepared-only batch
+- [ ] No proposal is eat out, takeaway or leftovers. Batch cooking arrives in FEAT-77
+- [ ] A slot the normaliser can't use is returned empty and counted in `dropped`. Other slots are unaffected
+- [ ] Reasons are plain text of at most 120 characters. The summary is plain text of at most 300 characters. Markdown is stripped
+- [ ] The request carries each pickable recipe's fields as listed above. `lastPlannedOn` and `timesPlannedLast4Weeks` are worked out by rule from non-deleted plans in the household
+- [ ] Method text, comments, cost, images, nutrition, plant-point counts and diners' identities are never sent
+- [ ] A range over 14 days, or one overlapping an active or future plan, is refused with plan creation's errors before any model call
+- [ ] With no pickable recipes, `MEAL_PLAN_NO_RECIPES` is returned and no model call is made
+- [ ] A refusal from every model gives `MEAL_PLAN_NOT_PROPOSED`. A timeout or provider failure gives `MEAL_PLAN_TRY_AGAIN`
+- [ ] The sixth proposal in an hour from one user is refused with `MEAL_PLAN_RATE_LIMITED`. Calls refused before the model don't count
+- [ ] Changing `MEAL_PLAN_ADAPTER` or `MEAL_PLAN_MODEL` changes the planner with no code change, and config refuses `fake` in production
+- [ ] Each call logs `reqId`, adapter, model, tokens, latency, outcome, and the counts of slots, Fixed meals, library recipes and dropped slots, plus the Brief's length, through the shared usage logger (feature `meal_plan`). It never logs the Brief, the note, reasons, the summary or recipe names
+
+**Implementation notes:**
+- Read the library and recency outside any transaction, and call the model outside any transaction. `propose` never writes, so there's no re-read guard as scoring has.
+- Recency is one query over slot items in non-deleted plans in the household, grouped by recipe (DEC-17). Dates come from `dateUtils` (DEC-33).
+- Reuse the shared helpers in `backend/src/lib/model-features/`: client setup, error sorting, refusal fallback, plain-text stripping, the structured-output schema helper and the usage logger.
+- **Structured-output schema size:** a 28-slot proposal schema is larger than scoring's. Check it against the grammar limit that the import schema hit (DEC-109 amended).
+- **Prompt caching:** the library part of the request is the same on every rerun in a sitting, so it's a candidate for caching. Measure before relying on it.
+- No `new Date()` in domain code. No `console.log`.
+
+**Proposed readings, for kick-off:**
+1. **The time limit.** Time a real 14-day call against the household's library. If it can't fit in one request, stop: that's cross-cutting #22's background-work trigger, and DEC-117 gets amended.
+2. **Brief and note length.** The Brief is capped at 500 characters and "Another go"'s note at 200.
+3. **The recency window.** "The 4 weeks before the plan starts" counts slots dated in the 28 days before `startDate`, from non-deleted plans. Slots on or after the start don't count.
+4. **Default effort.** `MEAL_PLAN_EFFORT` defaults to `medium` until FEAT-72 measures it.
+
+**Manual verification:**
+1. Call `propose` through the `anthropic` adapter for a 14-day plan with two Fixed meals and a Brief. It finishes within the time limit, fixed slots are untouched, and every recipe is from the library.
+2. Repeat with a Brief naming an ingredient to use up. The proposal favours recipes using it, and the summary says how the Brief was read.
+
+**Definition of done:**
+- Tests cover:
+  - the request builder: fields sent and not sent, recency, household scope
+  - each normaliser rule
+  - each error and the limit
+  - config refusing `fake` in production
+  - the usage log's fields
+  - one end-to-end call on the `fake` adapter
+- A real request through the `anthropic` adapter before the first deploy (cross-cutting #22).
+- Commit: `feat(planner): add the meal planner seam and plan proposals`
+- Gate check: manual verification steps 1–2.
+
+---
+
+### FEAT-76 — Planning wizard, Plan Review and Apply
+
+**Goal:** From the plans page, a cook opens a wizard. It takes the plan's dates, who's eating at each slot, the Fixed meals and an optional Brief, then shows the Plan Proposal in Plan Review. There the cook keeps, swaps or discards each slot, or asks for another go. Apply creates the plan with what was kept and opens it in the planner. Nothing exists before Apply. (DEC-117, DEC-110)
+
+**Estimate:** 2–3 days. **Depends on:** FEAT-75, FEAT-21 (the combobox), FEAT-31 (the slot card), FEAT-41 (plant points), FEAT-71 (the day and plan Health Score). **Enables:** FEAT-77, FEAT-78.
+
+**Files** (names provisional until kick-off):
+- `frontend/src/routes/_authed/plans/propose.tsx` (new, a thin shell), `frontend/src/routes/-components/plan-wizard-page.tsx` (new)
+- `frontend/src/components/plan-wizard/` (new): the dates, who's eating, Fixed meals and Brief steps, and Plan Review
+- `frontend/src/routes/-components/plans-page.tsx`: the "Plan with AI" entry
+- `backend/src/trpc/procedures/plans.ts`: a create-with-slots mutation for Apply, and a read that checks dates for step 1 (both are kick-off questions)
+- A read that works out plant points and the day and plan Health Score over proposed slots, sharing the rule code in `backend/src/lib/plant-points.ts` and FEAT-71's average (a kick-off question)
+- `shared/src/schemas/plan-proposals.ts`, `shared/src/schemas/plans.ts`
+
+**Acceptance criteria:**
+- [ ] The plans page has a "Plan with AI" entry beside the new-plan action. It's off while offline
+- [ ] **Step 1, dates:** the range follows plan creation's rules. A range over 14 days, or one overlapping an active or future plan, is refused at this step, with plan creation's messages
+- [ ] **Step 2, who's eating:**
+  - [ ] Attendance (household members and guests) is set once for every slot, then changed per slot
+  - [ ] Each slot shows its headcount. A slot can be set to nobody eating
+- [ ] **Step 3, Fixed meals:**
+  - [ ] Any slot can be fixed to a recipe (chosen in the shared combobox), eat out or takeaway
+  - [ ] Leftovers can't be fixed
+- [ ] **Step 4, the Brief:** optional plain text, within its length limit
+- [ ] The cook can move back through the steps without losing what they entered
+- [ ] **Asking for a proposal** shows progress while the call runs. Errors show plainly:
+  - [ ] the rate limit, with when to retry
+  - [ ] "try again"
+  - [ ] "couldn't make a plan"
+  - [ ] no recipes
+- [ ] **Plan Review shows:**
+  - [ ] every slot of the plan, laid out like the planner
+  - [ ] each proposed slot badged as an AI suggestion, with its reason
+  - [ ] the week's summary
+  - [ ] Fixed meals shown as fixed
+  - [ ] a note when slots were dropped
+- [ ] **For each proposed slot, the cook can:**
+  - [ ] keep it
+  - [ ] swap it for a recipe they pick in the shared combobox
+  - [ ] discard it, leaving the slot empty
+- [ ] **"Another go"** takes an optional note, reruns the whole proposal, and replaces the slots that weren't fixed
+- [ ] **Figures in review:** plant points per day and plan, and the day and plan Health Score, are worked out by the app's rules over the proposal as it stands, and update after every keep, swap or discard. The model never supplies them
+- [ ] **Apply** creates the plan in one transaction with:
+  - [ ] every slot's attendance
+  - [ ] the Fixed meals, written as their slot types and dishes
+  - [ ] the kept proposals
+  - [ ] Discarded slots are empty, keeping their attendance. Then the planner opens on the new plan
+- [ ] Apply checks the dates and every recipe's pickability again. A conflict since step 1 is refused with plan creation's error, and the review stays open
+- [ ] Applied meals carry no AI label. Reasons and the summary aren't stored
+- [ ] Leaving the wizard, or reloading, before Apply creates nothing and loses the proposal. Leaving with a proposal on screen asks first
+- [ ] The wizard and Plan Review work at phone width in both themes, and pass the axe scan
+
+**Implementation notes:**
+- Wizard state and the proposal live in React state (DEC-09). There's no draft table and no browser storage.
+- Plan Review renders slots with the slot card (cross-cutting #14), with the AI badge and reason in its existing extension regions. Check those regions fit before adding to the card: changing the slot card's shape is a stop-and-ask.
+- Swaps use the shared combobox over pickable recipes (cross-cutting #6). Don't fork a picker.
+- The headcount is diners plus guests, as on the planner. Don't introduce a second count.
+- Apply goes through `withTransaction` (cross-cutting #4) and writes slots with the same item and attendance rules as `slots.update`. Reuse that code rather than copying it.
+
+**Proposed readings, for kick-off:**
+1. **Apply's write.** Apply needs a mutation that creates a plan with its slots. A new `plans.createWithSlots`, sharing `create`'s date checks and `slots.update`'s item rules, is a new helper boundary, so stop and ask.
+2. **Step 1's date check.** A read that runs `create`'s range and overlap check without writing, so a clash shows before steps 2–4.
+3. **Figures over unsaved slots.** A read that takes the proposed slots and returns plant points and the day and plan Health Score by the same rules as the saved-plan reads. The rule code is shared, never copied, and the shape of that change to those helpers is a stop-and-ask.
+4. **"Another go" and the cook's edits.** Slots the cook swapped in review are sent as Fixed meals, so a rerun keeps them. Slots the cook kept or discarded are proposed again.
+5. **The route.** `/plans/propose`, with the step held in React state, not the URL.
+
+**Manual verification:**
+1. On a phone, plan a week with the wizard: two people at every dinner, one guest on Saturday, Sunday lunch fixed to a roast recipe, Friday dinner fixed to takeaway, and a Brief. Swap one slot and discard another, check the figures update, and apply. The plan matches what was kept, and attendance is on every slot.
+2. Start the wizard, get a proposal, and reload. Nothing was created.
+
+**Definition of done:**
+- Tests cover:
+  - each step's validation, and moving back
+  - attendance defaults and overrides
+  - Fixed meals
+  - keep, swap and discard
+  - "Another go" keeping swapped slots
+  - figures updating from rule code
+  - Apply's transaction and its re-checks
+  - nothing created before Apply
+  - the AI badge in review and its absence after Apply
+  - the offline state
+  - e2e: wizard → review → Apply → planner
+  - the axe scan in both themes
+- Commit: `feat(planner): add the planning wizard and plan review`
+- Gate check: manual verification steps 1–2.
+
+---
+
+### FEAT-77 — Batch cooking in Plan Proposals: fixed batches, cook-aheads and leftovers
+
+**Goal:** Plan Proposals plan batch cooking. A cook can fix a batch to cook for later, and the model plans meals that use it up. The model may also propose cooking extra portions to eat later, `plan_meal` leftovers slots that eat them, and batches cooked at slots where nobody eats. Review shows the planner's usual balance warnings. (DEC-117, DEC-88, DEC-90, DEC-91)
+
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-75, FEAT-76. **Enables:** none specifically.
+
+**Files:**
+- `backend/src/lib/plan-proposal/` (the request, the prompt and the normaliser), `backend/src/lib/meal-planner/` (the prompt)
+- `shared/src/schemas/plan-proposals.ts` (the `batch` Fixed meal)
+- `frontend/src/components/plan-wizard/` (the batch Fixed meal and the warnings in review)
+- `frontend/src/lib/serving-variation-supply.ts`: `deriveBaseBalances` over proposed slots, unchanged if its input fits
+
+**Acceptance criteria:**
+- [ ] **A batch Fixed meal:** step 3 can fix a slot to a batch, meaning a recipe and the number of portions to cook. The model plans meals that eat it within the plan and never changes it
+- [ ] **Extra portions:** the model may propose a dish with `prepared > eaten`, whose surplus is eaten at later slots in the plan
+- [ ] **Leftovers slots:**
+  - [ ] The model may propose a `plan_meal` leftovers slot: one item with `prepared = 0` and `eaten =` the slot's headcount
+  - [ ] Its recipe must be prepared at an earlier slot in the plan, or by a batch Fixed meal. The normaliser drops one that isn't
+- [ ] **Serving variations:** the model may propose a serving variation whose base is cooked earlier in the plan
+- [ ] **Headcount-0 slots:** at a slot where nobody eats, the model may propose a prepared-only batch (`eaten = 0`) on an otherwise empty slot. Otherwise the slot stays empty
+- [ ] **Item rules:** every proposed item follows DEC-91's rules. Eat out, takeaway and `takeaway` / `other` leftovers are never proposed
+- [ ] **Warnings in review:** shortfalls and "left in plan" amounts are worked out by `deriveBaseBalances` over the proposal as it stands, show as on the planner, and update after every keep, swap or discard. A shortfall never blocks Apply
+- [ ] **Applying:** a batch Fixed meal, cook-aheads and leftovers slots are written as the planner writes them. The shopping list for the applied plan provisions every `prepared` portion
+
+**Implementation notes:**
+- The model proposes quantities. The app checks them by rule (DEC-110 rule 3), and the normaliser checks structure only. A batch that isn't used up shows as "left in plan" rather than being refused.
+- "Earlier in the plan" follows the consumption walk's order: date, then occasion (DEC-88).
+- Freezer surplus is out of scope until the storage feature (DEC-117).
+
+**Proposed readings, for kick-off:**
+1. **Is a batch Fixed meal also eaten that day?** If the slot has people eating and no other Fixed meal, the model may make the batch their meal there too (`eaten =` headcount), or propose a separate main. The cook can't pin which.
+2. **Variation shortfalls.** A proposed serving variation with no base cooked earlier is kept with its shortfall warning, not dropped, matching the planner's soft warning.
+
+**Manual verification:**
+1. Fix "batch-cook keema, 6 portions" on Sunday dinner for a week with two eating. The proposal eats the keema later in the week, and review shows nothing short and nothing left. Discard one of those slots. Review shows "2 left in plan".
+
+**Definition of done:**
+- Tests cover:
+  - the batch Fixed meal
+  - each normaliser rule for cook-aheads, leftovers, variations and headcount-0 batches
+  - balances over a proposal, and their updates after edits
+  - Apply writing each kind
+  - the applied plan's shopping list
+- Commit: `feat(planner): plan batch cooking in plan proposals`
+- Gate check: manual verification step 1.
+
+---
+
+### FEAT-78 — Suggest again for one slot in Plan Review
+
+**Goal:** In Plan Review, a cook can ask for a different suggestion for one slot and keep the rest of the proposal. (DEC-117)
+
+**Estimate:** 0.5–1 day. **Depends on:** FEAT-75, FEAT-76. **Enables:** none specifically.
+
+**Files:**
+- `backend/src/lib/meal-planner/` (`proposeSlot` on the interface and both adapters), `backend/src/lib/plan-proposal/` (its request and normaliser)
+- `backend/src/trpc/procedures/plan-proposals.ts` (`proposeSlot`), `backend/src/plugins/rate-limit.ts` (its own limit)
+- `shared/src/schemas/plan-proposals.ts`
+- `frontend/src/components/plan-wizard/` ("Suggest again" on a proposed slot)
+
+**Shapes:** `planProposals.proposeSlot` takes:
+- the wizard's inputs
+- the proposal as it stands, sent as context for balance and variety
+- the slot to replace
+- the recipes already suggested for that slot, to avoid
+
+It returns that slot's items and a new reason, normalised by FEAT-75's and FEAT-77's rules. It reuses FEAT-75's errors, with its own rate-limit code.
+
+**Acceptance criteria:**
+- [ ] Each proposed slot in Plan Review has "Suggest again". It replaces only that slot, with a new reason and the AI badge
+- [ ] The new suggestion never repeats a recipe already suggested for that slot in this review, unless the library has nothing else that fits
+- [ ] Other slots are unchanged. Any knock-on shortfall or "left in plan" amount shows as a warning
+- [ ] The 31st single-slot suggestion in an hour from one user is refused with its own rate-limit error. It doesn't count against the 5 whole-plan proposals, and they don't count against it
+- [ ] "Suggest again" is off while offline and while another call for the same review is running
+- [ ] The call writes nothing, and logs metadata only, as FEAT-75 does
+
+**Manual verification:**
+1. In a review, ask for a new suggestion three times on one slot. Each is different, the rest of the week is unchanged, and the figures update.
+
+**Definition of done:**
+- Tests cover:
+  - the request (the current proposal and the recipes to avoid)
+  - normalising one slot
+  - repeats avoided
+  - the separate limit
+  - offline and in-flight states
+- Commit: `feat(planner): suggest again for one slot in plan review`
+- Gate check: manual verification step 1.
 
 ---
 
@@ -3568,7 +3858,7 @@ A stored health score (DEC-101) is only trustworthy if it's marked stale when it
 
 ### 22. Model features
 
-**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 and FEAT-67 (health scoring), FEAT-72 (evals), and any future feature that calls a model.
+**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 and FEAT-67 (health scoring), FEAT-72 (evals), FEAT-75 to FEAT-78 (AI meal planning), and any future feature that calls a model.
 
 Every model feature follows the rules in DEC-110 and is built the same way (DEC-109). A new feature that skips a step drifts from the others, and the drift is costly to undo once a second provider or model is in play. The checklist:
 - **Its own seam.** One narrow, domain-level interface per feature (`RecipeReader`, `RecipeScorer`), never a shared "AI service". It has an adapter per provider and a `fake` adapter for tests and e2e.
@@ -3580,7 +3870,7 @@ Every model feature follows the rules in DEC-110 and is built the same way (DEC-
 - **Shared code is helpers, not seams:** the provider client setup, provider error sorting, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
 - **A real call before the first deploy.** The `fake` adapter can't catch a provider's limits. Recipe Import shipped with a schema Anthropic refused on every request, so send one real request through the real adapter before a model feature first deploys.
 
-**Named triggers:** the first model feature that can't finish within one request decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. Health scoring settled it for itself with no background work: the browser drives scoring one request per recipe (DEC-112). The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
+**Named triggers:** the first model feature that can't finish within one request decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. Health scoring settled it for itself with no background work: the browser drives scoring one request per recipe (DEC-112). AI meal planning assumes a 14-day Plan Proposal fits in one request, and FEAT-75's kick-off times a real call to confirm it. If it doesn't fit, the trigger fires there (DEC-117). The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
 
 ---
 

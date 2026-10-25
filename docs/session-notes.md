@@ -4,6 +4,76 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-25 — AI meal planning scoped (DEC-117, FEAT-75 to FEAT-78); "meal-plan suggestions" non-goal narrowed
+
+**Status:** Docs only, no code. Requirements shaped with the user over 2026-10-24 and 2026-10-25, then written up. Nothing ticked. Start with FEAT-75's kick-off.
+
+**Gate:** "meal-plan suggestions" was an exclusion in the "AI / LLM features" non-goal. DEC-117 reverses it narrowly, judged against DEC-110. The model proposes, the cook reviews every slot, and nothing exists until Apply.
+
+**What it's for** (the user's five problems):
+- a blank-page week
+- being stuck in a rut
+- balancing plant variety and Health Scores
+- making batch cooking flow
+- varying taste profiles
+
+**Agreed with the user:**
+- **A wizard that creates the plan.** Its steps are:
+  1. Dates.
+  2. Who's eating at each slot.
+  3. Fixed meals.
+  4. An optional Brief.
+
+  Then a Plan Proposal, reviewed in Plan Review.
+- **Fixed meals:** a recipe, eat out, takeaway, or a batch to cook for later. Not leftovers.
+- **What the model proposes:** one main dish per slot. Batch cooking is in scope: extra portions, `plan_meal` leftovers, and batches cooked at slots where nobody eats.
+- **The Brief may name ingredients to use up.** This narrowly reverses "what can I cook with X", within planning only.
+- **What the cook can do in review:** keep, swap, suggest again for one slot, discard, or have another go at the whole week with a note.
+- **Storage:** proposals live in client state only, and nothing is stored before Apply.
+- **Limits:**
+  - 5 whole-plan proposals per user per hour, counting first proposals and every "another go".
+  - 30 single-slot suggestions per user per hour, counted separately.
+- **Repeats:** the model looks at the last 4 weeks of plans to avoid them.
+- **Length:** plans are at most 14 days.
+- **Freezer surplus:** fixed batches are used up within the plan. Freezer surplus waits for the storage feature.
+- **Clarifying questions** are deferred. In v1 the summary says how the model read the Brief.
+- **Glossary:** Plan Proposal, Plan Review, Brief and Fixed meal.
+- **The readings the user confirmed:**
+  - Nothing exists until Apply.
+  - The model picks only from the library, and never changes a Fixed meal.
+  - It never proposes eat out or takeaway.
+  - It matches each slot's headcount.
+  - The figures in review are worked out by rule.
+  - Proposals carry an AI badge only during review.
+  - The data flow is as DEC-117 names it.
+
+**Found in the code while writing it up:**
+- **Plans have no name in code.** `createPlanInputSchema` takes dates only, although `plan.md`'s data model still lists `name`. So the wizard's first step is dates only.
+- **"Who's eating" uses the existing attendance model:** named diners plus `guest_count`, with headcount computed (2026-06-29 entry). It isn't a separate number.
+- **The 14-day cap is already the app's maximum plan length** (`PLAN_MAX_RANGE_DAYS`).
+- **Plant points and FEAT-71's day and plan Health Score are only computed over saved slots.** Plan Review needs them over unsaved ones, which is FEAT-76's kick-off question 3. FEAT-71 isn't built yet, and FEAT-76 depends on it.
+
+**Docs changed:**
+- `CONTEXT.md`: a Planning section with the four terms.
+- DEC-117 (new). DEC-110 amended.
+- FEAT-75 to FEAT-78 (new). FEAT-72 amended with a Plan Proposal eval set. Cross-cutting #22's "Threads through" and named trigger updated.
+- `non-goals.md`: the AI adjacency note amended, and "AI meal planning follow-ons" added (existing plans, clarifying questions, freezer surplus).
+- `AGENTS.md`: the FEAT and DEC counts.
+
+**Open, for the kick-offs:**
+- **FEAT-75:**
+  - Time a real 14-day call against the household's library. If it doesn't fit in one request, cross-cutting #22's background-work trigger fires, and DEC-117 gets amended before building on.
+  - The other proposed readings: Brief and note lengths, the recency window, and the default effort.
+- **FEAT-76:** three stop-and-asks:
+  - a create-with-slots mutation for Apply
+  - a date check for the wizard's first step
+  - figures over unsaved slots, sharing the rule code
+- **FEAT-77:** whether a batch Fixed meal is also eaten at its own slot.
+- **A recipe-only Fixed meal:** a recipe fixed in place gets `prepared = eaten =` headcount. Confirm at FEAT-76 kick-off.
+- **Not checked:** the "who's eating" junction's DEC-29 flag (2026-06-29 entry) is still open, and Apply writes attendance.
+
+---
+
 ## 2026-10-24 — Cook mode swipe, and Back on the gather screen exits (DEC-116 amendment)
 
 **Status:** Committed and pushed to `ccr-34067350-yc6g57`. Frontend typecheck and lint are clean, and the cook mode and `useSwipe` tests pass. e2e not run. Not checked on a real phone.

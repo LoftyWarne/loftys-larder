@@ -119,6 +119,24 @@ Why not: Recipe Import is worth having because every proposal is checked against
 Revisit: when the household moves over from another recipe app with a large collection, or keeps importing many recipes from one file, one at a time. It would bring the background-work decision named in cross-cutting #22.
 `[→ decision log]`
 
+### AI meal planning follow-ons
+What it is: three things left out of AI meal planning's first version (DEC-117):
+- **Planning with AI on an existing plan,** rather than through the wizard that creates one.
+- **Clarifying questions,** where the model asks about an unclear Brief before proposing.
+- **Freezer surplus,** where a proposal leaves batch portions over for the freezer rather than using them up within the plan.
+
+Why not:
+- **Existing plans:** on a half-filled plan, the slots already filled and the Fixed meals would blur. The household chose a wizard that creates the plan.
+- **Clarifying questions:** they add a step and a model call before any plan appears. The summary already says how the model read the Brief, and "Another go" corrects a misreading.
+- **Freezer surplus:** nothing records which recipes freeze well, and the model guessing would present a guess as fact.
+
+Revisit:
+- **Existing plans:** when the cooks want to fill the rest of a plan they started by hand.
+- **Clarifying questions:** when Briefs are often misread despite the summary.
+- **Freezer surplus:** when the forthcoming storage feature records which recipes freeze well. That feature will also need the "Pantry / inventory tracking" and "Cooked-base shelf-life tracking" entries reversed or narrowed.
+
+`[→ decision log]`
+
 ---
 
 ## 2. Quality Bars Deliberately Held
@@ -220,7 +238,7 @@ Adjacency note: a future "starting inventory" field on a plan could subtract fro
 ### AI / LLM features
 What it would be: meal-plan suggestions, recipe recommendations, ingredient substitution advice, "what can I cook with X."
 Why not part of this: scope, cost, and the fact that two cooks know what they want to eat better than any model does. The plan is a tool for cooks who already cook, not a recommender.
-Adjacency note: model features are allowed when they follow the rules in DEC-110. The model proposes and a cook decides; kept output is labelled; deterministic data stays deterministic; each feature is built to cross-cutting #22. Built under those rules so far: the health score (DEC-101, DEC-112), and Recipe Import (DEC-103), which replaced the former "Recipe import from URLs" and "Photo recognition / OCR of cookbooks" entries. Recipe Generation (a model inventing a recipe from an idea) is deferred to its own feature, not excluded. The health score's Suggestion (DEC-112) narrowly reverses "ingredient substitution advice": one suggested change attached to a recipe's Health Score, which the cook decides whether to make. A standalone substitution feature and "what can I cook with X" stay excluded. The remaining exclusions stay until a concrete feature is proposed. Each would be reversed through the normal non-goal process and judged against DEC-110.
+Adjacency note: model features are allowed when they follow the rules in DEC-110. The model proposes and a cook decides; kept output is labelled; deterministic data stays deterministic; each feature is built to cross-cutting #22. Built under those rules so far: the health score (DEC-101, DEC-112), and Recipe Import (DEC-103), which replaced the former "Recipe import from URLs" and "Photo recognition / OCR of cookbooks" entries. Recipe Generation (a model inventing a recipe from an idea) is deferred to its own feature, not excluded. The health score's Suggestion (DEC-112) narrowly reverses "ingredient substitution advice": one suggested change attached to a recipe's Health Score, which the cook decides whether to make. A standalone substitution feature stays excluded. AI meal planning (DEC-117) narrowly reverses "meal-plan suggestions": a planning wizard creates a plan from a Plan Proposal, which the cook reviews slot by slot before anything exists. A Brief in that wizard may name ingredients to use up, which narrowly reverses "what can I cook with X" within planning only. Outside planning it stays excluded. Recipe recommendations (a standalone "you might like" feed) stay excluded. The follow-ons DEC-117 defers are listed under "AI meal planning follow-ons". The remaining exclusions stay until a concrete feature is proposed. Each would be reversed through the normal non-goal process and judged against DEC-110.
 
 ### Recipe / meal-plan sharing across households
 What it would be: exporting a recipe (or a whole plan) for another household to import, or a discoverable public library.

@@ -106,6 +106,12 @@ async function runAxe(page: Page, theme: Theme): Promise<void> {
       page.evaluate('document.documentElement.classList.contains("dark")'),
     )
     .toBe(theme === 'dark');
+  // Buttons fade their colours (`transition-colors`) when the theme flips;
+  // scanning mid-fade measures blended colours that fail contrast. Only
+  // transitions are awaited — infinite animations like spinners never finish.
+  await page.evaluate(
+    'Promise.allSettled(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished))',
+  );
 
   const results = await new AxeBuilder({ page })
     .withTags([...WCAG_AA_TAGS])

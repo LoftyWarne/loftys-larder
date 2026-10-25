@@ -2457,7 +2457,7 @@ Conventions:
 - `backend/package.json` (`@anthropic-ai/sdk`), `backend/src/config.ts` (`ANTHROPIC_API_KEY`, `RECIPE_IMPORT_ADAPTER`, `RECIPE_IMPORT_MODEL`), `docs/secrets-checklist.md`
 - `backend/src/lib/recipe-reader/` (new): the `RecipeReader` interface, the `anthropic` adapter (prompt, structured outputs), the `fake` adapter, and choosing an adapter from config
 - `backend/src/lib/recipe-import/` (new): `normaliseProposal`
-- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-72 at kick-off
+- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-78 at kick-off
 - `backend/src/trpc/procedures/recipe-imports.ts` (new: start, list, get, discard, create recipe), `backend/src/trpc/router.ts`
 - `backend/src/lib/recipe-writes.ts` (new: write code shared by `recipes.ts` and create recipe), `backend/src/trpc/procedures/recipes.ts` (uses it)
 - `backend/src/plugins/rate-limit.ts` (import limit), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the reader and the limit on the context)
@@ -2512,7 +2512,7 @@ Conventions:
   - The import limit is 14 `start` calls per user per hour, every call counted, checked inside `start` so the refusal is `TOO_MANY_REQUESTS` with `IMPORT_RATE_LIMITED`.
   - Adapters return a candidate shaped by `recipeImportCandidateSchema` (structured-output friendly); its rows refer to household ingredients as `{ id, name }`. A proposed new ingredient keeps a category or unit that wasn't sent as null (DEC-109 amended).
   - Create from import: an existing ingredient's row carries `unitId` for the unit-mismatch check; cost and image are accepted from the cook; a source proposed by name that exists by then is linked; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` carries the `newKey`. The draft is deleted first inside the transaction, so a second "Create recipe" finds nothing and rolls back (DEC-108 amended).
-  - The eval runner and eval set move to FEAT-72, with manual verification steps 1 and 2.
+  - The eval runner and eval set move to FEAT-78, with manual verification steps 1 and 2.
 - Amended after the FEAT-62 deploy (2026-10-04): Anthropic refused the structured-output schema, so every import failed in production. The `anthropic` adapter now describes the reply in its prompt instead of using structured outputs, and a request the provider refuses outright is `IMPORT_REQUEST_REJECTED` rather than "try again" (DEC-104 and DEC-109 amended).
 
 **Manual verification:**
@@ -2520,7 +2520,7 @@ Conventions:
 2. Run it on a shopping list. It reports not a recipe.
 3. Against a signed-in local app with a real key, call `start` and check the `recipe_drafts` row: `kind = 'import'`, the proposal, and the adapter and model.
 
-Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
+Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
 
 **Common gotchas:**
 - `baseServings` is required. If the text doesn't state it, it's an Estimate.
@@ -2535,9 +2535,9 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
   - `start`: a `fake` outcome becoming an import draft that records the reader; several recipes; not a recipe; timeout and provider error; the rate limit; household scoping of the lists sent.
   - Create recipe: one transaction; keys resolved for rows, step links and the source; rollback on a failure partway; `INGREDIENT_NAME_TAKEN`; the draft deleted.
   - `list`, `get` and `discard`: ownership, newest first, and manual drafts untouched.
-- Eval set: moved to FEAT-72 (kick-off, 2026-10-04).
+- Eval set: moved to FEAT-78 (kick-off, 2026-10-04).
 - Commit: `feat(recipes): read a pasted recipe into an import draft and create it in one transaction`
-- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-72).
+- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-78).
 
 ---
 
@@ -2887,7 +2887,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 - The encryption check reads the file in the browser and looks for `/Encrypt` in the trailer dictionary near the end of the file (the last 2 KB, and the first 2 KB for linearised files). It's a courtesy, not a guarantee. An encrypted PDF that gets through gives the provider's 400, which stays `IMPORT_REQUEST_REJECTED` so it reaches Sentry.
 - The PDF credential has no eager transformation. The image import preset's `c_limit,…,f_jpg` would make a JPEG of page 1, which nothing uses.
 - Read the `claude-api` skill before changing the `anthropic` adapter. Claude reads each PDF page as text and as an image: about 1,500–3,000 text tokens per page plus the image, so a page costs more time and money than a photo. Claude's own limits (32 MB and 600 pages per request) are far above this feature's caps.
-- 8 pages is provisional. Manual verification step 3 times a real 8-page PDF, and FEAT-72 tunes the cap.
+- 8 pages is provisional. Manual verification step 3 times a real 8-page PDF, and FEAT-78 tunes the cap.
 - Create recipe reads the PDF's public id from the stored input in the draft it deletes, as it does image ids (DEC-108 amended), and keeps it only if it's in the imports folder. A public id kept as an Original is never destroyed, whatever a draft says (DEC-107).
 - The existing signed destroy (`image/destroy`) deletes a PDF, because a PDF is an `image` resource.
 - Household scope for Originals still comes through the join to `recipes` (DEC-17).
@@ -2945,7 +2945,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 **Goal:** A model scores a recipe from 1 to 10, with a summary and an optional Suggestion. The browser scores a recipe automatically after Save & Finish and after an import's "Create recipe". A cook can Score or Rescore from the recipe page. The score shows on recipe cards and the recipe page as an AI health score. (DEC-112, DEC-101, DEC-109, DEC-110)
 
-**Estimate:** 2 days. **Depends on:** FEAT-57 (storage and staleness), FEAT-58 (nutrition), FEAT-60 (the model-feature helpers). **Enables:** FEAT-67 to FEAT-71, and FEAT-72's Health Score set.
+**Estimate:** 2 days. **Depends on:** FEAT-57 (storage and staleness), FEAT-58 (nutrition), FEAT-60 (the model-feature helpers). **Enables:** FEAT-67 to FEAT-71, and FEAT-78's Health Score set.
 
 **Files** (names provisional until kick-off):
 - `backend/src/lib/recipe-scorer/` (new): the `RecipeScorer` interface, the `anthropic` adapter and its prompt, the `fake` adapter, and choosing an adapter from config, laid out like `recipe-reader/`
@@ -3064,7 +3064,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 **Manual verification:**
 1. With a real API key, Score a recipe that has nutrition, from its page. A score, summary and Suggestion appear. Record the time and tokens in the session notes. This is cross-cutting #22's real call before the first deploy.
-2. Consistency check until FEAT-72: score a salad, a lasagne and a fry-up three times each with Rescore, and record the scores in the session notes. Each recipe's scores should be within a point of each other, and the salad should score above the fry-up.
+2. Consistency check until FEAT-78: score a salad, a lasagne and a fry-up three times each with Rescore, and record the scores in the session notes. Each recipe's scores should be within a point of each other, and the salad should score above the fry-up.
 3. Change an ingredient amount and Save & Finish. The recipe page shows "Scoring…", then a current score.
 4. Edit a base with serving variations and Save & Finish. Each variation gets a new score.
 5. Import a recipe and "Create recipe". It's scored with no further step.
@@ -3281,70 +3281,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-72 — Model feature evals: the eval runner, and the Recipe Import and Health Score eval sets
-
-**Goal:** Measure a model feature on real inputs before a model, effort or prompt change ships. One runner takes a feature and an adapter and runs that feature's inputs through its real reader; Recipe Import brings the first set, supplied by the user. The first run settles the import model (Opus 5.5 or Sonnet 5.5) and its effort level. Health scoring brings a second set, which checks that each recipe's score holds steady across runs and that scores fall in the expected order; its run settles the scoring model and effort. (DEC-104, DEC-109, DEC-112, cross-cutting #22)
-
-**Estimate:** 1–1.5 days, plus the user's time gathering inputs. **Depends on:** FEAT-60, FEAT-66. **Enables:** tuning `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT`, and FEAT-65's page cap; tuning `HEALTH_SCORE_MODEL` and `HEALTH_SCORE_EFFORT`.
-
-**Files:**
-- `backend/evals/` (new): the runner, the Recipe Import inputs and the Health Score inputs. Where the household lists come from, and whether inputs are committed, are decided at kick-off
-- `backend/package.json` (an `eval` script: a new script name, so a stop-and-ask)
-- `docs/session-notes.md` (the run's results)
-
-**Acceptance criteria:**
-- [ ] One command runs every input of a named feature through a named adapter, with an optional model and effort, without starting the app or writing to the database
-- [ ] For each input it reports latency, input and output tokens, the model that answered, the outcome, and whether the proposal passed `normaliseProposal`, plus totals
-- [ ] The runner takes a feature name and an adapter, and runs Recipe Import and Health Score inputs through the same code
-- [ ] For Health Score inputs, it scores each recipe a set number of times (three by default) and reports each recipe's scores, their spread, and whether the agreed order holds
-- [ ] A run over the agreed inputs compares Opus 5.5 and Sonnet 5.5 at two effort levels each, with times against the 75-second limit and the corrections each proposal would need, recorded in the session notes
-- [ ] A Health Score run compares Opus 5.5 at `low` with Sonnet 5.5 at two effort levels, recorded in the session notes. `HEALTH_SCORE_MODEL` and `HEALTH_SCORE_EFFORT` are set from it, and `HEALTH_SCORE_SINCE` moves if the model changes
-
-**Implementation notes:**
-- Real provider calls cost money: every run is the user's decision, and the runner never runs in CI.
-- Proposals go to the terminal or a gitignored file, never to Axiom or Sentry. No `console.log`: write through Pino or `process.stdout.write`.
-- About ten inputs, chosen to cover what imports will meet: a clean typed recipe, one buried in a blog story, US cup measures, no servings stated, several recipes in one text, a shopping list, and anything the household's own recipes make likely.
-- Inputs that copy a publication's text may not belong in the repo; if not, keep them in a gitignored folder with one committed sample.
-- Amended at Document import scoping (2026-10-05): renumbered from FEAT-64 so the Document import features (FEAT-64, FEAT-65) come first. The inputs also cover Documents: a typed PDF, a scanned PDF, an 8-page PDF timed against the 75-second limit to set FEAT-65's page cap, and a saved web page (DEC-111).
-- Amended at health score scoping (2026-10-07): renumbered from FEAT-66 to FEAT-72, after the health score features (DEC-112).
-  - Health Score inputs: about ten household recipes chosen to spread across the scale: a salad, a lentil soup, a lasagne, a fry-up, a dessert, a base and one of its serving variations, one with no nutrition, and one with estimated nutrition.
-  - Write the expected order down with the inputs before the first run (the salad above the fry-up, for example). The run checks it.
-  - An input is the scorer's request, exported from the database, so the runner never needs the app or the database.
-  - Scoring ships before this feature with a manual three-recipe consistency check (FEAT-66, manual step 2). Compare that check's numbers with this run's.
-- Amended at AI meal planning scoping (2026-10-25): a Plan Proposal set, added once FEAT-75 lands (DEC-117). This doesn't block the Recipe Import and Health Score sets.
-  - **About six inputs, each a planner request exported from real wizard inputs:**
-    - a plain week with no Brief
-    - a Brief naming ingredients to use up
-    - a week with many Fixed meals
-    - a batch-cooking week with a fixed batch
-    - a 14-day plan
-    - a misleading Brief
-  - **The report adds, per input:**
-    - slots dropped by the normaliser
-    - recipes repeated from the 4 weeks before the plan
-    - whether a fixed batch was used up
-    - whether the summary's reading of the Brief matches the Brief
-    - time against the time limit
-  - The run settles `MEAL_PLAN_MODEL` and `MEAL_PLAN_EFFORT`.
-
-**Manual verification:**
-1. Run the runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
-2. Run it on a shopping list. It reports not a recipe.
-3. Run the Health Score set through the `anthropic` adapter. Each recipe is scored three times, and the report shows each recipe's spread.
-
-**Common gotchas:**
-- Effort levels mean different amounts of thinking on different models, so compare each model across its own levels.
-- A classifier refusal can be answered by a fallback model. Check the model that answered in the report.
-
-**Definition of done:**
-- Tests cover: the runner's arguments and its report for both features, on the `fake` adapter.
-- Eval sets: both run on the agreed inputs, with the comparisons recorded in the session notes, and `RECIPE_IMPORT_MODEL` / `RECIPE_IMPORT_EFFORT` and `HEALTH_SCORE_MODEL` / `HEALTH_SCORE_EFFORT` set from them.
-- Commit: `feat(recipes): add the eval runner and the recipe import and health score eval sets`
-- Gate check: manual verification steps 1–3.
-
----
-
-### FEAT-73 — Planner day cards at phone width
+### FEAT-72 — Planner day cards at phone width
 
 **Goal:** Below `md` (768 px) the planner shows one card per day instead of the days-by-occasions grid, so dish names fit and nothing scrolls sideways. At `md` and up the grid is unchanged. (DEC-115, DEC-53)
 
@@ -3383,7 +3320,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-74 — Cook mode: a gather screen, one method step per screen, and the screen kept awake
+### FEAT-73 — Cook mode: a gather screen, one method step per screen, and the screen kept awake
 
 **Goal:** A cook can open a recipe in cook mode and work through it on a phone propped up in the kitchen. A gather screen with tick boxes on the scaled ingredients comes first, then one method step per screen in large type, with large Back and Next buttons. The screen stays on throughout, and nothing is stored. (DEC-116)
 
@@ -3446,11 +3383,11 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-75 — AI meal planning backend: the `MealPlanner` seam and whole-plan Plan Proposals
+### FEAT-74 — AI meal planning backend: the `MealPlanner` seam and whole-plan Plan Proposals
 
 **Goal:** Given a plan's dates, who's eating at each slot, the Fixed meals and an optional Brief, return a normalised Plan Proposal for the slots that aren't fixed. This first cut proposes one main dish per slot, with no batch cooking. Nothing is written. (DEC-117, DEC-109, DEC-110)
 
-**Estimate:** 2 days. **Depends on:** FEAT-19 (`pickable-recipes`), FEAT-27 (plan creation's date rules), FEAT-60 (the model-feature helpers), FEAT-66 (Health Scores). **Enables:** FEAT-76, FEAT-77, FEAT-78, and FEAT-72's Plan Proposal set.
+**Estimate:** 2 days. **Depends on:** FEAT-19 (`pickable-recipes`), FEAT-27 (plan creation's date rules), FEAT-60 (the model-feature helpers), FEAT-66 (Health Scores). **Enables:** FEAT-75, FEAT-76, FEAT-77, and FEAT-78's Plan Proposal set.
 
 **Files** (names provisional until kick-off):
 - `backend/src/lib/meal-planner/` (new): the `MealPlanner` interface, the `anthropic` adapter and its prompt, the `fake` adapter, and choosing an adapter from config. Laid out like `recipe-scorer/`.
@@ -3470,9 +3407,9 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
     - `{ kind: 'recipe', recipeId }`
     - `{ kind: 'eat_out' }`
     - `{ kind: 'takeaway' }`
-    - `{ kind: 'batch', recipeId, portions }` (accepted from FEAT-77)
+    - `{ kind: 'batch', recipeId, portions }` (accepted from FEAT-76)
   - `brief`: plain text or null
-  - `note` and `previous`: set only on "Another go" (FEAT-76)
+  - `note` and `previous`: set only on "Another go" (FEAT-75)
 - **Planner request** (what the seam gets):
   - `slots: [{ date, occasion, headcount, fixed }]`
   - `recipes: [{ id, name, tags, kind, baseRecipeId, baseServings, activeMins, totalMins, averageRating, healthScore, healthScoreOutOfDate, ingredientNames, lastPlannedOn, timesPlannedLast4Weeks }]`
@@ -3495,9 +3432,9 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 **Acceptance criteria:**
 - [ ] `propose` returns a proposal for every slot that isn't fixed, and nothing for fixed slots. It writes nothing
 - [ ] Every proposed recipe is pickable and in the household (DEC-17, cross-cutting #5). A soft-deleted recipe, or one from outside the household, is dropped by the normaliser
-- [ ] Each proposed recipe slot has exactly one dish, with `prepared = eaten =` the slot's headcount. FEAT-77 relaxes this to allow extra portions
-- [ ] A slot with headcount 0 is left empty. FEAT-77 relaxes this to allow a prepared-only batch
-- [ ] No proposal is eat out, takeaway or leftovers. Batch cooking arrives in FEAT-77
+- [ ] Each proposed recipe slot has exactly one dish, with `prepared = eaten =` the slot's headcount. FEAT-76 relaxes this to allow extra portions
+- [ ] A slot with headcount 0 is left empty. FEAT-76 relaxes this to allow a prepared-only batch
+- [ ] No proposal is eat out, takeaway or leftovers. Batch cooking arrives in FEAT-76
 - [ ] A slot the normaliser can't use is returned empty and counted in `dropped`. Other slots are unaffected
 - [ ] Reasons are plain text of at most 120 characters. The summary is plain text of at most 300 characters. Markdown is stripped
 - [ ] The request carries each pickable recipe's fields as listed above. `lastPlannedOn` and `timesPlannedLast4Weeks` are worked out by rule from non-deleted plans in the household
@@ -3521,7 +3458,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 1. **The time limit.** Time a real 14-day call against the household's library. If it can't fit in one request, stop: that's cross-cutting #22's background-work trigger, and DEC-117 gets amended.
 2. **Brief and note length.** The Brief is capped at 500 characters and "Another go"'s note at 200.
 3. **The recency window.** "The 4 weeks before the plan starts" counts slots dated in the 28 days before `startDate`, from non-deleted plans. Slots on or after the start don't count.
-4. **Default effort.** `MEAL_PLAN_EFFORT` defaults to `medium` until FEAT-72 measures it.
+4. **Default effort.** `MEAL_PLAN_EFFORT` defaults to `medium` until FEAT-78 measures it.
 
 **Manual verification:**
 1. Call `propose` through the `anthropic` adapter for a 14-day plan with two Fixed meals and a Brief. It finishes within the time limit, fixed slots are untouched, and every recipe is from the library.
@@ -3541,11 +3478,11 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-76 — Planning wizard, Plan Review and Apply
+### FEAT-75 — Planning wizard, Plan Review and Apply
 
 **Goal:** From the plans page, a cook opens a wizard. It takes the plan's dates, who's eating at each slot, the Fixed meals and an optional Brief, then shows the Plan Proposal in Plan Review. There the cook keeps, swaps or discards each slot, or asks for another go. Apply creates the plan with what was kept and opens it in the planner. Nothing exists before Apply. (DEC-117, DEC-110)
 
-**Estimate:** 2–3 days. **Depends on:** FEAT-75, FEAT-21 (the combobox), FEAT-31 (the slot card), FEAT-41 (plant points), FEAT-71 (the day and plan Health Score). **Enables:** FEAT-77, FEAT-78.
+**Estimate:** 2–3 days. **Depends on:** FEAT-74, FEAT-21 (the combobox), FEAT-31 (the slot card), FEAT-41 (plant points), FEAT-71 (the day and plan Health Score). **Enables:** FEAT-76, FEAT-77.
 
 **Files** (names provisional until kick-off):
 - `frontend/src/routes/_authed/plans/propose.tsx` (new, a thin shell), `frontend/src/routes/-components/plan-wizard-page.tsx` (new)
@@ -3630,11 +3567,11 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-77 — Batch cooking in Plan Proposals: fixed batches, cook-aheads and leftovers
+### FEAT-76 — Batch cooking in Plan Proposals: fixed batches, cook-aheads and leftovers
 
 **Goal:** Plan Proposals plan batch cooking. A cook can fix a batch to cook for later, and the model plans meals that use it up. The model may also propose cooking extra portions to eat later, `plan_meal` leftovers slots that eat them, and batches cooked at slots where nobody eats. Review shows the planner's usual balance warnings. (DEC-117, DEC-88, DEC-90, DEC-91)
 
-**Estimate:** 1.5–2 days. **Depends on:** FEAT-75, FEAT-76. **Enables:** none specifically.
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-74, FEAT-75. **Enables:** none specifically.
 
 **Files:**
 - `backend/src/lib/plan-proposal/` (the request, the prompt and the normaliser), `backend/src/lib/meal-planner/` (the prompt)
@@ -3678,11 +3615,11 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 
 ---
 
-### FEAT-78 — Suggest again for one slot in Plan Review
+### FEAT-77 — Suggest again for one slot in Plan Review
 
 **Goal:** In Plan Review, a cook can ask for a different suggestion for one slot and keep the rest of the proposal. (DEC-117)
 
-**Estimate:** 0.5–1 day. **Depends on:** FEAT-75, FEAT-76. **Enables:** none specifically.
+**Estimate:** 0.5–1 day. **Depends on:** FEAT-74, FEAT-75. **Enables:** none specifically.
 
 **Files:**
 - `backend/src/lib/meal-planner/` (`proposeSlot` on the interface and both adapters), `backend/src/lib/plan-proposal/` (its request and normaliser)
@@ -3696,7 +3633,7 @@ Steps 1 and 2 moved to FEAT-72 with the eval runner (kick-off, 2026-10-04).
 - the slot to replace
 - the recipes already suggested for that slot, to avoid
 
-It returns that slot's items and a new reason, normalised by FEAT-75's and FEAT-77's rules. It reuses FEAT-75's errors, with its own rate-limit code.
+It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-76's rules. It reuses FEAT-74's errors, with its own rate-limit code.
 
 **Acceptance criteria:**
 - [ ] Each proposed slot in Plan Review has "Suggest again". It replaces only that slot, with a new reason and the AI badge
@@ -3704,7 +3641,7 @@ It returns that slot's items and a new reason, normalised by FEAT-75's and FEAT-
 - [ ] Other slots are unchanged. Any knock-on shortfall or "left in plan" amount shows as a warning
 - [ ] The 31st single-slot suggestion in an hour from one user is refused with its own rate-limit error. It doesn't count against the 5 whole-plan proposals, and they don't count against it
 - [ ] "Suggest again" is off while offline and while another call for the same review is running
-- [ ] The call writes nothing, and logs metadata only, as FEAT-75 does
+- [ ] The call writes nothing, and logs metadata only, as FEAT-74 does
 
 **Manual verification:**
 1. In a review, ask for a new suggestion three times on one slot. Each is different, the rest of the week is unchanged, and the figures update.
@@ -3718,6 +3655,70 @@ It returns that slot's items and a new reason, normalised by FEAT-75's and FEAT-
   - offline and in-flight states
 - Commit: `feat(planner): suggest again for one slot in plan review`
 - Gate check: manual verification step 1.
+
+---
+
+### FEAT-78 — Model feature evals: the eval runner, and the Recipe Import and Health Score eval sets
+
+**Goal:** Measure a model feature on real inputs before a model, effort or prompt change ships. One runner takes a feature and an adapter and runs that feature's inputs through its real reader; Recipe Import brings the first set, supplied by the user. The first run settles the import model (Opus 5.5 or Sonnet 5.5) and its effort level. Health scoring brings a second set, which checks that each recipe's score holds steady across runs and that scores fall in the expected order; its run settles the scoring model and effort. (DEC-104, DEC-109, DEC-112, cross-cutting #22)
+
+**Estimate:** 1–1.5 days, plus the user's time gathering inputs. **Depends on:** FEAT-60, FEAT-66. **Enables:** tuning `RECIPE_IMPORT_MODEL` and `RECIPE_IMPORT_EFFORT`, and FEAT-65's page cap; tuning `HEALTH_SCORE_MODEL` and `HEALTH_SCORE_EFFORT`.
+
+**Files:**
+- `backend/evals/` (new): the runner, the Recipe Import inputs and the Health Score inputs. Where the household lists come from, and whether inputs are committed, are decided at kick-off
+- `backend/package.json` (an `eval` script: a new script name, so a stop-and-ask)
+- `docs/session-notes.md` (the run's results)
+
+**Acceptance criteria:**
+- [ ] One command runs every input of a named feature through a named adapter, with an optional model and effort, without starting the app or writing to the database
+- [ ] For each input it reports latency, input and output tokens, the model that answered, the outcome, and whether the proposal passed `normaliseProposal`, plus totals
+- [ ] The runner takes a feature name and an adapter, and runs Recipe Import and Health Score inputs through the same code
+- [ ] For Health Score inputs, it scores each recipe a set number of times (three by default) and reports each recipe's scores, their spread, and whether the agreed order holds
+- [ ] A run over the agreed inputs compares Opus 5.5 and Sonnet 5.5 at two effort levels each, with times against the 75-second limit and the corrections each proposal would need, recorded in the session notes
+- [ ] A Health Score run compares Opus 5.5 at `low` with Sonnet 5.5 at two effort levels, recorded in the session notes. `HEALTH_SCORE_MODEL` and `HEALTH_SCORE_EFFORT` are set from it, and `HEALTH_SCORE_SINCE` moves if the model changes
+
+**Implementation notes:**
+- Real provider calls cost money: every run is the user's decision, and the runner never runs in CI.
+- Proposals go to the terminal or a gitignored file, never to Axiom or Sentry. No `console.log`: write through Pino or `process.stdout.write`.
+- About ten inputs, chosen to cover what imports will meet: a clean typed recipe, one buried in a blog story, US cup measures, no servings stated, several recipes in one text, a shopping list, and anything the household's own recipes make likely.
+- Inputs that copy a publication's text may not belong in the repo; if not, keep them in a gitignored folder with one committed sample.
+- Amended at Document import scoping (2026-10-05): renumbered from FEAT-64 so the Document import features (FEAT-64, FEAT-65) come first. The inputs also cover Documents: a typed PDF, a scanned PDF, an 8-page PDF timed against the 75-second limit to set FEAT-65's page cap, and a saved web page (DEC-111).
+- Amended at health score scoping (2026-10-07): renumbered from FEAT-66 to FEAT-72, after the health score features (DEC-112).
+  - Health Score inputs: about ten household recipes chosen to spread across the scale: a salad, a lentil soup, a lasagne, a fry-up, a dessert, a base and one of its serving variations, one with no nutrition, and one with estimated nutrition.
+  - Write the expected order down with the inputs before the first run (the salad above the fry-up, for example). The run checks it.
+  - An input is the scorer's request, exported from the database, so the runner never needs the app or the database.
+  - Scoring ships before this feature with a manual three-recipe consistency check (FEAT-66, manual step 2). Compare that check's numbers with this run's.
+- Amended at AI meal planning scoping (2026-10-25): renumbered from FEAT-72 to FEAT-78, so the evals come last. The features after it each moved down one: planner day cards from FEAT-73 to FEAT-72, cook mode from FEAT-74 to FEAT-73, and AI meal planning to FEAT-74 to FEAT-77.
+- Amended at AI meal planning scoping (2026-10-25): a Plan Proposal set, added once FEAT-74 lands (DEC-117). This doesn't block the Recipe Import and Health Score sets.
+  - **About six inputs, each a planner request exported from real wizard inputs:**
+    - a plain week with no Brief
+    - a Brief naming ingredients to use up
+    - a week with many Fixed meals
+    - a batch-cooking week with a fixed batch
+    - a 14-day plan
+    - a misleading Brief
+  - **The report adds, per input:**
+    - slots dropped by the normaliser
+    - recipes repeated from the 4 weeks before the plan
+    - whether a fixed batch was used up
+    - whether the summary's reading of the Brief matches the Brief
+    - time against the time limit
+  - The run settles `MEAL_PLAN_MODEL` and `MEAL_PLAN_EFFORT`.
+
+**Manual verification:**
+1. Run the runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
+2. Run it on a shopping list. It reports not a recipe.
+3. Run the Health Score set through the `anthropic` adapter. Each recipe is scored three times, and the report shows each recipe's spread.
+
+**Common gotchas:**
+- Effort levels mean different amounts of thinking on different models, so compare each model across its own levels.
+- A classifier refusal can be answered by a fallback model. Check the model that answered in the report.
+
+**Definition of done:**
+- Tests cover: the runner's arguments and its report for both features, on the `fake` adapter.
+- Eval sets: both run on the agreed inputs, with the comparisons recorded in the session notes, and `RECIPE_IMPORT_MODEL` / `RECIPE_IMPORT_EFFORT` and `HEALTH_SCORE_MODEL` / `HEALTH_SCORE_EFFORT` set from them.
+- Commit: `feat(recipes): add the eval runner and the recipe import and health score eval sets`
+- Gate check: manual verification steps 1–3.
 
 ---
 
@@ -3858,19 +3859,19 @@ A stored health score (DEC-101) is only trustworthy if it's marked stale when it
 
 ### 22. Model features
 
-**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 and FEAT-67 (health scoring), FEAT-72 (evals), FEAT-75 to FEAT-78 (AI meal planning), and any future feature that calls a model.
+**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 and FEAT-67 (health scoring), FEAT-74 to FEAT-77 (AI meal planning), FEAT-78 (evals), and any future feature that calls a model.
 
 Every model feature follows the rules in DEC-110 and is built the same way (DEC-109). A new feature that skips a step drifts from the others, and the drift is costly to undo once a second provider or model is in play. The checklist:
 - **Its own seam.** One narrow, domain-level interface per feature (`RecipeReader`, `RecipeScorer`), never a shared "AI service". It has an adapter per provider and a `fake` adapter for tests and e2e.
 - **Config.** `<FEATURE>_ADAPTER` and `<FEATURE>_MODEL` in `config.ts`, validated by Zod. Config refuses `fake` in production. Where the provider has an effort setting, `<FEATURE>_EFFORT` too, since a level means different things on different models.
 - **Rules outside the seam.** Input preparation happens before the seam, and the feature's normaliser runs after it, on every adapter's output (schema, plain text, household references). Adapters only call the model.
 - **Logging.** Through one shared helper that takes a `feature` field and logs metadata only: `reqId`, feature, adapter, model, tokens, latency, outcome. No prompt or model text in logs or Sentry (DEC-104).
-- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-72.
+- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-78.
 - **Data flow.** The feature's DEC names any new data it sends to a provider.
 - **Shared code is helpers, not seams:** the provider client setup, provider error sorting, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
 - **A real call before the first deploy.** The `fake` adapter can't catch a provider's limits. Recipe Import shipped with a schema Anthropic refused on every request, so send one real request through the real adapter before a model feature first deploys.
 
-**Named triggers:** the first model feature that can't finish within one request decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. Health scoring settled it for itself with no background work: the browser drives scoring one request per recipe (DEC-112). AI meal planning assumes a 14-day Plan Proposal fits in one request, and FEAT-75's kick-off times a real call to confirm it. If it doesn't fit, the trigger fires there (DEC-117). The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
+**Named triggers:** the first model feature that can't finish within one request decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. Health scoring settled it for itself with no background work: the browser drives scoring one request per recipe (DEC-112). AI meal planning assumes a 14-day Plan Proposal fits in one request, and FEAT-74's kick-off times a real call to confirm it. If it doesn't fit, the trigger fires there (DEC-117). The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
 
 ---
 

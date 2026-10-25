@@ -53,7 +53,7 @@ export function PlannerGrid({
   onSlotClick,
   onSlotClear,
 }: PlannerGridProps): React.ReactElement {
-  // Below `md` the grid gives way to one card per day (FEAT-73, DEC-115). Only
+  // Below `md` the grid gives way to one card per day (FEAT-72, DEC-115). Only
   // one layout mounts, so each slot registers its dnd-kit ids once.
   const isMediumViewport = useIsMediumViewport();
   const visibleDates = useMemo(

@@ -324,7 +324,7 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
-    // Below `md` the planner shows one card per day (FEAT-73), which must fit
+    // Below `md` the planner shows one card per day (FEAT-72), which must fit
     // the width without sideways scrolling.
     test(`planner passes axe at phone width in ${theme} theme`, async ({
       page,

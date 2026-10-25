@@ -5,7 +5,7 @@ import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { formatLongDayLabel } from '@/lib/date-utils.ts';
 import { cn } from '@/lib/utils.ts';
 
-// One day of the plan below `md` (FEAT-73, DEC-115): the day's header, then a
+// One day of the plan below `md` (FEAT-72, DEC-115): the day's header, then a
 // row per occasion holding whatever the grid would put in that cell.
 export interface PlannerDayCardProps {
   date: string;

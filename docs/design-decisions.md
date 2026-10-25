@@ -1192,12 +1192,12 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** No new table or worker. Changing the model is a config change, and changing the provider is a new adapter (DEC-109).
 - **Consequences (−):** Recipe content, photos and the household's ingredient, tag and source names go to the provider. A slow import holds a request open for up to 75 seconds, and closing the app mid-import loses it (nothing was saved). The same input can give slightly different proposals. The eval set is manual, so a regression only shows when someone runs it.
 - **Revisit when:** Real imports come close to 75 seconds (try lower effort or Sonnet 5.5, then a background job). The spend cap is hit.
-- **Cross-refs:** DEC-01, DEC-49, DEC-56, DEC-64, DEC-72, DEC-75, DEC-76, DEC-77, DEC-101, DEC-103, DEC-108, DEC-109; FEAT-60, FEAT-72; cross-cutting #16.
+- **Cross-refs:** DEC-01, DEC-49, DEC-56, DEC-64, DEC-72, DEC-75, DEC-76, DEC-77, DEC-101, DEC-103, DEC-108, DEC-109; FEAT-60, FEAT-78; cross-cutting #16.
 - **Amended (2026-10-04) at FEAT-60 kick-off.**
   - Effort comes from `RECIPE_IMPORT_EFFORT` (default `medium`), so it moves with the model without a code change.
   - The `anthropic` adapter turns on Anthropic's server-side refusal fallback (`fallbacks: "default"`). A classifier refusal is re-run, in the same call, on the model Anthropic recommends for its category; a recipe tripping one is almost certainly a false positive. The draft and the logs record the model that answered. A refusal from the whole chain is still `IMPORT_NOT_A_RECIPE`.
   - The per-user limit is 14 imports an hour.
-  - The eval set and its runner move to FEAT-72, which also compares Opus 5.5 with Sonnet 5.5 on the same inputs. A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its fallback doesn't cover `bio` or `general_harms` refusals.
+  - The eval set and its runner move to FEAT-78, which also compares Opus 5.5 with Sonnet 5.5 on the same inputs. A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its fallback doesn't cover `bio` or `general_harms` refusals.
   - The SDK adds about 0.8 MB to the server bundle. Worth checking against the cold-start budget (DEC-64, FEAT-52) after the first deploy.
 - **Amended (2026-10-04) after the FEAT-62 deploy.**
   - The `anthropic` adapter no longer uses structured outputs: the prompt describes the reply instead (DEC-109 amended). Every import in production had been refused with a 400.
@@ -1310,7 +1310,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** Changing the model is a config change, and changing the provider is one new adapter. e2e runs without a real provider. The eval set can compare adapters side by side. Household scope (DEC-17) and plain text (DEC-49) hold whatever a model returns.
 - **Consequences (−):** The interface has to stay stable, because changing the outcome shape touches every adapter. Each adapter has its own prompt, so prompt improvements don't carry across providers. A provider that can't take image URLs would need its adapter to download images from Cloudinary, which puts image bytes in backend memory. DEC-50 forbids proxying uploads rather than this, but it goes against DEC-50's intent, so weigh it when such an adapter is proposed.
 - **Revisit when:** A second real provider adapter is added (check that the interface held), or the interface keeps changing. Two named triggers, recorded in cross-cutting #22: the first model feature that can't finish within one request (most likely the health-score backfill) decides background work against auto-stop (DEC-64); the first that needs streamed output decides the tRPC link change (cross-cutting #16).
-- **Cross-refs:** DEC-17, DEC-49, DEC-50, DEC-56, DEC-64, DEC-101, DEC-103, DEC-104, DEC-106, DEC-107, DEC-110; FEAT-60 to FEAT-66, FEAT-72; cross-cutting #16, #22.
+- **Cross-refs:** DEC-17, DEC-49, DEC-50, DEC-56, DEC-64, DEC-101, DEC-103, DEC-104, DEC-106, DEC-107, DEC-110; FEAT-60 to FEAT-66, FEAT-78; cross-cutting #16, #22.
 - **Amended (2026-10-04) at FEAT-60 kick-off.**
   - The names stand: `RecipeReader.read(request, signal)` and `normaliseProposal`.
   - Adapters return a candidate shaped by `recipeImportCandidateSchema` in `/shared`. It's kept to what structured outputs can express: every key present, no length or range limits, Estimate marks as a list. `normaliseProposal` parses it into the stricter proposal schema.
@@ -1319,7 +1319,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - The provider-facing JSON schema comes from a shared helper that keeps `enum` and `const`, because the SDK's helper moves them into descriptions and would leave the outcome unenforced.
 - **Amended (2026-10-04) after the FEAT-62 deploy.**
   - The `anthropic` adapter no longer uses structured outputs. Anthropic refused the reading schema twice: first for having more than 16 union-typed properties (it had 24), then, once under that, because the compiled grammar was too large. Probes against the live API found the schema right at that undocumented size limit, with no restructuring leaving room for even two more fields.
-  - The prompt now carries the same JSON schema, from the same helper, and asks for bare JSON; the adapter reads the object out of the reply even inside a code fence or a sentence. `normaliseProposal` stays the gate, so a malformed reply becomes "try again", as an invalid proposal always has. The reply's shape is no longer guaranteed; FEAT-72's evals measure how often it breaks.
+  - The prompt now carries the same JSON schema, from the same helper, and asks for bare JSON; the adapter reads the object out of the reply even inside a code fence or a sentence. `normaliseProposal` stays the gate, so a malformed reply becomes "try again", as an invalid proposal always has. The reply's shape is no longer guaranteed; FEAT-78's evals measure how often it breaks.
   - The candidate lists nutrition as `{ field, value }` entries, leaving out a field it has no value for, and gives an empty string for a missing description, source link or source detail. The proposal is unchanged.
   - Revisit when Anthropic raises its grammar limits, or when evals show malformed replies are common.
 - **Amended (2026-10-05) by DEC-111.** The request gains a `pdf` input (the PDF's Cloudinary delivery URL), which the `anthropic` adapter sends as a document block with a URL source. A `page` input's URL may be null, for a saved web page with no source link. Before the seam, the procedure looks a PDF up in Cloudinary for its page count and refuses one over the cap. Text and Markdown Documents reach the seam as `text`.
@@ -1352,13 +1352,13 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - **Import page:** a Document mode beside Paste text, Photos and Link. The whole page takes a dropped file in every mode: a Document goes to Document mode and images go to Photos (up to 8). Two Documents, or a Document with images, are refused. Off while offline.
   - **Cloudinary:** the account's "Allow delivery of PDF and ZIP files" setting is on, because the provider fetches the PDF by URL. Recorded in `OPERATIONS.md`.
   - **Data flow (cross-cutting #22):** a text Document, a saved page's recipe data or text, and a PDF's whole content go to the provider, as pasted text, links and images do. Logs carry the input kind, sizes, page count and a source link's host, never a file name or content.
-  - **Delivery:** FEAT-64 (text, Markdown and saved web pages), then FEAT-65 (PDFs). The eval runner moves after them (now FEAT-72, after the health score features of DEC-112) and adds PDF and saved-page inputs.
+  - **Delivery:** FEAT-64 (text, Markdown and saved web pages), then FEAT-65 (PDFs). The eval runner moves after them (now FEAT-78, after the health score features of DEC-112) and adds PDF and saved-page inputs.
 - **Alternatives:** (a) One route for every format, all uploaded to Cloudinary for the server to download: file bytes through the backend for text that fits in a tRPC call anyway. (b) Text and Markdown as their own server input kind with the file name recorded: new server surface for what is pasted text. (c) HTML reduced to text in the browser and sent as pasted text: loses JSON-LD and copies `readPageContent` into the frontend. (d) HTML uploaded to Cloudinary as a raw file. (e) PDF pages turned into JPEGs by Cloudinary and sent down the image path: no delivery setting needed, but the reader loses the text layer, and small print reads worse. (f) PDF text extracted in the browser with pdf.js: fails on scanned PDFs and adds a large dependency. (g) PDFs through tRPC as base64, or downloaded by the backend and sent as base64: breaks the body limit, or puts PDF bytes in backend memory (DEC-50, DEC-109). (h) A page picker for long PDFs, sending the chosen pages as images: handles e-books, but more UI for a case not yet seen. (i) Trusting the page count the browser reads from its upload response: the server can't verify it. (j) Keeping only the PDF's page images as Originals, or not keeping the PDF. (k) Several Documents per import, or a whole collection at once: see the "Bulk recipe import" non-goal.
 - **Why it won:** Each format reuses the path nearest to it. A text file is pasted text, a saved page is a linked page without the fetch, and a PDF is uploaded like a photo. Native PDF reading keeps the text layer and still reads scans, and the URL route keeps PDF bytes off Fastify. Keeping the PDF matches photos: it's what a cook rechecks an Estimate against.
 - **Consequences (+):** Text and Markdown need no server change. Saved pages get the JSON-LD path, and cover sites that block the link fetcher or sit behind a login. Scanned PDFs work. A PDF Original opens in the browser's own viewer.
 - **Consequences (−):** Any PDF or ZIP in the Cloudinary account can be fetched by its URL; uploads are signed and ids are random, so only the app can put one there. A schema change to `recipe_import_originals`, and a stored-input schema that no longer always matches the start input. The 8-page cap is a guess until a real PDF is timed, and a long e-book has to be cut down by the cook. A PDF page costs more tokens and time than a photo (about 1,500–3,000 text tokens plus the page image). One more Cloudinary call per PDF import. A file with 40 recipes means 40 imports.
 - **Revisit when:** PDF imports come close to 75 seconds, or the cap refuses PDFs the household uses often (the page picker). Cooks keep importing many recipes from one file (bulk import). A provider adapter can't take a PDF by URL (DEC-109's note on downloading applies).
-- **Cross-refs:** CONTEXT.md (Document), DEC-17, DEC-49, DEC-50 (amended), DEC-103 (amended), DEC-104, DEC-107 (amended), DEC-108 (amended), DEC-109 (amended), DEC-110; FEAT-61 to FEAT-65, FEAT-72; cross-cutting #22; non-goal: "Bulk recipe import" (new).
+- **Cross-refs:** CONTEXT.md (Document), DEC-17, DEC-49, DEC-50 (amended), DEC-103 (amended), DEC-104, DEC-107 (amended), DEC-108 (amended), DEC-109 (amended), DEC-110; FEAT-61 to FEAT-65, FEAT-78; cross-cutting #22; non-goal: "Bulk recipe import" (new).
 - **Amended (2026-10-05) at FEAT-64 kick-off.** Full detail in FEAT-64's implementation notes.
   - The browser checks a pruned page against both caps, 750,000 characters and 900,000 bytes as JSON, so the server's schema never refuses one the browser let through.
   - A drop of one Document goes to Document mode, and images go to Photos through the picker's own checks. Two Documents, or a Document with any other file, are refused. Drops are ignored while offline, while an import runs and during the several-recipes pick.
@@ -1391,7 +1391,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - **Recipes page filter (FEAT-69):** a "Health score" filter in DEC-100's format, offering Any, 6+, 7+, 8+ or 9+. Unscored recipes are hidden while it's set, and out-of-date scores count. There's no sort control.
   - **The Suggestion and the non-goal:** this narrowly reverses the "ingredient substitution advice" exclusion. The reversal covers one Suggestion attached to a Health Score; there's no standalone substitution feature and no "what can I swap for X". Judged against DEC-110: the cook decides whether to make the change (rule 1), and it's labelled AI (rule 2).
   - **Data flow (cross-cutting #22):** each scored recipe's name, ingredient lines, step text and nutrition go to Anthropic. That includes recipes typed in by hand, which until now never left the app. Logs carry metadata only: recipe id, recipe kind, line count, adapter, model, tokens, latency and outcome. They never include recipe text, the summary or the Suggestion.
-  - **Delivery:** FEAT-66 (scoring), FEAT-67 ("Score them"), FEAT-68 (ingredient edits), FEAT-69 (filter), FEAT-70 (planner). The day and plan score is DEC-113 (FEAT-71). The eval runner moves to FEAT-72 and gains a Health Score set. Scoring ships first, with a manual consistency check standing in until then.
+  - **Delivery:** FEAT-66 (scoring), FEAT-67 ("Score them"), FEAT-68 (ingredient edits), FEAT-69 (filter), FEAT-70 (planner). The day and plan score is DEC-113 (FEAT-71). The eval runner moves to FEAT-78 and gains a Health Score set. Scoring ships first, with a manual consistency check standing in until then.
 - **Alternatives:**
   - (a) Score only when a cook presses a button: scores go out of date with every edit and stay that way.
   - (b) Score from the server after a save, in the background: untracked work that auto-stop can cut off.
@@ -1399,7 +1399,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - (d) A formula over nutrition values: if the score were only traffic lights, DEC-110 rule 3 would require one. A formula can't judge a recipe with no nutrition, or veg, wholefood and processing.
   - (e) A score relative to the dish's role: a 7 would mean different things on different cards.
   - (f) Send the plant-points count: it would anchor the model on a number that counts a pinch of parsley like 200 g of spinach, and it would tie the score to `is_plant` edits. Sending each line's plant flag has the second problem.
-  - (g) Sonnet 5.5 at half the price, or Haiku 4.5, which has no effort setting. Opus 5.5 at low effort keeps one model to know, and FEAT-72 can change it in config.
+  - (g) Sonnet 5.5 at half the price, or Haiku 4.5, which has no effort setting. Opus 5.5 at low effort keeps one model to know, and FEAT-78 can change it in config.
   - (h) A `rubric_version` column instead of `HEALTH_SCORE_SINCE`: a schema change for what a date does.
   - (i) Write a result whose recipe changed while it was being scored, marked out of date: an older call could overwrite a newer current score.
   - (j) A summary with no Suggestion: the household wants something to act on.
@@ -1408,13 +1408,13 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):**
   - A save that changes what was scored costs a model call, very roughly 2p on Opus 5.5 at low effort.
   - Recipes typed by hand now leave the app.
-  - Consistency is unmeasured until FEAT-72.
+  - Consistency is unmeasured until FEAT-78.
   - At 30 an hour, scoring 200 existing recipes takes about seven sittings.
   - A model or prompt change needs `HEALTH_SCORE_SINCE` changed by hand.
   - A Suggestion can be poor advice. It's labelled and never applied.
   - Rescore lets a cook re-roll a score they dislike.
-- **Revisit when:** FEAT-72 shows the same recipe's score varying by more than a point between runs, or a cheaper model holding up. Also if cooks keep rescoring hoping for a different number, the cap gets in the way of ordinary editing, or Suggestions are routinely ignored or wrong.
-- **Cross-refs:** CONTEXT.md (Health Score, Out of date, Suggestion), DEC-17, DEC-21, DEC-23, DEC-32, DEC-49, DEC-64, DEC-88, DEC-91, DEC-100, DEC-101 (amended), DEC-103 (amended), DEC-104, DEC-106, DEC-109 (amended), DEC-110 (amended); FEAT-57, FEAT-58, FEAT-66 to FEAT-70, FEAT-72; cross-cutting #6, #14, #16, #21, #22; non-goal: "AI / LLM features" (adjacency note amended).
+- **Revisit when:** FEAT-78 shows the same recipe's score varying by more than a point between runs, or a cheaper model holding up. Also if cooks keep rescoring hoping for a different number, the cap gets in the way of ordinary editing, or Suggestions are routinely ignored or wrong.
+- **Cross-refs:** CONTEXT.md (Health Score, Out of date, Suggestion), DEC-17, DEC-21, DEC-23, DEC-32, DEC-49, DEC-64, DEC-88, DEC-91, DEC-100, DEC-101 (amended), DEC-103 (amended), DEC-104, DEC-106, DEC-109 (amended), DEC-110 (amended); FEAT-57, FEAT-58, FEAT-66 to FEAT-70, FEAT-78; cross-cutting #6, #14, #16, #21, #22; non-goal: "AI / LLM features" (adjacency note amended).
 - **Amended (2026-10-07) at FEAT-66 kick-off.** Full detail in FEAT-66's amended notes.
   - `healthScores.score` gains a `deleted` outcome for a soft-deleted recipe: no call, no write.
   - A score is current when it isn't stale and was scored on or after `HEALTH_SCORE_SINCE`, so a save or "Score them" updates an older scorer's score without a Rescore.
@@ -1467,7 +1467,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (+):** No sideways scrolling and no cut-off names on phones. The slot card is unchanged. Room in the day header for FEAT-71's day badge.
 - **Consequences (−):** A week takes more vertical scrolling than the grid, and you can't scan one occasion down the week at a glance. Two layouts to keep in step. Three widths now matter to the planner (`md`, `lg`, and below `md`).
 - **Revisit when:** The household misses comparing one occasion across the week on a phone, or long plans make the list tiring to scroll.
-- **Cross-refs:** FEAT-73, FEAT-31, FEAT-40, FEAT-41, FEAT-70, FEAT-71; DEC-53, DEC-84, DEC-85.
+- **Cross-refs:** FEAT-72, FEAT-31, FEAT-40, FEAT-41, FEAT-70, FEAT-71; DEC-53, DEC-84, DEC-85.
 
 ### DEC-116 — Cook mode: one method step per screen, a gather screen first, the screen kept awake, and nothing stored
 
@@ -1486,7 +1486,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** Ticks are lost on reload, and the two cooks don't share progress. Wake Lock support differs by browser, and on unsupported browsers the screen still locks. Times in step text aren't timers, so a cook still needs a kitchen timer. A long step with notes may still need scrolling on a small phone.
 - **Revisit when:** The cooks reach for timers often enough that a separate timer gets in the way, which is the trigger for in-page timers first. Also if losing ticks on reload annoys in practice, or if the two cooks cook one recipe together and want shared progress.
 - **Amended (2026-10-24).** Cook mode now has a horizontal swipe: swipe left for Next, right for Back. Touches that start within 24 px of either screen edge are ignored, so the iOS and Android edge-swipe Back still works. A gesture needs 50 px of travel and must be at least twice as wide as it is tall, so scrolling a long step or the gather list isn't read as a swipe. Swiping never leaves cook mode: it does nothing past the gather screen or the last step, and Finish and Exit stay buttons. There's no vertical swipe, because vertical movement is already how a long step or the gather list scrolls, and a pull down at the top of the page means refresh in mobile Chrome. Back on the gather screen now closes cook mode, as Exit does, instead of being disabled, and so does the Left arrow key there. A right swipe on the gather screen still does nothing, so a stray swipe can't lose the ticks.
-- **Cross-refs:** CONTEXT.md (Cook mode), DEC-23, DEC-36, DEC-49, DEC-94, DEC-95, DEC-96, DEC-98, DEC-99; FEAT-31 (slot card), FEAT-55, FEAT-74; non-goal: "Cook-mode timers, hands-free advance and shared progress" (renamed from "Cook-mode / step-by-step / timer integration" and narrowed: the step view and wake lock are built; timers, hands-free advance and stored progress stay out).
+- **Cross-refs:** CONTEXT.md (Cook mode), DEC-23, DEC-36, DEC-49, DEC-94, DEC-95, DEC-96, DEC-98, DEC-99; FEAT-31 (slot card), FEAT-55, FEAT-73; non-goal: "Cook-mode timers, hands-free advance and shared progress" (renamed from "Cook-mode / step-by-step / timer integration" and narrowed: the step view and wake lock are built; timers, hands-free advance and stored progress stay out).
 
 ### DEC-117 — AI meal planning: a wizard creates a plan from a Plan Proposal, which the cook reviews slot by slot, through a `MealPlanner` seam
 
@@ -1548,7 +1548,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - **Labelling (DEC-110 rule 2):** proposed meals are badged in review. Once applied they carry no label: a planned meal is the cook's choice, not a claim a reader could take for fact. So there's no schema change.
   - **Seam:** `MealPlanner`, with `propose(request, signal)` for a whole plan and `proposeSlot(request, signal)` for one slot, following DEC-109's pattern.
     - **Adapters:** `anthropic` and `fake`.
-    - **Config:** `MEAL_PLAN_ADAPTER`, `MEAL_PLAN_MODEL` (default `claude-opus-5-5`) and `MEAL_PLAN_EFFORT`. The default effort is set at FEAT-75 kick-off, and FEAT-72 tunes it. Config refuses `fake` in production.
+    - **Config:** `MEAL_PLAN_ADAPTER`, `MEAL_PLAN_MODEL` (default `claude-opus-5-5`) and `MEAL_PLAN_EFFORT`. The default effort is set at FEAT-74 kick-off, and FEAT-78 tunes it. Config refuses `fake` in production.
     - **Provider settings:** structured outputs, and Anthropic's refusal fallback on, as for scoring.
     - **Normaliser, after the seam, on every adapter's output:**
       - Every recipe id is pickable and in the household.
@@ -1559,7 +1559,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
       - No eat out or takeaway.
       - Reasons and summary are plain text within their lengths.
       - A slot that fails is dropped to empty and counted, and review says so. A shortfall is never a failure: it shows as the usual warning.
-  - **Calls:** one synchronous tRPC mutation per proposal and per single-slot suggestion, on `httpBatchLink` (cross-cutting #16), as for imports (DEC-104). Neither writes anything. The time limit is set at FEAT-75 kick-off, from a real call against the household's library for a 14-day plan. If a 14-day proposal can't finish within one request, cross-cutting #22's background-work trigger fires, and this DEC is amended before building goes on.
+  - **Calls:** one synchronous tRPC mutation per proposal and per single-slot suggestion, on `httpBatchLink` (cross-cutting #16), as for imports (DEC-104). Neither writes anything. The time limit is set at FEAT-74 kick-off, from a real call against the household's library for a 14-day plan. If a 14-day proposal can't finish within one request, cross-cutting #22's background-work trigger fires, and this DEC is amended before building goes on.
   - **Limits:**
     - 5 whole-plan proposals per user per hour, counting the first and every "Another go".
     - 30 single-slot suggestions per user per hour, counted separately.
@@ -1583,11 +1583,11 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
       - clarifying questions when a Brief is unclear
       - freezer surplus
   - **Delivery:**
-    - FEAT-75: the seam and whole-plan proposals, dishes only
-    - FEAT-76: the wizard, Plan Review and Apply
-    - FEAT-77: batch cooking in proposals
-    - FEAT-78: suggest again for one slot
-    - FEAT-72 gains a Plan Proposal eval set.
+    - FEAT-74: the seam and whole-plan proposals, dishes only
+    - FEAT-75: the wizard, Plan Review and Apply
+    - FEAT-76: batch cooking in proposals
+    - FEAT-77: suggest again for one slot
+    - FEAT-78 gains a Plan Proposal eval set.
 - **Alternatives:**
   - (a) Keep the exclusion.
   - (b) A rule-based helper with no model ("not planned in 4 weeks, rated 4+, scored 7+"). It covers the rut and some of the balance, but it can't read a Brief, judge taste variety or sequence batch cooking.
@@ -1619,7 +1619,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - The storage feature lands (freezer surplus).
   - Briefs are often misread (clarifying questions).
   - The cooks want to plan with AI on an existing plan.
-- **Cross-refs:** CONTEXT.md (Plan Proposal, Plan Review, Brief, Fixed meal), DEC-09, DEC-17, DEC-21, DEC-32, DEC-33, DEC-38, DEC-49, DEC-64, DEC-88, DEC-89, DEC-90, DEC-91, DEC-97, DEC-104, DEC-109, DEC-110 (amended), DEC-112, DEC-113; FEAT-19, FEAT-21, FEAT-27, FEAT-31, FEAT-41, FEAT-71, FEAT-72 (amended), FEAT-75 to FEAT-78; cross-cutting #5, #6, #16, #22; non-goals: "AI / LLM features" (adjacency note amended), "AI meal planning follow-ons" (new).
+- **Cross-refs:** CONTEXT.md (Plan Proposal, Plan Review, Brief, Fixed meal), DEC-09, DEC-17, DEC-21, DEC-32, DEC-33, DEC-38, DEC-49, DEC-64, DEC-88, DEC-89, DEC-90, DEC-91, DEC-97, DEC-104, DEC-109, DEC-110 (amended), DEC-112, DEC-113; FEAT-19, FEAT-21, FEAT-27, FEAT-31, FEAT-41, FEAT-71, FEAT-78 (amended), FEAT-74 to FEAT-77; cross-cutting #5, #6, #16, #22; non-goals: "AI / LLM features" (adjacency note amended), "AI meal planning follow-ons" (new).
 
 ---
 

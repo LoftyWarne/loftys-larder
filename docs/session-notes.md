@@ -4,9 +4,9 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-10-25 — AI meal planning scoped (DEC-117, FEAT-75 to FEAT-78); "meal-plan suggestions" non-goal narrowed
+## 2026-10-25 — AI meal planning scoped (DEC-117, FEAT-74 to FEAT-77); "meal-plan suggestions" non-goal narrowed; eval runner renumbered FEAT-78
 
-**Status:** Docs only, no code. Requirements shaped with the user over 2026-10-24 and 2026-10-25, then written up. Nothing ticked. Start with FEAT-75's kick-off.
+**Status:** Docs only, no code. Requirements shaped with the user over 2026-10-24 and 2026-10-25, then written up. Nothing ticked. Start with FEAT-74's kick-off.
 
 **Gate:** "meal-plan suggestions" was an exclusion in the "AI / LLM features" non-goal. DEC-117 reverses it narrowly, judged against DEC-110. The model proposes, the cook reviews every slot, and nothing exists until Apply.
 
@@ -51,25 +51,26 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 - **Plans have no name in code.** `createPlanInputSchema` takes dates only, although `plan.md`'s data model still lists `name`. So the wizard's first step is dates only.
 - **"Who's eating" uses the existing attendance model:** named diners plus `guest_count`, with headcount computed (2026-06-29 entry). It isn't a separate number.
 - **The 14-day cap is already the app's maximum plan length** (`PLAN_MAX_RANGE_DAYS`).
-- **Plant points and FEAT-71's day and plan Health Score are only computed over saved slots.** Plan Review needs them over unsaved ones, which is FEAT-76's kick-off question 3. FEAT-71 isn't built yet, and FEAT-76 depends on it.
+- **Plant points and FEAT-71's day and plan Health Score are only computed over saved slots.** Plan Review needs them over unsaved ones, which is FEAT-75's kick-off question 3. FEAT-71 isn't built yet, and FEAT-75 depends on it.
 
 **Docs changed:**
 - `CONTEXT.md`: a Planning section with the four terms.
 - DEC-117 (new). DEC-110 amended.
-- FEAT-75 to FEAT-78 (new). FEAT-72 amended with a Plan Proposal eval set. Cross-cutting #22's "Threads through" and named trigger updated.
+- FEAT-74 to FEAT-77 (new). FEAT-78 amended with a Plan Proposal eval set. Cross-cutting #22's "Threads through" and named trigger updated.
 - `non-goals.md`: the AI adjacency note amended, and "AI meal planning follow-ons" added (existing plans, clarifying questions, freezer surplus).
 - `AGENTS.md`: the FEAT and DEC counts.
+- **Numbering:** the eval runner moved from FEAT-72 to FEAT-78, so it comes last, and FEAT-73 to FEAT-78 each moved down one. Planner day cards are now FEAT-72 and cook mode FEAT-73, including the comments in `planner-day-card.tsx`, `planner-grid.tsx`, `use-is-large-viewport.ts` and `e2e/specs/a11y.spec.ts`. Every mention in these notes was updated too, except records of earlier renumbering: the 2026-10-07 entry's, and cook mode's note on the numbers it was scoped under.
 
 **Open, for the kick-offs:**
-- **FEAT-75:**
+- **FEAT-74:**
   - Time a real 14-day call against the household's library. If it doesn't fit in one request, cross-cutting #22's background-work trigger fires, and DEC-117 gets amended before building on.
   - The other proposed readings: Brief and note lengths, the recency window, and the default effort.
-- **FEAT-76:** three stop-and-asks:
+- **FEAT-75:** three stop-and-asks:
   - a create-with-slots mutation for Apply
   - a date check for the wizard's first step
   - figures over unsaved slots, sharing the rule code
-- **FEAT-77:** whether a batch Fixed meal is also eaten at its own slot.
-- **A recipe-only Fixed meal:** a recipe fixed in place gets `prepared = eaten =` headcount. Confirm at FEAT-76 kick-off.
+- **FEAT-76:** whether a batch Fixed meal is also eaten at its own slot.
+- **A recipe-only Fixed meal:** a recipe fixed in place gets `prepared = eaten =` headcount. Confirm at FEAT-75 kick-off.
 - **Not checked:** the "who's eating" junction's DEC-29 flag (2026-06-29 entry) is still open, and Apply writes attendance.
 
 ---
@@ -100,11 +101,11 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-10-24 — Cook mode (FEAT-74)
+## 2026-10-24 — Cook mode (FEAT-73)
 
-**Status:** Committed and pushed to `main`, rebased onto the emailed-code sign-in (DEC-114) and planner day cards (FEAT-73, DEC-115). Cook mode was scoped as DEC-114 and FEAT-73 on its branch; both numbers were taken on `main` first, so it's DEC-116 and FEAT-74. Typecheck, lint and format are clean in every workspace. Frontend: 971 tests green. e2e: 56 of 56, including the new cook mode spec and the cook mode axe scans at phone width in both themes. Backend unchanged. Manual verification (a real phone, the iOS home-screen PWA) not run. The FEAT-74 checkboxes are left for the user to tick. The day cards reuse the slot card, so the cook link shows there too; it has no phone-width e2e of its own.
+**Status:** Committed and pushed to `main`, rebased onto the emailed-code sign-in (DEC-114) and planner day cards (FEAT-72, DEC-115). Cook mode was scoped as DEC-114 and FEAT-73 on its branch; both numbers were taken on `main` first, so it's DEC-116 and FEAT-74 (FEAT-73 since the 2026-10-25 renumber). Typecheck, lint and format are clean in every workspace. Frontend: 971 tests green. e2e: 56 of 56, including the new cook mode spec and the cook mode axe scans at phone width in both themes. Backend unchanged. Manual verification (a real phone, the iOS home-screen PWA) not run. The FEAT-73 checkboxes are left for the user to tick. The day cards reuse the slot card, so the cook link shows there too; it has no phone-width e2e of its own.
 
-**Agreed at kick-off:** the readings are in FEAT-74's "Agreed at kick-off" block. The user chose a cook link on the slot card itself (not the home page alone), and no app shell in cook mode.
+**Agreed at kick-off:** the readings are in FEAT-73's "Agreed at kick-off" block. The user chose a cook link on the slot card itself (not the home page alone), and no app shell in cook mode.
 
 **Changes:**
 - **Shared:** `cookSearchSchema` (`servings` plus `step`) in `schemas/recipe-search.ts`.
@@ -126,9 +127,9 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
-## 2026-10-24 — Cook mode scoped (DEC-116, FEAT-74); cook-mode non-goal narrowed
+## 2026-10-24 — Cook mode scoped (DEC-116, FEAT-73); cook-mode non-goal narrowed
 
-**Status:** Docs only, no code. Scoped with the user. Start with FEAT-74's kick-off.
+**Status:** Docs only, no code. Scoped with the user. Start with FEAT-73's kick-off.
 
 **Why now:** the non-goal's trigger was real cooking with the app. Cooking from the recipe page, the screen locks partway through, the cook loses their place in the method, and the text is hard to read at arm's length.
 
@@ -140,13 +141,13 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 - Ways in: the recipe page's "Start cooking" button, and planner and home page dishes being cooked.
 - New glossary term **Cook mode** (`CONTEXT.md`). The non-goal is renamed "Cook-mode timers, hands-free advance and shared progress", and DEC-96's and DEC-99's cross-references now point to the new name.
 
-**Open, for the kick-off:** FEAT-74 lists four proposed readings: the planner entry's change to the slot card (a stop-and-ask), no method, unsupported wake lock, and no ingredients. Wake Lock in the iOS home-screen PWA is unverified, which is manual verification step 3.
+**Open, for the kick-off:** FEAT-73 lists four proposed readings: the planner entry's change to the slot card (a stop-and-ask), no method, unsupported wake lock, and no ingredients. Wake Lock in the iOS home-screen PWA is unverified, which is manual verification step 3.
 
 ---
 
-## 2026-10-24 — Planner day cards at phone width (FEAT-73, DEC-115)
+## 2026-10-24 — Planner day cards at phone width (FEAT-72, DEC-115)
 
-**Status:** Committed and pushed to `main`, rebased onto the emailed-code change (DEC-114). Typecheck, lint and format clean in every workspace. Frontend: 916 tests green. e2e: every planner test passes, including the new phone-width scan in both themes, and `planner.spec.ts` passes. Manual verification hasn't been run, so the FEAT-73 checkboxes are left for the user to tick.
+**Status:** Committed and pushed to `main`, rebased onto the emailed-code change (DEC-114). Typecheck, lint and format clean in every workspace. Frontend: 916 tests green. e2e: every planner test passes, including the new phone-width scan in both themes, and `planner.spec.ts` passes. Manual verification hasn't been run, so the FEAT-72 checkboxes are left for the user to tick.
 
 **Agreed at kick-off:** layout A from the mobile mockups, with all five readings as proposed: `md` (768 px) as the cut-off; a media-query hook rather than CSS `hidden`; the slot card unchanged; scroll to today once on load; trash button, editor sheet and "Move to…" left for a follow-up FEAT.
 
@@ -325,7 +326,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 **Open:**
 - The rubric is described but the prompt isn't written. That happens in FEAT-66, checked by its manual steps 1 and 2.
-- Score consistency is unmeasured until FEAT-72. FEAT-66's manual step 2 stands in until then.
+- Score consistency is unmeasured until FEAT-78. FEAT-66's manual step 2 stands in until then.
 - `secrets-checklist.md`, `fly.toml [env]` and `backend/.env.example` gain the `HEALTH_SCORE_*` settings in FEAT-66. The README changes when FEAT-66 ships.
 - The AGENTS.md convention line on health-score staleness gains ingredient edits when FEAT-68 lands.
 
@@ -419,7 +420,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 **Open, for the kick-offs:**
 - FEAT-64: the stored-input schema touches every reader of `proposal.input`. Existing drafts must still parse.
-- FEAT-65: turn on Cloudinary's PDF delivery setting before its first deploy. Time a real 8-page PDF against the 75-second limit (manual verification step 3); FEAT-72 tunes the cap. Confirm the `format` column's name and type.
+- FEAT-65: turn on Cloudinary's PDF delivery setting before its first deploy. Time a real 8-page PDF against the 75-second limit (manual verification step 3); FEAT-78 tunes the cap. Confirm the `format` column's name and type.
 
 ---
 
@@ -432,7 +433,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 **Unchanged on purpose:** the 75-second limit, 10 MB per image, 14 imports an hour (it counts imports, not images), and the all-at-once upload.
 
 **Open:**
-- The 75 s budget is the risk. The only measurement is four screenshots in 36.4 s. Run 6–8 real cookbook photos through the real adapter (a FEAT-72-style check) and compare against DEC-104's revisit trigger.
+- The 75 s budget is the risk. The only measurement is four screenshots in 36.4 s. Run 6–8 real cookbook photos through the real adapter (a FEAT-78-style check) and compare against DEC-104's revisit trigger.
 - Uploads are still all-or-nothing (`Promise.all` in `recipe-import-page.tsx`): one failure orphans the rest and "Try again" re-uploads every image. Keeping the successful uploads is the fix if this bites (DEC-107 amended).
 
 ---
@@ -473,7 +474,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 **Open:**
 - **Real model call before deploy** (cross-cutting #22): one link import through the `anthropic` adapter. Manual verification step 1 is that call.
 - **Sites that block the User-Agent or Fly's IPs** are unknown until real use. DEC-107's revisit trigger covers a site the household uses often.
-- **Bad source data** goes to the model as given. BBC Good Food's shakshuka declares "1.2 milligram of sodium", and the prompt's sodium-to-salt rule would make that 0.003 g. Worth an eval case in FEAT-72.
+- **Bad source data** goes to the model as given. BBC Good Food's shakshuka declares "1.2 milligram of sodium", and the prompt's sodium-to-salt rule would make that 0.003 g. Worth an eval case in FEAT-78.
 - e2e has no link import: one would need a stand-in page server reachable through the guard.
 
 ---
@@ -498,7 +499,7 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
 **Live check:** four PNG screenshots (the user's failed prod attempt, still in `loftys-larder/imports`) through the real adapter: candidate in 36.4 s, normalised into "Shakshuka" with 8 rows (3 matched), 5 proposed ingredients, 2 steps, 9 step links, 10 Estimate marks, 5 notes, 340 kcal. 9,019 tokens in, 4,470 out (about 10p). Diagnosis and probes cost about 7p more.
 
 **Open:**
-- The reply's shape is no longer guaranteed. FEAT-72's evals should measure malformed replies.
+- The reply's shape is no longer guaranteed. FEAT-78's evals should measure malformed replies.
 - The 8 images from the failed prod attempts are orphans in Cloudinary.
 - FEAT-60, 61 and 62 manual verification still needs a real run in production after this deploys.
 
@@ -595,13 +596,13 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
 - Unknown ids from a reader: proposed new ingredients may have a null category and unit (the cook picks in Import Review), and candidate rows carry `{ id, name }` so an unknown id still has a name to fall back on.
 - Create from import: existing-ingredient rows carry `unitId` and get the unit-mismatch check; cost and image are accepted from the cook; a `{ newName }` source taken meanwhile links to the existing one; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` names the `newKey`.
 - Anthropic's server-side refusal fallback (`fallbacks: "default"`) is on; the model that answered is recorded on the draft and in logs.
-- Evals become a later feature (FEAT-72): the eval runner, the user-supplied inputs, a Sonnet 5.5 vs Opus 5.5 comparison and effort tuning. FEAT-60's gate check is manual verification step 3 alone.
-- Model choice: Opus 5.5 stays the default (DEC-104). A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its refusal fallback doesn't cover `bio` or `general_harms` declines. Decide with FEAT-72's numbers.
+- Evals become a later feature (FEAT-78): the eval runner, the user-supplied inputs, a Sonnet 5.5 vs Opus 5.5 comparison and effort tuning. FEAT-60's gate check is manual verification step 3 alone.
+- Model choice: Opus 5.5 stays the default (DEC-104). A desk comparison found no head-to-head data on reading text or handwriting; Sonnet 5.5 is half the price and faster, but its refusal fallback doesn't cover `bio` or `general_harms` declines. Decide with FEAT-78's numbers.
 
 **Jev (TypeSafe AI) evaluated, not adopted.** Jev answers typed Choice / Score / yes-no questions with calibrated probabilities in 70–500 ms, but doesn't generate text and is weak at numbers ("not a calculator"), so it can't read recipes, convert units or estimate nutrition. Adopting it means a second provider and a new data flow. Ideas for later, each with a trigger:
 - **Near-duplicate check for proposed new ingredients** (DEC-105's revisit trigger: near-duplicates build up). Shortlist existing ingredients by trigram, ask a Choice "is this the same as one of these?" (max 255 options), show "possibly the same as X" in Import Review.
 - **Health scoring** (DEC-101, at its kick-off). A 10-level Score fits the 1–10 scale and would make a full backfill fast, but its docs admit weak numeric calibration on score levels, and it can't write the score's summary text.
-- **FEAT-72 grader** for fuzzy fields, e.g. "does this step keep the original instruction?".
+- **FEAT-78 grader** for fuzzy fields, e.g. "does this step keep the original instruction?".
 - Notes: `@typesafe-ai/sdk` ships ESM; data region not documented; zero data retention is enterprise-only.
 
 **Changes:**
@@ -619,7 +620,7 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
   - `procedures/recipe-imports.ts`: `start`, `list`, `get`, `discard`, `createRecipe`.
   - `rate-limit.ts` decorates `limitRecipeImportStart` (14 an hour per user; 1,000 under `NODE_ENV=test`). `AppContext` gains `log` (the request logger) and `recipeImport` (reader and limiter); the server builds the reader once at boot.
 - **Tests:** `plain-text`, `normalise-proposal`, `recipe-reader` (SDK HTTP layer faked through its `fetch` option), `recipe-imports-procedures` (Testcontainers), plus config and rate-limit cases. `test/helpers/context-deps.ts` fills the two new context fields for the other procedure tests.
-- **Docs and config:** FEAT-60 amended; new FEAT-72 (evals); cross-cutting #22; DEC-104, DEC-108 and DEC-109 amended; `secrets-checklist.md`; `fly.toml [env]`; `backend/.env.example`; README; AGENTS.md feature count.
+- **Docs and config:** FEAT-60 amended; new FEAT-78 (evals); cross-cutting #22; DEC-104, DEC-108 and DEC-109 amended; `secrets-checklist.md`; `fly.toml [env]`; `backend/.env.example`; README; AGENTS.md feature count.
 
 **Drift from the kick-off plan:**
 - New helper `structured-output-schema.ts`, not in the agreed list. The SDK's `zodOutputFormat` moves `enum` and `const` into descriptions, which would leave the outcome discriminator and the enums unenforced. Easy to drop if the SDK's helper is preferred.
@@ -629,7 +630,7 @@ Pasted-text imports were failing the same way since FEAT-60: the request never r
 
 **Open:**
 - **Not checked against the live API:** structured outputs together with server-side fallback, the effort setting, and the prompt. Manual verification step 3 is the first real call.
-- **"Converted" marks:** the prompt follows DEC-105 and marks a converted quantity only when the conversion rests on an assumption (an onion's weight, flour's density), not exact ones (tbsp → ml). The FEAT-60 criterion reads as "converted quantities are marked". Tune in FEAT-72 if every conversion should be marked.
+- **"Converted" marks:** the prompt follows DEC-105 and marks a converted quantity only when the conversion rests on an assumption (an onion's weight, flour's density), not exact ones (tbsp → ml). The FEAT-60 criterion reads as "converted quantities are marked". Tune in FEAT-78 if every conversion should be marked.
 - **Proposed new ingredient that already exists:** if the reader proposes a new ingredient whose name the household already has, `normaliseProposal` keeps it, and create recipe gives `INGREDIENT_NAME_TAKEN`. Import Review (FEAT-61) may want to flag it before then.
 - **Autosave and the proposal:** `recipeDrafts.upsert` replaces all of `draftData`, so Import Review must send `fields.proposal` back with each save. `list` falls back to a null name and `get` to a null proposal (FEAT-61).
 - **Closing the tab:** a cancelled request aborts the read. It's logged and reported as a timeout (`GATEWAY_TIMEOUT`, so it reaches Sentry).

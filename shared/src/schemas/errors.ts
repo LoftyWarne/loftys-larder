@@ -25,6 +25,7 @@ export const DOMAIN_ERROR_CODES = [
   'SLOT_RECIPE_NOT_PICKABLE',
   'SLOT_RECIPE_CROSS_HOUSEHOLD',
   'SLOT_CHEF_NOT_FOUND',
+  'SLOT_DINER_NOT_FOUND',
   'SLOT_BASE_CROSS_HOUSEHOLD',
   'SLOT_BASE_NOT_PICKABLE',
   'SLOT_BASE_NOT_BASE',
@@ -54,6 +55,16 @@ export const DOMAIN_ERROR_CODES = [
   'HEALTH_SCORE_NOT_SCORED',
   // The provider refused the request itself, so trying again won't help.
   'HEALTH_SCORE_REQUEST_REJECTED',
+  // Metadata `retryAfterSeconds`.
+  'MEAL_PLAN_RATE_LIMITED',
+  // Metadata `reason`: `timeout`, `unavailable` or `invalid_result`.
+  'MEAL_PLAN_TRY_AGAIN',
+  // Every model refused to propose a plan.
+  'MEAL_PLAN_NOT_PROPOSED',
+  // The provider refused the request itself, so trying again won't help.
+  'MEAL_PLAN_REQUEST_REJECTED',
+  // There are no pickable recipes to propose from.
+  'MEAL_PLAN_NO_RECIPES',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

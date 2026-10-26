@@ -65,6 +65,7 @@ import {
   type RecipeReader,
   type RecipeReading,
 } from '../src/lib/recipe-reader/types.ts';
+import { createFakeMealPlanner } from '../src/lib/meal-planner/fake.ts';
 import { createFakeRecipeScorer } from '../src/lib/recipe-scorer/fake.ts';
 import type { ModelRateLimitVerdict } from '../src/plugins/rate-limit.ts';
 import type { AppContext } from '../src/trpc/context.ts';
@@ -314,6 +315,12 @@ describe('recipe imports procedures', () => {
         scorer: createFakeRecipeScorer(),
         since: '2026-10-07',
         allowScore: () =>
+          Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
+      },
+      mealPlan: {
+        planner: createFakeMealPlanner(),
+        healthScoreSince: '2026-10-07',
+        allowProposal: () =>
           Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
       },
     };

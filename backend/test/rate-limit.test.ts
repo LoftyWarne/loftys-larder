@@ -311,3 +311,55 @@ describe('rate limit — health scores per user', () => {
     expect((await score(app, 'user-b')).allowed).toBe(true);
   });
 });
+
+describe('rate limit — plan proposals per user', () => {
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+    app = undefined;
+  });
+
+  async function buildProposalApp(): Promise<FastifyInstance> {
+    const instance = Fastify({ logger: false, trustProxy: true });
+    instance.decorateRequest('session', null);
+    instance.decorateRequest('user', null);
+    instance.addHook('preHandler', (req, _reply, done) => {
+      const raw = req.headers['x-test-user'];
+      if (typeof raw === 'string') {
+        // Structural stub: the proposal limiter only reads `user.id`.
+        req.user = { id: raw } as unknown as typeof req.user;
+      }
+      done();
+    });
+    await registerRateLimit(instance);
+    instance.post('/propose-probe', (req) => instance.limitPlanProposal(req));
+    await instance.ready();
+    return instance;
+  }
+
+  async function propose(instance: FastifyInstance, userId: string) {
+    const response = await instance.inject({
+      method: 'POST',
+      url: '/propose-probe',
+      headers: { 'x-test-user': userId },
+    });
+    return response.json<{ allowed: boolean; retryAfterSeconds: number }>();
+  }
+
+  it('allows 5 proposals an hour per user and refuses the 6th', async () => {
+    app = await buildProposalApp();
+    for (let i = 0; i < 5; i += 1) {
+      expect((await propose(app, 'user-a')).allowed).toBe(true);
+    }
+    const refused = await propose(app, 'user-a');
+    expect(refused.allowed).toBe(false);
+    expect(refused.retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  it('keeps a separate count for each user', async () => {
+    app = await buildProposalApp();
+    for (let i = 0; i < 5; i += 1) await propose(app, 'user-a');
+    expect((await propose(app, 'user-b')).allowed).toBe(true);
+  });
+});

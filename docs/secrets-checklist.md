@@ -81,7 +81,7 @@ bootstrap, stage everything then run the deploy workflow.
 | `SENTRY_ENVIRONMENT` | Optional Sentry environment tag | Manual |
 | `SENTRY_TRACES_SAMPLE_RATE` | Optional, 0–1; defaults to 0 (DEC-77 punts tracing) | Manual |
 | `SENTRY_BROWSER_INGEST_ORIGIN` | Added to CSP `connect-src` so the SPA can POST events | Sentry |
-| `ANTHROPIC_API_KEY` | Recipe Import's `anthropic` reader (DEC-104) and the `anthropic` health scorer (DEC-112); required while `RECIPE_IMPORT_ADAPTER` or `HEALTH_SCORE_ADAPTER` is `anthropic`. Set a monthly spend cap on the key's workspace in the Anthropic Console | Anthropic Console |
+| `ANTHROPIC_API_KEY` | Recipe Import's `anthropic` reader (DEC-104), the `anthropic` health scorer (DEC-112) and the `anthropic` meal planner (DEC-117); required while `RECIPE_IMPORT_ADAPTER`, `HEALTH_SCORE_ADAPTER` or `MEAL_PLAN_ADAPTER` is `anthropic`. Set a monthly spend cap on the key's workspace in the Anthropic Console | Anthropic Console |
 
 ### Recipe Import reader settings
 
@@ -99,6 +99,12 @@ effort is a `fly.toml` edit and a deploy; no code changes.
 Production also refuses to boot without `HEALTH_SCORE_SINCE`. Change it to the
 deploy date whenever the scoring model or prompt changes, so "Score them"
 rescores recipes scored under the old one.
+
+### Meal planner settings
+
+`MEAL_PLAN_ADAPTER`, `MEAL_PLAN_MODEL` and `MEAL_PLAN_EFFORT` follow the same
+rules, in the same `[env]` block (DEC-117). Production refuses to boot unless
+`MEAL_PLAN_ADAPTER` names a real adapter.
 
 ### Frontend Sentry DSN
 

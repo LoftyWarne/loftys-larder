@@ -38,6 +38,7 @@ import {
   mealPlanSlots,
 } from '../../db/schema/meal-plans.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
+import { assertNewPlanDatesAllowed } from '../../lib/plan-dates.ts';
 import { loadSlotDiners } from '../../lib/slot-diners.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
@@ -66,45 +67,7 @@ export const plansRouter = router({
       const startDate = parseCivilDate(input.startDate);
       const endDate = parseCivilDate(input.endDate);
 
-      if (daysBetween(startDate, endDate) > PLAN_MAX_RANGE_DAYS) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Plan range cannot exceed ${PLAN_MAX_RANGE_DAYS.toString()} days`,
-          cause: {
-            code: 'PLAN_RANGE_TOO_LONG',
-            maxDays: PLAN_MAX_RANGE_DAYS,
-          },
-        });
-      }
-
-      const today = todayInLondon();
-
-      // Overlap check (DEC-38): any non-past plan in this household whose
-      // [start_date, end_date] intersects the proposed range. Inclusive
-      // boundary semantics — a plan ending on D blocks a new plan starting
-      // on D, matching the spec's `NOT (other.end < new.start OR other.start
-      // > new.end)` formulation. `end_date >= today` exempts past plans.
-      const conflicting = await ctx.db
-        .select({ id: mealPlans.id })
-        .from(mealPlans)
-        .where(
-          and(
-            eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
-            gte(mealPlans.endDate, today),
-            sql`NOT (${mealPlans.endDate} < ${startDate} OR ${mealPlans.startDate} > ${endDate})`,
-          ),
-        );
-
-      if (conflicting.length > 0) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: 'Plan overlaps with an existing active or future plan',
-          cause: {
-            code: 'PLAN_DATE_OVERLAP',
-            conflictingPlanIds: conflicting.map((row) => row.id),
-          },
-        });
-      }
+      await assertNewPlanDatesAllowed(ctx.db, startDate, endDate);
 
       const occasionIds = await loadOccasionIds(ctx.db);
 

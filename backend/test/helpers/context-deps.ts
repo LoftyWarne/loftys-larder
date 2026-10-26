@@ -1,5 +1,6 @@
 import pino from 'pino';
 
+import { createFakeMealPlanner } from '../../src/lib/meal-planner/fake.ts';
 import { PageUnreadableError } from '../../src/lib/recipe-import/fetch-page.ts';
 import { createFakeRecipeReader } from '../../src/lib/recipe-reader/fake.ts';
 import { createFakeRecipeScorer } from '../../src/lib/recipe-scorer/fake.ts';
@@ -9,7 +10,7 @@ import type { AppContext } from '../../src/trpc/context.ts';
 // exercise.
 export function contextDeps(): Pick<
   AppContext,
-  'log' | 'recipeImport' | 'healthScore' | 'destroyImage'
+  'log' | 'recipeImport' | 'healthScore' | 'mealPlan' | 'destroyImage'
 > {
   return {
     log: pino({ level: 'silent' }),
@@ -25,6 +26,12 @@ export function contextDeps(): Pick<
       scorer: createFakeRecipeScorer(),
       since: '2026-10-07',
       allowScore: () =>
+        Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
+    },
+    mealPlan: {
+      planner: createFakeMealPlanner(),
+      healthScoreSince: '2026-10-07',
+      allowProposal: () =>
         Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
     },
   };

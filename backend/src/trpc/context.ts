@@ -8,6 +8,7 @@ import type {
   LookUpImportPdf,
 } from '../lib/cloudinary.ts';
 import type { PageFetcher } from '../lib/recipe-import/fetch-page.ts';
+import type { MealPlanner } from '../lib/meal-planner/types.ts';
 import type { RecipeReader } from '../lib/recipe-reader/types.ts';
 import type { RecipeScorer } from '../lib/recipe-scorer/types.ts';
 import type { ModelRateLimitVerdict } from '../plugins/rate-limit.ts';
@@ -37,6 +38,7 @@ declare module 'fastify' {
     lookUpImportPdf: LookUpImportPdf;
     recipeScorer: RecipeScorer;
     healthScoreSince: string;
+    mealPlanner: MealPlanner;
   }
 }
 
@@ -56,6 +58,13 @@ export interface HealthScoreContext {
   allowScore: () => Promise<ModelRateLimitVerdict>;
 }
 
+export interface MealPlanContext {
+  planner: MealPlanner;
+  // HEALTH_SCORE_SINCE, for each recipe's out-of-date flag (DEC-112).
+  healthScoreSince: string;
+  allowProposal: () => Promise<ModelRateLimitVerdict>;
+}
+
 export interface AppContext {
   req: CreateFastifyContextOptions['req'];
   reply: CreateFastifyContextOptions['res'];
@@ -70,6 +79,7 @@ export interface AppContext {
   log: FastifyBaseLogger;
   recipeImport: RecipeImportContext;
   healthScore: HealthScoreContext;
+  mealPlan: MealPlanContext;
 }
 
 export function createContext({
@@ -98,6 +108,11 @@ export function createContext({
       scorer: req.server.recipeScorer,
       since: req.server.healthScoreSince,
       allowScore: () => req.server.limitHealthScore(req),
+    },
+    mealPlan: {
+      planner: req.server.mealPlanner,
+      healthScoreSince: req.server.healthScoreSince,
+      allowProposal: () => req.server.limitPlanProposal(req),
     },
   };
 }

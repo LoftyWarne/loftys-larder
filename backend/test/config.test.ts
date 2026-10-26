@@ -19,12 +19,13 @@ const baseEnv = {
   CLOUDINARY_API_SECRET: 'test-secret',
 } as const;
 
-// Production refuses to start without a real Recipe Import reader and health
-// scorer.
+// Production refuses to start without a real Recipe Import reader, health
+// scorer and meal planner.
 const prodModelEnv = {
   RECIPE_IMPORT_ADAPTER: 'anthropic',
   HEALTH_SCORE_ADAPTER: 'anthropic',
   HEALTH_SCORE_SINCE: '2026-10-07',
+  MEAL_PLAN_ADAPTER: 'anthropic',
   ANTHROPIC_API_KEY: 'sk-test',
 } as const;
 
@@ -234,6 +235,7 @@ describe('loadConfig — Recipe Import reader', () => {
     AXIOM_DATASET: 'axiom-dataset',
     HEALTH_SCORE_ADAPTER: 'anthropic',
     HEALTH_SCORE_SINCE: '2026-10-07',
+    MEAL_PLAN_ADAPTER: 'anthropic',
   } as const;
 
   it('defaults to the fake adapter, Opus 5.5 and medium effort outside production', () => {
@@ -300,6 +302,7 @@ describe('loadConfig — health scorer', () => {
     AXIOM_TOKEN: 'axiom-token',
     AXIOM_DATASET: 'axiom-dataset',
     RECIPE_IMPORT_ADAPTER: 'anthropic',
+    MEAL_PLAN_ADAPTER: 'anthropic',
     ANTHROPIC_API_KEY: 'sk-test',
   } as const;
 
@@ -373,5 +376,59 @@ describe('CURRENT_HOUSEHOLD_ID', () => {
     expect(CURRENT_HOUSEHOLD_ID).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
+  });
+});
+
+describe('loadConfig — meal planner', () => {
+  const prodEnv = {
+    ...baseEnv,
+    NODE_ENV: 'production',
+    AXIOM_TOKEN: 'axiom-token',
+    AXIOM_DATASET: 'axiom-dataset',
+    RECIPE_IMPORT_ADAPTER: 'anthropic',
+    HEALTH_SCORE_ADAPTER: 'anthropic',
+    HEALTH_SCORE_SINCE: '2026-10-07',
+    ANTHROPIC_API_KEY: 'sk-test',
+  } as const;
+
+  it('defaults to the fake adapter, Opus 5.5 and medium effort outside production', () => {
+    const config = loadConfig({ ...baseEnv });
+    expect(config.MEAL_PLAN_ADAPTER).toBe('fake');
+    expect(config.MEAL_PLAN_MODEL).toBe('claude-opus-5-5');
+    expect(config.MEAL_PLAN_EFFORT).toBe('medium');
+  });
+
+  it('takes the adapter, model and effort from the environment', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      MEAL_PLAN_ADAPTER: 'anthropic',
+      MEAL_PLAN_MODEL: 'claude-sonnet-5-5',
+      MEAL_PLAN_EFFORT: 'high',
+      ANTHROPIC_API_KEY: 'sk-test',
+    });
+    expect(config.MEAL_PLAN_ADAPTER).toBe('anthropic');
+    expect(config.MEAL_PLAN_MODEL).toBe('claude-sonnet-5-5');
+    expect(config.MEAL_PLAN_EFFORT).toBe('high');
+  });
+
+  it('refuses the fake adapter in production', () => {
+    expect(() =>
+      loadConfig({ ...prodEnv, MEAL_PLAN_ADAPTER: 'fake' }),
+    ).toThrowError(/MEAL_PLAN_ADAPTER/);
+  });
+
+  it('requires an adapter to be named in production', () => {
+    expect(() => loadConfig({ ...prodEnv })).toThrowError(/MEAL_PLAN_ADAPTER/);
+  });
+
+  it('accepts the anthropic adapter in production', () => {
+    const config = loadConfig({ ...prodEnv, MEAL_PLAN_ADAPTER: 'anthropic' });
+    expect(config.MEAL_PLAN_ADAPTER).toBe('anthropic');
+  });
+
+  it('requires ANTHROPIC_API_KEY for the anthropic adapter', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, MEAL_PLAN_ADAPTER: 'anthropic' }),
+    ).toThrowError(/ANTHROPIC_API_KEY is required when MEAL_PLAN_ADAPTER/);
   });
 });

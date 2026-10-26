@@ -53,6 +53,9 @@ const devConfig: Config = {
   HEALTH_SCORE_MODEL: 'claude-opus-5-5',
   HEALTH_SCORE_EFFORT: 'low',
   HEALTH_SCORE_SINCE: '2026-10-07',
+  MEAL_PLAN_ADAPTER: 'fake',
+  MEAL_PLAN_MODEL: 'claude-opus-5-5',
+  MEAL_PLAN_EFFORT: 'medium',
   ...authEnv,
 };
 
@@ -74,6 +77,9 @@ const prodConfig: Config = {
   HEALTH_SCORE_MODEL: 'claude-opus-5-5',
   HEALTH_SCORE_EFFORT: 'low',
   HEALTH_SCORE_SINCE: '2026-10-07',
+  MEAL_PLAN_ADAPTER: 'fake',
+  MEAL_PLAN_MODEL: 'claude-opus-5-5',
+  MEAL_PLAN_EFFORT: 'medium',
   ...authEnv,
 };
 

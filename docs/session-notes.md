@@ -4,6 +4,40 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-26 — AI meal planning backend (FEAT-74)
+
+**Status:** Committed and pushed to `main`. Typecheck, lint and format are clean in every workspace. Backend: 1,160 tests green. Frontend: 1,000 green. e2e not run (no frontend change). **Reading 1 (the time limit) is not settled:** it has only been timed against the 14-recipe dev library, not the household's real one. The FEAT-74 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (all twelve readings as proposed):
+- The usage log's feature is `meal-plan`, kebab case like `recipe-import` and `health-score`.
+- Plans are hard-deleted, so recency counts every plan in the household. A recipe counts as planned at a slot where it's eaten (`eaten > 0`), once per slot. A variation doesn't count for its base. `lastPlannedOn` is the latest such slot before `startDate`.
+- `slots` must hold exactly one entry per (date × occasion) in the range, or the call is a plain `BAD_REQUEST`. Diners are deduped and checked against `users` (`SLOT_DINER_NOT_FOUND`, as the slot editor does). A fixed recipe that isn't pickable is `BAD_REQUEST` with `SLOT_RECIPE_NOT_PICKABLE`. All are checked before the model and don't count towards the limit.
+- `{ kind: 'batch' }` isn't in the input yet (FEAT-76). `{ kind: 'empty' }` is.
+- `previous` is the normalised Plan Proposal the cook saw. The planner gets it as `{ date, occasion, recipeId }` per slot plus the summary.
+- `healthScoreOutOfDate` uses `healthScoreDueReason`: stale, or scored before `HEALTH_SCORE_SINCE`.
+- A variation sends only its own ingredient names. Its base's travel on the base's row.
+- `lib/plan-dates.ts` (`assertNewPlanDatesAllowed`) is the new helper for the range and overlap checks, and `plans.create` uses it. `plans.update` and `plans.duplicate` keep their own copies (update excludes the plan itself).
+
+**Decided while building** (worth a look):
+- **Too-long text is cut at a word** (`cutAtWord`, with an ellipsis, within the limit), unlike the health-score normaliser, because reasons and summaries are never stored and a rerun costs one of 5 calls an hour. Changed after the independent review; it was first built to refuse. A reply in which every slot that needed a dish was dropped is still `MEAL_PLAN_TRY_AGAIN` (`invalid_result`).
+- **`previous` slots not in this plan's slots are dropped** before the planner sees them, so a client can't pad the request (review finding).
+- **The prompt says a variation contains its base's ingredients** as well as its own `ingredientNames`, for a Brief's use-ups and plant variety (review finding).
+- `fixedCount` in the usage log counts Fixed meals only, so `{ kind: 'empty' }` slots aren't counted.
+- The first candidate entry for a slot wins. Entries for fixed slots, unknown slots or headcount-0 slots are ignored, not counted. Occasions are matched ignoring case and surrounding space.
+- **Nothing to fill means no model call:** if every slot is fixed or has headcount 0, `propose` returns empty slots with an empty summary. It doesn't count towards the limit.
+- The candidate has no nullable fields: a slot the model leaves out is dropped. The structured-output schema is the same size at any plan length.
+- `MAX_TOKENS` is 16,000, as for scoring. Prompt caching isn't on. The user message sends `<library>` before `<plan>`, so caching can be added after measuring.
+- The rate limit is in memory (`@fastify/rate-limit`) like the other model limits, 5 an hour per user.
+
+**First timing (dev library, not the real one):** 14 recipes, 2 occasions, 14 days (28 slots, 2 fixed), Opus 5.5 at `medium`, structured outputs. Anthropic accepted the schema. One run took 34.3 s, with 4,987 input and 3,703 output tokens. 26 of 26 open slots were filled, with none dropped. The summary said how the Brief was read. The probe script is in the session scratchpad, not the repo. The real library will add input tokens and possibly more thinking. A prod read via `flyctl ssh` was blocked by the permission check, so the real timing waits on the user.
+
+**Independent review (same day):** no blockers. Its three suggestions were applied, as above, along with two of its notes: the `fly.toml` comment wrap, and `SLOT_DINER_NOT_FOUND` added to `DOMAIN_ERROR_CODES` (`slots.ts` already threw it). The other notes were left as they are:
+- An abort when the user navigates away is reported as a timeout, as for import and scoring.
+- The recency window mixes a string and a `Date` for its two bounds.
+- Occasions are matched ignoring case, though names are unique only case-sensitively.
+
+---
+
 ## 2026-10-25 — Day and plan Health Score in the planner (FEAT-71)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,094 tests green. Frontend: 1,000 green. e2e: 56 of 56, including both planner axe scans. The e2e seed has no scored dishes on the planner, so the scan doesn't see a badge with a value; the badge's states are covered by component tests. Manual verification step 1 hasn't been run. The FEAT-71 checkboxes are left for the user to tick.

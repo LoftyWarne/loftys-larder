@@ -21,11 +21,12 @@ primary_region = "lhr"
 [deploy]
   release_command = "sh -c 'node /app/migrate.js && node /app/seed-reference.js'"
 
-# Recipe Import reader (DEC-104, DEC-109) and health scorer (DEC-112). Not
-# secrets; ANTHROPIC_API_KEY is a Fly secret and must be set before a deploy
-# that selects `anthropic` (docs/secrets-checklist.md). Changing a model or
-# effort needs no code change. HEALTH_SCORE_SINCE moves to the deploy date
-# with any change of scoring model or prompt, so older scores are rescored.
+# Recipe Import reader (DEC-104, DEC-109), health scorer (DEC-112) and meal
+# planner (DEC-117). Not secrets; ANTHROPIC_API_KEY is a Fly secret and must
+# be set before a deploy that selects `anthropic` (docs/secrets-checklist.md).
+# Changing a model or effort needs no code change. HEALTH_SCORE_SINCE moves to
+# the deploy date with any change of scoring model or prompt, so older scores
+# are rescored.
 [env]
   RECIPE_IMPORT_ADAPTER = "anthropic"
   RECIPE_IMPORT_MODEL = "claude-opus-5-5"
@@ -34,6 +35,9 @@ primary_region = "lhr"
   HEALTH_SCORE_MODEL = "claude-opus-5-5"
   HEALTH_SCORE_EFFORT = "low"
   HEALTH_SCORE_SINCE = "2026-10-07"
+  MEAL_PLAN_ADAPTER = "anthropic"
+  MEAL_PLAN_MODEL = "claude-opus-5-5"
+  MEAL_PLAN_EFFORT = "medium"
 
 [http_service]
   internal_port = 3000

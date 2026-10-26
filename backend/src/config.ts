@@ -22,6 +22,10 @@ export const healthScoreAdapterSchema = z.enum(['anthropic', 'fake']);
 
 export type HealthScoreAdapter = z.infer<typeof healthScoreAdapterSchema>;
 
+export const mealPlanAdapterSchema = z.enum(['anthropic', 'fake']);
+
+export type MealPlanAdapter = z.infer<typeof mealPlanAdapterSchema>;
+
 // Outside production, where config doesn't name one.
 const DEFAULT_HEALTH_SCORE_SINCE = '2026-10-07';
 
@@ -109,6 +113,11 @@ const configSchema = z
     // The date the scoring model or prompt last changed. Scores from London
     // days before it are due again as "from an older scorer".
     HEALTH_SCORE_SINCE: z.iso.date().optional(),
+    // AI meal planning (DEC-117), set up the same way as the reader. The
+    // default effort stands until FEAT-78 measures it.
+    MEAL_PLAN_ADAPTER: mealPlanAdapterSchema.optional(),
+    MEAL_PLAN_MODEL: z.string().min(1).default('claude-opus-5-5'),
+    MEAL_PLAN_EFFORT: modelEffortSchema.default('medium'),
     ANTHROPIC_API_KEY: z.string().min(1).optional(),
   })
   .refine(
@@ -194,10 +203,32 @@ const configSchema = z
       message: 'HEALTH_SCORE_SINCE is required in production (DEC-112).',
     },
   )
+  .refine(
+    (value) =>
+      value.NODE_ENV !== 'production' ||
+      (value.MEAL_PLAN_ADAPTER !== undefined &&
+        value.MEAL_PLAN_ADAPTER !== 'fake'),
+    {
+      path: ['MEAL_PLAN_ADAPTER'],
+      message:
+        'MEAL_PLAN_ADAPTER must be set to a real adapter in production (DEC-117).',
+    },
+  )
+  .refine(
+    (value) =>
+      value.MEAL_PLAN_ADAPTER !== 'anthropic' ||
+      Boolean(value.ANTHROPIC_API_KEY),
+    {
+      path: ['ANTHROPIC_API_KEY'],
+      message:
+        'ANTHROPIC_API_KEY is required when MEAL_PLAN_ADAPTER is anthropic.',
+    },
+  )
   .transform((value) => ({
     ...value,
     RECIPE_IMPORT_ADAPTER: value.RECIPE_IMPORT_ADAPTER ?? 'fake',
     HEALTH_SCORE_ADAPTER: value.HEALTH_SCORE_ADAPTER ?? 'fake',
+    MEAL_PLAN_ADAPTER: value.MEAL_PLAN_ADAPTER ?? 'fake',
     HEALTH_SCORE_SINCE: value.HEALTH_SCORE_SINCE ?? DEFAULT_HEALTH_SCORE_SINCE,
   }));
 

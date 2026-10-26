@@ -11,6 +11,8 @@ import { createDestroyImage, createLookUpImportPdf } from './lib/cloudinary.ts';
 import { createPageFetcher } from './lib/recipe-import/fetch-page.ts';
 import { createRecipeReader } from './lib/recipe-reader/index.ts';
 import type { RecipeReader } from './lib/recipe-reader/types.ts';
+import { createMealPlanner } from './lib/meal-planner/index.ts';
+import type { MealPlanner } from './lib/meal-planner/types.ts';
 import { createRecipeScorer } from './lib/recipe-scorer/index.ts';
 import type { RecipeScorer } from './lib/recipe-scorer/types.ts';
 import { buildLoggerBundle } from './plugins/logger.ts';
@@ -51,6 +53,9 @@ export interface BuildAppOptions {
   // Inject a health scorer in tests; production builds the one config names
   // (DEC-112).
   recipeScorer?: RecipeScorer;
+  // Inject a meal planner in tests; production builds the one config names
+  // (DEC-117).
+  mealPlanner?: MealPlanner;
 }
 
 export interface BuiltApp {
@@ -128,6 +133,7 @@ export async function buildAppWithLogger(
     options.recipeScorer ?? createRecipeScorer(config),
   );
   app.decorate('healthScoreSince', config.HEALTH_SCORE_SINCE);
+  app.decorate('mealPlanner', options.mealPlanner ?? createMealPlanner(config));
 
   registerHealth(app);
 
@@ -165,6 +171,7 @@ export async function buildAppWithLogger(
           sessionMaxPerMinute: 30_000,
           importStartsPerHour: 1_000,
           healthScoresPerHour: 1_000,
+          planProposalsPerHour: 1_000,
         }
       : {},
   );

@@ -41,6 +41,7 @@ export interface RateLimitOptions {
   sessionMaxPerMinute?: number;
   importStartsPerHour?: number;
   healthScoresPerHour?: number;
+  planProposalsPerHour?: number;
 }
 
 export interface ModelRateLimitVerdict {
@@ -57,6 +58,9 @@ declare module 'fastify' {
     // Counts one `healthScores.score` that reaches the model for the
     // request's user.
     limitHealthScore: (req: FastifyRequest) => Promise<ModelRateLimitVerdict>;
+    // Counts one `planProposals.propose` that reaches the model for the
+    // request's user.
+    limitPlanProposal: (req: FastifyRequest) => Promise<ModelRateLimitVerdict>;
   }
 }
 
@@ -115,6 +119,18 @@ export async function registerRateLimit(
   });
   app.decorate('limitHealthScore', async (req: FastifyRequest) =>
     toVerdict(await checkHealthScore(req)),
+  );
+
+  // Whole-plan proposals (DEC-117): the first and every "Another go" count,
+  // once past the cheap checks.
+  const checkPlanProposal = app.createRateLimit({
+    max: options.planProposalsPerHour ?? 5,
+    timeWindow: '1 hour',
+    keyGenerator: (req) =>
+      req.user ? `plan-proposal:${req.user.id}` : `plan-proposal-ip:${req.ip}`,
+  });
+  app.decorate('limitPlanProposal', async (req: FastifyRequest) =>
+    toVerdict(await checkPlanProposal(req)),
   );
 
   // preHandler (not onRequest) so the auth plugin has already hydrated

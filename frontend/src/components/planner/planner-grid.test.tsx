@@ -112,6 +112,16 @@ describe('PlannerGrid', () => {
       expect(screen.queryByRole('list')).not.toBeInTheDocument();
     });
 
+    it('fills each slot card’s comment region when asked', () => {
+      renderGrid({
+        slots: [slot(1, '2026-06-15', 2, { comment: 'Hidden comment' })],
+        rangeEnd: '2026-06-15',
+        slotCommentLine: (s) => <span>Note for {s.id}</span>,
+      });
+      expect(screen.getByText('Note for 1')).toBeInTheDocument();
+      expect(screen.queryByText('Hidden comment')).not.toBeInTheDocument();
+    });
+
     it('renders each slot once', () => {
       const { container } = render(
         <PlannerGrid

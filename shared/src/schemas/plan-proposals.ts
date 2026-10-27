@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
-import { healthScoreRecipeKindSchema } from './health-scores.ts';
-import { leftoversSourceSchema, slotTypeSchema } from './plans.ts';
+import {
+  healthScoreAverageSchema,
+  healthScoreRecipeKindSchema,
+} from './health-scores.ts';
+import { leftoversSourceSchema, planSchema, slotTypeSchema } from './plans.ts';
+import { slotItemInputSchema, withSlotContentRules } from './slots.ts';
 
 // AI meal planning (DEC-117): a model proposes meals for a new plan's slots
 // that aren't fixed, and the cook reviews them before anything is written.
@@ -56,6 +60,31 @@ export const planProposalSchema = z.object({
 
 export type PlanProposal = z.infer<typeof planProposalSchema>;
 
+// What `propose` returns: the Plan Proposal, with each dish's recipe fields
+// for Plan Review to show, as a planner slot item carries them. On "Another
+// go" the client sends it back as `previous`, which keeps only the proposal's
+// own fields.
+export const proposedDishSchema = planProposalItemSchema.extend({
+  recipeName: z.string(),
+  recipeImageUrl: z.string().nullable(),
+  isBase: z.boolean(),
+  baseRecipeId: recipeIdSchema.nullable(),
+});
+
+export type ProposedDish = z.infer<typeof proposedDishSchema>;
+
+export const proposedSlotSchema = planProposalSlotSchema.extend({
+  items: z.array(proposedDishSchema),
+});
+
+export type ProposedSlot = z.infer<typeof proposedSlotSchema>;
+
+export const proposePlanResultSchema = planProposalSchema.extend({
+  slots: z.array(proposedSlotSchema),
+});
+
+export type ProposePlanResult = z.infer<typeof proposePlanResultSchema>;
+
 export const proposePlanSlotSchema = z.object({
   date: civilDateSchema,
   occasionId: occasionIdSchema,
@@ -83,6 +112,29 @@ export const proposePlanInputSchema = z
   });
 
 export type ProposePlanInput = z.infer<typeof proposePlanInputSchema>;
+
+// The wizard's Brief step and Plan Review's "Another go" (DEC-49: plain text).
+export const planBriefFormSchema = z.object({
+  brief: z
+    .string()
+    .max(
+      MEAL_PLAN_BRIEF_MAX_LENGTH,
+      `Keep the brief to ${String(MEAL_PLAN_BRIEF_MAX_LENGTH)} characters`,
+    ),
+});
+
+export type PlanBriefForm = z.infer<typeof planBriefFormSchema>;
+
+export const anotherGoFormSchema = z.object({
+  note: z
+    .string()
+    .max(
+      MEAL_PLAN_NOTE_MAX_LENGTH,
+      `Keep the note to ${String(MEAL_PLAN_NOTE_MAX_LENGTH)} characters`,
+    ),
+});
+
+export type AnotherGoForm = z.infer<typeof anotherGoFormSchema>;
 
 export const mealPlanRecipeSchema = z.object({
   id: recipeIdSchema,
@@ -150,3 +202,87 @@ export const mealPlanCandidateSchema = z.object({
 });
 
 export type MealPlanCandidate = z.infer<typeof mealPlanCandidateSchema>;
+
+// Apply (DEC-117): the new plan with every slot as the cook left it in Plan
+// Review. One entry per (date × occasion) in the range, each following the
+// slot editor's content rules.
+export const applyPlanSlotSchema = withSlotContentRules(
+  z.object({
+    date: civilDateSchema,
+    occasionId: occasionIdSchema,
+    slotType: slotTypeSchema,
+    leftoversSource: leftoversSourceSchema.nullable(),
+    items: z.array(slotItemInputSchema),
+    dinerUserIds: z.array(z.string().min(1)),
+    guestCount: z.number().int().nonnegative(),
+  }),
+);
+
+export type ApplyPlanSlot = z.infer<typeof applyPlanSlotSchema>;
+
+// Counts from the review, logged as metadata only and never stored, so
+// "cooks discard most of a proposal" can be seen (DEC-117's revisit trigger).
+export const planReviewCountsSchema = z.object({
+  suggested: z.number().int().nonnegative(),
+  swapped: z.number().int().nonnegative(),
+  discarded: z.number().int().nonnegative(),
+  suggestedAgain: z.number().int().nonnegative(),
+  anotherGo: z.number().int().nonnegative(),
+});
+
+export type PlanReviewCounts = z.infer<typeof planReviewCountsSchema>;
+
+export const createPlanWithSlotsInputSchema = z
+  .object({
+    startDate: civilDateSchema,
+    endDate: civilDateSchema,
+    slots: z.array(applyPlanSlotSchema),
+    reviewCounts: planReviewCountsSchema.nullable(),
+  })
+  .refine((value) => value.startDate <= value.endDate, {
+    path: ['endDate'],
+    message: 'End date must be on or after start date',
+  });
+
+export type CreatePlanWithSlotsInput = z.infer<
+  typeof createPlanWithSlotsInputSchema
+>;
+
+export const createPlanWithSlotsResultSchema = z.object({
+  plan: planSchema,
+});
+
+export type CreatePlanWithSlotsResult = z.infer<
+  typeof createPlanWithSlotsResultSchema
+>;
+
+// Plan Review's figures, worked out by rule over the proposal as it stands
+// (DEC-110 rule 3): every eaten dish with its date.
+export const PROPOSED_FIGURES_MAX_DISHES = 500;
+
+export const proposedFiguresInputSchema = z.object({
+  dishes: z
+    .array(
+      z.object({
+        date: civilDateSchema,
+        recipeId: recipeIdSchema,
+        eaten: z.number().int().positive(),
+      }),
+    )
+    .max(PROPOSED_FIGURES_MAX_DISHES),
+});
+
+export type ProposedFiguresInput = z.infer<typeof proposedFiguresInputSchema>;
+
+const proposedFiguresSchema = z.object({
+  plantPoints: z.number().int().nonnegative(),
+  healthScore: healthScoreAverageSchema,
+});
+
+// `days` holds the dates with an eaten dish, in date order.
+export const proposedFiguresResultSchema = z.object({
+  days: z.array(proposedFiguresSchema.extend({ date: civilDateSchema })),
+  plan: proposedFiguresSchema,
+});
+
+export type ProposedFiguresResult = z.infer<typeof proposedFiguresResultSchema>;

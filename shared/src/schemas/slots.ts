@@ -4,6 +4,8 @@ import {
   leftoversSourceSchema,
   planSlotSchema,
   slotTypeSchema,
+  type LeftoversSource,
+  type SlotType,
 } from './plans.ts';
 
 const slotIdSchema = z.number().int().positive();
@@ -39,14 +41,64 @@ export const slotItemInputSchema = z
   });
 export type SlotItemInput = z.infer<typeof slotItemInputSchema>;
 
+// The rules a slot's content follows, wherever a slot is written: the slot
+// editor's full replace and Apply's new plan (DEC-89/DEC-91). Each item
+// carries `prepared` (cooked) + `eaten` (consumed here). The second refine
+// encodes the slot-status coupling in terms of what's *eaten* (`eaten > 0`
+// items iff the slot is `recipe`); prepared-only cook-ahead rows are allowed
+// on any type.
+interface SlotContentFields {
+  slotType: SlotType;
+  leftoversSource: LeftoversSource | null;
+  items: readonly SlotItemInput[];
+}
+
+export function withSlotContentRules<T extends z.ZodType<SlotContentFields>>(
+  schema: T,
+): T {
+  return schema
+    .refine(
+      (value) =>
+        (value.slotType === 'leftovers') === (value.leftoversSource !== null),
+      {
+        path: ['leftoversSource'],
+        message:
+          'leftoversSource is required when slotType is leftovers, and not allowed otherwise',
+      },
+    )
+    .refine(
+      (value) => {
+        const eatenCount = value.items.filter((item) => item.eaten > 0).length;
+        // A `recipe` slot is the eaten meal: at least one dish is eaten here.
+        if (value.slotType === 'recipe') return eatenCount >= 1;
+        // `leftovers` of a planned meal: exactly the one eaten dish (pure
+        // consume — the food was cooked earlier), no cooking here.
+        if (value.slotType === 'leftovers') {
+          const only = value.items[0];
+          return value.leftoversSource === 'plan_meal'
+            ? value.items.length === 1 &&
+                only !== undefined &&
+                only.eaten > 0 &&
+                only.prepared === 0
+            : value.items.length === 0;
+        }
+        // empty / eat_out / takeaway: nothing eaten here (prepared-only
+        // cook-ahead rows are still allowed).
+        return eatenCount === 0;
+      },
+      {
+        path: ['items'],
+        message:
+          'eaten items are required when slotType is recipe, are exactly one pure-consume dish for leftovers of a planned meal, and not allowed otherwise',
+      },
+    );
+}
+
 // Full-replace semantics: the caller declares the slot's desired final state —
 // status + chef + comment + the complete `items` list. The procedure deletes
-// and reinserts the items. Composable occasions (DEC-89/DEC-91): each item
-// carries `prepared` (cooked) + `eaten` (consumed here). The refine encodes the
-// slot-status coupling in terms of what's *eaten* (`eaten > 0` items iff the
-// slot is `recipe`); prepared-only cook-ahead rows are allowed on any type.
-export const updateSlotInputSchema = z
-  .object({
+// and reinserts the items.
+export const updateSlotInputSchema = withSlotContentRules(
+  z.object({
     slotId: slotIdSchema,
     slotType: slotTypeSchema,
     // Required (and only allowed) when slotType is `leftovers`. `plan_meal`
@@ -63,42 +115,8 @@ export const updateSlotInputSchema = z
     // The procedure checks each user id exists in the household.
     dinerUserIds: z.array(z.string().min(1)),
     guestCount: z.number().int().nonnegative(),
-  })
-  .refine(
-    (value) =>
-      (value.slotType === 'leftovers') === (value.leftoversSource !== null),
-    {
-      path: ['leftoversSource'],
-      message:
-        'leftoversSource is required when slotType is leftovers, and not allowed otherwise',
-    },
-  )
-  .refine(
-    (value) => {
-      const eatenCount = value.items.filter((item) => item.eaten > 0).length;
-      // A `recipe` slot is the eaten meal: at least one dish is eaten here.
-      if (value.slotType === 'recipe') return eatenCount >= 1;
-      // `leftovers` of a planned meal: exactly the one eaten dish (pure
-      // consume — the food was cooked earlier), no cooking here.
-      if (value.slotType === 'leftovers') {
-        const only = value.items[0];
-        return value.leftoversSource === 'plan_meal'
-          ? value.items.length === 1 &&
-              only !== undefined &&
-              only.eaten > 0 &&
-              only.prepared === 0
-          : value.items.length === 0;
-      }
-      // empty / eat_out / takeaway: nothing eaten here (prepared-only
-      // cook-ahead rows are still allowed).
-      return eatenCount === 0;
-    },
-    {
-      path: ['items'],
-      message:
-        'eaten items are required when slotType is recipe, are exactly one pure-consume dish for leftovers of a planned meal, and not allowed otherwise',
-    },
-  );
+  }),
+);
 export type UpdateSlotInput = z.infer<typeof updateSlotInputSchema>;
 
 export const updateSlotResultSchema = z.object({

@@ -628,7 +628,17 @@ describe('plan proposal procedures', () => {
         occasionId: dinnerId,
         slotType: 'recipe',
         leftoversSource: null,
-        items: [{ recipeId: soup, prepared: 2, eaten: 2 }],
+        items: [
+          {
+            recipeId: soup,
+            prepared: 2,
+            eaten: 2,
+            recipeName: 'Lentil Soup',
+            recipeImageUrl: null,
+            isBase: false,
+            baseRecipeId: null,
+          },
+        ],
         reason: FAKE_PLANNER_REASON,
       });
       expect(await planCount()).toBe(before);

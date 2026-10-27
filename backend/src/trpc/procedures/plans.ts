@@ -3,8 +3,16 @@ import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import {
+  checkNewPlanDatesResultSchema,
   createPlanInputSchema,
   createPlanResultSchema,
+  createPlanWithSlotsInputSchema,
+  createPlanWithSlotsResultSchema,
+  proposedFiguresInputSchema,
+  proposedFiguresResultSchema,
+  type CheckNewPlanDatesResult,
+  type CreatePlanWithSlotsResult,
+  type ProposedFiguresResult,
   deletePlanInputSchema,
   deletePlanResultSchema,
   duplicatePlanInputSchema,
@@ -38,9 +46,21 @@ import {
   mealPlanSlots,
 } from '../../db/schema/meal-plans.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
-import { assertNewPlanDatesAllowed } from '../../lib/plan-dates.ts';
+import { selectProposedHealthScore } from '../../lib/health-score/average.ts';
+import { logModelFeatureEvent } from '../../lib/model-features/usage-log.ts';
+import {
+  assertNewPlanDatesAllowed,
+  assertSlotsCoverRange,
+} from '../../lib/plan-dates.ts';
+import { selectProposedPlantPoints } from '../../lib/plant-points.ts';
 import { loadSlotDiners } from '../../lib/slot-diners.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
+import {
+  assertDinersExist,
+  assertRecipesPickable,
+  replaceSlotDiners,
+  replaceSlotItems,
+} from '../../lib/slot-writes.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import {
   addDays,
@@ -55,6 +75,7 @@ import {
   generateEmptySlotsForRange,
 } from '../../lib/slot-generation.ts';
 import { protectedProcedure, router } from '../init.ts';
+import { MEAL_PLAN_FEATURE } from './plan-proposals.ts';
 
 type Schema = typeof schema;
 type DbHandle = NodePgDatabase<Schema> | Tx;
@@ -72,39 +93,144 @@ export const plansRouter = router({
       const occasionIds = await loadOccasionIds(ctx.db);
 
       const withTransaction = makeWithTransaction(ctx.db);
-      const { plan, slotCount } = await withTransaction(async (tx) => {
-        const inserted = await tx
-          .insert(mealPlans)
-          .values({
-            householdId: CURRENT_HOUSEHOLD_ID,
-            createdByUserId: ctx.user.id,
+      return await withTransaction(
+        async (tx) =>
+          await insertPlanWithEmptySlots(tx, {
+            userId: ctx.user.id,
             startDate,
             endDate,
-          })
-          .returning({
-            id: mealPlans.id,
-            startDate: mealPlans.startDate,
-            endDate: mealPlans.endDate,
-            createdByUserId: mealPlans.createdByUserId,
-          });
-        const row = inserted[0];
-        if (!row) {
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: 'Plan insert returned no row',
-          });
-        }
-        const count = await generateEmptySlotsForRange(
-          tx,
-          row.id,
+            occasionIds,
+          }),
+      );
+    }),
+
+  // The planning wizard's first step (DEC-117): plan creation's date checks,
+  // without writing, so a clash shows before the other steps. Returns the
+  // occasions the new plan's slots are laid out by.
+  checkNewDates: protectedProcedure
+    .input(createPlanInputSchema)
+    .output(checkNewPlanDatesResultSchema)
+    .query(async ({ ctx, input }): Promise<CheckNewPlanDatesResult> => {
+      await assertNewPlanDatesAllowed(
+        ctx.db,
+        parseCivilDate(input.startDate),
+        parseCivilDate(input.endDate),
+      );
+      const occasions = await ctx.db
+        .select({ id: mealOccasions.id, name: mealOccasions.name })
+        .from(mealOccasions)
+        .orderBy(asc(mealOccasions.id));
+      return { occasions };
+    }),
+
+  // Apply (DEC-117): creates the plan with every slot as the cook left it in
+  // Plan Review, in one transaction. The dates and every recipe's
+  // pickability are checked again, since time has passed since step 1.
+  createWithSlots: protectedProcedure
+    .input(createPlanWithSlotsInputSchema)
+    .output(createPlanWithSlotsResultSchema)
+    .mutation(async ({ ctx, input }): Promise<CreatePlanWithSlotsResult> => {
+      const startDate = parseCivilDate(input.startDate);
+      const endDate = parseCivilDate(input.endDate);
+
+      await assertNewPlanDatesAllowed(ctx.db, startDate, endDate);
+      const occasionIds = await loadOccasionIds(ctx.db);
+      assertSlotsCoverRange(
+        input.slots,
+        eachDateInRange(startDate, endDate),
+        occasionIds,
+      );
+      await assertRecipesPickable(
+        ctx.db,
+        input.slots.flatMap((slot) => slot.items.map((item) => item.recipeId)),
+      );
+      await assertDinersExist(
+        ctx.db,
+        input.slots.flatMap((slot) => slot.dinerUserIds),
+      );
+
+      const withTransaction = makeWithTransaction(ctx.db);
+      const plan = await withTransaction(async (tx) => {
+        const created = await insertPlanWithEmptySlots(tx, {
+          userId: ctx.user.id,
           startDate,
           endDate,
           occasionIds,
+        });
+        const slotRows = await tx
+          .select({
+            id: mealPlanSlots.id,
+            date: mealPlanSlots.date,
+            occasionId: mealPlanSlots.occasionId,
+          })
+          .from(mealPlanSlots)
+          .where(eq(mealPlanSlots.planId, created.plan.id));
+        const slotIds = new Map(
+          slotRows.map((row) => [
+            `${formatCivilDate(row.date)}|${row.occasionId.toString()}`,
+            row.id,
+          ]),
         );
-        return { plan: toPlanDto(row), slotCount: count };
+        for (const slot of input.slots) {
+          const slotId = slotIds.get(
+            `${slot.date}|${slot.occasionId.toString()}`,
+          );
+          if (slotId === undefined) {
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: 'Generated slot not found',
+            });
+          }
+          await tx
+            .update(mealPlanSlots)
+            .set({
+              slotType: slot.slotType,
+              leftoversSource: slot.leftoversSource,
+              guestCount: slot.guestCount,
+            })
+            .where(eq(mealPlanSlots.id, slotId));
+          await replaceSlotItems(tx, slotId, slot.items);
+          await replaceSlotDiners(tx, slotId, [...new Set(slot.dinerUserIds)]);
+        }
+        return created.plan;
       });
 
-      return { plan, slotCount };
+      // Metadata only, never stored or acted on: lets DEC-117's first
+      // revisit trigger ("cooks discard most of a proposal") be seen.
+      logModelFeatureEvent(
+        ctx.log,
+        { feature: MEAL_PLAN_FEATURE, event: 'applied' },
+        { slotCount: input.slots.length, ...input.reviewCounts },
+      );
+
+      return { plan };
+    }),
+
+  // Plan Review's figures over the proposal as it stands (DEC-110 rule 3),
+  // by the same rules as the saved plan's plant points and Health Score.
+  proposedFigures: protectedProcedure
+    .input(proposedFiguresInputSchema)
+    .output(proposedFiguresResultSchema)
+    .query(async ({ ctx, input }): Promise<ProposedFiguresResult> => {
+      const dishes = input.dishes;
+      const figuresFor = async (date: string | null) => {
+        const args = { householdId: CURRENT_HOUSEHOLD_ID, dishes, date };
+        const [plantPoints, healthScore] = await Promise.all([
+          selectProposedPlantPoints(ctx.db, args),
+          selectProposedHealthScore(ctx.db, args),
+        ]);
+        return { plantPoints, healthScore };
+      };
+      const dates = [...new Set(dishes.map((dish) => dish.date))].sort((a, b) =>
+        a.localeCompare(b),
+      );
+      const [plan, days] = await Promise.all([
+        figuresFor(null),
+        Promise.all(
+          dates.map(async (date) => ({ date, ...(await figuresFor(date)) })),
+        ),
+      ]);
+      return { days, plan };
     }),
 
   list: protectedProcedure
@@ -631,6 +757,48 @@ async function loadHouseholdPlan(db: DbHandle, id: number): Promise<PlanRow> {
     });
   }
   return row;
+}
+
+interface NewPlan {
+  userId: string;
+  startDate: Date;
+  endDate: Date;
+  occasionIds: number[];
+}
+
+async function insertPlanWithEmptySlots(
+  tx: Tx,
+  { userId, startDate, endDate, occasionIds }: NewPlan,
+): Promise<CreatePlanResult> {
+  const inserted = await tx
+    .insert(mealPlans)
+    .values({
+      householdId: CURRENT_HOUSEHOLD_ID,
+      createdByUserId: userId,
+      startDate,
+      endDate,
+    })
+    .returning({
+      id: mealPlans.id,
+      startDate: mealPlans.startDate,
+      endDate: mealPlans.endDate,
+      createdByUserId: mealPlans.createdByUserId,
+    });
+  const row = inserted[0];
+  if (!row) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Plan insert returned no row',
+    });
+  }
+  const slotCount = await generateEmptySlotsForRange(
+    tx,
+    row.id,
+    startDate,
+    endDate,
+    occasionIds,
+  );
+  return { plan: toPlanDto(row), slotCount };
 }
 
 async function loadOccasionIds(db: DbHandle): Promise<number[]> {

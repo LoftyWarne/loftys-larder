@@ -105,6 +105,21 @@ export const createPlanInputSchema = z
   });
 export type CreatePlanInput = z.infer<typeof createPlanInputSchema>;
 
+// The wizard's first step runs plan creation's date checks without writing,
+// and gets the occasions it lays the new plan's slots out by.
+export const planOccasionSchema = z.object({
+  id: occasionIdSchema,
+  name: z.string(),
+});
+export type PlanOccasion = z.infer<typeof planOccasionSchema>;
+
+export const checkNewPlanDatesResultSchema = z.object({
+  occasions: z.array(planOccasionSchema),
+});
+export type CheckNewPlanDatesResult = z.infer<
+  typeof checkNewPlanDatesResultSchema
+>;
+
 export const createPlanResultSchema = z.object({
   plan: planSchema,
   slotCount: z.number().int().nonnegative(),

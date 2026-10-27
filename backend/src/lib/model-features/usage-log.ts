@@ -27,3 +27,18 @@ export function logModelUsage(
 ): void {
   log.info({ modelUsage: { ...details, ...usage } }, 'model call');
 }
+
+// A model feature's step that isn't a model call, such as applying a Plan
+// Proposal. Metadata only, like the line above.
+export interface ModelFeatureEvent {
+  feature: string;
+  event: string;
+}
+
+export function logModelFeatureEvent(
+  log: Pick<FastifyBaseLogger, 'info'>,
+  event: ModelFeatureEvent,
+  details: ModelUsageDetails = {},
+): void {
+  log.info({ modelFeatureEvent: { ...details, ...event } }, 'model feature');
+}

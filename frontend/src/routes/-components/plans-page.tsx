@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/alert-dialog.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { todayInLondon } from '@/lib/date-utils.ts';
-import { getDomainErrorCode } from '@/lib/domain-error.ts';
+import { planErrorMessage } from '@/lib/plan-errors.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 const STATUS_OPTIONS: readonly { value: PlanStatus; label: string }[] = [
@@ -115,7 +115,7 @@ export function PlansPage(): React.ReactElement {
         params: { planId: String(result.plan.id) },
       });
     } catch (err) {
-      setNewPlanError(translateError(err, 'Could not create plan.'));
+      setNewPlanError(planErrorMessage(err, 'Could not create plan.'));
     }
   }
 
@@ -130,7 +130,7 @@ export function PlansPage(): React.ReactElement {
         params: { planId: String(result.plan.id) },
       });
     } catch (err) {
-      setDuplicateError(translateError(err, 'Could not duplicate plan.'));
+      setDuplicateError(planErrorMessage(err, 'Could not duplicate plan.'));
     }
   }
 
@@ -141,7 +141,7 @@ export function PlansPage(): React.ReactElement {
       await deleteMutation.mutateAsync({ id: deleteTarget.id });
       setDeleteTarget(null);
     } catch (err) {
-      setDeleteError(translateError(err, 'Could not delete plan.'));
+      setDeleteError(planErrorMessage(err, 'Could not delete plan.'));
     }
   }
 
@@ -302,18 +302,4 @@ export function PlansPage(): React.ReactElement {
       </AlertDialog>
     </section>
   );
-}
-
-function translateError(err: unknown, fallback: string): string {
-  const code = getDomainErrorCode(err);
-  if (code === 'PLAN_DATE_OVERLAP') {
-    return 'That range overlaps an existing active or future plan.';
-  }
-  if (code === 'PLAN_RANGE_TOO_LONG') {
-    return 'Plan range cannot exceed 14 days.';
-  }
-  if (code === 'PLAN_PAST_NOT_EDITABLE') {
-    return 'Past plans cannot be edited.';
-  }
-  return err instanceof Error ? err.message : fallback;
 }

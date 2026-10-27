@@ -3532,7 +3532,7 @@ Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
   - [ ] Discarded slots are empty, keeping their attendance. Then the planner opens on the new plan
 - [ ] Apply checks the dates and every recipe's pickability again. A conflict since step 1 is refused with plan creation's error, and the review stays open
 - [ ] Applied meals carry no AI label. Reasons and the summary aren't stored
-- [ ] **Apply's log:** Apply's input carries optional counts from the review: slots suggested, swapped, discarded and suggested again, and how many times "Another go" was used. The server checks they're non-negative integers and logs them through the shared usage logger (feature `meal_plan`, with `reqId`). It never stores them, acts on them, or logs recipe names. They let DEC-117's first revisit trigger be seen
+- [ ] **Apply's log:** Apply's input carries optional counts from the review: slots suggested, swapped, discarded and suggested again, and how many times "Another go" was used. The server checks they're non-negative integers and logs them through the shared usage logger (feature `meal-plan`, as FEAT-74 shipped it, with `reqId`). It never stores them, acts on them, or logs recipe names. They let DEC-117's first revisit trigger be seen
 - [ ] Leaving the wizard, or reloading, before Apply creates nothing and loses the proposal. Leaving with a proposal on screen asks first
 - [ ] The wizard and Plan Review work at phone width in both themes, and pass the axe scan
 

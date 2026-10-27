@@ -19,6 +19,7 @@ import { Route as AuthedIngredientsRouteImport } from './routes/_authed/ingredie
 import { Route as AuthedRecipesIndexRouteImport } from './routes/_authed/recipes/index'
 import { Route as AuthedPlansIndexRouteImport } from './routes/_authed/plans/index'
 import { Route as AuthedRecipesNewRouteImport } from './routes/_authed/recipes/new'
+import { Route as AuthedPlansProposeRouteImport } from './routes/_authed/plans/propose'
 import { Route as AuthedPlansPlanIdRouteImport } from './routes/_authed/plans/$planId'
 import { Route as AuthedRecipesImportIndexRouteImport } from './routes/_authed/recipes/import.index'
 import { Route as AuthedRecipesRecipeIdIndexRouteImport } from './routes/_authed/recipes/$recipeId.index'
@@ -76,6 +77,11 @@ const AuthedRecipesNewRoute = AuthedRecipesNewRouteImport.update({
   path: '/recipes/new',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedPlansProposeRoute = AuthedPlansProposeRouteImport.update({
+  id: '/plans/propose',
+  path: '/plans/propose',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedPlansPlanIdRoute = AuthedPlansPlanIdRouteImport.update({
   id: '/plans/$planId',
   path: '/plans/$planId',
@@ -126,6 +132,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthedSettingsRoute
   '/shopping': typeof AuthedShoppingRoute
   '/plans/$planId': typeof AuthedPlansPlanIdRoute
+  '/plans/propose': typeof AuthedPlansProposeRoute
   '/recipes/new': typeof AuthedRecipesNewRoute
   '/plans/': typeof AuthedPlansIndexRoute
   '/recipes/': typeof AuthedRecipesIndexRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByTo {
   '/shopping': typeof AuthedShoppingRoute
   '/': typeof AuthedIndexRoute
   '/plans/$planId': typeof AuthedPlansPlanIdRoute
+  '/plans/propose': typeof AuthedPlansProposeRoute
   '/recipes/new': typeof AuthedRecipesNewRoute
   '/plans': typeof AuthedPlansIndexRoute
   '/recipes': typeof AuthedRecipesIndexRoute
@@ -164,6 +172,7 @@ export interface FileRoutesById {
   '/_authed/shopping': typeof AuthedShoppingRoute
   '/_authed/': typeof AuthedIndexRoute
   '/_authed/plans/$planId': typeof AuthedPlansPlanIdRoute
+  '/_authed/plans/propose': typeof AuthedPlansProposeRoute
   '/_authed/recipes/new': typeof AuthedRecipesNewRoute
   '/_authed/plans/': typeof AuthedPlansIndexRoute
   '/_authed/recipes/': typeof AuthedRecipesIndexRoute
@@ -184,6 +193,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/shopping'
     | '/plans/$planId'
+    | '/plans/propose'
     | '/recipes/new'
     | '/plans/'
     | '/recipes/'
@@ -202,6 +212,7 @@ export interface FileRouteTypes {
     | '/shopping'
     | '/'
     | '/plans/$planId'
+    | '/plans/propose'
     | '/recipes/new'
     | '/plans'
     | '/recipes'
@@ -221,6 +232,7 @@ export interface FileRouteTypes {
     | '/_authed/shopping'
     | '/_authed/'
     | '/_authed/plans/$planId'
+    | '/_authed/plans/propose'
     | '/_authed/recipes/new'
     | '/_authed/plans/'
     | '/_authed/recipes/'
@@ -310,6 +322,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedRecipesNewRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/plans/propose': {
+      id: '/_authed/plans/propose'
+      path: '/plans/propose'
+      fullPath: '/plans/propose'
+      preLoaderRoute: typeof AuthedPlansProposeRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/plans/$planId': {
       id: '/_authed/plans/$planId'
       path: '/plans/$planId'
@@ -368,6 +387,7 @@ interface AuthedRouteChildren {
   AuthedShoppingRoute: typeof AuthedShoppingRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
   AuthedPlansPlanIdRoute: typeof AuthedPlansPlanIdRoute
+  AuthedPlansProposeRoute: typeof AuthedPlansProposeRoute
   AuthedRecipesNewRoute: typeof AuthedRecipesNewRoute
   AuthedPlansIndexRoute: typeof AuthedPlansIndexRoute
   AuthedRecipesIndexRoute: typeof AuthedRecipesIndexRoute
@@ -385,6 +405,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedShoppingRoute: AuthedShoppingRoute,
   AuthedIndexRoute: AuthedIndexRoute,
   AuthedPlansPlanIdRoute: AuthedPlansPlanIdRoute,
+  AuthedPlansProposeRoute: AuthedPlansProposeRoute,
   AuthedRecipesNewRoute: AuthedRecipesNewRoute,
   AuthedPlansIndexRoute: AuthedPlansIndexRoute,
   AuthedRecipesIndexRoute: AuthedRecipesIndexRoute,

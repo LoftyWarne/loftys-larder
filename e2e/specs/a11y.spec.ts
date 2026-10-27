@@ -11,6 +11,13 @@ import {
   setHealthScore,
   type CreatedPlan,
 } from '../fixtures/db.ts';
+import {
+  FAKE_REFUSED_BRIEF,
+  openBriefStep,
+  openPlanReview,
+  WIZARD_END,
+  WIZARD_START,
+} from '../fixtures/plan-wizard.ts';
 
 // axe-core's `impact` values: 'minor' | 'moderate' | 'serious' | 'critical'.
 // Failing on serious/critical keeps the gate honest without flagging every
@@ -346,6 +353,91 @@ test.describe('a11y — authed views', () => {
           ),
         )
         .toBe(true);
+      await runAxe(page, theme);
+    });
+
+    // Every screen of the wizard (DEC-117), at phone width.
+    test(`planning wizard steps pass axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto('/plans/propose');
+      await expect(
+        page.getByRole('heading', { name: 'Which dates?' }),
+      ).toBeVisible();
+      await runAxe(page, theme);
+      await page.getByLabel('Start date').fill(WIZARD_START);
+      await page.getByLabel('End date').fill(WIZARD_END);
+      await page.getByRole('button', { name: 'Next' }).click();
+      await expect(
+        page.getByRole('heading', { name: 'Who’s eating?' }),
+      ).toBeVisible();
+      await runAxe(page, theme);
+      await page.getByRole('button', { name: 'Next' }).click();
+      await expect(
+        page.getByRole('heading', { name: 'Any meals already decided?' }),
+      ).toBeVisible();
+      await runAxe(page, theme);
+      await page.getByRole('button', { name: 'Next' }).click();
+      await expect(
+        page.getByRole('heading', { name: 'Anything to steer the plan?' }),
+      ).toBeVisible();
+      await runAxe(page, theme);
+    });
+
+    test(`plan proposal progress and error pass axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await openBriefStep(page);
+      // Hold the proposal until the progress screen has been scanned.
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route('**/api/trpc/planProposals.propose**', async (route) => {
+        await held;
+        await route.continue();
+      });
+      await page.getByLabel('Brief').fill(FAKE_REFUSED_BRIEF);
+      await page.getByRole('button', { name: 'Plan my meals' }).click();
+      await expect(page.getByRole('status')).toContainText(
+        'Planning your meals…',
+      );
+      await runAxe(page, theme);
+      release();
+      await expect(page.getByRole('alert')).toContainText(
+        'A plan couldn’t be made.',
+      );
+      await runAxe(page, theme);
+    });
+
+    test(`plan review passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await openPlanReview(page);
+      await expect(page.getByText('AI suggestion').first()).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            'document.documentElement.scrollWidth <= window.innerWidth',
+          ),
+        )
+        .toBe(true);
+      await runAxe(page, theme);
+    });
+
+    // The swap dialog with the shared combobox open on its results.
+    test(`plan review's swap dialog passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await openPlanReview(page);
+      await page.locator('[data-slot-type="recipe"] button').first().click();
+      await page.getByRole('button', { name: 'Swap' }).click();
+      await page.getByLabel('Swap for a recipe').fill('curry');
+      await expect(page.getByRole('option').first()).toBeVisible();
       await runAxe(page, theme);
     });
 

@@ -1,21 +1,18 @@
 import { TRPCError } from '@trpc/server';
-import { asc, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import {
-  planProposalSchema,
   proposePlanInputSchema,
+  proposePlanResultSchema,
   type DomainErrorCode,
   type PlanProposal,
-  type ProposePlanInput,
+  type ProposePlanResult,
 } from '../../../../shared/src/index.ts';
 import type { Db } from '../../db/index.ts';
-import { users } from '../../db/schema/auth.ts';
+import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
-import {
-  eachDateInRange,
-  formatCivilDate,
-  parseCivilDate,
-} from '../../lib/date-utils.ts';
+import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
+import { eachDateInRange, parseCivilDate } from '../../lib/date-utils.ts';
 import {
   MealPlannerRequestError,
   MealPlannerTimeoutError,
@@ -27,7 +24,10 @@ import {
   logModelUsage,
   type ModelUsageDetails,
 } from '../../lib/model-features/usage-log.ts';
-import { assertNewPlanDatesAllowed } from '../../lib/plan-dates.ts';
+import {
+  assertNewPlanDatesAllowed,
+  assertSlotsCoverRange,
+} from '../../lib/plan-dates.ts';
 import {
   emptySlot,
   normalisePlanProposal,
@@ -38,13 +38,14 @@ import {
   loadPlannerLibrary,
   slotHeadcount,
 } from '../../lib/plan-proposal/request.ts';
+import { assertDinersExist } from '../../lib/slot-writes.ts';
 import { protectedProcedure, router } from '../init.ts';
 
 // Set at FEAT-74 kick-off, as import's (DEC-104), under Cloudflare's
 // 100-second origin limit (DEC-72), with the client's one retry inside it.
 export const MEAL_PLAN_TIMEOUT_MS = 75_000;
 
-const FEATURE = 'meal-plan';
+export const MEAL_PLAN_FEATURE = 'meal-plan';
 
 type TryAgainReason = 'timeout' | 'unavailable' | 'invalid_result';
 
@@ -54,8 +55,8 @@ export const planProposalsRouter = router({
   // library is read, and the model called, outside any transaction.
   propose: protectedProcedure
     .input(proposePlanInputSchema)
-    .output(planProposalSchema)
-    .mutation(async ({ ctx, input, signal }): Promise<PlanProposal> => {
+    .output(proposePlanResultSchema)
+    .mutation(async ({ ctx, input, signal }): Promise<ProposePlanResult> => {
       const { planner, healthScoreSince, allowProposal } = ctx.mealPlan;
       const startDate = parseCivilDate(input.startDate);
       const endDate = parseCivilDate(input.endDate);
@@ -64,10 +65,13 @@ export const planProposalsRouter = router({
       // limit.
       await assertNewPlanDatesAllowed(ctx.db, startDate, endDate);
       const occasionNames = await loadOccasionNames(ctx.db);
-      assertSlotsCoverRange(input, eachDateInRange(startDate, endDate), [
+      assertSlotsCoverRange(input.slots, eachDateInRange(startDate, endDate), [
         ...occasionNames.keys(),
       ]);
-      await assertDinersExist(ctx.db, input);
+      await assertDinersExist(
+        ctx.db,
+        input.slots.flatMap((slot) => slot.dinerUserIds),
+      );
 
       const library = await loadPlannerLibrary(ctx.db, {
         startDate,
@@ -107,11 +111,11 @@ export const planProposalsRouter = router({
       }));
       // Every slot is fixed or has nobody eating: nothing to ask the model.
       if (!slots.some((slot) => slot.fixed === null && slot.headcount > 0)) {
-        return {
+        return await withDishDetails(ctx.db, {
           slots: slots.filter((slot) => slot.fixed === null).map(emptySlot),
           summary: '',
           dropped: 0,
-        };
+        });
       }
 
       const verdict = await allowProposal();
@@ -139,7 +143,7 @@ export const planProposalsRouter = router({
         logModelUsage(
           ctx.log,
           {
-            feature: FEATURE,
+            feature: MEAL_PLAN_FEATURE,
             adapter: planner.adapter,
             model: usage?.model ?? planner.model,
             inputTokens: usage?.inputTokens ?? null,
@@ -211,7 +215,7 @@ export const planProposalsRouter = router({
         throw tryAgain('invalid_result');
       }
       logUsage('proposed', usage, { dropped: proposal.dropped });
-      return proposal;
+      return await withDishDetails(ctx.db, proposal);
     }),
 });
 
@@ -223,54 +227,55 @@ async function loadOccasionNames(db: Db): Promise<Map<number, string>> {
   return new Map(rows.map((row) => [row.id, row.name]));
 }
 
-// One slot per (date × occasion) in the range, and nothing else.
-function assertSlotsCoverRange(
-  input: ProposePlanInput,
-  dates: Date[],
-  occasionIds: number[],
-): void {
-  const expected = new Set(
-    dates.flatMap((date) =>
-      occasionIds.map((id) => `${formatCivilDate(date)}|${id.toString()}`),
-    ),
-  );
-  const seen = new Set<string>();
-  for (const slot of input.slots) {
-    const key = `${slot.date}|${slot.occasionId.toString()}`;
-    if (!expected.has(key) || seen.has(key)) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: 'Slots must be one per date and occasion in the range',
-      });
-    }
-    seen.add(key);
-  }
-  if (seen.size !== expected.size) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Slots must be one per date and occasion in the range',
-    });
-  }
-}
-
-// Diners are counted, never sent, but checked as the slot editor checks them.
-async function assertDinersExist(
+// Adds each dish's recipe fields for Plan Review to show. Every recipe is in
+// the household: the normaliser keeps only pickable ones.
+async function withDishDetails(
   db: Db,
-  input: ProposePlanInput,
-): Promise<void> {
-  const ids = [...new Set(input.slots.flatMap((slot) => slot.dinerUserIds))];
-  if (ids.length === 0) return;
-  const rows = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(inArray(users.id, ids));
-  if (rows.length !== ids.length) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Diner user not found',
-      cause: { code: 'SLOT_DINER_NOT_FOUND' },
-    });
-  }
+  proposal: PlanProposal,
+): Promise<ProposePlanResult> {
+  const ids = [
+    ...new Set(
+      proposal.slots.flatMap((slot) => slot.items.map((item) => item.recipeId)),
+    ),
+  ];
+  const rows =
+    ids.length === 0
+      ? []
+      : await db
+          .select({
+            id: recipes.id,
+            name: recipes.name,
+            imageUrl: recipes.imageUrl,
+            isBase: recipes.isBase,
+            baseRecipeId: recipes.baseRecipeId,
+          })
+          .from(recipes)
+          .where(
+            and(
+              inArray(recipes.id, ids),
+              eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          );
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return {
+    ...proposal,
+    slots: proposal.slots.map((slot) => ({
+      ...slot,
+      items: slot.items.flatMap((item) => {
+        const recipe = byId.get(item.recipeId);
+        if (!recipe) return [];
+        return [
+          {
+            ...item,
+            recipeName: recipe.name,
+            recipeImageUrl: recipe.imageUrl,
+            isBase: recipe.isBase,
+            baseRecipeId: recipe.baseRecipeId,
+          },
+        ];
+      }),
+    })),
+  };
 }
 
 // Timeouts, outages and unusable results are server-side failures, so they

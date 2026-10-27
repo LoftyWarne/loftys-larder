@@ -9,7 +9,6 @@ import {
   updateSlotResultSchema,
   type PlanSlot,
   type RelocateSlotResult,
-  type SlotItemInput,
   type UpdateSlotResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
@@ -24,6 +23,7 @@ import {
 import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
 import { loadSlotDiners } from '../../lib/slot-diners.ts';
+import { replaceSlotDiners, replaceSlotItems } from '../../lib/slot-writes.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import { formatCivilDate } from '../../lib/date-utils.ts';
@@ -183,29 +183,6 @@ function emptyMetaPatch(): MetaPatch {
   };
 }
 
-// Replace the slot's items with `items`, reinserting in the given order. The
-// caller is responsible for having deleted any prior rows (relocate batches the
-// delete across both slots; update relies on this helper's own delete).
-async function replaceSlotItems(
-  tx: Tx,
-  slotId: number,
-  items: readonly SlotItemInput[],
-): Promise<void> {
-  await tx
-    .delete(mealPlanSlotItems)
-    .where(eq(mealPlanSlotItems.slotId, slotId));
-  if (items.length === 0) return;
-  await tx.insert(mealPlanSlotItems).values(
-    items.map((item) => ({
-      slotId,
-      recipeId: item.recipeId,
-      prepared: item.prepared,
-      eaten: item.eaten,
-      sortOrder: item.sortOrder,
-    })),
-  );
-}
-
 interface RawSlotItem {
   recipeId: number;
   prepared: number;
@@ -227,23 +204,6 @@ async function loadRawSlotItems(
     .from(mealPlanSlotItems)
     .where(eq(mealPlanSlotItems.slotId, slotId))
     .orderBy(asc(mealPlanSlotItems.sortOrder), asc(mealPlanSlotItems.id));
-}
-
-// Replace the slot's named diners with `userIds`. Like `replaceSlotItems`, the
-// caller may have batch-deleted prior rows already (relocate does); this helper
-// also clears the slot's own rows so `update` can call it standalone.
-async function replaceSlotDiners(
-  tx: Tx,
-  slotId: number,
-  userIds: readonly string[],
-): Promise<void> {
-  await tx
-    .delete(mealPlanSlotDiners)
-    .where(eq(mealPlanSlotDiners.slotId, slotId));
-  if (userIds.length === 0) return;
-  await tx
-    .insert(mealPlanSlotDiners)
-    .values(userIds.map((userId) => ({ slotId, userId })));
 }
 
 async function loadRawSlotDiners(tx: Tx, slotId: number): Promise<string[]> {

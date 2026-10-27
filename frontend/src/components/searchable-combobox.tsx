@@ -312,7 +312,9 @@ function SearchableComboboxInner<T extends SearchableComboboxOption>(
               {emptyMessage}
             </p>
           ) : (
-            <ul>
+            // Options belong directly to the listbox, so the list is only
+            // layout.
+            <ul role="presentation">
               {options.map((option, index) => {
                 const optionId = `${listboxId}-opt-${String(option.id)}`;
                 const isActive = index === activeIndex;

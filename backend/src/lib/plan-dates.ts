@@ -5,7 +5,7 @@ import { PLAN_MAX_RANGE_DAYS } from '../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../config.ts';
 import type { Db } from '../db/index.ts';
 import { mealPlans } from '../db/schema/meal-plans.ts';
-import { daysBetween, todayInLondon } from './date-utils.ts';
+import { daysBetween, formatCivilDate, todayInLondon } from './date-utils.ts';
 
 // The date rules for a new plan, shared by plan creation and the planning
 // wizard's proposals so both refuse the same ranges with the same errors.
@@ -50,4 +50,36 @@ export async function assertNewPlanDatesAllowed(
       },
     });
   }
+}
+
+// A new plan's slots, as the wizard sends them: one per (date × occasion) in
+// the range, and nothing else.
+export function assertSlotsCoverRange(
+  slots: readonly { date: string; occasionId: number }[],
+  dates: readonly Date[],
+  occasionIds: readonly number[],
+): void {
+  const expected = new Set(
+    dates.flatMap((date) =>
+      occasionIds.map((id) => `${formatCivilDate(date)}|${id.toString()}`),
+    ),
+  );
+  const seen = new Set<string>();
+  for (const slot of slots) {
+    const key = `${slot.date}|${slot.occasionId.toString()}`;
+    if (!expected.has(key) || seen.has(key)) {
+      throw slotsDontCoverRange();
+    }
+    seen.add(key);
+  }
+  if (seen.size !== expected.size) {
+    throw slotsDontCoverRange();
+  }
+}
+
+function slotsDontCoverRange(): TRPCError {
+  return new TRPCError({
+    code: 'BAD_REQUEST',
+    message: 'Slots must be one per date and occasion in the range',
+  });
 }

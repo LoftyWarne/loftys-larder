@@ -2,13 +2,14 @@ import { type AnyColumn, type SQL, sql } from 'drizzle-orm';
 
 import type { Db } from '../db/index.ts';
 import { ingredients } from '../db/schema/ingredients.ts';
-import {
-  mealPlans,
-  mealPlanSlotItems,
-  mealPlanSlots,
-} from '../db/schema/meal-plans.ts';
 import { recipeIngredients, recipes } from '../db/schema/recipes.ts';
 import type { Tx } from '../db/withTransaction.ts';
+
+import {
+  proposedEatenItems,
+  savedEatenItems,
+  type EatenDish,
+} from './eaten-items.ts';
 
 // Recipe-level plant points: COUNT(DISTINCT ingredient_id) over the recipe's
 // non-optional ingredients filtered to `is_plant = true` (DEC-32 — never
@@ -74,8 +75,8 @@ export async function selectRecipePlantPoints(
 }
 
 // Day / plan plant points count what's *eaten* (DEC-91), composing the
-// recipe-level primitive over two contribution sources per slot, unioned then
-// DISTINCT-counted at the ingredient_id level:
+// recipe-level primitive over two contribution sources per eaten dish,
+// unioned then DISTINCT-counted at the ingredient_id level:
 //
 //   1. eaten recipe                        — items with eaten > 0
 //   2. base traversal: an eaten variation  — its base, when base_recipe_id IS NOT NULL
@@ -86,8 +87,9 @@ export async function selectRecipePlantPoints(
 // ingredient_id) gives the spec's dedup for free, including the "eaten meal's
 // base = a base cooked the same day" case (DEC-32, FEAT-41).
 //
-// The household-scoped plan join keeps the helpers safe even if a caller
-// forgets the procedure-layer guard (DEC-17 / cross-cutting #3).
+// The eaten dishes come from a saved plan or from a proposal in Plan Review
+// (`eaten-items.ts`); both are household-scoped, which keeps the helpers safe
+// even if a caller forgets the procedure-layer guard (DEC-17 / cross-cutting #3).
 
 type DbHandle = Db | Tx;
 
@@ -97,84 +99,78 @@ interface DayPlantPointsArgs {
   date: string;
 }
 
-interface PlanPlantPointsArgs {
-  planId: number;
-  householdId: string;
-}
-
 export async function selectDayPlantPoints(
   db: DbHandle,
   { planId, householdId, date }: DayPlantPointsArgs,
 ): Promise<number> {
-  return await countDistinctPlants(db, {
-    planId,
-    householdId,
-    dateFilter: sql`and meal_plan_slots.date = ${date}::date`,
-  });
+  return await countDistinctPlants(
+    db,
+    savedEatenItems(planId, householdId, date),
+  );
+}
+
+interface PlanPlantPointsArgs {
+  planId: number;
+  householdId: string;
 }
 
 export async function selectPlanPlantPoints(
   db: DbHandle,
   { planId, householdId }: PlanPlantPointsArgs,
 ): Promise<number> {
-  return await countDistinctPlants(db, {
-    planId,
-    householdId,
-    dateFilter: sql``,
-  });
+  return await countDistinctPlants(
+    db,
+    savedEatenItems(planId, householdId, null),
+  );
 }
 
-interface CountArgs {
-  planId: number;
+interface ProposedPlantPointsArgs {
   householdId: string;
-  dateFilter: SQL;
+  dishes: readonly EatenDish[];
+  date: string | null;
+}
+
+export async function selectProposedPlantPoints(
+  db: DbHandle,
+  { householdId, dishes, date }: ProposedPlantPointsArgs,
+): Promise<number> {
+  if (dishes.length === 0) return 0;
+  return await countDistinctPlants(
+    db,
+    proposedEatenItems(dishes, householdId, date),
+  );
 }
 
 async function countDistinctPlants(
   db: DbHandle,
-  { planId, householdId, dateFilter }: CountArgs,
+  eatenItems: SQL,
 ): Promise<number> {
   // Bare column references inside `sql` templates drop the table qualifier;
   // both `recipe_ingredients` and `ingredients` carry an `id` column, so
   // every join predicate and projection in the inner unions is fully
   // qualified by name to dodge "column reference ambiguous". The outer
   // SELECT projects only `ingredient_id` — single source, no shadowing.
-  const planFilter = sql`meal_plans.id = ${planId} and meal_plans.household_id = ${householdId}`;
-
   const rows = await db.execute<{ count: number }>(sql`
+    with eaten_items as (${eatenItems})
     select count(distinct contributions.ingredient_id)::int as count
     from (
       -- 1. eaten-item ingredients
       select recipe_ingredients.ingredient_id
-      from ${mealPlanSlots}
-      inner join ${mealPlans}
-        on meal_plans.id = meal_plan_slots.plan_id
-      inner join ${mealPlanSlotItems}
-        on meal_plan_slot_items.slot_id = meal_plan_slots.id
-        and meal_plan_slot_items.eaten > 0
+      from eaten_items
       inner join ${recipeIngredients}
-        on recipe_ingredients.recipe_id = meal_plan_slot_items.recipe_id
+        on recipe_ingredients.recipe_id = eaten_items.recipe_id
         and recipe_ingredients.is_optional = false
-      where ${planFilter}
-        ${dateFilter}
 
       union all
       -- 2. serving-variation traversal: an eaten item's base
       select recipe_ingredients.ingredient_id
-      from ${mealPlanSlots}
-      inner join ${mealPlans}
-        on meal_plans.id = meal_plan_slots.plan_id
-      inner join ${mealPlanSlotItems}
-        on meal_plan_slot_items.slot_id = meal_plan_slots.id
-        and meal_plan_slot_items.eaten > 0
+      from eaten_items
       inner join ${recipes}
-        on recipes.id = meal_plan_slot_items.recipe_id
+        on recipes.id = eaten_items.recipe_id
       inner join ${recipeIngredients}
         on recipe_ingredients.recipe_id = recipes.base_recipe_id
         and recipe_ingredients.is_optional = false
-      where ${planFilter}
-        and recipes.base_recipe_id is not null
-        ${dateFilter}
+      where recipes.base_recipe_id is not null
     ) as contributions
     inner join ${ingredients}
       on ingredients.id = contributions.ingredient_id

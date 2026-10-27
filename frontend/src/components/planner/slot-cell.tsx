@@ -88,7 +88,8 @@ export function SlotCell({
       <button
         type="button"
         ref={setDragRef}
-        {...attributes}
+        // Without DnD the card is a plain button, not a disabled draggable.
+        {...(dndEnabled ? attributes : {})}
         {...listeners}
         onClick={onClick}
         aria-label={describeSlotForA11y(slot, shortBy)}
@@ -233,7 +234,10 @@ function ShortfallNudge({
   needsBase: boolean;
 }): React.ReactElement {
   return (
-    <span className="text-xs text-amber-700" data-testid="slot-item-shortfall">
+    <span
+      className="text-xs text-amber-700 dark:text-amber-400"
+      data-testid="slot-item-shortfall"
+    >
       ⚠ {shortfallText(shortBy, needsBase)}
     </span>
   );

@@ -4,6 +4,52 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-26 — Planning wizard, Plan Review and Apply (FEAT-75)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,175 tests green. Frontend: 1,028 green. e2e: 62 of 62, including the new wizard spec and four new axe scans (wizard and review, at phone width, in both themes). Manual verification steps 1–2 haven't been run, and nothing has been tried against the real `anthropic` adapter. The FEAT-75 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (all nine readings as proposed):
+- Apply is `plans.createWithSlots`. It runs the date checks, then checks one slot per date × occasion, every recipe's pickability and every diner. Then, in one `withTransaction`, it inserts the plan and its empty slots and writes each slot.
+- `plans.checkNewDates` runs the date checks for step 1 and returns the occasions. No other read gave the client the occasions before a plan exists.
+- `propose` returns each dish's recipe fields (`proposePlanResultSchema`). `previous` still takes the plain `planProposalSchema`, which strips them.
+- `plans.proposedFigures` takes `{ date, recipeId, eaten }` per eaten dish and returns plant points and the Health Score per day and for the plan.
+- A recipe Fixed meal, or a swap, gets `prepared = eaten =` the slot's headcount.
+- A recipe can't be fixed where nobody eats until batch cooking arrives. If attendance drops to 0 under a fixed recipe, the fix is cleared.
+- The log feature stays `meal-plan`. FEAT-75's text is corrected; FEAT-74's acceptance line and DEC-117 still say `meal_plan`.
+- Apply logs through a new `logModelFeatureEvent` (key `modelFeatureEvent`, event `applied`), not `logModelUsage`, because Apply isn't a model call.
+- Dates, attendance, Fixed meals and the Brief make up the inputs that need a new proposal.
+
+**How the rules are shared, not copied:**
+- **Figures:** `lib/eaten-items.ts` gives two sources of `(recipe_id, eaten)` rows, a saved plan's or a proposal's (a `VALUES` list). Plant points and the Health Score average each take either source. The saved-plan reads return what they did; a test checks proposed figures equal the saved reads for the same dishes.
+- **Slot writes:** `replaceSlotItems` and `replaceSlotDiners` moved unchanged from `slots.ts` to `lib/slot-writes.ts`, with `assertRecipesPickable` (through `pickableRecipesWhere`) and `assertDinersExist`.
+- **Item rules:** they're now `withSlotContentRules` in `shared/src/schemas/slots.ts`, used by `updateSlotInputSchema` and Apply's slot schema.
+- **Other moves:** `assertSlotsCoverRange` moved to `lib/plan-dates.ts` from the proposals procedure. Plan creation's messages moved from `plans-page.tsx` to `lib/plan-errors.ts`.
+
+**Drift and things decided while building** (worth a look):
+- **Pickability:** Apply checks it with the helper (`includePickerHidden`), not the slot editor's `assertRecipeAssignable`, so a variation of a deleted base is refused too. `assertRecipeAssignable` stays in `slots.ts`.
+- **`PlannerGrid`** gained an optional `slotCommentLine` prop. It fills the slot card's existing `commentLine` region, and the planner doesn't pass it.
+- **Slot card fix:** with DnD off, it no longer spreads dnd-kit's attributes. Before, every card announced itself as a disabled draggable (`aria-disabled="true"`). The planner always has DnD on, so it's unchanged.
+- **Slot card fix:** the shortfall line gained `dark:text-amber-400`. Review was the first axe scan to show a shortfall in dark mode, and it failed contrast. `serving-variation-warning.tsx` has the same `text-amber-700` with no dark variant and is untouched.
+- **Review shows the planner's shortfall warnings** (DEC-117). Proposing a serving variation without its base reads as a shortfall, as in the planner.
+- **Swap** is offered on any slot that isn't fixed and has someone eating, including slots the model left empty. Restore is offered on swapped or discarded slots.
+- **Shared form schemas:** the Brief and the "Another go" note are React Hook Form forms with shared schemas (`planBriefFormSchema`, `anotherGoFormSchema`).
+- **Leaving with a proposal** uses TanStack Router's `useBlocker`, with `enableBeforeUnload` for reloads.
+
+**Independent review (same day):** no blockers. Three findings were fixed, as the user chose:
+- **Fixed meals are pruned to the range.** `pruneFixedMeals` keeps only Fixed meals in the current range, and a recipe only where someone eats. It now runs when the dates change as well as when attendance changes. Before, a fix on a date that left the range came back unchecked when the range grew again, and could land where nobody eats.
+- **Apply's refusals read plainly** (`applyErrorMessage`): date clashes in plan creation's words, a recipe no longer pickable, a diner no longer in the household, and one generic message for anything else. The server's text, such as Zod's JSON, is never shown.
+- **Axe scans now cover every screen:** step 1, the Brief step, the progress screen (the e2e holds the request), the error screen, and the swap dialog with the combobox open. e2e is now 66 of 66. Backend 1,175 and frontend 1,034 tests pass.
+- **That last scan found a bug in the shared combobox** (cross-cutting #6). A plain `<ul>` sat between the `listbox` and its `option`s, which axe rates critical. It's now `role="presentation"`, with no change to the primitive's props. Every picker in the app is affected.
+
+**Left as they are:**
+- **The review's slot cards and screen readers:** a fixed or nobody-eating slot is a button that does nothing, and the card's label omits the review status. The fix needs a slot card prop change, which is a stop-and-ask.
+- **`suggestedAgain` is 0** until FEAT-77 adds suggest again for one slot. The review read it as "Another go", which has its own count.
+- **Apply's checks run before its transaction**, as `plans.create`'s do.
+- **The slot editor still checks diners one at a time**, while Apply checks them in one batch.
+- **Apply's rollback when a write fails part-way isn't tested.**
+
+---
+
 ## 2026-10-26 — AI meal planning backend (FEAT-74)
 
 **Status:** Committed and pushed to `main`. Typecheck, lint and format are clean in every workspace. Backend: 1,160 tests green. Frontend: 1,000 green. e2e not run (no frontend change). **Reading 1 (the time limit) is not settled:** it has only been timed against the 14-recipe dev library, not the household's real one. The FEAT-74 checkboxes are left for the user to tick.

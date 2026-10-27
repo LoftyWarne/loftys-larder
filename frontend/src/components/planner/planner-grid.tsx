@@ -39,6 +39,9 @@ export interface PlannerGridProps {
   /** Day Health Scores (DEC-113), with the same keys contract as above. */
   dayHealthScores?: ReadonlyMap<string, HealthScoreAverage | null>;
   dndEnabled?: boolean;
+  // Fills the slot card's comment region (cross-cutting #14) in place of the
+  // slot's comment; Plan Review shows the AI badge and reason there.
+  slotCommentLine?: (slot: PlanSlot) => ReactNode;
   onSlotClick: (slot: PlanSlot) => void;
   onSlotClear?: (slot: PlanSlot) => void;
 }
@@ -58,6 +61,7 @@ export function PlannerGrid({
   dayPlantCounts,
   dayHealthScores,
   dndEnabled = false,
+  slotCommentLine,
   onSlotClick,
   onSlotClear,
 }: PlannerGridProps): React.ReactElement {
@@ -124,6 +128,7 @@ export function PlannerGrid({
             guestCount={slot.guestCount}
           />
         }
+        commentLine={slotCommentLine?.(slot)}
         onClick={() => {
           onSlotClick(slot);
         }}

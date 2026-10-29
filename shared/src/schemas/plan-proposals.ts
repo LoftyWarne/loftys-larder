@@ -122,6 +122,35 @@ export const proposePlanInputSchema = z
 
 export type ProposePlanInput = z.infer<typeof proposePlanInputSchema>;
 
+// Suggest again for one slot in Plan Review (DEC-117). `slots` and `brief` are
+// the wizard's inputs, as `propose` takes them. `current` is every slot that
+// isn't fixed as the cook has left it in review, for balance and variety.
+// `avoidRecipeIds` are the recipes already suggested for the target slot.
+export const proposeSlotInputSchema = z
+  .object({
+    startDate: civilDateSchema,
+    endDate: civilDateSchema,
+    slots: z.array(proposePlanSlotSchema),
+    brief: z.string().trim().max(MEAL_PLAN_BRIEF_MAX_LENGTH).nullable(),
+    current: z.array(planProposalSlotSchema.omit({ reason: true })),
+    target: z.object({ date: civilDateSchema, occasionId: occasionIdSchema }),
+    avoidRecipeIds: z.array(recipeIdSchema),
+  })
+  .refine((value) => value.startDate <= value.endDate, {
+    path: ['endDate'],
+    message: 'End date must be on or after start date',
+  });
+
+export type ProposeSlotInput = z.infer<typeof proposeSlotInputSchema>;
+
+// The target slot's new suggestion. An empty slot, with no reason, is only
+// returned where nobody eats and nothing was worth cooking there.
+export const proposeSlotResultSchema = z.object({
+  slot: proposedSlotSchema,
+});
+
+export type ProposeSlotResult = z.infer<typeof proposeSlotResultSchema>;
+
 // The wizard's Brief step and Plan Review's "Another go" (DEC-49: plain text).
 export const planBriefFormSchema = z.object({
   brief: z
@@ -168,6 +197,20 @@ export const mealPlanDishKindSchema = z.enum(['cook', 'leftovers']);
 
 export type MealPlanDishKind = z.infer<typeof mealPlanDishKindSchema>;
 
+// One slot's dish as the planner sees it: a previous proposal's, or the
+// review's as it stands. Null for an empty slot.
+const mealPlanSlotDishSchema = z.object({
+  date: civilDateSchema,
+  occasion: z.string(),
+  dish: z
+    .object({
+      kind: mealPlanDishKindSchema,
+      recipeId: recipeIdSchema,
+      prepared: z.number().int().nonnegative(),
+    })
+    .nullable(),
+});
+
 // What the planner is sent, and all it's sent (DEC-117). Headcounts only:
 // never who the diners are. `basesToCook` marks the base of each fixed serving
 // variation, with the portions it needs by that slot, so the planner can
@@ -193,25 +236,26 @@ export const mealPlanRequestSchema = z.object({
   note: z.string().nullable(),
   previous: z
     .object({
-      slots: z.array(
-        z.object({
-          date: civilDateSchema,
-          occasion: z.string(),
-          dish: z
-            .object({
-              kind: mealPlanDishKindSchema,
-              recipeId: recipeIdSchema,
-              prepared: z.number().int().nonnegative(),
-            })
-            .nullable(),
-        }),
-      ),
+      slots: z.array(mealPlanSlotDishSchema),
       summary: z.string(),
     })
     .nullable(),
 });
 
 export type MealPlanRequest = z.infer<typeof mealPlanRequestSchema>;
+
+// What the planner is told for one slot's suggestion: the plan as the cook
+// has left it in review (`current`), the slot to suggest for, and the recipes
+// already suggested there, to avoid. No note, and no previous summary.
+export const mealPlanSlotRequestSchema = mealPlanRequestSchema
+  .omit({ note: true, previous: true })
+  .extend({
+    current: z.array(mealPlanSlotDishSchema),
+    target: z.object({ date: civilDateSchema, occasion: z.string() }),
+    avoidRecipeIds: z.array(recipeIdSchema),
+  });
+
+export type MealPlanSlotRequest = z.infer<typeof mealPlanSlotRequestSchema>;
 
 // The planner's reply, kept to what structured outputs can express: no range
 // or length limits. `normalisePlanProposal` parses it into a Plan Proposal.
@@ -240,6 +284,30 @@ export const mealPlanCandidateSchema = z.object({
 });
 
 export type MealPlanCandidate = z.infer<typeof mealPlanCandidateSchema>;
+
+// The planner's reply for one slot. `dish` is null only where nobody eats and
+// nothing is worth cooking. `normaliseSlotSuggestion` parses it.
+export const mealPlanSlotCandidateSchema = z.object({
+  dish: z
+    .object({
+      kind: mealPlanDishKindSchema.describe(
+        '"cook" to cook the recipe here, "leftovers" to eat portions cooked at an earlier slot.',
+      ),
+      recipeId: z.number().describe('The id of one recipe from the library.'),
+      prepared: z
+        .number()
+        .describe(
+          'For "cook", the portions cooked here in all, at least the headcount. 0 for "leftovers".',
+        ),
+      reason: z.string().describe('Why this recipe here, in plain text.'),
+    })
+    .nullable()
+    .describe(
+      'The dish for the target slot. null only when nobody eats there and no Batch is worth cooking.',
+    ),
+});
+
+export type MealPlanSlotCandidate = z.infer<typeof mealPlanSlotCandidateSchema>;
 
 // Apply (DEC-117): the new plan with every slot as the cook left it in Plan
 // Review. One entry per (date × occasion) in the range, each following the

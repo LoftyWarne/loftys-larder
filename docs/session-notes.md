@@ -4,6 +4,49 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-29 — Suggest again for one slot in Plan Review (FEAT-77)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,246 tests green. Frontend: 1,071 green. e2e: 73 of 73. That includes a spec that runs manual verification step 1 against the fake adapter (three suggestions on one slot, each different, with the rest of the plan unchanged) and two new axe scans (the slot dialog while Suggest again runs, then with its error, at phone width in both themes). Manual verification step 1 hasn't been run in the app or against the real `anthropic` adapter. The FEAT-77 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (all nine readings as proposed):
+- **The avoid list** is every recipe the model suggested for the slot in this review: the first proposal, each "Another go" and each Suggest again. The cook's swaps aren't on it.
+- **Repeats:** the prompt says to avoid the list. The normaliser refuses a repeat while the library has any other pickable recipe, giving `MEAL_PLAN_TRY_AGAIN` (`invalid_result`). That still counts towards the limit. "Fits" means pickable, plus a leftovers dish eating something cooked earlier. Whether a dish suits the occasion is left to the model.
+- **An unusable reply** fails with `MEAL_PLAN_TRY_AGAIN`, and the slot stays as it was.
+- **Where nobody eats,** Suggest again is offered too. An empty answer is valid there, and the dialog stays open saying nothing's worth cooking ahead.
+- **Knock-on effects:** replacing a Batch's slot can leave its leftovers short, which shows as the usual warning. The prompt tells the model that's fine.
+- **The status afterwards** is `suggested`, even from swapped or discarded. So "Another go" replaces it, and `ReviewState.proposal` carries it as `previous`.
+- **`suggestedAgain`** in Apply's counts is the number of slots suggested again at least once.
+- **Limits:** it shares the 75-second `MEAL_PLAN_TIMEOUT_MS`. `MAX_TOKENS` is 4,000. The limit is 30 an hour (`limitPlanSlotSuggestion`, key `plan-slot:<user>`), counted apart from whole plans.
+- **Logging:** feature `meal-plan` with `singleSlot: true` and `avoidCount`, plus the whole plan's metadata.
+
+**How it's built:**
+- `planProposals.proposeSlot` takes the wizard's inputs (`slots`, `brief`), `current` (every slot that isn't fixed as review has it, with no reasons), `target` and `avoidRecipeIds`. It returns `{ slot }`.
+  - `propose`'s cheap checks moved into a local `checkPlanInput`, and the planner call's timeout, error mapping and usage log into `callPlanner`. Both procedures use them, and `propose` behaves as before.
+  - A fixed target, or one outside the plan, is a plain `BAD_REQUEST` before the model.
+- **The seam** gains `proposeSlot(request, signal)`.
+  - **The `anthropic` adapter** shares one request path between the two calls. It has its own system prompt (`MEAL_PLANNER_SLOT_SYSTEM_PROMPT`) and structured-output schema (`mealPlanSlotCandidateSchema`, `{ dish | null }`).
+  - **The prompt:** both prompts are now built from shared sections. The whole-plan prompt's text is byte-for-byte unchanged (checked against a snapshot while building).
+  - **The fake adapter** cooks the first library recipe not on the avoid list for the headcount, or nothing where nobody eats. It has the same failure markers, plus `[fake:repeat]`.
+- **The normaliser:**
+  - `normaliseSlotSuggestion` reuses the whole plan's per-slot rules (`normaliseEntry`).
+  - `cookedBefore` works out "cooked earlier" from the Fixed meals and `current`, in the consumption walk's order. It ignores `current` entries for fixed slots and for slots outside the plan.
+- **The request:** `buildMealPlanSlotRequest` drops `current` entries that are fixed or outside the plan. The previous and current dishes share a `toSlotDish` mapper, and `mealPlanSlotDishSchema` in `/shared`.
+- **Frontend:**
+  - `ReviewSlot` gains `suggestedRecipeIds` and `suggestedAgain`. `ReviewPlanSlot` gains `canSuggestAgain` and `suggestedAgain`.
+  - New `applySlotSuggestion` and `buildProposeSlotInput`.
+  - `slotSuggestionErrorMessage` has its own rate-limit wording, and both rate-limit messages share a `retryIn` helper.
+
+**Drift from the plan:**
+- **The mutation lives in `PlanReview`,** not `plan-wizard-page.tsx`. Everything it disables (Another go, Apply, Back and the slot dialogs) is in review, so the page didn't need to know. `plan-wizard-page.tsx` is unchanged.
+- **Plan Review now opens the dialog on any slot that isn't fixed.** Before, an empty slot where nobody ate didn't open, because Swap was its only action.
+- **A test harness fix:** `proposeSlotMock` is reset in `beforeEach`, because `vi.clearAllMocks` keeps `mockResolvedValueOnce` queues.
+
+**Left as they are:**
+- **Closing the dialog while a suggestion runs** still applies the result when it lands. Everything else in review stays disabled until then.
+- **The e2e test seeds a fourth recipe,** so the three suggestions all differ. With the shared three-recipe library, the third has to repeat, which the rules allow.
+
+---
+
 ## 2026-10-28 — Batch cooking in Plan Proposals, and the "Plan with AI" entry (FEAT-76)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,199 tests green. Frontend: 1,054 green. e2e: 70 of 70, including the entry and its offline state, a Batch through review, Apply and the shopping list, and two new axe scans (a Batch at step 3, and review with a Batch and "left in plan", at phone width in both themes). Manual verification step 1 hasn't been run in the app. The FEAT-76 checkboxes are left for the user to tick.

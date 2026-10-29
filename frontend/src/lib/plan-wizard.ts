@@ -11,6 +11,7 @@ import {
   type ProposedSlot,
   type ProposePlanInput,
   type ProposePlanResult,
+  type ProposeSlotInput,
 } from '@loftys-larder/shared';
 
 import { eachDateInRange } from '@/lib/date-utils.ts';
@@ -74,6 +75,10 @@ export interface ReviewSlot {
   // The latest suggestion for the slot, which restore puts back.
   suggestion: ProposedSlot;
   status: ReviewSlotStatus;
+  // Every recipe suggested for the slot in this review, which Suggest again
+  // avoids.
+  suggestedRecipeIds: readonly number[];
+  suggestedAgain: boolean;
 }
 
 export interface ReviewState {
@@ -98,6 +103,9 @@ export interface ReviewPlanSlot {
   reason: string | null;
   // Swap is offered on any slot that isn't fixed and has someone eating.
   canSwap: boolean;
+  // Suggest again is offered on any slot that isn't fixed.
+  canSuggestAgain: boolean;
+  suggestedAgain: boolean;
 }
 
 export function slotKey(date: string, occasionId: number): string {
@@ -308,7 +316,12 @@ export function startReview(proposal: ProposePlanResult): ReviewState {
     slots: new Map(
       proposal.slots.map((suggestion) => [
         slotKey(suggestion.date, suggestion.occasionId),
-        { suggestion, status: { kind: 'suggested' } },
+        {
+          suggestion,
+          status: { kind: 'suggested' },
+          suggestedRecipeIds: recipeIds(suggestion),
+          suggestedAgain: false,
+        },
       ]),
     ),
     summary: proposal.summary,
@@ -329,7 +342,15 @@ export function rerunReview(
     const key = slotKey(suggestion.date, suggestion.occasionId);
     const existing = slots.get(key);
     if (existing && existing.status.kind !== 'suggested') continue;
-    slots.set(key, { suggestion, status: { kind: 'suggested' } });
+    slots.set(key, {
+      suggestion,
+      status: { kind: 'suggested' },
+      suggestedRecipeIds: withRecipeIds(
+        existing?.suggestedRecipeIds ?? [],
+        suggestion,
+      ),
+      suggestedAgain: existing?.suggestedAgain ?? false,
+    });
   }
   return {
     slots,
@@ -338,6 +359,82 @@ export function rerunReview(
     proposal,
     anotherGoCount: review.anotherGoCount + 1,
   };
+}
+
+// Suggest again's new suggestion replaces the slot's, whatever the cook had
+// done with it, and becomes the one "Another go" sends back and restore puts
+// back.
+export function applySlotSuggestion(
+  review: ReviewState,
+  key: string,
+  suggestion: ProposedSlot,
+): ReviewState {
+  const slot = review.slots.get(key);
+  if (!slot) return review;
+  const slots = new Map(review.slots);
+  slots.set(key, {
+    suggestion,
+    status: { kind: 'suggested' },
+    suggestedRecipeIds: withRecipeIds(slot.suggestedRecipeIds, suggestion),
+    suggestedAgain: true,
+  });
+  return {
+    ...review,
+    slots,
+    proposal: {
+      ...review.proposal,
+      slots: review.proposal.slots.map((entry) =>
+        slotKey(entry.date, entry.occasionId) === key ? suggestion : entry,
+      ),
+    },
+  };
+}
+
+// Suggest again's input: the wizard's inputs as for the first proposal, every
+// slot that isn't fixed as the cook has left it, and the recipes already
+// suggested for this one.
+export function buildProposeSlotInput(
+  inputs: WizardInputs,
+  review: ReviewState,
+  key: string,
+): ProposeSlotInput {
+  const { startDate, endDate, slots, brief } = buildProposeInput(inputs, null);
+  const target = review.slots.get(key);
+  return {
+    startDate,
+    endDate,
+    slots,
+    brief,
+    current: reviewPlanSlots(inputs, review)
+      .filter((entry) => entry.kind !== 'fixed')
+      .map(({ slot }) => ({
+        date: slot.date,
+        occasionId: slot.occasionId,
+        slotType: slot.slotType,
+        leftoversSource: slot.leftoversSource,
+        items: slot.items.map((item) => ({
+          recipeId: item.recipeId,
+          prepared: item.prepared,
+          eaten: item.eaten,
+        })),
+      })),
+    target: {
+      date: target?.suggestion.date ?? '',
+      occasionId: target?.suggestion.occasionId ?? 0,
+    },
+    avoidRecipeIds: [...(target?.suggestedRecipeIds ?? [])],
+  };
+}
+
+function recipeIds(suggestion: ProposedSlot): number[] {
+  return suggestion.items.map((item) => item.recipeId);
+}
+
+function withRecipeIds(
+  ids: readonly number[],
+  suggestion: ProposedSlot,
+): number[] {
+  return [...new Set([...ids, ...recipeIds(suggestion)])];
 }
 
 export function setReviewStatus(
@@ -482,6 +579,8 @@ export function reviewPlanSlots(
         kind,
         reason,
         canSwap: kind !== 'fixed' && eaten > 0,
+        canSuggestAgain: kind !== 'fixed',
+        suggestedAgain: reviewed?.suggestedAgain ?? false,
       };
     },
   );
@@ -531,16 +630,18 @@ export function reviewCounts(review: ReviewState): PlanReviewCounts {
   let suggested = 0;
   let swapped = 0;
   let discarded = 0;
+  let suggestedAgain = 0;
   for (const slot of review.slots.values()) {
     if (hasDish(slot.suggestion)) suggested += 1;
     if (slot.status.kind === 'swapped') swapped += 1;
     if (slot.status.kind === 'discarded') discarded += 1;
+    if (slot.suggestedAgain) suggestedAgain += 1;
   }
   return {
     suggested,
     swapped,
     discarded,
-    suggestedAgain: 0,
+    suggestedAgain,
     anotherGo: review.anotherGoCount,
   };
 }

@@ -57,6 +57,8 @@ export const DOMAIN_ERROR_CODES = [
   'HEALTH_SCORE_REQUEST_REJECTED',
   // Metadata `retryAfterSeconds`.
   'MEAL_PLAN_RATE_LIMITED',
+  // Suggest again for one slot. Metadata `retryAfterSeconds`.
+  'MEAL_PLAN_SLOT_RATE_LIMITED',
   // Metadata `reason`: `timeout`, `unavailable` or `invalid_result`.
   'MEAL_PLAN_TRY_AGAIN',
   // Every model refused to propose a plan.

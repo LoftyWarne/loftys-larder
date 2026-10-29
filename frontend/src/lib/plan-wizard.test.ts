@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 
 import { deriveBaseBalances } from './serving-variation-supply.ts';
 import {
+  applySlotSuggestion,
   batchPortionsError,
   buildApplyInput,
   buildProposeInput,
+  buildProposeSlotInput,
   defaultAttendance,
   figuresInput,
   inputsSignature,
@@ -341,6 +343,172 @@ describe('reviewing', () => {
         { date: MON, recipeId: ROAST.id, eaten: 2 },
         { date: MON, recipeId: 1, eaten: 2 },
       ],
+    });
+  });
+});
+
+describe('suggesting again for one slot', () => {
+  const first = proposal([
+    suggestion(MON, DINNER.id, 1, 'Quick'),
+    suggestion(TUE, LUNCH.id, 2),
+    suggestion(TUE, DINNER.id, null),
+  ]);
+  const withFixed = inputs({
+    fixed: new Map([
+      [slotKey(MON, LUNCH.id), { kind: 'recipe', recipe: ROAST }],
+    ]),
+    brief: ' light ',
+  });
+  const key = slotKey(TUE, LUNCH.id);
+
+  it('sends the wizard’s inputs, the review as it stands, the slot and what was suggested there', () => {
+    const review = setReviewStatus(
+      startReview(first),
+      slotKey(MON, DINNER.id),
+      { kind: 'swapped', recipe: PASTA },
+    );
+    const input = buildProposeSlotInput(withFixed, review, key);
+    expect(input).toMatchObject({
+      startDate: MON,
+      endDate: TUE,
+      brief: 'light',
+      target: { date: TUE, occasionId: LUNCH.id },
+      avoidRecipeIds: [2],
+    });
+    // The wizard's Fixed meals only: a swap isn't sent as fixed.
+    expect(input.slots.map((slot) => slot.fixed)).toEqual([
+      { kind: 'recipe', recipeId: ROAST.id },
+      null,
+      null,
+      null,
+    ]);
+    expect(input.current).toEqual([
+      {
+        date: MON,
+        occasionId: DINNER.id,
+        slotType: 'recipe',
+        leftoversSource: null,
+        items: [{ recipeId: PASTA.id, prepared: 2, eaten: 2 }],
+      },
+      {
+        date: TUE,
+        occasionId: LUNCH.id,
+        slotType: 'recipe',
+        leftoversSource: null,
+        items: [{ recipeId: 2, prepared: 2, eaten: 2 }],
+      },
+      {
+        date: TUE,
+        occasionId: DINNER.id,
+        slotType: 'empty',
+        leftoversSource: null,
+        items: [],
+      },
+    ]);
+  });
+
+  it('replaces only that slot, with its new reason, and avoids every suggestion so far', () => {
+    let review = applySlotSuggestion(
+      startReview(first),
+      key,
+      suggestion(TUE, LUNCH.id, 5, 'Fresh'),
+    );
+    review = applySlotSuggestion(
+      review,
+      key,
+      suggestion(TUE, LUNCH.id, 6, 'Fresher'),
+    );
+    const slots = reviewPlanSlots(withFixed, review);
+    expect(slots.map((entry) => entry.slot.items[0]?.recipeName)).toEqual([
+      'Sunday Roast',
+      'Recipe 1',
+      'Recipe 6',
+      undefined,
+    ]);
+    expect(slots[2]).toMatchObject({
+      kind: 'suggested',
+      reason: 'Fresher',
+      suggestedAgain: true,
+    });
+    expect(slots[1]?.suggestedAgain).toBe(false);
+    expect(
+      buildProposeSlotInput(withFixed, review, key).avoidRecipeIds,
+    ).toEqual([2, 5, 6]);
+  });
+
+  it('works on a swapped or discarded slot, and restore then puts back the latest suggestion', () => {
+    let review = setReviewStatus(startReview(first), key, {
+      kind: 'swapped',
+      recipe: PASTA,
+    });
+    review = applySlotSuggestion(review, key, suggestion(TUE, LUNCH.id, 5));
+    expect(reviewPlanSlots(withFixed, review)[2]?.kind).toBe('suggested');
+
+    review = setReviewStatus(review, key, { kind: 'discarded' });
+    review = applySlotSuggestion(review, key, suggestion(TUE, LUNCH.id, 6));
+    review = setReviewStatus(review, key, { kind: 'swapped', recipe: PASTA });
+    review = setReviewStatus(review, key, { kind: 'suggested' });
+    expect(reviewPlanSlots(withFixed, review)[2]?.slot.items[0]?.recipeId).toBe(
+      6,
+    );
+  });
+
+  it('sends the latest suggestion back on another go, and adds its suggestions to the history', () => {
+    let review = applySlotSuggestion(
+      startReview(first),
+      key,
+      suggestion(TUE, LUNCH.id, 5),
+    );
+    expect(
+      buildProposeInput(withFixed, { review, note: '' }).previous?.slots[1]
+        ?.items[0]?.recipeId,
+    ).toBe(5);
+    review = rerunReview(review, proposal([suggestion(TUE, LUNCH.id, 7)]));
+    expect(
+      buildProposeSlotInput(withFixed, review, key).avoidRecipeIds,
+    ).toEqual([2, 5, 7]);
+    // Still as suggested, so another go replaced it.
+    expect(reviewPlanSlots(withFixed, review)[2]?.slot.items[0]?.recipeId).toBe(
+      7,
+    );
+  });
+
+  it('offers Suggest again on every slot that isn’t fixed, even where nobody eats', () => {
+    const nobodyAtTueDinner = inputs({
+      ...withFixed,
+      attendance: {
+        ...defaultAttendance(['ann', 'bo']),
+        bySlot: new Map([
+          [slotKey(TUE, DINNER.id), { dinerUserIds: [], guestCount: 0 }],
+        ]),
+      },
+    });
+    const slots = reviewPlanSlots(nobodyAtTueDinner, startReview(first));
+    expect(slots.map((entry) => entry.canSuggestAgain)).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
+    expect(slots[3]?.canSwap).toBe(false);
+  });
+
+  it('counts each slot suggested again once', () => {
+    let review = applySlotSuggestion(
+      startReview(first),
+      key,
+      suggestion(TUE, LUNCH.id, 5),
+    );
+    review = applySlotSuggestion(review, key, suggestion(TUE, LUNCH.id, 6));
+    review = applySlotSuggestion(
+      review,
+      slotKey(MON, DINNER.id),
+      suggestion(MON, DINNER.id, 7),
+    );
+    review = setReviewStatus(review, key, { kind: 'discarded' });
+    expect(reviewCounts(review)).toMatchObject({
+      suggestedAgain: 2,
+      discarded: 1,
     });
   });
 });

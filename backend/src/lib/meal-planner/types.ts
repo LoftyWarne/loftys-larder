@@ -1,9 +1,13 @@
-import type { MealPlanRequest } from '../../../../shared/src/index.ts';
+import type {
+  MealPlanRequest,
+  MealPlanSlotRequest,
+} from '../../../../shared/src/index.ts';
 import type { MealPlanAdapter } from '../../config.ts';
 
 // The AI meal planning seam (DEC-117, in DEC-109's pattern). An adapter turns
-// a plan's slots and the household's library into an unvalidated candidate;
-// `normalisePlanProposal` checks every candidate the same way, whichever
+// a plan's slots and the household's library into an unvalidated candidate,
+// for the whole plan or one slot; `normalisePlanProposal` and
+// `normaliseSlotSuggestion` check every candidate the same way, whichever
 // adapter produced it. Adapters stop when the signal aborts, map their
 // provider's refusals to `refused`, and never log.
 
@@ -28,6 +32,10 @@ export interface MealPlanner {
   // The model asked for.
   model: string;
   propose(request: MealPlanRequest, signal: AbortSignal): Promise<MealPlanning>;
+  proposeSlot(
+    request: MealPlanSlotRequest,
+    signal: AbortSignal,
+  ): Promise<MealPlanning>;
 }
 
 export class MealPlannerTimeoutError extends Error {

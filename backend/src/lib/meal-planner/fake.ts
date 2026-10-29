@@ -1,6 +1,8 @@
 import type {
   MealPlanCandidate,
   MealPlanRequest,
+  MealPlanSlotCandidate,
+  MealPlanSlotRequest,
 } from '../../../../shared/src/index.ts';
 import {
   MealPlannerRequestError,
@@ -13,7 +15,9 @@ import {
 // Canned outcomes for backend tests and e2e, chosen by a marker in the Brief.
 // Otherwise the library's recipes are proposed in turn, one per slot that
 // isn't fixed and has someone eating. With `batch`, the first such slot cooks
-// double its headcount and the next eats the rest as leftovers.
+// double its headcount and the next eats the rest as leftovers. For one slot,
+// the first recipe not already suggested there is cooked for its headcount,
+// or nothing where nobody eats; with `repeat`, an already suggested one.
 export const FAKE_PLANNER_MARKERS = {
   refused: '[fake:refused]',
   timeout: '[fake:timeout]',
@@ -21,12 +25,14 @@ export const FAKE_PLANNER_MARKERS = {
   invalid: '[fake:invalid]',
   rejected: '[fake:rejected]',
   batch: '[fake:batch]',
+  repeat: '[fake:repeat]',
 } as const;
 
 export const FAKE_PLANNER_MODEL = 'fake';
 
 export const FAKE_PLANNER_REASON = 'Not planned for a while.';
 export const FAKE_PLANNER_SUMMARY = 'A varied week from your library.';
+export const FAKE_PLANNER_SLOT_REASON = 'Something different for this meal.';
 
 const usage = { model: FAKE_PLANNER_MODEL, inputTokens: 0, outputTokens: 0 };
 
@@ -37,17 +43,23 @@ export function createFakeMealPlanner(): MealPlanner {
     propose(request, signal) {
       return Promise.resolve().then(() => proposeFake(request, signal));
     },
+    proposeSlot(request, signal) {
+      return Promise.resolve().then(() => proposeFakeSlot(request, signal));
+    },
   };
 }
 
-function proposeFake(
-  request: MealPlanRequest,
+type Marker = keyof typeof FAKE_PLANNER_MARKERS;
+
+// The canned failures, shared by both calls. Returns an outcome when one
+// applies.
+function cannedOutcome(
+  brief: string | null,
   signal: AbortSignal,
-): MealPlanning {
+): { has: (marker: Marker) => boolean; outcome: MealPlanning | null } {
   if (signal.aborted) throw new MealPlannerTimeoutError();
-  const brief = request.brief ?? '';
-  const has = (marker: keyof typeof FAKE_PLANNER_MARKERS) =>
-    brief.includes(FAKE_PLANNER_MARKERS[marker]);
+  const has = (marker: Marker) =>
+    (brief ?? '').includes(FAKE_PLANNER_MARKERS[marker]);
   if (has('timeout')) throw new MealPlannerTimeoutError();
   if (has('unavailable')) throw new MealPlannerUnavailableError(529);
   if (has('rejected')) {
@@ -58,13 +70,57 @@ function proposeFake(
       'req_fake',
     );
   }
-  if (has('refused')) return { outcome: { kind: 'refused' }, usage };
+  if (has('refused')) {
+    return { has, outcome: { outcome: { kind: 'refused' }, usage } };
+  }
   if (has('invalid')) {
     return {
-      outcome: { kind: 'candidate', candidate: { slots: 'none' } },
-      usage,
+      has,
+      outcome: {
+        outcome: { kind: 'candidate', candidate: { slots: 'none' } },
+        usage,
+      },
     };
   }
+  return { has, outcome: null };
+}
+
+function proposeFakeSlot(
+  request: MealPlanSlotRequest,
+  signal: AbortSignal,
+): MealPlanning {
+  const { has, outcome } = cannedOutcome(request.brief, signal);
+  if (outcome) return outcome;
+  const target = request.slots.find(
+    (slot) =>
+      slot.date === request.target.date &&
+      slot.occasion === request.target.occasion,
+  );
+  const avoid = new Set(request.avoidRecipeIds);
+  const recipe = has('repeat')
+    ? request.recipes.find((candidate) => avoid.has(candidate.id))
+    : (request.recipes.find((candidate) => !avoid.has(candidate.id)) ??
+      request.recipes[0]);
+  const candidate: MealPlanSlotCandidate = {
+    dish:
+      target && target.headcount > 0 && recipe
+        ? {
+            kind: 'cook',
+            recipeId: recipe.id,
+            prepared: target.headcount,
+            reason: FAKE_PLANNER_SLOT_REASON,
+          }
+        : null,
+  };
+  return { outcome: { kind: 'candidate', candidate }, usage };
+}
+
+function proposeFake(
+  request: MealPlanRequest,
+  signal: AbortSignal,
+): MealPlanning {
+  const { has, outcome } = cannedOutcome(request.brief, signal);
+  if (outcome) return outcome;
   const open = request.slots.filter(
     (slot) => slot.fixed === null && slot.headcount > 0,
   );

@@ -6,14 +6,8 @@ import { planErrorMessage } from '@/lib/plan-errors.ts';
 export function proposalErrorMessage(err: unknown): string {
   const cause = getDomainErrorCause(err);
   switch (cause?.code) {
-    case 'MEAL_PLAN_RATE_LIMITED': {
-      const seconds: unknown = cause.retryAfterSeconds;
-      const minutes = Math.max(
-        1,
-        Math.ceil((typeof seconds === 'number' ? seconds : 0) / 60),
-      );
-      return `You’ve asked for a lot of plans recently. Try again in ${String(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}.`;
-    }
+    case 'MEAL_PLAN_RATE_LIMITED':
+      return `You’ve asked for a lot of plans recently. Try again in ${retryIn(cause.retryAfterSeconds)}.`;
     case 'MEAL_PLAN_TRY_AGAIN':
       return 'The plan didn’t work. Try again.';
     case 'MEAL_PLAN_NOT_PROPOSED':
@@ -26,6 +20,31 @@ export function proposalErrorMessage(err: unknown): string {
     default:
       return planErrorMessage(err, 'The plan didn’t work. Try again.');
   }
+}
+
+// How a failed Suggest again reads, for one slot. Its own limit, then the
+// whole plan's messages in a slot's words where they differ.
+export function slotSuggestionErrorMessage(err: unknown): string {
+  const cause = getDomainErrorCause(err);
+  switch (cause?.code) {
+    case 'MEAL_PLAN_SLOT_RATE_LIMITED':
+      return `You’ve asked for a lot of suggestions recently. Try again in ${retryIn(cause.retryAfterSeconds)}.`;
+    case 'MEAL_PLAN_TRY_AGAIN':
+      return 'That suggestion didn’t work. Try again.';
+    case 'MEAL_PLAN_NOT_PROPOSED':
+    case 'MEAL_PLAN_REQUEST_REJECTED':
+      return 'A new suggestion couldn’t be made for this meal. Try again later.';
+    default:
+      return proposalErrorMessage(err);
+  }
+}
+
+function retryIn(seconds: unknown): string {
+  const minutes = Math.max(
+    1,
+    Math.ceil((typeof seconds === 'number' ? seconds : 0) / 60),
+  );
+  return `${String(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}`;
 }
 
 const APPLY_FAILED = 'The plan couldn’t be created. Try again.';

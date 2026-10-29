@@ -322,6 +322,8 @@ describe('recipe imports procedures', () => {
         healthScoreSince: '2026-10-07',
         allowProposal: () =>
           Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
+        allowSlotSuggestion: () =>
+          Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
       },
     };
   }

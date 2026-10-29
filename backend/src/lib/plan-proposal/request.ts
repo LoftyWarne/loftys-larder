@@ -3,8 +3,11 @@ import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import type {
   MealPlanRecipe,
   MealPlanRequest,
+  MealPlanSlotRequest,
   PlanProposal,
+  PlanProposalSlot,
   ProposePlanInput,
+  ProposeSlotInput,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import type { Db } from '../../db/index.ts';
@@ -240,34 +243,71 @@ function basesToCook(
   });
 }
 
+// The planner's view of Suggest again for one slot: the plan's slots as for a
+// whole plan, and the review as it stands. Entries in `current` that aren't
+// in this plan, or are for a fixed slot, are dropped.
+export function buildMealPlanSlotRequest(
+  input: ProposeSlotInput,
+  library: MealPlanRecipe[],
+  occasionNames: ReadonlyMap<number, string>,
+): MealPlanSlotRequest {
+  const occasion = (id: number) => occasionNames.get(id) ?? String(id);
+  const open = new Set(
+    input.slots.filter((slot) => slot.fixed === null).map(planSlotKey),
+  );
+  return {
+    slots: input.slots.map((slot) => ({
+      date: slot.date,
+      occasion: occasion(slot.occasionId),
+      headcount: slotHeadcount(slot),
+      fixed: slot.fixed,
+    })),
+    basesToCook: basesToCook(input.slots, library, occasion),
+    recipes: library,
+    brief: input.brief === '' ? null : input.brief,
+    current: input.current
+      .filter((slot) => open.has(planSlotKey(slot)))
+      .map((slot) => toSlotDish(slot, occasion)),
+    target: {
+      date: input.target.date,
+      occasion: occasion(input.target.occasionId),
+    },
+    avoidRecipeIds: [...new Set(input.avoidRecipeIds)],
+  };
+}
+
+function planSlotKey(slot: { date: string; occasionId: number }): string {
+  return `${slot.date}|${slot.occasionId.toString()}`;
+}
+
 function toPrevious(
   previous: PlanProposal,
   planSlots: ProposePlanInput['slots'],
   occasion: (id: number) => string,
 ): NonNullable<MealPlanRequest['previous']> {
-  const key = (slot: { date: string; occasionId: number }) =>
-    `${slot.date}|${slot.occasionId.toString()}`;
-  const inPlan = new Set(planSlots.map(key));
+  const inPlan = new Set(planSlots.map(planSlotKey));
   return {
     slots: previous.slots
-      .filter((slot) => inPlan.has(key(slot)))
-      .map((slot) => {
-        const item = slot.items[0];
-        return {
-          date: slot.date,
-          occasion: occasion(slot.occasionId),
-          dish: item
-            ? {
-                kind:
-                  slot.slotType === 'leftovers'
-                    ? ('leftovers' as const)
-                    : ('cook' as const),
-                recipeId: item.recipeId,
-                prepared: item.prepared,
-              }
-            : null,
-        };
-      }),
+      .filter((slot) => inPlan.has(planSlotKey(slot)))
+      .map((slot) => toSlotDish(slot, occasion)),
     summary: previous.summary,
+  };
+}
+
+function toSlotDish(
+  slot: Pick<PlanProposalSlot, 'date' | 'occasionId' | 'slotType' | 'items'>,
+  occasion: (id: number) => string,
+): MealPlanSlotRequest['current'][number] {
+  const item = slot.items[0];
+  return {
+    date: slot.date,
+    occasion: occasion(slot.occasionId),
+    dish: item
+      ? {
+          kind: slot.slotType === 'leftovers' ? 'leftovers' : 'cook',
+          recipeId: item.recipeId,
+          prepared: item.prepared,
+        }
+      : null,
   };
 }

@@ -5,8 +5,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type {
   MealPlanRequest,
+  MealPlanSlotRequest,
   ProposePlanInput,
   ProposePlanSlot,
+  ProposeSlotInput,
 } from '../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../src/config.ts';
 import * as schema from '../src/db/schema/index.ts';
@@ -42,6 +44,7 @@ import {
   createFakeMealPlanner,
   FAKE_PLANNER_MARKERS,
   FAKE_PLANNER_REASON,
+  FAKE_PLANNER_SLOT_REASON,
   FAKE_PLANNER_SUMMARY,
 } from '../src/lib/meal-planner/fake.ts';
 import type { MealPlanner } from '../src/lib/meal-planner/types.ts';
@@ -271,6 +274,7 @@ describe('plan proposal procedures', () => {
   interface ContextOptions {
     planner?: MealPlanner;
     allowProposal?: () => Promise<ModelRateLimitVerdict>;
+    allowSlotSuggestion?: () => Promise<ModelRateLimitVerdict>;
     log?: AppContext['log'];
   }
 
@@ -314,12 +318,16 @@ describe('plan proposal procedures', () => {
         allowProposal:
           options.allowProposal ??
           (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
+        allowSlotSuggestion:
+          options.allowSlotSuggestion ??
+          (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
       },
     });
   }
 
   function spyPlanner(inner: MealPlanner = createFakeMealPlanner()) {
     const requests: MealPlanRequest[] = [];
+    const slotRequests: MealPlanSlotRequest[] = [];
     const planner: MealPlanner = {
       adapter: inner.adapter,
       model: inner.model,
@@ -327,8 +335,12 @@ describe('plan proposal procedures', () => {
         requests.push(request);
         return inner.propose(request, signal);
       },
+      proposeSlot: (request, signal) => {
+        slotRequests.push(request);
+        return inner.proposeSlot(request, signal);
+      },
     };
-    return { planner, requests };
+    return { planner, requests, slotRequests };
   }
 
   function countingLimit(verdict = { allowed: true, retryAfterSeconds: 0 }) {
@@ -1151,6 +1163,443 @@ describe('plan proposal procedures', () => {
       expect(output).not.toMatch(/secret/i);
       expect(output).not.toContain(FAKE_PLANNER_REASON);
       expect(output).not.toContain(FAKE_PLANNER_SUMMARY);
+    });
+  });
+
+  describe('suggesting again for one slot', () => {
+    function slotInput(
+      overrides: Partial<ProposeSlotInput> = {},
+    ): ProposeSlotInput {
+      return {
+        startDate: dates[0] ?? '',
+        endDate: dates.at(-1) ?? '',
+        slots: slots(),
+        brief: null,
+        current: [],
+        target: { date: dates[1] ?? '', occasionId: dinnerId },
+        avoidRecipeIds: [],
+        ...overrides,
+      };
+    }
+
+    function cooked(
+      date: string | undefined,
+      occasionId: number,
+      recipeId: number,
+      prepared = 2,
+    ): ProposeSlotInput['current'][number] {
+      return {
+        date: date ?? '',
+        occasionId,
+        slotType: 'recipe',
+        leftoversSource: null,
+        items: [{ recipeId, prepared, eaten: 2 }],
+      };
+    }
+
+    // A planner whose single-slot reply is `dish`.
+    function replying(dish: unknown): MealPlanner {
+      return {
+        ...createFakeMealPlanner(),
+        proposeSlot: () =>
+          Promise.resolve({
+            outcome: { kind: 'candidate', candidate: { dish } },
+            usage: { model: 'fake', inputTokens: 0, outputTokens: 0 },
+          }),
+      };
+    }
+
+    function countingSlotLimit() {
+      const calls = { count: 0 };
+      return {
+        calls,
+        allowSlotSuggestion: () => {
+          calls.count += 1;
+          return Promise.resolve({ allowed: true, retryAfterSeconds: 0 });
+        },
+      };
+    }
+
+    it('sends the proposal as it stands by occasion name, the slot, and the recipes to avoid', async () => {
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      const chilli = await seedRecipe({ name: 'Bean Chilli' });
+      const { planner, slotRequests } = spyPlanner();
+      await caller({ planner }).planProposals.proposeSlot(
+        slotInput({
+          slots: slots((slot) =>
+            slot.date === dates[0] && slot.occasionId === lunchId
+              ? { fixed: { kind: 'recipe', recipeId: chilli } }
+              : {},
+          ),
+          brief: 'Something light',
+          current: [
+            // Fixed, so dropped.
+            cooked(dates[0], lunchId, soup),
+            cooked(dates[0], dinnerId, soup, 4),
+            {
+              date: dates[1] ?? '',
+              occasionId: lunchId,
+              slotType: 'leftovers',
+              leftoversSource: 'plan_meal',
+              items: [{ recipeId: soup, prepared: 0, eaten: 2 }],
+            },
+            cooked(dates[1], dinnerId, chilli),
+            // Not in this plan, so dropped.
+            cooked('2020-01-01', dinnerId, soup),
+          ],
+          avoidRecipeIds: [chilli, chilli],
+        }),
+      );
+
+      expect(slotRequests).toHaveLength(1);
+      const request = slotRequests[0];
+      expect(request?.current).toEqual([
+        {
+          date: dates[0],
+          occasion: 'Dinner',
+          dish: { kind: 'cook', recipeId: soup, prepared: 4 },
+        },
+        {
+          date: dates[1],
+          occasion: 'Lunch',
+          dish: { kind: 'leftovers', recipeId: soup, prepared: 0 },
+        },
+        {
+          date: dates[1],
+          occasion: 'Dinner',
+          dish: { kind: 'cook', recipeId: chilli, prepared: 2 },
+        },
+      ]);
+      expect(request?.target).toEqual({ date: dates[1], occasion: 'Dinner' });
+      expect(request?.avoidRecipeIds).toEqual([chilli]);
+      expect(request?.brief).toBe('Something light');
+      expect(request?.slots).toHaveLength(6);
+      expect(request?.recipes.map((recipe) => recipe.id)).toEqual([
+        soup,
+        chilli,
+      ]);
+      expect(request).not.toHaveProperty('note');
+      expect(request).not.toHaveProperty('previous');
+    });
+
+    it('suggests a recipe not already suggested for the slot, and writes nothing', async () => {
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      const chilli = await seedRecipe({ name: 'Bean Chilli' });
+      const before = await planCount();
+
+      const result = await caller().planProposals.proposeSlot(
+        slotInput({ avoidRecipeIds: [soup] }),
+      );
+
+      expect(result.slot).toEqual({
+        date: dates[1],
+        occasionId: dinnerId,
+        slotType: 'recipe',
+        leftoversSource: null,
+        items: [
+          {
+            recipeId: chilli,
+            prepared: 2,
+            eaten: 2,
+            recipeName: 'Bean Chilli',
+            recipeImageUrl: null,
+            isBase: false,
+            baseRecipeId: null,
+          },
+        ],
+        reason: FAKE_PLANNER_SLOT_REASON,
+      });
+      expect(await planCount()).toBe(before);
+    });
+
+    it('refuses a repeat while the library has another recipe', async () => {
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      await seedRecipe({ name: 'Bean Chilli' });
+      await expect(
+        caller().planProposals.proposeSlot(
+          slotInput({
+            brief: FAKE_PLANNER_MARKERS.repeat,
+            avoidRecipeIds: [soup],
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: 'BAD_GATEWAY',
+        cause: { code: 'MEAL_PLAN_TRY_AGAIN', reason: 'invalid_result' },
+      });
+    });
+
+    it('repeats a recipe when every one was already suggested', async () => {
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      const chilli = await seedRecipe({ name: 'Bean Chilli' });
+      const result = await caller().planProposals.proposeSlot(
+        slotInput({ avoidRecipeIds: [soup, chilli] }),
+      );
+      expect(result.slot.items[0]?.recipeId).toBe(soup);
+    });
+
+    it('keeps a leftovers suggestion only of a dish the review cooks earlier', async () => {
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      const planner = replying({
+        kind: 'leftovers',
+        recipeId: soup,
+        prepared: 0,
+        reason: 'Finishes the soup.',
+      });
+
+      const result = await caller({ planner }).planProposals.proposeSlot(
+        slotInput({ current: [cooked(dates[0], dinnerId, soup, 4)] }),
+      );
+      expect(result.slot).toMatchObject({
+        slotType: 'leftovers',
+        leftoversSource: 'plan_meal',
+        items: [{ recipeId: soup, prepared: 0, eaten: 2 }],
+        reason: 'Finishes the soup.',
+      });
+
+      await expect(
+        caller({ planner }).planProposals.proposeSlot(
+          slotInput({ current: [cooked(dates[2], dinnerId, soup, 4)] }),
+        ),
+      ).rejects.toMatchObject({
+        cause: { code: 'MEAL_PLAN_TRY_AGAIN', reason: 'invalid_result' },
+      });
+    });
+
+    it('keeps a leftovers suggestion of a fixed Batch cooked earlier', async () => {
+      const keema = await seedRecipe({ name: 'Keema' });
+      const planner = replying({
+        kind: 'leftovers',
+        recipeId: keema,
+        prepared: 0,
+        reason: 'The rest of the keema.',
+      });
+      const result = await caller({ planner }).planProposals.proposeSlot(
+        slotInput({
+          slots: slots((slot) =>
+            slot.date === dates[0] && slot.occasionId === dinnerId
+              ? { fixed: { kind: 'batch', recipeId: keema, portions: 6 } }
+              : {},
+          ),
+        }),
+      );
+      expect(result.slot.slotType).toBe('leftovers');
+    });
+
+    it('cooks a prepared-only Batch, or leaves the slot empty, where nobody eats', async () => {
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      const nobodyAtTarget = slots((slot) =>
+        slot.date === dates[1] && slot.occasionId === dinnerId
+          ? { dinerUserIds: [], guestCount: 0 }
+          : {},
+      );
+
+      const empty = await caller().planProposals.proposeSlot(
+        slotInput({ slots: nobodyAtTarget }),
+      );
+      expect(empty.slot).toEqual({
+        date: dates[1],
+        occasionId: dinnerId,
+        slotType: 'empty',
+        leftoversSource: null,
+        items: [],
+        reason: null,
+      });
+
+      const batch = await caller({
+        planner: replying({
+          kind: 'cook',
+          recipeId: soup,
+          prepared: 4,
+          reason: 'For the busy days.',
+        }),
+      }).planProposals.proposeSlot(slotInput({ slots: nobodyAtTarget }));
+      expect(batch.slot).toMatchObject({
+        slotType: 'empty',
+        items: [{ recipeId: soup, prepared: 4, eaten: 0 }],
+      });
+    });
+
+    it('tries again when no dish comes back where people eat', async () => {
+      await seedRecipe({ name: 'Lentil Soup' });
+      await expect(
+        caller({ planner: replying(null) }).planProposals.proposeSlot(
+          slotInput(),
+        ),
+      ).rejects.toMatchObject({
+        code: 'BAD_GATEWAY',
+        cause: { code: 'MEAL_PLAN_TRY_AGAIN', reason: 'invalid_result' },
+      });
+    });
+
+    describe('errors', () => {
+      async function refusedBeforeTheModel(
+        slotInputValue: ProposeSlotInput,
+        expected: Record<string, unknown>,
+      ) {
+        const { planner, slotRequests } = spyPlanner();
+        const limit = countingSlotLimit();
+        await expect(
+          caller({
+            planner,
+            allowSlotSuggestion: limit.allowSlotSuggestion,
+          }).planProposals.proposeSlot(slotInputValue),
+        ).rejects.toMatchObject(expected);
+        expect(slotRequests).toHaveLength(0);
+        expect(limit.calls.count).toBe(0);
+      }
+
+      it('refuses a fixed slot', async () => {
+        const soup = await seedRecipe({ name: 'Lentil Soup' });
+        await refusedBeforeTheModel(
+          slotInput({
+            slots: slots((slot) =>
+              slot.date === dates[1] && slot.occasionId === dinnerId
+                ? { fixed: { kind: 'recipe', recipeId: soup } }
+                : {},
+            ),
+          }),
+          { code: 'BAD_REQUEST' },
+        );
+      });
+
+      it('refuses a slot that isn’t in the plan', async () => {
+        await seedRecipe({ name: 'Lentil Soup' });
+        await refusedBeforeTheModel(
+          slotInput({ target: { date: '2020-01-01', occasionId: dinnerId } }),
+          { code: 'BAD_REQUEST' },
+        );
+      });
+
+      it('runs the whole plan’s checks first', async () => {
+        await seedRecipe({ name: 'Lentil Soup' });
+        await refusedBeforeTheModel(
+          slotInput({
+            slots: slots(() => ({ dinerUserIds: ['user-nobody'] })),
+          }),
+          { cause: { code: 'SLOT_DINER_NOT_FOUND' } },
+        );
+        await refusedBeforeTheModel(slotInput({ slots: slots().slice(1) }), {
+          code: 'BAD_REQUEST',
+        });
+      });
+
+      it('refuses with no pickable recipes', async () => {
+        await refusedBeforeTheModel(slotInput(), {
+          cause: { code: 'MEAL_PLAN_NO_RECIPES' },
+        });
+      });
+
+      it('refuses over its own limit, with the seconds until retry', async () => {
+        await seedRecipe({ name: 'Lentil Soup' });
+        const { planner, slotRequests } = spyPlanner();
+        const proposals = countingLimit();
+        await expect(
+          caller({
+            planner,
+            allowProposal: proposals.allowProposal,
+            allowSlotSuggestion: () =>
+              Promise.resolve({ allowed: false, retryAfterSeconds: 600 }),
+          }).planProposals.proposeSlot(slotInput()),
+        ).rejects.toMatchObject({
+          code: 'TOO_MANY_REQUESTS',
+          cause: {
+            code: 'MEAL_PLAN_SLOT_RATE_LIMITED',
+            retryAfterSeconds: 600,
+          },
+        });
+        expect(slotRequests).toHaveLength(0);
+        expect(proposals.calls.count).toBe(0);
+      });
+
+      it('counts against its own limit, and a whole plan doesn’t', async () => {
+        await seedRecipe({ name: 'Lentil Soup' });
+        const proposals = countingLimit();
+        const suggestions = countingSlotLimit();
+        const c = caller({
+          allowProposal: proposals.allowProposal,
+          allowSlotSuggestion: suggestions.allowSlotSuggestion,
+        });
+        await c.planProposals.proposeSlot(slotInput());
+        expect(suggestions.calls.count).toBe(1);
+        expect(proposals.calls.count).toBe(0);
+        await c.planProposals.propose(input());
+        expect(suggestions.calls.count).toBe(1);
+        expect(proposals.calls.count).toBe(1);
+      });
+
+      it.each([
+        [
+          FAKE_PLANNER_MARKERS.refused,
+          'UNPROCESSABLE_CONTENT',
+          { code: 'MEAL_PLAN_NOT_PROPOSED' },
+        ],
+        [
+          FAKE_PLANNER_MARKERS.timeout,
+          'GATEWAY_TIMEOUT',
+          { code: 'MEAL_PLAN_TRY_AGAIN', reason: 'timeout' },
+        ],
+        [
+          FAKE_PLANNER_MARKERS.unavailable,
+          'SERVICE_UNAVAILABLE',
+          { code: 'MEAL_PLAN_TRY_AGAIN', reason: 'unavailable' },
+        ],
+        [
+          FAKE_PLANNER_MARKERS.invalid,
+          'BAD_GATEWAY',
+          { code: 'MEAL_PLAN_TRY_AGAIN', reason: 'invalid_result' },
+        ],
+        [
+          FAKE_PLANNER_MARKERS.rejected,
+          'INTERNAL_SERVER_ERROR',
+          { code: 'MEAL_PLAN_REQUEST_REJECTED' },
+        ],
+      ])('maps %s to %s', async (marker, code, cause) => {
+        await seedRecipe({ name: 'Lentil Soup' });
+        const before = await planCount();
+        await expect(
+          caller().planProposals.proposeSlot(slotInput({ brief: marker })),
+        ).rejects.toMatchObject({ code, cause });
+        expect(await planCount()).toBe(before);
+      });
+    });
+
+    it('logs metadata only, with the request id', async () => {
+      const lines: string[] = [];
+      const log = pino(
+        { level: 'info' },
+        { write: (line) => lines.push(line) },
+      ).child({ reqId: 'req-slot-1' });
+      const id = await seedRecipe({ name: 'Grandmas Secret Stew' });
+      await seedRecipe({ name: 'Secret Soup' });
+      await caller({ log }).planProposals.proposeSlot(
+        slotInput({
+          brief: 'Use up the secret spinach',
+          avoidRecipeIds: [id],
+        }),
+      );
+
+      const entries = lines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((entry) => 'modelUsage' in entry);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        reqId: 'req-slot-1',
+        modelUsage: {
+          feature: 'meal-plan',
+          adapter: 'fake',
+          model: 'fake',
+          outcome: 'proposed',
+          singleSlot: true,
+          slotCount: 6,
+          fixedCount: 0,
+          libraryCount: 2,
+          avoidCount: 1,
+          briefLength: 'Use up the secret spinach'.length,
+        },
+      });
+      const output = lines.join('');
+      expect(output).not.toMatch(/secret/i);
+      expect(output).not.toContain(FAKE_PLANNER_SLOT_REASON);
     });
   });
 });

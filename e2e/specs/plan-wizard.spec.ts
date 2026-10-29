@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { getPool, resetHouseholdData } from '../fixtures/db.ts';
+import { createRecipe, getPool, resetHouseholdData } from '../fixtures/db.ts';
 import {
   FAKE_BATCH_BRIEF,
   openPlanReview,
@@ -43,6 +43,43 @@ test.describe('planning wizard', () => {
     await expect(page.locator('[data-slot-type="recipe"]')).toHaveCount(3);
     await expect(page.locator('[data-slot-type="empty"]')).toHaveCount(1);
     await expect(page.getByText('AI suggestion')).toHaveCount(0);
+    expect(await planCount()).toBe(1);
+  });
+
+  test('suggest again three times on one slot: each is different, and the rest of the plan stays', async ({
+    page,
+  }) => {
+    await createRecipe({
+      name: 'Veg Curry',
+      baseServings: 4,
+      ingredients: [
+        { name: 'Red lentils', quantity: '200', unit: 'g', category: 'Pantry' },
+      ],
+    });
+    await openPlanReview(page);
+    const slots = page.locator('[data-slot-id]');
+    const before = await slots.allInnerTexts();
+
+    const seen = new Set<string>([before[1] ?? '']);
+    for (let i = 0; i < 3; i += 1) {
+      await slots.nth(1).getByRole('button').first().click();
+      await page.getByRole('button', { name: 'Suggest again' }).click();
+      await expect(page.getByRole('dialog')).toBeHidden();
+      await expect(
+        slots.nth(1).getByText('Something different for this meal.'),
+      ).toBeVisible();
+      const after = await slots.allInnerTexts();
+      expect(after.filter((_, index) => index !== 1)).toEqual(
+        before.filter((_, index) => index !== 1),
+      );
+      seen.add(after[1] ?? '');
+    }
+    // The first suggestion and three new ones, all different.
+    expect(seen.size).toBe(4);
+    await expect(slots.nth(1).getByText('AI suggestion')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(page).toHaveURL(/\/plans\/\d+$/);
     expect(await planCount()).toBe(1);
   });
 

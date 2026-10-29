@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import type {
   MealPlanRecipe,
   MealPlanRequest,
+  MealPlanSlotRequest,
 } from '../../shared/src/index.ts';
 import {
   FAKE_PLANNER_MARKERS,
   FAKE_PLANNER_REASON,
+  FAKE_PLANNER_SLOT_REASON,
   FAKE_PLANNER_SUMMARY,
 } from '../src/lib/meal-planner/fake.ts';
 import { createMealPlanner } from '../src/lib/meal-planner/index.ts';
@@ -51,6 +53,27 @@ const request: MealPlanRequest = {
   brief: 'Something light',
   note: null,
   previous: null,
+};
+
+const slotRequest: MealPlanSlotRequest = {
+  slots: request.slots,
+  basesToCook: [],
+  recipes: request.recipes,
+  brief: null,
+  current: [
+    {
+      date: '2026-11-02',
+      occasion: 'Lunch',
+      dish: { kind: 'cook', recipeId: 1, prepared: 2 },
+    },
+    {
+      date: '2026-11-02',
+      occasion: 'Dinner',
+      dish: { kind: 'cook', recipeId: 2, prepared: 2 },
+    },
+  ],
+  target: { date: '2026-11-02', occasion: 'Dinner' },
+  avoidRecipeIds: [2],
 };
 
 const candidate = {
@@ -140,6 +163,8 @@ function proposeWith(respond: () => Response) {
   return {
     requests,
     propose: () => planner.propose(request, new AbortController().signal),
+    proposeSlot: () =>
+      planner.proposeSlot(slotRequest, new AbortController().signal),
   };
 }
 
@@ -322,6 +347,83 @@ describe('anthropic meal planner', () => {
   });
 });
 
+describe('anthropic meal planner, for one slot', () => {
+  const slotCandidate = {
+    dish: { kind: 'cook', recipeId: 1, prepared: 2, reason: 'Light.' },
+  };
+
+  it('sends the single-slot prompt, a smaller token limit and its own structured output format', async () => {
+    const { proposeSlot, requests } = proposeWith(() =>
+      textResponse(JSON.stringify(slotCandidate)),
+    );
+    await proposeSlot();
+    const sent = requests[0];
+    expect(sent?.body).toMatchObject({
+      model: 'claude-opus-5-5',
+      max_tokens: 4000,
+      fallbacks: 'default',
+      output_config: {
+        effort: 'medium',
+        format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            required: ['dish'],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    const system = sent?.body.system;
+    expect(system).toEqual(expect.stringContaining('plan.avoidRecipeIds'));
+    expect(system).toEqual(expect.stringContaining('plan.current'));
+    expect(system).toEqual(expect.stringContaining('give dish null'));
+    // The whole plan's rules for choosing recipes and batch cooking.
+    expect(system).toEqual(expect.stringContaining('timesPlannedLast4Weeks'));
+    expect(system).toEqual(expect.stringContaining('basesToCook'));
+    expect(system).not.toEqual(expect.stringContaining('plan.previous'));
+  });
+
+  it('sends the plan as it stands, the slot and the recipes to avoid', async () => {
+    const { proposeSlot, requests } = proposeWith(() =>
+      textResponse(JSON.stringify(slotCandidate)),
+    );
+    await proposeSlot();
+    const messages = requests[0]?.body.messages as { content: string }[];
+    const plan = /<plan>\n(?<plan>.*)\n<\/plan>$/s.exec(
+      messages[0]?.content ?? '',
+    )?.groups?.plan;
+    expect(JSON.parse(plan ?? '')).toEqual({
+      slots: slotRequest.slots,
+      basesToCook: [],
+      brief: null,
+      current: slotRequest.current,
+      target: slotRequest.target,
+      avoidRecipeIds: [2],
+    });
+  });
+
+  it('returns the reply as an unvalidated candidate', async () => {
+    const { proposeSlot } = proposeWith(() =>
+      textResponse(JSON.stringify(slotCandidate)),
+    );
+    expect((await proposeSlot()).outcome).toEqual({
+      kind: 'candidate',
+      candidate: slotCandidate,
+    });
+  });
+
+  it('maps a refusal from every model to refused', async () => {
+    const { proposeSlot } = proposeWith(() =>
+      messageResponse({
+        stop_reason: 'refusal',
+        stop_details: { type: 'refusal', category: null, explanation: null },
+      }),
+    );
+    expect((await proposeSlot()).outcome).toEqual({ kind: 'refused' });
+  });
+});
+
 describe('fake meal planner', () => {
   const planner = createMealPlanner({
     ...anthropicConfig,
@@ -404,5 +506,51 @@ describe('fake meal planner', () => {
       signal,
     );
     expect(planning.outcome).toEqual({ kind: 'refused' });
+  });
+
+  describe('for one slot', () => {
+    it('cooks the first recipe not already suggested, for the headcount', async () => {
+      expect((await planner.proposeSlot(slotRequest, signal)).outcome).toEqual({
+        kind: 'candidate',
+        candidate: {
+          dish: {
+            kind: 'cook',
+            recipeId: 1,
+            prepared: 2,
+            reason: FAKE_PLANNER_SLOT_REASON,
+          },
+        },
+      });
+    });
+
+    it('repeats a suggested recipe for a Brief marked repeat', async () => {
+      const planning = await planner.proposeSlot(
+        { ...slotRequest, brief: FAKE_PLANNER_MARKERS.repeat },
+        signal,
+      );
+      expect(planning.outcome).toMatchObject({
+        candidate: { dish: { recipeId: 2 } },
+      });
+    });
+
+    it('gives no dish where nobody eats', async () => {
+      const planning = await planner.proposeSlot(
+        { ...slotRequest, target: { date: '2026-11-03', occasion: 'Dinner' } },
+        signal,
+      );
+      expect(planning.outcome).toEqual({
+        kind: 'candidate',
+        candidate: { dish: null },
+      });
+    });
+
+    it('throws for the same markers as a whole plan', async () => {
+      await expect(
+        planner.proposeSlot(
+          { ...slotRequest, brief: FAKE_PLANNER_MARKERS.timeout },
+          signal,
+        ),
+      ).rejects.toBeInstanceOf(MealPlannerTimeoutError);
+    });
   });
 });

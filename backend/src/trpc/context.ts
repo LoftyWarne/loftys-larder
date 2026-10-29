@@ -63,6 +63,7 @@ export interface MealPlanContext {
   // HEALTH_SCORE_SINCE, for each recipe's out-of-date flag (DEC-112).
   healthScoreSince: string;
   allowProposal: () => Promise<ModelRateLimitVerdict>;
+  allowSlotSuggestion: () => Promise<ModelRateLimitVerdict>;
 }
 
 export interface AppContext {
@@ -113,6 +114,7 @@ export function createContext({
       planner: req.server.mealPlanner,
       healthScoreSince: req.server.healthScoreSince,
       allowProposal: () => req.server.limitPlanProposal(req),
+      allowSlotSuggestion: () => req.server.limitPlanSlotSuggestion(req),
     },
   };
 }

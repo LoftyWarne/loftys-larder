@@ -1,12 +1,16 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
-import { mealPlanCandidateSchema } from '../../../../shared/src/index.ts';
+import {
+  mealPlanCandidateSchema,
+  mealPlanSlotCandidateSchema,
+} from '../../../../shared/src/index.ts';
 import type { ModelEffort } from '../../config.ts';
 import { ANTHROPIC_REFUSAL_FALLBACK_BETA } from '../model-features/anthropic-client.ts';
 import { classifyAnthropicError } from '../model-features/anthropic-errors.ts';
 import { toStructuredOutputSchema } from '../model-features/structured-output-schema.ts';
 import {
   buildMealPlannerUserMessage,
+  MEAL_PLANNER_SLOT_SYSTEM_PROMPT,
   MEAL_PLANNER_SYSTEM_PROMPT,
 } from './anthropic-prompt.ts';
 import {
@@ -14,15 +18,21 @@ import {
   MealPlannerTimeoutError,
   MealPlannerUnavailableError,
   type MealPlanner,
+  type MealPlanning,
 } from './types.ts';
 
 // Structured outputs, as for scoring: the slots are an array of one small
 // object, so the schema stays the same size however long the plan is.
 const CANDIDATE_SCHEMA = toStructuredOutputSchema(mealPlanCandidateSchema);
+const SLOT_CANDIDATE_SCHEMA = toStructuredOutputSchema(
+  mealPlanSlotCandidateSchema,
+);
 
 // Room for thinking plus 28 reasons and a summary, and still under the SDK's
 // limit for a non-streaming request.
 const MAX_TOKENS = 16_000;
+// One dish and its reason, plus thinking.
+const SLOT_MAX_TOKENS = 4_000;
 
 export interface AnthropicMealPlannerOptions {
   client: Anthropic;
@@ -34,46 +44,76 @@ export function createAnthropicMealPlanner(
   options: AnthropicMealPlannerOptions,
 ): MealPlanner {
   const { client, model, effort } = options;
+
+  async function plan(
+    call: {
+      system: string;
+      schema: Record<string, unknown>;
+      maxTokens: number;
+      userMessage: string;
+    },
+    signal: AbortSignal,
+  ): Promise<MealPlanning> {
+    let response: Anthropic.Beta.BetaMessage;
+    try {
+      response = await client.beta.messages.create(
+        {
+          model,
+          max_tokens: call.maxTokens,
+          betas: [ANTHROPIC_REFUSAL_FALLBACK_BETA],
+          fallbacks: 'default',
+          output_config: {
+            effort,
+            format: { type: 'json_schema', schema: call.schema },
+          },
+          system: call.system,
+          messages: [{ role: 'user', content: call.userMessage }],
+        },
+        { signal },
+      );
+    } catch (error) {
+      throw toPlannerError(error, signal);
+    }
+
+    const usage = {
+      model: response.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
+    // A refusal from the whole fallback chain: nothing can be proposed.
+    if (response.stop_reason === 'refusal') {
+      return { outcome: { kind: 'refused' }, usage };
+    }
+    const text = response.content
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('');
+    return { outcome: { kind: 'candidate', candidate: parse(text) }, usage };
+  }
+
   return {
     adapter: 'anthropic',
     model,
-    async propose(request, signal) {
-      let response: Anthropic.Beta.BetaMessage;
-      try {
-        response = await client.beta.messages.create(
-          {
-            model,
-            max_tokens: MAX_TOKENS,
-            betas: [ANTHROPIC_REFUSAL_FALLBACK_BETA],
-            fallbacks: 'default',
-            output_config: {
-              effort,
-              format: { type: 'json_schema', schema: CANDIDATE_SCHEMA },
-            },
-            system: MEAL_PLANNER_SYSTEM_PROMPT,
-            messages: [
-              { role: 'user', content: buildMealPlannerUserMessage(request) },
-            ],
-          },
-          { signal },
-        );
-      } catch (error) {
-        throw toPlannerError(error, signal);
-      }
-
-      const usage = {
-        model: response.model,
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-      };
-      // A refusal from the whole fallback chain: no plan can be proposed.
-      if (response.stop_reason === 'refusal') {
-        return { outcome: { kind: 'refused' }, usage };
-      }
-      const text = response.content
-        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-        .join('');
-      return { outcome: { kind: 'candidate', candidate: parse(text) }, usage };
+    propose(request, signal) {
+      return plan(
+        {
+          system: MEAL_PLANNER_SYSTEM_PROMPT,
+          schema: CANDIDATE_SCHEMA,
+          maxTokens: MAX_TOKENS,
+          userMessage: buildMealPlannerUserMessage(request),
+        },
+        signal,
+      );
+    },
+    proposeSlot(request, signal) {
+      return plan(
+        {
+          system: MEAL_PLANNER_SLOT_SYSTEM_PROMPT,
+          schema: SLOT_CANDIDATE_SCHEMA,
+          maxTokens: SLOT_MAX_TOKENS,
+          userMessage: buildMealPlannerUserMessage(request),
+        },
+        signal,
+      );
     },
   };
 }

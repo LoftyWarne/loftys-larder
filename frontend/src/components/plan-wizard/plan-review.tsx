@@ -18,7 +18,10 @@ import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { eachDateInRange, formatDayRangeLabel } from '@/lib/date-utils.ts';
+import { slotSuggestionErrorMessage } from '@/lib/plan-proposal-errors.ts';
 import {
+  applySlotSuggestion,
+  buildProposeSlotInput,
   figuresInput,
   leftInPlan,
   reviewPlanSlots,
@@ -94,7 +97,11 @@ export function PlanReview({
       ),
     [reviewSlots, balances],
   );
-  const busy = anotherGoPending || applyPending;
+  const suggestMutation = trpc.planProposals.proposeSlot.useMutation();
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  // One model call at a time for a review: Suggest again, "Another go" or
+  // Apply.
+  const busy = anotherGoPending || applyPending || suggestMutation.isPending;
 
   const figuresRequest = useMemo(
     () => figuresInput(reviewSlots),
@@ -126,6 +133,28 @@ export function PlanReview({
   function update(key: string, next: Parameters<typeof setReviewStatus>[2]) {
     onReviewChange(setReviewStatus(review, key, next));
     setOpenKey(null);
+  }
+
+  function openSlotAt(key: string | null) {
+    setOpenKey(key);
+    setSuggestError(null);
+  }
+
+  // Replaces only this slot. The dialog stays open when the answer is that
+  // nothing's worth cooking where nobody eats, so the cook sees why.
+  async function suggestAgain(key: string) {
+    setSuggestError(null);
+    let result;
+    try {
+      result = await suggestMutation.mutateAsync(
+        buildProposeSlotInput(inputs, review, key),
+      );
+    } catch (err) {
+      setSuggestError(slotSuggestionErrorMessage(err));
+      return;
+    }
+    onReviewChange(applySlotSuggestion(review, key, result.slot));
+    if (result.slot.items.length > 0) setOpenKey(null);
   }
 
   return (
@@ -193,8 +222,7 @@ export function PlanReview({
         onSlotClick={(slot) => {
           const entry = byId.get(slot.id);
           if (busy || !entry || entry.kind === 'fixed') return;
-          if (entry.kind === 'unfilled' && !entry.canSwap) return;
-          setOpenKey(slotKey(slot.date, slot.occasionId));
+          openSlotAt(slotKey(slot.date, slot.occasionId));
         }}
       />
 
@@ -267,11 +295,17 @@ export function PlanReview({
       <ReviewSlotDialog
         reviewSlot={openSlot}
         onClose={() => {
-          setOpenKey(null);
+          openSlotAt(null);
         }}
         onSwap={(recipe) => {
           if (openKey) update(openKey, { kind: 'swapped', recipe });
         }}
+        onSuggestAgain={() => {
+          if (openKey) void suggestAgain(openKey);
+        }}
+        suggestPending={suggestMutation.isPending}
+        suggestError={suggestError}
+        offline={offline}
         onDiscard={() => {
           if (openKey) update(openKey, { kind: 'discarded' });
         }}

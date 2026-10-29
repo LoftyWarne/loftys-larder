@@ -4,6 +4,7 @@ import {
   MEAL_PLAN_SUMMARY_MAX_LENGTH,
   compareSlotOrder,
   mealPlanCandidateSchema,
+  mealPlanSlotCandidateSchema,
   type FixedMeal,
   type MealPlanCandidate,
   type PlanProposal,
@@ -65,15 +66,7 @@ export function normalisePlanProposal(
 
   // Walked in the consumption walk's order (DEC-88), so a leftovers dish can
   // only eat what a strictly earlier slot cooked.
-  const walk = context.slots
-    .map((slot, index) => ({ slot, index }))
-    .sort(
-      (a, b) =>
-        compareSlotOrder(
-          { date: a.slot.date, occasionName: a.slot.occasion },
-          { date: b.slot.date, occasionName: b.slot.occasion },
-        ) || a.index - b.index,
-    );
+  const walk = walkOrder(context.slots);
   const cookedEarlier = new Set<number>();
   const normalised = new Map<number, PlanProposalSlot>();
   let dropped = 0;
@@ -108,6 +101,93 @@ export function normalisePlanProposal(
     return result ? [result] : [];
   });
   return { slots, summary, dropped };
+}
+
+export interface SlotSuggestionContext {
+  // The slot to suggest for, which isn't fixed.
+  slot: ProposalSlotContext;
+  // Every recipe cooked at a strictly earlier slot: a Fixed meal's, or one
+  // the review holds as it stands.
+  cookedEarlier: ReadonlySet<number>;
+  pickableRecipeIds: ReadonlySet<number>;
+  // The recipes already suggested for the slot in this review.
+  avoidRecipeIds: ReadonlySet<number>;
+}
+
+// Suggest again for one slot, by the same rules as a whole plan's slot. A
+// recipe already suggested there is refused while the library has any other
+// pickable recipe. Null means "try again": only a slot nobody eats at may come
+// back empty, and only when the planner said so.
+export function normaliseSlotSuggestion(
+  candidate: unknown,
+  context: SlotSuggestionContext,
+): PlanProposalSlot | null {
+  const parsed = mealPlanSlotCandidateSchema.safeParse(candidate);
+  if (!parsed.success) return null;
+  const { slot } = context;
+  const dish = parsed.data.dish;
+  if (dish === null) return slot.headcount === 0 ? emptySlot(slot) : null;
+  if (!context.pickableRecipeIds.has(dish.recipeId)) return null;
+  if (
+    context.avoidRecipeIds.has(dish.recipeId) &&
+    [...context.pickableRecipeIds].some((id) => !context.avoidRecipeIds.has(id))
+  ) {
+    return null;
+  }
+  return normaliseEntry(
+    slot,
+    { ...dish, date: slot.date, occasion: slot.occasion },
+    context.cookedEarlier,
+  );
+}
+
+// The recipes cooked before `target` in the consumption walk's order: each
+// Fixed meal's, and each dish prepared in `current`, the review's slots that
+// aren't fixed. An entry in `current` for a fixed slot is ignored.
+export function cookedBefore(
+  target: Pick<ProposalSlotContext, 'date' | 'occasion'>,
+  slots: readonly ProposalSlotContext[],
+  current: readonly Pick<PlanProposalSlot, 'date' | 'occasionId' | 'items'>[],
+): Set<number> {
+  const byKey = new Map(
+    current.map((entry) => [
+      `${entry.date}|${entry.occasionId.toString()}`,
+      entry,
+    ]),
+  );
+  const cooked = new Set<number>();
+  for (const slot of slots) {
+    const earlier =
+      compareSlotOrder(
+        { date: slot.date, occasionName: slot.occasion },
+        { date: target.date, occasionName: target.occasion },
+      ) < 0;
+    if (!earlier) continue;
+    if (slot.fixed !== null) {
+      const fixed = fixedRecipeCooked(slot);
+      if (fixed !== null) cooked.add(fixed);
+      continue;
+    }
+    const entry = byKey.get(`${slot.date}|${slot.occasionId.toString()}`);
+    for (const item of entry?.items ?? []) {
+      if (item.prepared > 0) cooked.add(item.recipeId);
+    }
+  }
+  return cooked;
+}
+
+function walkOrder(
+  slots: readonly ProposalSlotContext[],
+): { slot: ProposalSlotContext; index: number }[] {
+  return slots
+    .map((slot, index) => ({ slot, index }))
+    .sort(
+      (a, b) =>
+        compareSlotOrder(
+          { date: a.slot.date, occasionName: a.slot.occasion },
+          { date: b.slot.date, occasionName: b.slot.occasion },
+        ) || a.index - b.index,
+    );
 }
 
 // The recipe a Fixed meal cooks, if any.

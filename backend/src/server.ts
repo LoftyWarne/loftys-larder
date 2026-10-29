@@ -172,6 +172,7 @@ export async function buildAppWithLogger(
           importStartsPerHour: 1_000,
           healthScoresPerHour: 1_000,
           planProposalsPerHour: 1_000,
+          planSlotSuggestionsPerHour: 1_000,
         }
       : {},
   );

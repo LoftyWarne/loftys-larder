@@ -3,8 +3,15 @@ import type {
   ProposePlanInput,
   ProposePlanResult,
   ProposedSlot,
+  ProposeSlotInput,
 } from '@loftys-larder/shared';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
 import { act } from 'react';
@@ -18,6 +25,7 @@ const {
   recipesFetchMock,
   invalidateMock,
   proposeMock,
+  proposeSlotMock,
   applyMock,
   figuresQueryMock,
 } = vi.hoisted(() => ({
@@ -28,6 +36,7 @@ const {
   recipesFetchMock: vi.fn(),
   invalidateMock: vi.fn().mockResolvedValue(undefined),
   proposeMock: vi.fn(),
+  proposeSlotMock: vi.fn(),
   applyMock: vi.fn(),
   figuresQueryMock: vi.fn(),
 }));
@@ -50,34 +59,58 @@ const MEMBERS = [
   { id: 'bo', name: 'Bo' },
 ];
 
-vi.mock('@/lib/trpc.ts', () => ({
-  trpc: {
-    useUtils: () => ({
+vi.mock('@/lib/trpc.ts', async () => {
+  const { useState } = await import('react');
+  // Tracks `isPending` like a real mutation, for the in-flight states.
+  function usePendingMutation(mutate: (input: unknown) => Promise<unknown>) {
+    const [isPending, setPending] = useState(false);
+    return {
+      isPending,
+      mutateAsync: async (input: unknown) => {
+        setPending(true);
+        try {
+          return await mutate(input);
+        } finally {
+          setPending(false);
+        }
+      },
+    };
+  }
+  return {
+    trpc: {
+      useUtils: () => ({
+        plans: {
+          checkNewDates: { fetch: checkDatesMock },
+          list: { invalidate: invalidateMock },
+        },
+        user: { listHouseholdMembers: { fetch: membersFetchMock } },
+        recipes: { list: { fetch: recipesFetchMock } },
+      }),
+      user: {
+        listHouseholdMembers: {
+          useQuery: () => ({ data: { members: MEMBERS } }),
+        },
+      },
+      planProposals: {
+        propose: {
+          useMutation: () => ({ mutateAsync: proposeMock, isPending: false }),
+        },
+        proposeSlot: {
+          useMutation: () =>
+            usePendingMutation((input) =>
+              (proposeSlotMock as (input: unknown) => Promise<unknown>)(input),
+            ),
+        },
+      },
       plans: {
-        checkNewDates: { fetch: checkDatesMock },
-        list: { invalidate: invalidateMock },
-      },
-      user: { listHouseholdMembers: { fetch: membersFetchMock } },
-      recipes: { list: { fetch: recipesFetchMock } },
-    }),
-    user: {
-      listHouseholdMembers: {
-        useQuery: () => ({ data: { members: MEMBERS } }),
+        createWithSlots: {
+          useMutation: () => ({ mutateAsync: applyMock, isPending: false }),
+        },
+        proposedFigures: { useQuery: figuresQueryMock },
       },
     },
-    planProposals: {
-      propose: {
-        useMutation: () => ({ mutateAsync: proposeMock, isPending: false }),
-      },
-    },
-    plans: {
-      createWithSlots: {
-        useMutation: () => ({ mutateAsync: applyMock, isPending: false }),
-      },
-      proposedFigures: { useQuery: figuresQueryMock },
-    },
-  },
-}));
+  };
+});
 
 import { PlanWizardPage } from './plan-wizard-page.tsx';
 
@@ -137,6 +170,7 @@ function domainError(code: string, extra: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  proposeSlotMock.mockReset();
   blockerMock.mockReturnValue({ status: 'idle' });
   checkDatesMock.mockResolvedValue({ occasions: [LUNCH, DINNER] });
   membersFetchMock.mockResolvedValue({ members: MEMBERS });
@@ -192,6 +226,10 @@ async function toReview(user: ReturnType<typeof userEvent.setup>) {
 
 function lastProposeInput(): ProposePlanInput {
   return proposeMock.mock.lastCall?.[0] as ProposePlanInput;
+}
+
+function lastProposeSlotInput(): ProposeSlotInput {
+  return proposeSlotMock.mock.lastCall?.[0] as ProposeSlotInput;
 }
 
 describe('the dates step', () => {
@@ -787,6 +825,275 @@ describe('Plan Review', () => {
   });
 });
 
+describe('Suggest again', () => {
+  it('replaces only that slot with a new reason, avoiding what was suggested, and the figures update', async () => {
+    const user = userEvent.setup();
+    proposeSlotMock
+      .mockResolvedValueOnce({
+        slot: suggestion(MON, DINNER.id, 25, 'Pea Risotto'),
+      })
+      .mockResolvedValueOnce({
+        slot: suggestion(MON, DINNER.id, 26, 'Veg Curry'),
+      });
+    render(<PlanWizardPage />);
+    await toReview(user);
+
+    await user.click(screen.getByRole('button', { name: /Bean Chilli/ }));
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+
+    expect(lastProposeSlotInput()).toMatchObject({
+      startDate: MON,
+      endDate: TUE,
+      target: { date: MON, occasionId: DINNER.id },
+      avoidRecipeIds: [22],
+    });
+    expect(
+      lastProposeSlotInput().current.map((slot) => slot.items[0]?.recipeId),
+    ).toEqual([21, 22, 23, 24]);
+    expect(await screen.findByText('Why Pea Risotto')).toBeVisible();
+    expect(screen.queryByText('Bean Chilli')).not.toBeInTheDocument();
+    expect(screen.getByText('Why Lentil Soup')).toBeVisible();
+    expect(screen.getByText('Why Green Salad')).toBeVisible();
+    expect(screen.getByText('Why Fish Pie')).toBeVisible();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(figuresQueryMock).toHaveBeenLastCalledWith(
+        {
+          dishes: [
+            { date: MON, recipeId: 21, eaten: 2 },
+            { date: MON, recipeId: 25, eaten: 2 },
+            { date: TUE, recipeId: 23, eaten: 2 },
+            { date: TUE, recipeId: 24, eaten: 2 },
+          ],
+        },
+        expect.anything(),
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: /Pea Risotto/ }));
+    expect(
+      within(screen.getByRole('dialog')).getByText('AI suggestion'),
+    ).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+    expect(lastProposeSlotInput().avoidRecipeIds).toEqual([22, 25]);
+    expect(await screen.findByText('Why Veg Curry')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    const input = applyMock.mock.lastCall?.[0] as CreatePlanWithSlotsInput;
+    expect(input.slots[1]?.items[0]?.recipeId).toBe(26);
+    expect(input.reviewCounts?.suggestedAgain).toBe(1);
+  });
+
+  it('works on a swapped and a discarded slot, and restore puts back the latest suggestion', async () => {
+    const user = userEvent.setup();
+    proposeSlotMock
+      .mockResolvedValueOnce({
+        slot: suggestion(MON, LUNCH.id, 25, 'Pea Risotto'),
+      })
+      .mockResolvedValueOnce({
+        slot: suggestion(MON, DINNER.id, 26, 'Veg Curry'),
+      });
+    render(<PlanWizardPage />);
+    await toReview(user);
+
+    await user.click(screen.getByRole('button', { name: /Lentil Soup/ }));
+    await user.click(screen.getByRole('button', { name: 'Swap' }));
+    await user.type(screen.getByLabelText('Swap for a recipe'), 'Roast');
+    await user.click(
+      await screen.findByRole('option', { name: /Sunday Roast/ }),
+    );
+    await user.click(screen.getByRole('button', { name: /Sunday Roast/ }));
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+    expect(lastProposeSlotInput().avoidRecipeIds).toEqual([21]);
+    expect(await screen.findByText('Why Pea Risotto')).toBeVisible();
+    expect(screen.queryByText('Your pick')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Pea Risotto/ }));
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    await user.click(
+      screen.getByRole('button', { name: /^Lunch on 2026-11-02/ }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Restore suggestion' }),
+    );
+    expect(await screen.findByText('Why Pea Risotto')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: /Bean Chilli/ }));
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    await user.click(
+      screen.getByRole('button', { name: /^Dinner on 2026-11-02/ }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+    expect(await screen.findByText('Why Veg Curry')).toBeVisible();
+    expect(screen.queryByText('Discarded')).not.toBeInTheDocument();
+  });
+
+  it('shows a knock-on shortfall when the slot cooked a Batch', async () => {
+    const user = userEvent.setup();
+    const batch = suggestion(MON, LUNCH.id, 21, 'Lentil Soup');
+    proposeMock.mockResolvedValueOnce({
+      ...PROPOSAL,
+      slots: [
+        {
+          ...batch,
+          items: batch.items.map((item) => ({ ...item, prepared: 4 })),
+        },
+        suggestion(MON, DINNER.id, 22, 'Bean Chilli'),
+        {
+          ...suggestion(TUE, LUNCH.id, 21, 'Lentil Soup'),
+          slotType: 'leftovers',
+          leftoversSource: 'plan_meal',
+          items: batch.items.map((item) => ({ ...item, prepared: 0 })),
+        },
+        suggestion(TUE, DINNER.id, 24, 'Fish Pie'),
+      ],
+    } satisfies ProposePlanResult);
+    proposeSlotMock.mockResolvedValueOnce({
+      slot: suggestion(MON, LUNCH.id, 25, 'Pea Risotto'),
+    });
+    render(<PlanWizardPage />);
+    await toReview(user);
+    await user.click(
+      screen.getByRole('button', { name: /^Lunch on 2026-11-02/ }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+    await screen.findByText('Why Pea Risotto');
+
+    const leftovers = screen
+      .getByRole('button', { name: /^Lunch on 2026-11-03/ })
+      .closest<HTMLElement>('[data-slot-id]');
+    expect(leftovers).not.toBeNull();
+    expect(
+      within(leftovers ?? document.body).getByTestId('slot-item-shortfall'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  });
+
+  it('shows why a suggestion failed and keeps the slot', async () => {
+    const user = userEvent.setup();
+    proposeSlotMock.mockRejectedValueOnce(
+      domainError('MEAL_PLAN_SLOT_RATE_LIMITED', { retryAfterSeconds: 90 }),
+    );
+    render(<PlanWizardPage />);
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: /Bean Chilli/ }));
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'You’ve asked for a lot of suggestions recently. Try again in 2 minutes.',
+    );
+    expect(
+      within(screen.getByRole('dialog')).getByText('Bean Chilli'),
+    ).toBeVisible();
+  });
+
+  it('is off while the suggestion runs, as are another go and Apply', async () => {
+    const user = userEvent.setup();
+    let resolve!: (value: unknown) => void;
+    proposeSlotMock.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    render(<PlanWizardPage />);
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: /Bean Chilli/ }));
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByRole('button', { name: 'Suggesting…' }),
+    ).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'Discard' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Another go', hidden: true }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Apply', hidden: true }),
+    ).toBeDisabled();
+
+    await act(async () => {
+      resolve({ slot: suggestion(MON, DINNER.id, 25, 'Pea Risotto') });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText('Why Pea Risotto')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  });
+
+  it('suggests again where nobody eats, saying when nothing’s worth cooking ahead', async () => {
+    const user = userEvent.setup();
+    proposeMock.mockResolvedValueOnce({
+      ...PROPOSAL,
+      slots: [
+        {
+          ...suggestion(MON, LUNCH.id, 21, 'x'),
+          slotType: 'empty',
+          items: [],
+          reason: null,
+        },
+        ...PROPOSAL.slots.slice(1),
+      ],
+    } satisfies ProposePlanResult);
+    proposeSlotMock.mockResolvedValueOnce({
+      slot: {
+        date: MON,
+        occasionId: LUNCH.id,
+        slotType: 'empty',
+        leftoversSource: null,
+        items: [],
+        reason: null,
+      },
+    });
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(
+      screen.getByRole('button', { name: /^Nobody eating, Lunch, Mon/ }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Plan my meals' }));
+    await screen.findByRole('heading', { name: /^Review/ });
+
+    await user.click(
+      screen.getByRole('button', { name: /^Lunch on 2026-11-02/ }),
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).queryByRole('button', { name: 'Swap' }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Suggest again' }),
+    );
+    expect(
+      await within(dialog).findByText(
+        'Nobody eats here, and nothing’s worth cooking ahead.',
+      ),
+    ).toBeVisible();
+  });
+
+  it('offers nothing on a fixed slot', async () => {
+    const user = userEvent.setup();
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.selectOptions(
+      screen.getByLabelText(/^Fixed meal, Dinner, Mon/),
+      'eat_out',
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Plan my meals' }));
+    await screen.findByRole('heading', { name: /^Review/ });
+
+    await user.click(
+      screen.getByRole('button', { name: /^Dinner on 2026-11-02/ }),
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
 describe('offline', () => {
   function setOnline(value: boolean): void {
     Object.defineProperty(navigator, 'onLine', {
@@ -829,6 +1136,25 @@ describe('offline', () => {
 
     expect(screen.getByRole('button', { name: 'Another go' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  });
+
+  it('can’t suggest again for a slot while offline', async () => {
+    const user = userEvent.setup();
+    render(<PlanWizardPage />);
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: /Bean Chilli/ }));
+    setOnline(false);
+
+    expect(
+      screen.getByRole('button', { name: 'Suggest again' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText('You’re offline. Suggest again needs a connection.'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+
+    setOnline(true);
+    expect(screen.getByRole('button', { name: 'Suggest again' })).toBeEnabled();
   });
 
   it('can’t try a failed proposal again while offline', async () => {

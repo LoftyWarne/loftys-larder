@@ -363,3 +363,73 @@ describe('rate limit — plan proposals per user', () => {
     expect((await propose(app, 'user-b')).allowed).toBe(true);
   });
 });
+
+describe('rate limit — single-slot suggestions per user', () => {
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+    app = undefined;
+  });
+
+  async function buildSlotApp(): Promise<FastifyInstance> {
+    const instance = Fastify({ logger: false, trustProxy: true });
+    instance.decorateRequest('session', null);
+    instance.decorateRequest('user', null);
+    instance.addHook('preHandler', (req, _reply, done) => {
+      const raw = req.headers['x-test-user'];
+      if (typeof raw === 'string') {
+        // Structural stub: the limiters only read `user.id`.
+        req.user = { id: raw } as unknown as typeof req.user;
+      }
+      done();
+    });
+    await registerRateLimit(instance);
+    instance.post('/slot-probe', (req) =>
+      instance.limitPlanSlotSuggestion(req),
+    );
+    instance.post('/propose-probe', (req) => instance.limitPlanProposal(req));
+    await instance.ready();
+    return instance;
+  }
+
+  async function probe(
+    instance: FastifyInstance,
+    url: '/slot-probe' | '/propose-probe',
+    userId: string,
+  ) {
+    const response = await instance.inject({
+      method: 'POST',
+      url,
+      headers: { 'x-test-user': userId },
+    });
+    return response.json<{ allowed: boolean; retryAfterSeconds: number }>();
+  }
+
+  it('allows 30 suggestions an hour per user and refuses the 31st', async () => {
+    app = await buildSlotApp();
+    for (let i = 0; i < 30; i += 1) {
+      expect((await probe(app, '/slot-probe', 'user-a')).allowed).toBe(true);
+    }
+    const refused = await probe(app, '/slot-probe', 'user-a');
+    expect(refused.allowed).toBe(false);
+    expect(refused.retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  it('counts apart from whole-plan proposals, both ways', async () => {
+    app = await buildSlotApp();
+    for (let i = 0; i < 5; i += 1) await probe(app, '/propose-probe', 'user-a');
+    expect((await probe(app, '/propose-probe', 'user-a')).allowed).toBe(false);
+    expect((await probe(app, '/slot-probe', 'user-a')).allowed).toBe(true);
+
+    for (let i = 0; i < 30; i += 1) await probe(app, '/slot-probe', 'user-b');
+    expect((await probe(app, '/slot-probe', 'user-b')).allowed).toBe(false);
+    expect((await probe(app, '/propose-probe', 'user-b')).allowed).toBe(true);
+  });
+
+  it('keeps a separate count for each user', async () => {
+    app = await buildSlotApp();
+    for (let i = 0; i < 30; i += 1) await probe(app, '/slot-probe', 'user-a');
+    expect((await probe(app, '/slot-probe', 'user-b')).allowed).toBe(true);
+  });
+});

@@ -477,6 +477,34 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    // The slot dialog while Suggest again runs, and with its error.
+    test(`plan review's suggest again passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await openPlanReview(page);
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route(
+        '**/api/trpc/planProposals.proposeSlot**',
+        async (route) => {
+          await held;
+          await route.abort();
+        },
+      );
+      await page.locator('[data-slot-type="recipe"] button').first().click();
+      await page.getByRole('button', { name: 'Suggest again' }).click();
+      await expect(
+        page.getByRole('button', { name: 'Suggesting…' }),
+      ).toBeDisabled();
+      await runAxe(page, theme);
+      release();
+      await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible();
+      await runAxe(page, theme);
+    });
+
     test(`shopping list passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto(`/plans/${String(fixture.planId)}/shopping`);
       await expect(

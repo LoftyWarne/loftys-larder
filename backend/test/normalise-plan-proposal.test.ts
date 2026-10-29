@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  cookedBefore,
   cutAtWord,
   normalisePlanProposal,
+  normaliseSlotSuggestion,
   type ProposalContext,
   type ProposalSlotContext,
+  type SlotSuggestionContext,
 } from '../src/lib/plan-proposal/normalise.ts';
 
 const LUNCH = 1;
@@ -485,6 +488,206 @@ describe('normalisePlanProposal', () => {
       slotType: 'recipe',
       items: [{ recipeId: 12, prepared: 2, eaten: 2 }],
     });
+  });
+});
+
+describe('normaliseSlotSuggestion', () => {
+  const target = slot('2026-11-03', DINNER);
+
+  function slotContext(
+    overrides: Partial<SlotSuggestionContext> = {},
+  ): SlotSuggestionContext {
+    return {
+      slot: target,
+      cookedEarlier: new Set(),
+      pickableRecipeIds: new Set([10, 11, 12]),
+      avoidRecipeIds: new Set(),
+      ...overrides,
+    };
+  }
+
+  function dish(
+    recipeId: number,
+    overrides: Partial<{
+      kind: 'cook' | 'leftovers';
+      prepared: number;
+      reason: string;
+    }> = {},
+  ) {
+    return {
+      dish: {
+        kind: 'cook',
+        recipeId,
+        prepared: 2,
+        reason: 'Something **fresh**.',
+        ...overrides,
+      },
+    };
+  }
+
+  it('gives the slot one dish eaten by its headcount, with a plain-text reason', () => {
+    expect(normaliseSlotSuggestion(dish(11), slotContext())).toEqual({
+      date: '2026-11-03',
+      occasionId: DINNER,
+      slotType: 'recipe',
+      leftoversSource: null,
+      items: [{ recipeId: 11, prepared: 2, eaten: 2 }],
+      reason: 'Something fresh.',
+    });
+  });
+
+  it('keeps a Batch that cooks more than the headcount', () => {
+    expect(
+      normaliseSlotSuggestion(dish(11, { prepared: 6 }), slotContext())?.items,
+    ).toEqual([{ recipeId: 11, prepared: 6, eaten: 2 }]);
+  });
+
+  it('tries again for a reply that isn’t a candidate, or a recipe that isn’t pickable', () => {
+    expect(normaliseSlotSuggestion({ dish: 'x' }, slotContext())).toBeNull();
+    expect(normaliseSlotSuggestion(dish(99), slotContext())).toBeNull();
+  });
+
+  it('tries again for a dish that cooks fewer than the headcount', () => {
+    expect(
+      normaliseSlotSuggestion(dish(11, { prepared: 1 }), slotContext()),
+    ).toBeNull();
+  });
+
+  describe('repeats', () => {
+    it('refuses a recipe already suggested while another is pickable', () => {
+      expect(
+        normaliseSlotSuggestion(
+          dish(10),
+          slotContext({ avoidRecipeIds: new Set([10, 11]) }),
+        ),
+      ).toBeNull();
+    });
+
+    it('allows a repeat when every pickable recipe was suggested', () => {
+      expect(
+        normaliseSlotSuggestion(
+          dish(10),
+          slotContext({ avoidRecipeIds: new Set([10, 11, 12]) }),
+        )?.items,
+      ).toEqual([{ recipeId: 10, prepared: 2, eaten: 2 }]);
+    });
+  });
+
+  describe('leftovers', () => {
+    it('keeps a plan-meal leftover of a dish cooked earlier', () => {
+      expect(
+        normaliseSlotSuggestion(
+          dish(12, { kind: 'leftovers', prepared: 0 }),
+          slotContext({ cookedEarlier: new Set([12]) }),
+        ),
+      ).toMatchObject({
+        slotType: 'leftovers',
+        leftoversSource: 'plan_meal',
+        items: [{ recipeId: 12, prepared: 0, eaten: 2 }],
+      });
+    });
+
+    it('tries again for a leftover of a dish not cooked earlier', () => {
+      expect(
+        normaliseSlotSuggestion(
+          dish(12, { kind: 'leftovers', prepared: 0 }),
+          slotContext(),
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe('where nobody eats', () => {
+    const nobody = slot('2026-11-03', DINNER, { headcount: 0 });
+
+    it('keeps a prepared-only Batch on an empty slot', () => {
+      expect(
+        normaliseSlotSuggestion(
+          dish(11, { prepared: 4 }),
+          slotContext({ slot: nobody }),
+        ),
+      ).toMatchObject({
+        slotType: 'empty',
+        items: [{ recipeId: 11, prepared: 4, eaten: 0 }],
+      });
+    });
+
+    it('leaves the slot empty when the planner gives no dish', () => {
+      expect(
+        normaliseSlotSuggestion({ dish: null }, slotContext({ slot: nobody })),
+      ).toEqual({
+        date: '2026-11-03',
+        occasionId: DINNER,
+        slotType: 'empty',
+        leftoversSource: null,
+        items: [],
+        reason: null,
+      });
+    });
+
+    it('tries again for a leftover there', () => {
+      expect(
+        normaliseSlotSuggestion(
+          dish(12, { kind: 'leftovers', prepared: 0 }),
+          slotContext({ slot: nobody, cookedEarlier: new Set([12]) }),
+        ),
+      ).toBeNull();
+    });
+  });
+
+  it('tries again when no dish comes back where people eat', () => {
+    expect(normaliseSlotSuggestion({ dish: null }, slotContext())).toBeNull();
+  });
+});
+
+describe('cookedBefore', () => {
+  it('collects what Fixed meals and the review cook at strictly earlier slots', () => {
+    const slots = [
+      slot('2026-11-02', LUNCH, { fixed: { kind: 'recipe', recipeId: 10 } }),
+      slot('2026-11-02', DINNER),
+      slot('2026-11-03', LUNCH, {
+        headcount: 0,
+        fixed: { kind: 'batch', recipeId: 13, portions: 4 },
+      }),
+      slot('2026-11-03', DINNER),
+      slot('2026-11-04', LUNCH),
+    ];
+    const item = (recipeId: number, prepared: number) => ({
+      recipeId,
+      prepared,
+      eaten: 2,
+    });
+    const cooked = cookedBefore(
+      { date: '2026-11-03', occasion: 'Dinner' },
+      slots,
+      [
+        { date: '2026-11-02', occasionId: DINNER, items: [item(11, 2)] },
+        // A slot that isn't in the plan is ignored.
+        { date: '2026-11-02', occasionId: DINNER + 10, items: [item(15, 2)] },
+        // A fixed slot's entry is ignored.
+        { date: '2026-11-02', occasionId: LUNCH, items: [item(16, 2)] },
+        // The target and later slots don't count.
+        { date: '2026-11-03', occasionId: DINNER, items: [item(12, 2)] },
+        { date: '2026-11-04', occasionId: LUNCH, items: [item(14, 2)] },
+      ],
+    );
+    expect([...cooked].sort()).toEqual([10, 11, 13]);
+  });
+
+  it('ignores a leftover’s portions, which aren’t cooked', () => {
+    const slots = [slot('2026-11-02', DINNER), slot('2026-11-03', DINNER)];
+    const cooked = cookedBefore(
+      { date: '2026-11-03', occasion: 'Dinner' },
+      slots,
+      [
+        {
+          date: '2026-11-02',
+          occasionId: DINNER,
+          items: [{ recipeId: 11, prepared: 0, eaten: 2 }],
+        },
+      ],
+    );
+    expect(cooked.size).toBe(0);
   });
 });
 

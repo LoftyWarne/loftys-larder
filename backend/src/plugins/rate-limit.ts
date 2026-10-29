@@ -42,6 +42,7 @@ export interface RateLimitOptions {
   importStartsPerHour?: number;
   healthScoresPerHour?: number;
   planProposalsPerHour?: number;
+  planSlotSuggestionsPerHour?: number;
 }
 
 export interface ModelRateLimitVerdict {
@@ -61,6 +62,11 @@ declare module 'fastify' {
     // Counts one `planProposals.propose` that reaches the model for the
     // request's user.
     limitPlanProposal: (req: FastifyRequest) => Promise<ModelRateLimitVerdict>;
+    // Counts one `planProposals.proposeSlot` that reaches the model for the
+    // request's user.
+    limitPlanSlotSuggestion: (
+      req: FastifyRequest,
+    ) => Promise<ModelRateLimitVerdict>;
   }
 }
 
@@ -131,6 +137,17 @@ export async function registerRateLimit(
   });
   app.decorate('limitPlanProposal', async (req: FastifyRequest) =>
     toVerdict(await checkPlanProposal(req)),
+  );
+
+  // Suggest again for one slot (DEC-117), counted apart from whole plans.
+  const checkPlanSlotSuggestion = app.createRateLimit({
+    max: options.planSlotSuggestionsPerHour ?? 30,
+    timeWindow: '1 hour',
+    keyGenerator: (req) =>
+      req.user ? `plan-slot:${req.user.id}` : `plan-slot-ip:${req.ip}`,
+  });
+  app.decorate('limitPlanSlotSuggestion', async (req: FastifyRequest) =>
+    toVerdict(await checkPlanSlotSuggestion(req)),
   );
 
   // preHandler (not onRequest) so the auth plugin has already hydrated

@@ -1,12 +1,16 @@
 import type { ProposePlanResult, ProposedSlot } from '@loftys-larder/shared';
 import { describe, expect, it } from 'vitest';
 
+import { deriveBaseBalances } from './serving-variation-supply.ts';
 import {
+  batchPortionsError,
   buildApplyInput,
   buildProposeInput,
   defaultAttendance,
   figuresInput,
   inputsSignature,
+  invalidBatches,
+  leftInPlan,
   pruneFixedMeals,
   rerunReview,
   resolveAttendance,
@@ -399,5 +403,238 @@ describe('applying', () => {
       anotherGo: 1,
     });
     expect(reviewCounts(review)).toEqual(input.reviewCounts);
+  });
+});
+
+describe('batch cooking', () => {
+  const KEEMA: RecipeChoice = {
+    id: 20,
+    name: 'Keema',
+    imageUrl: null,
+    isBase: false,
+    baseRecipeId: null,
+  };
+  const WED = '2026-11-04';
+  const nobodyAtMonLunch = {
+    ...defaultAttendance(['ann', 'bo']),
+    bySlot: new Map([
+      [slotKey(MON, LUNCH.id), { dinerUserIds: [], guestCount: 0 }],
+    ]),
+  };
+
+  function batchAt(
+    key: string,
+    portions: number,
+  ): Map<string, { kind: 'batch'; recipe: RecipeChoice; portions: number }> {
+    return new Map([[key, { kind: 'batch', recipe: KEEMA, portions }]]);
+  }
+
+  function leftovers(
+    date: string,
+    occasionId: number,
+    recipe: RecipeChoice,
+  ): ProposedSlot {
+    return {
+      date,
+      occasionId,
+      slotType: 'leftovers',
+      leftoversSource: 'plan_meal',
+      items: [
+        {
+          recipeId: recipe.id,
+          prepared: 0,
+          eaten: 2,
+          recipeName: recipe.name,
+          recipeImageUrl: null,
+          isBase: recipe.isBase,
+          baseRecipeId: recipe.baseRecipeId,
+        },
+      ],
+      reason: 'Easy night.',
+    };
+  }
+
+  it('has the people eating at a Batch Fixed meal eat it there', () => {
+    const slots = reviewPlanSlots(
+      inputs({ fixed: batchAt(slotKey(MON, DINNER.id), 6) }),
+      startReview(proposal([])),
+    );
+    expect(slots[1]).toMatchObject({
+      kind: 'fixed',
+      slot: {
+        slotType: 'recipe',
+        items: [{ recipeName: 'Keema', prepared: 6, eaten: 2 }],
+      },
+    });
+  });
+
+  it('makes a Batch Fixed meal where nobody eats prepared-only', () => {
+    const slots = reviewPlanSlots(
+      inputs({
+        attendance: nobodyAtMonLunch,
+        fixed: batchAt(slotKey(MON, LUNCH.id), 4),
+      }),
+      startReview(proposal([])),
+    );
+    expect(slots[0]).toMatchObject({
+      kind: 'fixed',
+      slot: {
+        slotType: 'empty',
+        items: [{ recipeName: 'Keema', prepared: 4, eaten: 0 }],
+      },
+    });
+  });
+
+  it('refuses a Batch with fewer portions than its slot’s headcount', () => {
+    const two = { dinerUserIds: ['ann', 'bo'], guestCount: 0 };
+    expect(batchPortionsError(1, two)).toBe(
+      'Cook at least 2 portions: everyone eating here eats it.',
+    );
+    expect(batchPortionsError(Number.NaN, two)).not.toBeNull();
+    expect(batchPortionsError(2.5, two)).not.toBeNull();
+    expect(batchPortionsError(51, two)).toBe('Cook at most 50 portions.');
+    expect(batchPortionsError(2, two)).toBeNull();
+    expect(batchPortionsError(0, { dinerUserIds: [], guestCount: 0 })).toBe(
+      'Cook at least 1 portion.',
+    );
+    expect(
+      invalidBatches(
+        {
+          attendance: defaultAttendance(['ann', 'bo']),
+          fixed: batchAt(slotKey(MON, DINNER.id), 1),
+        },
+        wizardSlots(MON, TUE, [LUNCH, DINNER]),
+      ),
+    ).toEqual([slotKey(MON, DINNER.id)]);
+  });
+
+  it('keeps a Batch Fixed meal that no longer feeds its slot, flagged for step 3', () => {
+    const attendance = {
+      ...defaultAttendance(['ann', 'bo']),
+      byOccasion: new Map([
+        [DINNER.id, { dinerUserIds: ['ann', 'bo'], guestCount: 2 }],
+      ]),
+    };
+    const fixed = new Map([
+      ...batchAt(slotKey(MON, DINNER.id), 3),
+      ...batchAt(slotKey(TUE, DINNER.id), 4),
+    ]);
+    const slots = wizardSlots(MON, TUE, [LUNCH, DINNER]);
+    const pruned = pruneFixedMeals({ attendance, fixed }, slots);
+    expect(pruned).toBe(fixed);
+    expect(invalidBatches({ attendance, fixed: pruned }, slots)).toEqual([
+      slotKey(MON, DINNER.id),
+    ]);
+  });
+
+  it('sends a Batch Fixed meal with its portions', () => {
+    const input = buildProposeInput(
+      inputs({ fixed: batchAt(slotKey(MON, DINNER.id), 6) }),
+      null,
+    );
+    expect(input.slots[1]?.fixed).toEqual({
+      kind: 'batch',
+      recipeId: KEEMA.id,
+      portions: 6,
+    });
+  });
+
+  // Manual verification step 1, over a three-day plan.
+  describe('balances over a proposal', () => {
+    const batchInputs = inputs({
+      endDate: WED,
+      fixed: batchAt(slotKey(MON, DINNER.id), 6),
+    });
+    const first = proposal([
+      suggestion(MON, LUNCH.id, 1),
+      leftovers(TUE, LUNCH.id, KEEMA),
+      suggestion(TUE, DINNER.id, 2),
+      suggestion(WED, LUNCH.id, 3),
+      leftovers(WED, DINNER.id, KEEMA),
+    ]);
+
+    function balances(review: ReturnType<typeof startReview>) {
+      const slots = reviewPlanSlots(batchInputs, review).map(
+        (entry) => entry.slot,
+      );
+      const derived = deriveBaseBalances(slots);
+      return {
+        short: [...derived.shortfallBySlot.values()],
+        left: leftInPlan(slots, derived.remainingByBase),
+      };
+    }
+
+    it('shows nothing short and nothing left when the Batch is eaten up', () => {
+      expect(balances(startReview(first))).toEqual({ short: [], left: [] });
+    });
+
+    it('shows what’s left after a discard, and clears it on restore', () => {
+      const key = slotKey(WED, DINNER.id);
+      const discarded = setReviewStatus(startReview(first), key, {
+        kind: 'discarded',
+      });
+      expect(balances(discarded).left).toEqual([
+        { recipeId: KEEMA.id, recipeName: 'Keema', portions: 2 },
+      ]);
+      const restored = setReviewStatus(discarded, key, { kind: 'suggested' });
+      expect(balances(restored)).toEqual({ short: [], left: [] });
+    });
+
+    it('shows what’s left after a swap', () => {
+      const swapped = setReviewStatus(
+        startReview(first),
+        slotKey(TUE, LUNCH.id),
+        { kind: 'swapped', recipe: PASTA },
+      );
+      expect(balances(swapped).left).toEqual([
+        { recipeId: KEEMA.id, recipeName: 'Keema', portions: 2 },
+      ]);
+    });
+
+    it('shows a shortfall when leftovers outrun the Batch', () => {
+      const small = inputs({
+        endDate: WED,
+        fixed: batchAt(slotKey(MON, DINNER.id), 4),
+      });
+      const slots = reviewPlanSlots(small, startReview(first)).map(
+        (entry) => entry.slot,
+      );
+      expect([...deriveBaseBalances(slots).shortfallBySlot.values()]).toEqual([
+        2,
+      ]);
+    });
+
+    it('applies the Batch and its leftovers as the planner writes them', () => {
+      const input = buildApplyInput(batchInputs, startReview(first));
+      expect(
+        input.slots.map((slot) => [
+          slot.slotType,
+          slot.leftoversSource,
+          slot.items.map((item) => [item.recipeId, item.prepared, item.eaten]),
+        ]),
+      ).toEqual([
+        ['recipe', null, [[1, 2, 2]]],
+        ['recipe', null, [[KEEMA.id, 6, 2]]],
+        ['leftovers', 'plan_meal', [[KEEMA.id, 0, 2]]],
+        ['recipe', null, [[2, 2, 2]]],
+        ['recipe', null, [[3, 2, 2]]],
+        ['leftovers', 'plan_meal', [[KEEMA.id, 0, 2]]],
+      ]);
+    });
+  });
+
+  it('applies a prepared-only Batch on an otherwise empty slot', () => {
+    const input = buildApplyInput(
+      inputs({
+        attendance: nobodyAtMonLunch,
+        fixed: batchAt(slotKey(MON, LUNCH.id), 4),
+      }),
+      startReview(proposal([])),
+    );
+    expect(input.slots[0]).toMatchObject({
+      slotType: 'empty',
+      items: [{ recipeId: KEEMA.id, prepared: 4, eaten: 0, sortOrder: 0 }],
+      dinerUserIds: [],
+    });
   });
 });

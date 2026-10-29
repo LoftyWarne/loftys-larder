@@ -15,3 +15,13 @@ export function compareOccasionByName(a: string, b: string): number {
   }
   return aOrder - bOrder;
 }
+
+// The consumption walk's order (DEC-88): date, then occasion. Ties are left to
+// the caller.
+export function compareSlotOrder(
+  a: { date: string; occasionName: string },
+  b: { date: string; occasionName: string },
+): number {
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  return compareOccasionByName(a.occasionName, b.occasionName);
+}

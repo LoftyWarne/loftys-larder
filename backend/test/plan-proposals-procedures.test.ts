@@ -588,9 +588,130 @@ describe('plan proposal procedures', () => {
       );
       expect(requests[0]?.note).toBe('Less soup');
       expect(requests[0]?.previous).toEqual({
-        slots: [{ date: dates[0], occasion: 'Dinner', recipeId: id }],
+        slots: [
+          {
+            date: dates[0],
+            occasion: 'Dinner',
+            dish: { kind: 'cook', recipeId: id, prepared: 2 },
+          },
+        ],
         summary: 'Soup week.',
       });
+    });
+
+    it('sends a rerun’s leftovers and prepared-only Batches as dishes', async () => {
+      const id = await seedRecipe({ name: 'Keema' });
+      const { planner, requests } = spyPlanner();
+      await caller({ planner }).planProposals.propose(
+        input({
+          note: 'More curry',
+          previous: {
+            slots: [
+              {
+                date: dates[0] ?? '',
+                occasionId: lunchId,
+                slotType: 'empty',
+                leftoversSource: null,
+                items: [{ recipeId: id, prepared: 6, eaten: 0 }],
+                reason: 'A cook-up.',
+              },
+              {
+                date: dates[0] ?? '',
+                occasionId: dinnerId,
+                slotType: 'leftovers',
+                leftoversSource: 'plan_meal',
+                items: [{ recipeId: id, prepared: 0, eaten: 2 }],
+                reason: 'Easy night.',
+              },
+              {
+                date: dates[1] ?? '',
+                occasionId: dinnerId,
+                slotType: 'empty',
+                leftoversSource: null,
+                items: [],
+                reason: null,
+              },
+            ],
+            summary: 'Curry week.',
+            dropped: 0,
+          },
+        }),
+      );
+      expect(requests[0]?.previous?.slots).toEqual([
+        {
+          date: dates[0],
+          occasion: 'Lunch',
+          dish: { kind: 'cook', recipeId: id, prepared: 6 },
+        },
+        {
+          date: dates[0],
+          occasion: 'Dinner',
+          dish: { kind: 'leftovers', recipeId: id, prepared: 0 },
+        },
+        { date: dates[1], occasion: 'Dinner', dish: null },
+      ]);
+    });
+
+    it('marks the base of each fixed serving variation, with the portions it needs', async () => {
+      const base = await seedRecipe({ name: 'Tomato Base', isBase: true });
+      const pasta = await seedRecipe({
+        name: 'Tomato Pasta',
+        baseRecipeId: base,
+      });
+      const shakshuka = await seedRecipe({
+        name: 'Shakshuka',
+        baseRecipeId: base,
+      });
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      const { planner, requests } = spyPlanner();
+      await caller({ planner }).planProposals.propose(
+        input({
+          slots: slots((slot) =>
+            slot.date === dates[1] && slot.occasionId === dinnerId
+              ? { fixed: { kind: 'recipe', recipeId: pasta }, guestCount: 1 }
+              : slot.date === dates[2] && slot.occasionId === lunchId
+                ? {
+                    fixed: { kind: 'batch', recipeId: shakshuka, portions: 5 },
+                  }
+                : slot.date === dates[2] && slot.occasionId === dinnerId
+                  ? { fixed: { kind: 'recipe', recipeId: soup } }
+                  : {},
+          ),
+        }),
+      );
+      expect(requests[0]?.basesToCook).toEqual([
+        {
+          baseRecipeId: base,
+          portions: 3,
+          neededBy: { date: dates[1], occasion: 'Dinner' },
+        },
+        {
+          baseRecipeId: base,
+          portions: 5,
+          neededBy: { date: dates[2], occasion: 'Lunch' },
+        },
+      ]);
+    });
+
+    it('sends a Batch Fixed meal as it was fixed', async () => {
+      const keema = await seedRecipe({ name: 'Keema' });
+      const { planner, requests } = spyPlanner();
+      await caller({ planner }).planProposals.propose(
+        input({
+          slots: slots((slot) =>
+            slot.date === dates[0] && slot.occasionId === dinnerId
+              ? { fixed: { kind: 'batch', recipeId: keema, portions: 6 } }
+              : {},
+          ),
+        }),
+      );
+      expect(requests[0]?.slots[1]).toEqual({
+        date: dates[0],
+        occasion: 'Dinner',
+        headcount: 2,
+        fixed: { kind: 'batch', recipeId: keema, portions: 6 },
+      });
+      expect(requests[0]?.basesToCook).toEqual([]);
     });
   });
 
@@ -662,6 +783,25 @@ describe('plan proposal procedures', () => {
       expect(proposal.dropped).toBe(0);
     });
 
+    it('proposes a Batch and the leftovers slot that eats it', async () => {
+      const keema = await seedRecipe({ name: 'Keema' });
+      const proposal = await caller().planProposals.propose(
+        input({ brief: FAKE_PLANNER_MARKERS.batch }),
+      );
+      expect(proposal.dropped).toBe(0);
+      expect(proposal.slots[0]).toMatchObject({
+        slotType: 'recipe',
+        items: [{ recipeId: keema, prepared: 4, eaten: 2 }],
+      });
+      expect(proposal.slots[1]).toMatchObject({
+        slotType: 'leftovers',
+        leftoversSource: 'plan_meal',
+        items: [
+          { recipeId: keema, prepared: 0, eaten: 2, recipeName: 'Keema' },
+        ],
+      });
+    });
+
     it('asks no model when every slot is fixed or has nobody eating', async () => {
       await seedRecipe({ name: 'Lentil Soup' });
       const { planner, requests } = spyPlanner();
@@ -684,6 +824,58 @@ describe('plan proposal procedures', () => {
       expect(proposal.slots.every((slot) => slot.slotType === 'empty')).toBe(
         true,
       );
+    });
+
+    it('asks the model when a slot nobody eats at could cook a fixed variation’s base first', async () => {
+      const base = await seedRecipe({ name: 'Tomato Base', isBase: true });
+      const pasta = await seedRecipe({
+        name: 'Tomato Pasta',
+        baseRecipeId: base,
+      });
+      const { planner, requests } = spyPlanner();
+      const proposal = await caller({ planner }).planProposals.propose(
+        input({
+          slots: slots((slot) =>
+            slot.date === dates[0] && slot.occasionId === lunchId
+              ? { dinerUserIds: [], guestCount: 0 }
+              : slot.date === dates[1] && slot.occasionId === dinnerId
+                ? { fixed: { kind: 'recipe', recipeId: pasta } }
+                : { fixed: { kind: 'takeaway' } },
+          ),
+        }),
+      );
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.basesToCook).toEqual([
+        {
+          baseRecipeId: base,
+          portions: 2,
+          neededBy: { date: dates[1], occasion: 'Dinner' },
+        },
+      ]);
+      expect(proposal.slots).toEqual([
+        expect.objectContaining({ date: dates[0], occasionId: lunchId }),
+      ]);
+    });
+
+    it('asks no model when the only slot nobody eats at comes after the base is needed', async () => {
+      const base = await seedRecipe({ name: 'Tomato Base', isBase: true });
+      const pasta = await seedRecipe({
+        name: 'Tomato Pasta',
+        baseRecipeId: base,
+      });
+      const { planner, requests } = spyPlanner();
+      await caller({ planner }).planProposals.propose(
+        input({
+          slots: slots((slot) =>
+            slot.date === dates[2] && slot.occasionId === dinnerId
+              ? { dinerUserIds: [], guestCount: 0 }
+              : slot.date === dates[0] && slot.occasionId === dinnerId
+                ? { fixed: { kind: 'recipe', recipeId: pasta } }
+                : { fixed: { kind: 'takeaway' } },
+          ),
+        }),
+      );
+      expect(requests).toHaveLength(0);
     });
   });
 
@@ -775,6 +967,71 @@ describe('plan proposal procedures', () => {
           cause: { code: 'SLOT_RECIPE_NOT_PICKABLE', recipeId: deleted },
         },
       );
+    });
+
+    it('refuses a Batch Fixed meal of a recipe that isn’t pickable', async () => {
+      await seedRecipe({ name: 'Lentil Soup' });
+      const deleted = await seedRecipe({ name: 'Old Soup', isDeleted: true });
+      await refusedBeforeTheModel(
+        (c) =>
+          c.planProposals.propose(
+            input({
+              slots: slots((slot) =>
+                slot.occasionId === lunchId
+                  ? { fixed: { kind: 'batch', recipeId: deleted, portions: 4 } }
+                  : {},
+              ),
+            }),
+          ),
+        {
+          code: 'BAD_REQUEST',
+          cause: { code: 'SLOT_RECIPE_NOT_PICKABLE', recipeId: deleted },
+        },
+      );
+    });
+
+    it('refuses a Batch Fixed meal with fewer portions than its slot’s headcount', async () => {
+      const keema = await seedRecipe({ name: 'Keema' });
+      await refusedBeforeTheModel(
+        (c) =>
+          c.planProposals.propose(
+            input({
+              slots: slots((slot) =>
+                slot.date === dates[0] && slot.occasionId === dinnerId
+                  ? {
+                      fixed: { kind: 'batch', recipeId: keema, portions: 2 },
+                      guestCount: 1,
+                    }
+                  : {},
+              ),
+            }),
+          ),
+        {
+          code: 'BAD_REQUEST',
+          cause: {
+            code: 'MEAL_PLAN_BATCH_TOO_SMALL',
+            date: dates[0],
+            occasionId: dinnerId,
+          },
+        },
+      );
+    });
+
+    it('accepts a prepared-only Batch Fixed meal where nobody eats', async () => {
+      const keema = await seedRecipe({ name: 'Keema' });
+      const proposal = await caller().planProposals.propose(
+        input({
+          slots: slots((slot) =>
+            slot.date === dates[0] && slot.occasionId === lunchId
+              ? {
+                  dinerUserIds: [],
+                  fixed: { kind: 'batch', recipeId: keema, portions: 4 },
+                }
+              : {},
+          ),
+        }),
+      );
+      expect(proposal.slots).toHaveLength(5);
     });
 
     it('refuses over the limit, with the seconds until retry', async () => {

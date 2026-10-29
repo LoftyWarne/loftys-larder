@@ -206,12 +206,38 @@ export function buildMealPlanRequest(
       headcount: slotHeadcount(slot),
       fixed: slot.fixed,
     })),
+    basesToCook: basesToCook(input.slots, library, occasion),
     recipes: library,
     brief: input.brief === '' ? null : input.brief,
     note: input.note === '' ? null : input.note,
     previous:
       input.previous && toPrevious(input.previous, input.slots, occasion),
   };
+}
+
+// A fixed serving variation needs a base portion for every portion it cooks
+// (DEC-91): a fixed recipe cooks the headcount, a Batch its portions.
+function basesToCook(
+  planSlots: ProposePlanInput['slots'],
+  library: MealPlanRecipe[],
+  occasion: (id: number) => string,
+): MealPlanRequest['basesToCook'] {
+  const byId = new Map(library.map((recipe) => [recipe.id, recipe]));
+  return planSlots.flatMap((slot) => {
+    const fixed = slot.fixed;
+    if (fixed?.kind !== 'recipe' && fixed?.kind !== 'batch') return [];
+    const baseRecipeId = byId.get(fixed.recipeId)?.baseRecipeId ?? null;
+    const portions =
+      fixed.kind === 'batch' ? fixed.portions : slotHeadcount(slot);
+    if (baseRecipeId === null || portions === 0) return [];
+    return [
+      {
+        baseRecipeId,
+        portions,
+        neededBy: { date: slot.date, occasion: occasion(slot.occasionId) },
+      },
+    ];
+  });
 }
 
 function toPrevious(
@@ -225,11 +251,23 @@ function toPrevious(
   return {
     slots: previous.slots
       .filter((slot) => inPlan.has(key(slot)))
-      .map((slot) => ({
-        date: slot.date,
-        occasion: occasion(slot.occasionId),
-        recipeId: slot.items.find((item) => item.eaten > 0)?.recipeId ?? null,
-      })),
+      .map((slot) => {
+        const item = slot.items[0];
+        return {
+          date: slot.date,
+          occasion: occasion(slot.occasionId),
+          dish: item
+            ? {
+                kind:
+                  slot.slotType === 'leftovers'
+                    ? ('leftovers' as const)
+                    : ('cook' as const),
+                recipeId: item.recipeId,
+                prepared: item.prepared,
+              }
+            : null,
+        };
+      }),
     summary: previous.summary,
   };
 }

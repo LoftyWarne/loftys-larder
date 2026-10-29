@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button.tsx';
 import { eachDateInRange, formatDayRangeLabel } from '@/lib/date-utils.ts';
 import {
   figuresInput,
+  leftInPlan,
   reviewPlanSlots,
   setReviewStatus,
   slotKey,
@@ -44,6 +45,7 @@ export interface PlanReviewProps {
   onAnotherGo: (note: string) => void;
   anotherGoPending: boolean;
   anotherGoError: string | null;
+  offline?: boolean;
   onApply: () => void;
   applyPending: boolean;
   applyError: string | null;
@@ -58,6 +60,7 @@ export function PlanReview({
   onAnotherGo,
   anotherGoPending,
   anotherGoError,
+  offline = false,
   onApply,
   applyPending,
   applyError,
@@ -82,6 +85,14 @@ export function PlanReview({
   const balances = useMemo(
     () => deriveBaseBalances(reviewSlots.map((entry) => entry.slot)),
     [reviewSlots],
+  );
+  const leftOver = useMemo(
+    () =>
+      leftInPlan(
+        reviewSlots.map((entry) => entry.slot),
+        balances.remainingByBase,
+      ),
+    [reviewSlots, balances],
   );
   const busy = anotherGoPending || applyPending;
 
@@ -150,6 +161,18 @@ export function PlanReview({
               : `${String(review.dropped)} meals couldn’t be suggested and were left empty.`}
           </p>
         )}
+        {leftOver.length > 0 && (
+          <div className="text-sm">
+            <p className="font-medium">Left in plan</p>
+            <ul aria-label="Left in plan" className="text-muted-foreground">
+              {leftOver.map((dish) => (
+                <li key={dish.recipeId}>
+                  {dish.recipeName}: {dish.portions} left in plan
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </header>
 
       <PlannerGrid
@@ -212,7 +235,12 @@ export function PlanReview({
             {anotherGoError}
           </p>
         )}
-        <Button type="submit" variant="outline" disabled={busy}>
+        {offline && (
+          <p className="text-sm text-muted-foreground">
+            You’re offline. Planning with AI needs a connection.
+          </p>
+        )}
+        <Button type="submit" variant="outline" disabled={busy || offline}>
           {anotherGoPending ? 'Planning again…' : 'Another go'}
         </Button>
       </form>

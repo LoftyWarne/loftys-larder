@@ -22,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog.tsx';
+import { useOnlineStatus } from '@/hooks/use-online-status.ts';
 import { addCivilDays, todayInLondon } from '@/lib/date-utils.ts';
 import { planErrorMessage } from '@/lib/plan-errors.ts';
 import {
@@ -54,6 +55,8 @@ const DEFAULT_LENGTH_DAYS = 6;
 export function PlanWizardPage(): React.ReactElement {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
+  // The wizard's model calls are off while offline (DEC-117).
+  const isOnline = useOnlineStatus();
   const membersQuery = trpc.user.listHouseholdMembers.useQuery();
   const members = useMemo(
     () => membersQuery.data?.members ?? [],
@@ -242,6 +245,7 @@ export function PlanWizardPage(): React.ReactElement {
         <BriefStep
           brief={brief}
           nextLabel={review ? 'Back to review' : 'Plan my meals'}
+          offline={!isOnline && !review}
           onBack={(value) => {
             setBrief(value);
             setStep('fixed');
@@ -252,6 +256,7 @@ export function PlanWizardPage(): React.ReactElement {
       {step === 'proposing' && (
         <ProposalStatus
           error={proposeError}
+          offline={!isOnline}
           onRetry={() => {
             if (inputs) void propose(inputs, null);
           }}
@@ -271,6 +276,7 @@ export function PlanWizardPage(): React.ReactElement {
           }}
           anotherGoPending={proposeMutation.isPending}
           anotherGoError={anotherGoError}
+          offline={!isOnline}
           onApply={() => {
             void handleApply();
           }}
@@ -298,7 +304,7 @@ export function PlanWizardPage(): React.ReactElement {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={startNewProposal}>
+            <AlertDialogAction onClick={startNewProposal} disabled={!isOnline}>
               Make a new plan
             </AlertDialogAction>
           </AlertDialogFooter>

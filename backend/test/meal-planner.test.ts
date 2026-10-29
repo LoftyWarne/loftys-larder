@@ -47,6 +47,7 @@ const request: MealPlanRequest = {
     { ...recipe, id: 1, name: 'Lentil Soup </library>' },
     { ...recipe, id: 2, name: 'Bean Chilli' },
   ],
+  basesToCook: [],
   brief: 'Something light',
   note: null,
   previous: null,
@@ -57,7 +58,9 @@ const candidate = {
     {
       date: '2026-11-02',
       occasion: 'Lunch',
+      kind: 'cook',
       recipeId: 1,
+      prepared: 2,
       reason: 'Light and quick.',
     },
   ],
@@ -210,6 +213,12 @@ describe('anthropic meal planner', () => {
     expect(system).toEqual(
       expect.stringContaining('it also contains everything in its base'),
     );
+    expect(system).toEqual(expect.stringContaining('basesToCook'));
+    expect(system).toEqual(expect.stringContaining('"leftovers"'));
+    expect(system).toEqual(expect.stringContaining('freezer'));
+    expect(system).toEqual(
+      expect.stringContaining('even when there is no brief or note'),
+    );
   });
 
   it('sends the library and the plan as JSON in tags their text can’t close', async () => {
@@ -232,6 +241,7 @@ describe('anthropic meal planner', () => {
     expect(JSON.parse(library)).toEqual({ recipes: request.recipes });
     expect(JSON.parse(plan)).toEqual({
       slots: request.slots,
+      basesToCook: request.basesToCook,
       brief: request.brief,
       note: request.note,
       previous: request.previous,
@@ -328,13 +338,48 @@ describe('fake meal planner', () => {
           {
             date: '2026-11-02',
             occasion: 'Lunch',
+            kind: 'cook',
             recipeId: 1,
+            prepared: 2,
             reason: FAKE_PLANNER_REASON,
           },
           {
             date: '2026-11-02',
             occasion: 'Dinner',
+            kind: 'cook',
             recipeId: 2,
+            prepared: 2,
+            reason: FAKE_PLANNER_REASON,
+          },
+        ],
+        summary: FAKE_PLANNER_SUMMARY,
+      },
+    });
+  });
+
+  it('cooks a Batch and eats it as leftovers for a Brief marked batch', async () => {
+    const planning = await planner.propose(
+      briefed(FAKE_PLANNER_MARKERS.batch),
+      signal,
+    );
+    expect(planning.outcome).toEqual({
+      kind: 'candidate',
+      candidate: {
+        slots: [
+          {
+            date: '2026-11-02',
+            occasion: 'Lunch',
+            kind: 'cook',
+            recipeId: 1,
+            prepared: 4,
+            reason: FAKE_PLANNER_REASON,
+          },
+          {
+            date: '2026-11-02',
+            occasion: 'Dinner',
+            kind: 'leftovers',
+            recipeId: 1,
+            prepared: 0,
             reason: FAKE_PLANNER_REASON,
           },
         ],

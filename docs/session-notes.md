@@ -4,6 +4,58 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-10-28 — Batch cooking in Plan Proposals, and the "Plan with AI" entry (FEAT-76)
+
+**Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,199 tests green. Frontend: 1,054 green. e2e: 70 of 70, including the entry and its offline state, a Batch through review, Apply and the shopping list, and two new axe scans (a Batch at step 3, and review with a Batch and "left in plan", at phone width in both themes). Manual verification step 1 hasn't been run in the app. The FEAT-76 checkboxes are left for the user to tick.
+
+**Real adapter probe (same day):** two runs of `anthropic` (Opus 5.5, `medium`) against the 14-recipe dev library, from a scratchpad script and not the app. Each was a 7-day plan with two eating, a Batch Fixed meal of 6 on Sunday dinner, Wednesday lunch at headcount 0, and a fixed serving variation on Thursday dinner.
+- **Anthropic accepted the new reply schema.** Runs took 34.2 s and 39.0 s, with about 5,500 input and 3,500–4,100 output tokens. Nothing was dropped either time.
+- Both runs ate the fixed Batch at its slot plus two leftovers lunches, so nothing was left. They also proposed Batches of their own (4–6 portions) with leftovers slots that used them up.
+- Both used the headcount-0 slot to cook 4 portions of the fixed variation's base: 2 for Thursday's fixed bake and 2 for another variation on Saturday. That's `basesToCook` working, with no shortfall.
+- **With no Brief, the first run's summary was just "x".** The second run had a Brief, and its summary read it well ("I took 'light lunches' to mean…"), even saying no recipe contains spinach. 
+  - **Fixed the next day.** The prompt now says to always write the summary as one or two full sentences, even with no Brief or note, and gives an example. A tightened prompt alone gave an empty summary on the next run, so the reply schema's `summary` description was reworded too. It had said "The week in brief, and how the Brief was read", which seems to have read as optional with no Brief. Two further no-Brief runs each wrote a proper summary of the week's Batches and variety, with nothing dropped and nothing left. A prompt test checks the new wording. The review already hides an empty summary.
+- **Quality notes for FEAT-78:** the second run made 5 of its 12 open slots leftovers. Both runs repeated Tunacado within the week, though the dev library has few standalone dishes.
+
+**Agreed at kick-off** (all eight readings as proposed):
+- **The reply:** each slot entry is `{ date, occasion, kind: 'cook' | 'leftovers', recipeId, prepared, reason }`, with no nullable fields.
+  - `cook` needs `prepared` between the headcount (at least 1) and `MEAL_PLAN_BATCH_MAX_PORTIONS` (50); otherwise the slot is dropped and counted.
+  - Where nobody eats, `cook` is a prepared-only Batch on an `empty` slot. A leftovers entry, or anything invalid, is ignored there and not counted.
+  - `leftovers` becomes a `plan_meal` leftovers slot with `prepared = 0` and `eaten =` the headcount.
+- **A Batch Fixed meal** is `{ kind: 'batch', recipeId, portions }` (at most 50). It's allowed where nobody eats. `pruneFixedMeals` clears one whose portions fall below a new headcount.
+  - Step 3 refuses one below the headcount: an inline error, and Next is disabled.
+  - The server refuses it with `BAD_REQUEST` and `MEAL_PLAN_BATCH_TOO_SMALL`, before the model.
+- **`basesToCook`** on the planner request: one entry per fixed serving variation (a recipe or a Batch), giving its base, the portions it needs and the slot it's needed by. It's built by rule and doesn't net off other cooking.
+- **"Left in plan"** is a list in the review header, from `deriveBaseBalances`' end balances. No slot card prop changed.
+- **"Earlier in the plan"** on the server uses a new shared `compareSlotOrder` in `shared/src/lib/occasion-order.ts`: date, then `compareOccasionByName`. A leftover is kept if a strictly earlier slot prepares its recipe: a fixed recipe, a fixed Batch, or a proposed `cook` that survived. A leftover whose producer was dropped is dropped too.
+- Variations with no base cooked earlier are kept, and review shows the shortfall.
+- **The entry:** an outline "Plan with AI" button beside "New plan". Offline, it's disabled with "You're offline. Planning with AI needs a connection." In the wizard, offline disables "Plan my meals" (when it would propose), Try again, Another go, and "Make a new plan" in the confirm. Apply isn't affected.
+- Logging is unchanged. `fixedCount` counts a Batch.
+
+**Decided while building** (worth a look):
+- **`previous` on a rerun** now sends each slot's `dish: { kind, recipeId, prepared } | null`, not just `recipeId`, so the planner sees the Batches it proposed before.
+- **The fake planner** gained `[fake:batch]`: the first open slot cooks double its headcount, and the next eats the rest as leftovers. The e2e and procedure tests use it.
+- **`deriveBaseBalances` now sorts with the shared comparator,** then by slot id. The only change is for an occasion missing from `OCCASION_ORDER`: it now sorts by name rather than counting as 0. Only Lunch and Dinner exist.
+- **The review dialog was unchanged.** A suggested Batch where nobody eats gets Discard and Restore, but no Swap, because `canSwap` already needs someone eating.
+- **A swapped Batch** becomes an ordinary dish (`prepared = eaten =` headcount), so any leftovers that ate it show a shortfall.
+- **The prompt's new "Batch cooking" section** says one portion feeds one person, tells the model to use every Batch up and not plan for the freezer, explains `basesToCook`, and asks a Batch's reason to say when the rest is eaten.
+- **README** now names "Plan with AI".
+
+**Left as they are:**
+- **Hidden error:** pressing Change on a Batch at step 3 hides its portions input while the Batch stays fixed. If its portions were invalid, Next stays disabled with no visible reason until a recipe is picked again.
+- **The axe scan for review with a Batch** discards the last recipe slot as well as the leftovers, because the a11y fixture's library finishes the leftover base as a variation the next day. That's correct behaviour, but it hides "left in plan" otherwise.
+- **The e2e checks the shopping list by its contributor count** ("From 3 meals"), not a total, because the e2e household's headcount isn't fixed by the fixture.
+
+**After an independent review (2026-10-29), four fixes:**
+- **The model is now also asked** when every slot where people eat is fixed but an open slot nobody eats at comes before a fixed variation's base is needed, so the base can be batch-cooked there.
+- **A Batch Fixed meal whose slot grows past its portions is kept,** not pruned. Step 3 shows the portions error and disables Next until the cook fixes it.
+- **`MEAL_PLAN_BATCH_TOO_SMALL` has its own message.** It's only reachable if the client and server checks drift apart.
+- **A new page test** covers a fixed variation's base shortfall showing in review while Apply stays enabled.
+- **Left as notes:**
+  - A slot with more than 50 eating can't take a valid Batch.
+  - `compareSlotOrder` would sort inconsistently with a third, unordered occasion.
+
+---
+
 ## 2026-10-26 — Planning wizard, Plan Review and Apply (FEAT-75)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,175 tests green. Frontend: 1,028 green. e2e: 62 of 62, including the new wizard spec and four new axe scans (wizard and review, at phone width, in both themes). Manual verification steps 1–2 haven't been run, and nothing has been tried against the real `anthropic` adapter. The FEAT-75 checkboxes are left for the user to tick.

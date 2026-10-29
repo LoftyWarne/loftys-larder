@@ -12,13 +12,15 @@ import {
 
 // Canned outcomes for backend tests and e2e, chosen by a marker in the Brief.
 // Otherwise the library's recipes are proposed in turn, one per slot that
-// isn't fixed and has someone eating.
+// isn't fixed and has someone eating. With `batch`, the first such slot cooks
+// double its headcount and the next eats the rest as leftovers.
 export const FAKE_PLANNER_MARKERS = {
   refused: '[fake:refused]',
   timeout: '[fake:timeout]',
   unavailable: '[fake:unavailable]',
   invalid: '[fake:invalid]',
   rejected: '[fake:rejected]',
+  batch: '[fake:batch]',
 } as const;
 
 export const FAKE_PLANNER_MODEL = 'fake';
@@ -66,15 +68,32 @@ function proposeFake(
   const open = request.slots.filter(
     (slot) => slot.fixed === null && slot.headcount > 0,
   );
+  const batch = has('batch');
   const candidate: MealPlanCandidate = {
-    slots: open.flatMap((slot, index) => {
+    slots: open.flatMap((slot, index): MealPlanCandidate['slots'] => {
+      const first = request.recipes[0];
+      if (batch && index === 1 && first) {
+        return [
+          {
+            date: slot.date,
+            occasion: slot.occasion,
+            kind: 'leftovers',
+            recipeId: first.id,
+            prepared: 0,
+            reason: FAKE_PLANNER_REASON,
+          },
+        ];
+      }
       const recipe = request.recipes[index % request.recipes.length];
       return recipe
         ? [
             {
               date: slot.date,
               occasion: slot.occasion,
+              kind: 'cook',
               recipeId: recipe.id,
+              prepared:
+                batch && index === 0 ? slot.headcount * 2 : slot.headcount,
               reason: FAKE_PLANNER_REASON,
             },
           ]

@@ -1,15 +1,16 @@
-import type {
-  ApplyPlanSlot,
-  CreatePlanWithSlotsInput,
-  FixedMeal,
-  PlanOccasion,
-  PlanReviewCounts,
-  PlanSlot,
-  PlanSlotItem,
-  ProposedFiguresInput,
-  ProposedSlot,
-  ProposePlanInput,
-  ProposePlanResult,
+import {
+  MEAL_PLAN_BATCH_MAX_PORTIONS,
+  type ApplyPlanSlot,
+  type CreatePlanWithSlotsInput,
+  type FixedMeal,
+  type PlanOccasion,
+  type PlanReviewCounts,
+  type PlanSlot,
+  type PlanSlotItem,
+  type ProposedFiguresInput,
+  type ProposedSlot,
+  type ProposePlanInput,
+  type ProposePlanResult,
 } from '@loftys-larder/shared';
 
 import { eachDateInRange } from '@/lib/date-utils.ts';
@@ -39,9 +40,11 @@ export interface RecipeChoice {
   baseRecipeId: number | null;
 }
 
-// Leftovers can't be fixed: the model proposes them.
+// Leftovers can't be fixed: the model proposes them. A Batch cooks `portions`
+// in all, which may be NaN while the cook is typing it.
 export type FixedChoice =
   | { kind: 'recipe'; recipe: RecipeChoice }
+  | { kind: 'batch'; recipe: RecipeChoice; portions: number }
   | { kind: 'eat_out' }
   | { kind: 'takeaway' };
 
@@ -158,14 +161,51 @@ export function headcount(attendance: Attendance): number {
 export const NOBODY_EATING: Attendance = { dinerUserIds: [], guestCount: 0 };
 
 // A recipe can't be fixed where nobody eats: it would be neither prepared nor
-// eaten. Batches cooked for later arrive with batch cooking.
+// eaten. A Batch can: it's cooked there for later.
 export function canFixRecipe(attendance: Attendance): boolean {
   return headcount(attendance) > 0;
 }
 
+// Why a Batch's portions can't be used, or null. People eating at its slot
+// eat it there, so it cooks at least the headcount.
+export function batchPortionsError(
+  portions: number,
+  attendance: Attendance,
+): string | null {
+  const least = Math.max(headcount(attendance), 1);
+  if (!Number.isInteger(portions) || portions < least) {
+    return least === 1
+      ? 'Cook at least 1 portion.'
+      : `Cook at least ${String(least)} portions: everyone eating here eats it.`;
+  }
+  if (portions > MEAL_PLAN_BATCH_MAX_PORTIONS) {
+    return `Cook at most ${String(MEAL_PLAN_BATCH_MAX_PORTIONS)} portions.`;
+  }
+  return null;
+}
+
+// Slot keys whose Batch can't be used as it stands.
+export function invalidBatches(
+  inputs: Pick<WizardInputs, 'attendance' | 'fixed'>,
+  slots: readonly WizardSlotRef[],
+): string[] {
+  return slots.flatMap((slot) => {
+    const choice = inputs.fixed.get(slot.key);
+    if (choice?.kind !== 'batch') return [];
+    const attendance = resolveAttendance(
+      inputs.attendance,
+      slot.date,
+      slot.occasionId,
+    );
+    return batchPortionsError(choice.portions, attendance) ? [slot.key] : [];
+  });
+}
+
 // Keeps the Fixed meals the plan can still hold, after a change to the dates
-// or attendance: those in the range, and a recipe only where someone eats.
-// Returns the same map when nothing changed.
+// or attendance: those in the range, and a recipe only where someone eats. A
+// Batch that no longer cooks enough for its slot is kept, so step 3 can ask
+// for more portions rather than lose the recipe. Returns the same map when
+// nothing changed.
 export function pruneFixedMeals(
   inputs: Pick<WizardInputs, 'attendance' | 'fixed'>,
   slots: readonly WizardSlotRef[],
@@ -211,9 +251,18 @@ export function inputsSignature(inputs: WizardInputs): string {
 
 function fixedMeal(choice: FixedChoice | undefined): FixedMeal | null {
   if (!choice) return null;
-  return choice.kind === 'recipe'
-    ? { kind: 'recipe', recipeId: choice.recipe.id }
-    : { kind: choice.kind };
+  switch (choice.kind) {
+    case 'recipe':
+      return { kind: 'recipe', recipeId: choice.recipe.id };
+    case 'batch':
+      return {
+        kind: 'batch',
+        recipeId: choice.recipe.id,
+        portions: choice.portions,
+      };
+    default:
+      return { kind: choice.kind };
+  }
 }
 
 // The first proposal's input, or "Another go"'s: swapped slots go as Fixed
@@ -315,10 +364,15 @@ const EMPTY_CONTENT: SlotContent = {
   items: [],
 };
 
-// A recipe the cook chose eats the slot's headcount.
-function recipeContent(recipe: RecipeChoice, eaten: number): SlotContent {
+// A recipe the cook chose eats the slot's headcount. A Batch cooks more, and
+// where nobody eats it's prepared-only on an otherwise empty slot (DEC-91).
+function recipeContent(
+  recipe: RecipeChoice,
+  eaten: number,
+  prepared = eaten,
+): SlotContent {
   return {
-    slotType: 'recipe',
+    slotType: eaten > 0 ? 'recipe' : 'empty',
     leftoversSource: null,
     items: [
       {
@@ -328,12 +382,23 @@ function recipeContent(recipe: RecipeChoice, eaten: number): SlotContent {
         isBase: recipe.isBase,
         baseRecipeId: recipe.baseRecipeId,
         isDeleted: false,
-        prepared: eaten,
+        prepared,
         eaten,
         sortOrder: 0,
       },
     ],
   };
+}
+
+function fixedContent(choice: FixedChoice, eaten: number): SlotContent {
+  switch (choice.kind) {
+    case 'recipe':
+      return recipeContent(choice.recipe, eaten);
+    case 'batch':
+      return recipeContent(choice.recipe, eaten, choice.portions);
+    default:
+      return { ...EMPTY_CONTENT, slotType: choice.kind };
+  }
 }
 
 function suggestionContent(suggestion: ProposedSlot): SlotContent {
@@ -380,10 +445,7 @@ export function reviewPlanSlots(
       let reason: string | null = null;
       if (fixed) {
         kind = 'fixed';
-        content =
-          fixed.kind === 'recipe'
-            ? recipeContent(fixed.recipe, eaten)
-            : { ...EMPTY_CONTENT, slotType: fixed.kind };
+        content = fixedContent(fixed, eaten);
       } else if (reviewed?.status.kind === 'swapped') {
         kind = 'swapped';
         content = recipeContent(reviewed.status.recipe, eaten);
@@ -423,6 +485,30 @@ export function reviewPlanSlots(
       };
     },
   );
+}
+
+export interface LeftInPlan {
+  recipeId: number;
+  recipeName: string;
+  portions: number;
+}
+
+// Cooked portions not eaten by the end of the plan, from the consumption
+// walk's end balances (DEC-91), in the order the dishes first appear.
+export function leftInPlan(
+  slots: readonly PlanSlot[],
+  remaining: ReadonlyMap<number, number>,
+): LeftInPlan[] {
+  const names = new Map<number, string>();
+  for (const slot of slots) {
+    for (const item of slot.items) {
+      if (!names.has(item.recipeId)) names.set(item.recipeId, item.recipeName);
+    }
+  }
+  return [...names].flatMap(([recipeId, recipeName]) => {
+    const portions = remaining.get(recipeId) ?? 0;
+    return portions > 0 ? [{ recipeId, recipeName, portions }] : [];
+  });
 }
 
 export function figuresInput(

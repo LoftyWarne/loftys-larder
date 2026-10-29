@@ -4,7 +4,7 @@ import type {
   PlanListItem,
   PlanStatus,
 } from '@loftys-larder/shared';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 
 import { DuplicatePlanDialog } from '@/components/planner/duplicate-plan-dialog.tsx';
@@ -21,6 +21,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useOnlineStatus } from '@/hooks/use-online-status.ts';
 import { todayInLondon } from '@/lib/date-utils.ts';
 import { planErrorMessage } from '@/lib/plan-errors.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -57,6 +58,7 @@ function advance(iso: string, days: number): string {
 export function PlansPage(): React.ReactElement {
   const search = useSearch({ from: '/_authed/plans/' });
   const navigate = useNavigate();
+  const isOnline = useOnlineStatus();
   const utils = trpc.useUtils();
 
   const listQuery = trpc.plans.list.useQuery({ status: search.status });
@@ -155,15 +157,38 @@ export function PlansPage(): React.ReactElement {
     <section className="mx-auto max-w-3xl space-y-6">
       <header className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Plans</h1>
-        <Button
-          onClick={() => {
-            setNewPlanError(null);
-            setNewPlanOpen(true);
-          }}
-        >
-          New plan
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {isOnline ? (
+            <Button asChild variant="outline">
+              <Link to="/plans/propose">Plan with AI</Link>
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              disabled
+              aria-describedby="plan-with-ai-offline"
+            >
+              Plan with AI
+            </Button>
+          )}
+          <Button
+            onClick={() => {
+              setNewPlanError(null);
+              setNewPlanOpen(true);
+            }}
+          >
+            New plan
+          </Button>
+        </div>
       </header>
+      {!isOnline && (
+        <p
+          id="plan-with-ai-offline"
+          className="text-right text-sm text-muted-foreground"
+        >
+          You’re offline. Planning with AI needs a connection.
+        </p>
+      )}
 
       <div
         className="flex flex-wrap gap-2"

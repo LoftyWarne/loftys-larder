@@ -36,9 +36,21 @@ function entry(
   date: string,
   occasion: string,
   recipeId: number,
-  reason = 'A good fit.',
+  overrides: Partial<{
+    kind: 'cook' | 'leftovers';
+    prepared: number;
+    reason: string;
+  }> = {},
 ) {
-  return { date, occasion, recipeId, reason };
+  return {
+    date,
+    occasion,
+    kind: 'cook',
+    recipeId,
+    prepared: 2,
+    reason: 'A good fit.',
+    ...overrides,
+  };
 }
 
 describe('normalisePlanProposal', () => {
@@ -46,8 +58,8 @@ describe('normalisePlanProposal', () => {
     const proposal = normalisePlanProposal(
       {
         slots: [
-          entry('2026-11-02', 'Lunch', 10),
-          entry('2026-11-02', 'Dinner', 11),
+          entry('2026-11-02', 'Lunch', 10, { prepared: 1 }),
+          entry('2026-11-02', 'Dinner', 11, { prepared: 3 }),
         ],
         summary: 'A varied week.',
       },
@@ -104,10 +116,7 @@ describe('normalisePlanProposal', () => {
   it('leaves a slot nobody eats at empty, without counting it as dropped', () => {
     const proposal = normalisePlanProposal(
       {
-        slots: [
-          entry('2026-11-02', 'Lunch', 10),
-          entry('2026-11-02', 'Dinner', 11),
-        ],
+        slots: [entry('2026-11-02', 'Dinner', 11)],
         summary: '',
       },
       context([
@@ -170,7 +179,11 @@ describe('normalisePlanProposal', () => {
   it('strips markdown from reasons and the summary', () => {
     const proposal = normalisePlanProposal(
       {
-        slots: [entry('2026-11-02', 'Lunch', 10, '**Quick** and _light_.')],
+        slots: [
+          entry('2026-11-02', 'Lunch', 10, {
+            reason: '**Quick** and _light_.',
+          }),
+        ],
         summary: '# Week\n- Plenty of `veg`.',
       },
       context([slot('2026-11-02', LUNCH)]),
@@ -183,7 +196,7 @@ describe('normalisePlanProposal', () => {
     const reason = `${'word '.repeat(30)}end`;
     const summary = `${'plenty '.repeat(50)}end`;
     const proposal = normalisePlanProposal(
-      { slots: [entry('2026-11-02', 'Lunch', 10, reason)], summary },
+      { slots: [entry('2026-11-02', 'Lunch', 10, { reason })], summary },
       context([slot('2026-11-02', LUNCH)]),
     );
     expect(proposal?.slots[0]).toMatchObject({ slotType: 'recipe' });
@@ -194,7 +207,10 @@ describe('normalisePlanProposal', () => {
 
   it('treats an empty reason as none', () => {
     const proposal = normalisePlanProposal(
-      { slots: [entry('2026-11-02', 'Lunch', 10, '  ')], summary: '' },
+      {
+        slots: [entry('2026-11-02', 'Lunch', 10, { reason: '  ' })],
+        summary: '',
+      },
       context([slot('2026-11-02', LUNCH)]),
     );
     expect(proposal?.slots[0]).toMatchObject({
@@ -216,21 +232,259 @@ describe('normalisePlanProposal', () => {
     ).toBeNull();
   });
 
-  it('never proposes eat out, takeaway or leftovers', () => {
+  it('never proposes eat out, takeaway, or takeaway or other leftovers', () => {
     const proposal = normalisePlanProposal(
       {
         slots: [
-          entry('2026-11-02', 'Lunch', 10),
-          entry('2026-11-02', 'Dinner', 11),
+          entry('2026-11-02', 'Lunch', 10, { prepared: 4 }),
+          entry('2026-11-02', 'Dinner', 10, { kind: 'leftovers' }),
+          entry('2026-11-03', 'Lunch', 11, { prepared: 3 }),
         ],
         summary: '',
       },
-      context([slot('2026-11-02', LUNCH), slot('2026-11-02', DINNER)]),
+      context([
+        slot('2026-11-02', LUNCH),
+        slot('2026-11-02', DINNER),
+        slot('2026-11-03', LUNCH, { headcount: 0 }),
+      ]),
     );
     for (const proposed of proposal?.slots ?? []) {
-      expect(['recipe', 'empty']).toContain(proposed.slotType);
-      expect(proposed.leftoversSource).toBeNull();
+      expect(['recipe', 'leftovers', 'empty']).toContain(proposed.slotType);
+      expect([null, 'plan_meal']).toContain(proposed.leftoversSource);
     }
+  });
+
+  describe('Batches', () => {
+    it('keeps a dish that cooks more than its headcount, eating the headcount there', () => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [entry('2026-11-02', 'Dinner', 10, { prepared: 6 })],
+          summary: '',
+        },
+        context([slot('2026-11-02', DINNER)]),
+      );
+      expect(proposal?.slots[0]).toMatchObject({
+        slotType: 'recipe',
+        items: [{ recipeId: 10, prepared: 6, eaten: 2 }],
+      });
+      expect(proposal?.dropped).toBe(0);
+    });
+
+    it.each([
+      ['cooks fewer portions than its headcount', 1],
+      ['cooks more than the most a Batch may', 51],
+      ['cooks part of a portion', 2.5],
+    ])('empties and counts a dish that %s', (_label, prepared) => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [
+            entry('2026-11-02', 'Lunch', 10, { prepared }),
+            entry('2026-11-02', 'Dinner', 11),
+          ],
+          summary: '',
+        },
+        context([slot('2026-11-02', LUNCH), slot('2026-11-02', DINNER)]),
+      );
+      expect(proposal?.slots[0]).toMatchObject({ slotType: 'empty' });
+      expect(proposal?.dropped).toBe(1);
+    });
+
+    it('keeps a prepared-only Batch where nobody eats, on an otherwise empty slot', () => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [
+            entry('2026-11-01', 'Dinner', 10, {
+              prepared: 8,
+              reason: 'A Sunday cook-up.',
+            }),
+            entry('2026-11-02', 'Dinner', 11),
+          ],
+          summary: '',
+        },
+        context([
+          slot('2026-11-01', DINNER, { headcount: 0 }),
+          slot('2026-11-02', DINNER),
+        ]),
+      );
+      expect(proposal?.slots[0]).toEqual({
+        date: '2026-11-01',
+        occasionId: DINNER,
+        slotType: 'empty',
+        leftoversSource: null,
+        items: [{ recipeId: 10, prepared: 8, eaten: 0 }],
+        reason: 'A Sunday cook-up.',
+      });
+      expect(proposal?.dropped).toBe(0);
+    });
+
+    it.each([
+      ['a leftovers dish', { kind: 'leftovers' as const }],
+      ['a Batch of no portions', { prepared: 0 }],
+    ])(
+      'ignores %s where nobody eats, leaving the slot empty and uncounted',
+      (_label, overrides) => {
+        const proposal = normalisePlanProposal(
+          {
+            slots: [
+              entry('2026-11-01', 'Lunch', 10, { prepared: 4 }),
+              entry('2026-11-01', 'Dinner', 10, overrides),
+            ],
+            summary: '',
+          },
+          context([
+            slot('2026-11-01', LUNCH),
+            slot('2026-11-01', DINNER, { headcount: 0 }),
+          ]),
+        );
+        expect(proposal?.slots[1]).toMatchObject({
+          slotType: 'empty',
+          items: [],
+        });
+        expect(proposal?.dropped).toBe(0);
+      },
+    );
+  });
+
+  describe('leftovers', () => {
+    it('keeps a plan-meal leftover of a dish cooked earlier, eating the headcount', () => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [
+            entry('2026-11-02', 'Lunch', 10, { kind: 'leftovers' }),
+            entry('2026-11-01', 'Dinner', 10, { prepared: 4 }),
+          ],
+          summary: '',
+        },
+        context([
+          slot('2026-11-02', LUNCH, { headcount: 3 }),
+          slot('2026-11-01', DINNER),
+        ]),
+      );
+      expect(proposal?.slots[0]).toMatchObject({
+        slotType: 'leftovers',
+        leftoversSource: 'plan_meal',
+        items: [{ recipeId: 10, prepared: 0, eaten: 3 }],
+      });
+      expect(proposal?.dropped).toBe(0);
+    });
+
+    it('keeps a leftover of a Batch cooked where nobody eats', () => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [
+            entry('2026-11-01', 'Dinner', 10, { prepared: 6 }),
+            entry('2026-11-02', 'Dinner', 10, { kind: 'leftovers' }),
+          ],
+          summary: '',
+        },
+        context([
+          slot('2026-11-01', DINNER, { headcount: 0 }),
+          slot('2026-11-02', DINNER),
+        ]),
+      );
+      expect(proposal?.slots[1]).toMatchObject({ slotType: 'leftovers' });
+    });
+
+    it.each([
+      [
+        'a Batch Fixed meal',
+        { kind: 'batch' as const, recipeId: 10, portions: 6 },
+      ],
+      ['a fixed recipe', { kind: 'recipe' as const, recipeId: 10 }],
+    ])('keeps a leftover of %s earlier in the plan', (_label, fixed) => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [entry('2026-11-02', 'Dinner', 10, { kind: 'leftovers' })],
+          summary: '',
+        },
+        context([
+          slot('2026-11-01', DINNER, { fixed }),
+          slot('2026-11-02', DINNER),
+        ]),
+      );
+      expect(proposal?.slots).toHaveLength(1);
+      expect(proposal?.slots[0]).toMatchObject({ slotType: 'leftovers' });
+    });
+
+    it('drops a leftover whose dish is cooked only later, or at the same slot', () => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [
+            entry('2026-11-02', 'Lunch', 10, { kind: 'leftovers' }),
+            entry('2026-11-02', 'Dinner', 10, { prepared: 4 }),
+            entry('2026-11-03', 'Dinner', 11, { kind: 'leftovers' }),
+          ],
+          summary: '',
+        },
+        context([
+          slot('2026-11-02', LUNCH),
+          slot('2026-11-02', DINNER),
+          slot('2026-11-03', DINNER),
+        ]),
+      );
+      expect(proposal?.slots.map((s) => s.slotType)).toEqual([
+        'empty',
+        'recipe',
+        'empty',
+      ]);
+      expect(proposal?.dropped).toBe(2);
+    });
+
+    it('drops a leftover whose earlier dish was itself dropped', () => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [
+            entry('2026-11-01', 'Dinner', 10, { prepared: 1 }),
+            entry('2026-11-02', 'Dinner', 10, { kind: 'leftovers' }),
+            entry('2026-11-03', 'Dinner', 11),
+          ],
+          summary: '',
+        },
+        context([
+          slot('2026-11-01', DINNER),
+          slot('2026-11-02', DINNER),
+          slot('2026-11-03', DINNER),
+        ]),
+      );
+      expect(proposal?.slots.map((s) => s.slotType)).toEqual([
+        'empty',
+        'empty',
+        'recipe',
+      ]);
+      expect(proposal?.dropped).toBe(2);
+    });
+
+    it('drops a leftover of a recipe that isn’t pickable', () => {
+      const proposal = normalisePlanProposal(
+        {
+          slots: [
+            entry('2026-11-02', 'Dinner', 99, { kind: 'leftovers' }),
+            entry('2026-11-03', 'Dinner', 11),
+          ],
+          summary: '',
+        },
+        context([
+          slot('2026-11-01', DINNER, {
+            fixed: { kind: 'batch', recipeId: 99, portions: 6 },
+          }),
+          slot('2026-11-02', DINNER),
+          slot('2026-11-03', DINNER),
+        ]),
+      );
+      expect(proposal?.slots[0]).toMatchObject({ slotType: 'empty' });
+    });
+  });
+
+  it('keeps a serving variation whose base isn’t cooked earlier, leaving the shortfall to review', () => {
+    // 12 is a variation; whether its base was cooked is a balance, not a rule.
+    const proposal = normalisePlanProposal(
+      { slots: [entry('2026-11-02', 'Dinner', 12)], summary: '' },
+      context([slot('2026-11-02', DINNER)]),
+    );
+    expect(proposal?.slots[0]).toMatchObject({
+      slotType: 'recipe',
+      items: [{ recipeId: 12, prepared: 2, eaten: 2 }],
+    });
   });
 });
 

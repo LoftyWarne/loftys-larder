@@ -419,6 +419,92 @@ describe('plan apply and review procedures', () => {
       ]);
     });
 
+    it('writes Batches and leftovers as the planner does, and the shopping list provisions every prepared portion', async () => {
+      const keema = await seedRecipe({ name: 'Keema' });
+      const chilli = await seedRecipe({ name: 'Bean Chilli' });
+      const soup = await seedRecipe({ name: 'Lentil Soup' });
+      const leftovers = (recipeId: number) => ({
+        slotType: 'leftovers' as const,
+        leftoversSource: 'plan_meal' as const,
+        items: [{ recipeId, prepared: 0, eaten: 2, sortOrder: 0 }],
+      });
+
+      const { plan } = await caller().plans.createWithSlots(
+        input({
+          slots: slots((slot) => {
+            const at = (day: number, occasionId: number) =>
+              slot.date === dates[day] && slot.occasionId === occasionId;
+            // A prepared-only Batch where nobody eats.
+            if (at(0, lunchId)) {
+              return {
+                dinerUserIds: [],
+                items: [
+                  { recipeId: keema, prepared: 4, eaten: 0, sortOrder: 0 },
+                ],
+              };
+            }
+            // A Batch Fixed meal, eaten by the headcount at its slot.
+            if (at(0, dinnerId)) {
+              return {
+                slotType: 'recipe',
+                items: [
+                  { recipeId: chilli, prepared: 6, eaten: 2, sortOrder: 0 },
+                ],
+              };
+            }
+            if (at(1, lunchId)) return leftovers(keema);
+            if (at(1, dinnerId)) return leftovers(chilli);
+            // A proposed Batch.
+            if (at(2, lunchId)) {
+              return {
+                slotType: 'recipe',
+                items: [
+                  { recipeId: soup, prepared: 4, eaten: 2, sortOrder: 0 },
+                ],
+              };
+            }
+            return leftovers(soup);
+          }),
+        }),
+      );
+
+      const saved = await caller().plans.get({ id: plan.id });
+      expect(
+        saved.slots.map((slot) => [
+          slot.slotType,
+          slot.leftoversSource,
+          slot.items.map((item) => [
+            item.recipeName,
+            item.prepared,
+            item.eaten,
+          ]),
+        ]),
+      ).toEqual([
+        ['empty', null, [['Keema', 4, 0]]],
+        ['recipe', null, [['Bean Chilli', 6, 2]]],
+        ['leftovers', 'plan_meal', [['Keema', 0, 2]]],
+        ['leftovers', 'plan_meal', [['Bean Chilli', 0, 2]]],
+        ['recipe', null, [['Lentil Soup', 4, 2]]],
+        ['leftovers', 'plan_meal', [['Lentil Soup', 0, 2]]],
+      ]);
+
+      // 100 g of lentils per 4 portions, for the 14 portions cooked.
+      const list = await caller().shopping.getForPlan({ planId: plan.id });
+      const line = list.categories[0]?.lines[0];
+      expect(line?.ingredient.name).toBe('Red Lentils');
+      expect(line?.totalQuantity).toBe('350.000');
+      expect(
+        line?.contributingSlots.map((contribution) => [
+          contribution.recipeName,
+          contribution.scaledQuantity,
+        ]),
+      ).toEqual([
+        ['Keema', '100.000'],
+        ['Bean Chilli', '150.000'],
+        ['Lentil Soup', '100.000'],
+      ]);
+    });
+
     it('refuses dates that now clash with plan creation’s error, writing nothing', async () => {
       await seedSavedPlan();
       await expect(

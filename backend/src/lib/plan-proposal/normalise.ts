@@ -1,8 +1,11 @@
 import {
+  MEAL_PLAN_BATCH_MAX_PORTIONS,
   MEAL_PLAN_REASON_MAX_LENGTH,
   MEAL_PLAN_SUMMARY_MAX_LENGTH,
+  compareSlotOrder,
   mealPlanCandidateSchema,
   type FixedMeal,
+  type MealPlanCandidate,
   type PlanProposal,
   type PlanProposalSlot,
 } from '../../../../shared/src/index.ts';
@@ -11,12 +14,18 @@ import { stripMarkdown } from '../model-features/plain-text.ts';
 // The one gate every planner's output passes before the cook sees it,
 // whichever adapter produced it (DEC-117). Model output is untrusted:
 //   - only slots that aren't fixed are returned, so a Fixed meal can't change;
-//   - a slot nobody eats at stays empty;
-//   - each other slot gets exactly one pickable recipe from the household,
-//     eaten by its headcount, or is emptied and counted in `dropped`;
+//   - each slot with someone eating gets exactly one pickable recipe from the
+//     household, eaten by its headcount, or is emptied and counted in
+//     `dropped`. A "cook" dish cooks at least the headcount; a "leftovers"
+//     dish (`plan_meal`, DEC-90) eats a recipe cooked at an earlier slot;
+//   - a slot nobody eats at may cook a Batch for later (prepared-only,
+//     DEC-91). Anything else there is ignored and the slot stays empty;
 //   - text is stripped of markdown (DEC-49) and cut at a word when too long.
 //     Unlike a Health Score's, reasons and the summary are never stored, so a
 //     long one isn't worth a rerun.
+// Quantities are checked by rule after this (DEC-110 rule 3): a Batch not
+// used up, or a dish eaten before enough was cooked, shows as a warning in
+// review, never as a failure here.
 // Null means "try again": the reply wasn't a candidate, or every slot that
 // needed a dish was dropped.
 
@@ -34,6 +43,8 @@ export interface ProposalContext {
   pickableRecipeIds: ReadonlySet<number>;
 }
 
+type CandidateEntry = MealPlanCandidate['slots'][number];
+
 export function normalisePlanProposal(
   candidate: unknown,
   context: ProposalContext,
@@ -46,46 +57,107 @@ export function normalisePlanProposal(
   );
 
   // The first entry for a slot wins.
-  const entries = new Map<string, (typeof parsed.data.slots)[number]>();
+  const entries = new Map<string, CandidateEntry>();
   for (const entry of parsed.data.slots) {
     const key = slotKey(entry.date, entry.occasion);
     if (!entries.has(key)) entries.set(key, entry);
   }
 
+  // Walked in the consumption walk's order (DEC-88), so a leftovers dish can
+  // only eat what a strictly earlier slot cooked.
+  const walk = context.slots
+    .map((slot, index) => ({ slot, index }))
+    .sort(
+      (a, b) =>
+        compareSlotOrder(
+          { date: a.slot.date, occasionName: a.slot.occasion },
+          { date: b.slot.date, occasionName: b.slot.occasion },
+        ) || a.index - b.index,
+    );
+  const cookedEarlier = new Set<number>();
+  const normalised = new Map<number, PlanProposalSlot>();
   let dropped = 0;
   let needed = 0;
-  const slots = context.slots
-    .filter((slot) => slot.fixed === null)
-    .map((slot): PlanProposalSlot => {
-      if (slot.headcount === 0) return emptySlot(slot);
-      needed += 1;
-      const entry = entries.get(slotKey(slot.date, slot.occasion));
-      if (!entry || !context.pickableRecipeIds.has(entry.recipeId)) {
-        dropped += 1;
-        return emptySlot(slot);
+  for (const { slot, index } of walk) {
+    if (slot.fixed !== null) {
+      const cooked = fixedRecipeCooked(slot);
+      if (cooked !== null) cookedEarlier.add(cooked);
+      continue;
+    }
+    const entry = entries.get(slotKey(slot.date, slot.occasion));
+    if (slot.headcount > 0) needed += 1;
+    const result =
+      entry && context.pickableRecipeIds.has(entry.recipeId)
+        ? normaliseEntry(slot, entry, cookedEarlier)
+        : null;
+    if (result) {
+      normalised.set(index, result);
+      for (const item of result.items) {
+        if (item.prepared > 0) cookedEarlier.add(item.recipeId);
       }
-      const reason = cutAtWord(
-        stripMarkdown(entry.reason),
-        MEAL_PLAN_REASON_MAX_LENGTH,
-      );
-      return {
-        date: slot.date,
-        occasionId: slot.occasionId,
-        slotType: 'recipe',
-        leftoversSource: null,
-        items: [
-          {
-            recipeId: entry.recipeId,
-            prepared: slot.headcount,
-            eaten: slot.headcount,
-          },
-        ],
-        reason: reason === '' ? null : reason,
-      };
-    });
+    } else {
+      // A slot nobody eats at needed nothing, so it isn't counted.
+      if (slot.headcount > 0) dropped += 1;
+      normalised.set(index, emptySlot(slot));
+    }
+  }
 
   if (needed > 0 && dropped === needed) return null;
+  const slots = context.slots.flatMap((slot, index) => {
+    const result = normalised.get(index);
+    return result ? [result] : [];
+  });
   return { slots, summary, dropped };
+}
+
+// The recipe a Fixed meal cooks, if any.
+function fixedRecipeCooked(slot: ProposalSlotContext): number | null {
+  const fixed = slot.fixed;
+  if (fixed?.kind === 'batch') return fixed.recipeId;
+  if (fixed?.kind === 'recipe' && slot.headcount > 0) return fixed.recipeId;
+  return null;
+}
+
+function normaliseEntry(
+  slot: ProposalSlotContext,
+  entry: CandidateEntry,
+  cookedEarlier: ReadonlySet<number>,
+): PlanProposalSlot | null {
+  const reasonText = cutAtWord(
+    stripMarkdown(entry.reason),
+    MEAL_PLAN_REASON_MAX_LENGTH,
+  );
+  const reason = reasonText === '' ? null : reasonText;
+  const base = {
+    date: slot.date,
+    occasionId: slot.occasionId,
+    reason,
+  };
+  const { headcount } = slot;
+  if (entry.kind === 'leftovers') {
+    if (headcount === 0 || !cookedEarlier.has(entry.recipeId)) return null;
+    return {
+      ...base,
+      slotType: 'leftovers',
+      leftoversSource: 'plan_meal',
+      items: [{ recipeId: entry.recipeId, prepared: 0, eaten: headcount }],
+    };
+  }
+  const prepared = entry.prepared;
+  const cap = Math.max(MEAL_PLAN_BATCH_MAX_PORTIONS, headcount);
+  if (
+    !Number.isInteger(prepared) ||
+    prepared < Math.max(headcount, 1) ||
+    prepared > cap
+  ) {
+    return null;
+  }
+  return {
+    ...base,
+    slotType: headcount === 0 ? 'empty' : 'recipe',
+    leftoversSource: null,
+    items: [{ recipeId: entry.recipeId, prepared, eaten: headcount }],
+  };
 }
 
 export function emptySlot(

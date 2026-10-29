@@ -2,7 +2,7 @@ import type { ListPlansResult, PlanListItem } from '@loftys-larder/shared';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   listUseQueryMock,
@@ -127,7 +127,57 @@ beforeEach(() => {
   deleteMutationOptions = {};
 });
 
+function setOnline(value: boolean): void {
+  Object.defineProperty(navigator, 'onLine', {
+    configurable: true,
+    get: () => value,
+  });
+}
+
 describe('PlansPage', () => {
+  describe('Plan with AI', () => {
+    afterEach(() => {
+      setOnline(true);
+    });
+
+    it('links to the planning wizard beside the new-plan action', () => {
+      setup();
+      render(<PlansPage />);
+
+      // The router mock renders `to` as is, so the anchor has no href.
+      expect(screen.getByText('Plan with AI').closest('a')).toHaveAttribute(
+        'to',
+        '/plans/propose',
+      );
+      expect(screen.getByRole('button', { name: 'New plan' })).toBeEnabled();
+    });
+
+    it('is off while offline, and says why', () => {
+      setOnline(false);
+      setup();
+      render(<PlansPage />);
+
+      expect(screen.getByText('Plan with AI').closest('a')).toBeNull();
+      const entry = screen.getByRole('button', { name: 'Plan with AI' });
+      expect(entry).toBeDisabled();
+      expect(entry).toHaveAccessibleDescription(
+        'You’re offline. Planning with AI needs a connection.',
+      );
+    });
+
+    it('turns back on when the connection returns', () => {
+      setOnline(false);
+      setup();
+      render(<PlansPage />);
+      setOnline(true);
+      act(() => {
+        window.dispatchEvent(new Event('online'));
+      });
+
+      expect(screen.getByText('Plan with AI').closest('a')).not.toBeNull();
+    });
+  });
+
   it('renders the active filter as selected by default and lists plans', () => {
     setup();
     render(<PlansPage />);

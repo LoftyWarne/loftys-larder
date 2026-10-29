@@ -17,6 +17,9 @@ export const WIZARD_END = civilDate(61);
 
 // The fake planner refuses a Brief carrying its refusal marker.
 export const FAKE_REFUSED_BRIEF = 'Anything [fake:refused]';
+// With its batch marker, it cooks a Batch at the first open slot and eats
+// the rest as leftovers at the next.
+export const FAKE_BATCH_BRIEF = 'Batch cook [fake:batch]';
 
 export async function seedWizardRecipes(): Promise<void> {
   for (const name of ['Lentil Soup', 'Bean Chilli', 'Fish Pie']) {

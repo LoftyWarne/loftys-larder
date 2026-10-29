@@ -18,11 +18,20 @@ export const MEAL_PLAN_BRIEF_MAX_LENGTH = 500;
 export const MEAL_PLAN_NOTE_MAX_LENGTH = 200;
 export const MEAL_PLAN_REASON_MAX_LENGTH = 120;
 export const MEAL_PLAN_SUMMARY_MAX_LENGTH = 300;
+// The most portions one Batch may cook, fixed or proposed.
+export const MEAL_PLAN_BATCH_MAX_PORTIONS = 50;
 
 // A Fixed meal: the model plans around it and never changes it. `empty` is
-// sent only on "Another go", for a slot the cook discarded in review.
+// sent only on "Another go", for a slot the cook discarded in review. A
+// `batch` cooks `portions` in all: people eating at its slot eat it there, and
+// the rest is planned to be eaten later in the plan.
 export const fixedMealSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('recipe'), recipeId: recipeIdSchema }),
+  z.object({
+    kind: z.literal('batch'),
+    recipeId: recipeIdSchema,
+    portions: z.number().int().positive().max(MEAL_PLAN_BATCH_MAX_PORTIONS),
+  }),
   z.object({ kind: z.literal('eat_out') }),
   z.object({ kind: z.literal('takeaway') }),
   z.object({ kind: z.literal('empty') }),
@@ -155,8 +164,14 @@ export const mealPlanRecipeSchema = z.object({
 
 export type MealPlanRecipe = z.infer<typeof mealPlanRecipeSchema>;
 
+export const mealPlanDishKindSchema = z.enum(['cook', 'leftovers']);
+
+export type MealPlanDishKind = z.infer<typeof mealPlanDishKindSchema>;
+
 // What the planner is sent, and all it's sent (DEC-117). Headcounts only:
-// never who the diners are.
+// never who the diners are. `basesToCook` marks the base of each fixed serving
+// variation, with the portions it needs by that slot, so the planner can
+// Batch-cook it earlier.
 export const mealPlanRequestSchema = z.object({
   slots: z.array(
     z.object({
@@ -164,6 +179,13 @@ export const mealPlanRequestSchema = z.object({
       occasion: z.string(),
       headcount: z.number().int().nonnegative(),
       fixed: fixedMealSchema.nullable(),
+    }),
+  ),
+  basesToCook: z.array(
+    z.object({
+      baseRecipeId: recipeIdSchema,
+      portions: z.number().int().positive(),
+      neededBy: z.object({ date: civilDateSchema, occasion: z.string() }),
     }),
   ),
   recipes: z.array(mealPlanRecipeSchema),
@@ -175,7 +197,13 @@ export const mealPlanRequestSchema = z.object({
         z.object({
           date: civilDateSchema,
           occasion: z.string(),
-          recipeId: recipeIdSchema.nullable(),
+          dish: z
+            .object({
+              kind: mealPlanDishKindSchema,
+              recipeId: recipeIdSchema,
+              prepared: z.number().int().nonnegative(),
+            })
+            .nullable(),
         }),
       ),
       summary: z.string(),
@@ -192,13 +220,23 @@ export const mealPlanCandidateSchema = z.object({
     z.object({
       date: z.string().describe('The slot’s date, as YYYY-MM-DD.'),
       occasion: z.string().describe('The slot’s occasion, as sent.'),
+      kind: mealPlanDishKindSchema.describe(
+        '"cook" to cook the recipe here, "leftovers" to eat portions cooked at an earlier slot.',
+      ),
       recipeId: z.number().describe('The id of one recipe from the library.'),
+      prepared: z
+        .number()
+        .describe(
+          'For "cook", the portions cooked here in all, at least the headcount. 0 for "leftovers".',
+        ),
       reason: z.string().describe('Why this recipe here, in plain text.'),
     }),
   ),
   summary: z
     .string()
-    .describe('The week in brief, and how the Brief was read, in plain text.'),
+    .describe(
+      'One or two full sentences on the plan as a whole, always written, even with no brief. With a brief or note, also how it was read. Plain text.',
+    ),
 });
 
 export type MealPlanCandidate = z.infer<typeof mealPlanCandidateSchema>;

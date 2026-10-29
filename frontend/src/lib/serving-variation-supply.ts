@@ -1,4 +1,4 @@
-import { OCCASION_ORDER, type PlanSlot } from '@loftys-larder/shared';
+import { compareSlotOrder, type PlanSlot } from '@loftys-larder/shared';
 
 // Cooked portions are a per-recipe pool that meals draw down (DEC-88/DEC-91;
 // 1:1). Walking the plan in cook-before-eat order (date, then occasion: Lunch <
@@ -21,7 +21,9 @@ export interface BaseBalances {
 }
 
 export function deriveBaseBalances(slots: readonly PlanSlot[]): BaseBalances {
-  const ordered = [...slots].sort(compareSlotOrder);
+  const ordered = [...slots].sort(
+    (a, b) => compareSlotOrder(a, b) || a.id - b.id,
+  );
   const balance = new Map<number, number>();
   const shortfallBySlot = new Map<number, number>();
   const shortfallByItem = new Map<number, number>();
@@ -72,12 +74,4 @@ export function itemConsumedBase(item: {
   baseRecipeId: number | null;
 }): number | null {
   return item.isBase ? item.recipeId : item.baseRecipeId;
-}
-
-function compareSlotOrder(a: PlanSlot, b: PlanSlot): number {
-  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-  const aOrder = OCCASION_ORDER[a.occasionName] ?? 0;
-  const bOrder = OCCASION_ORDER[b.occasionName] ?? 0;
-  if (aOrder !== bOrder) return aOrder - bOrder;
-  return a.id - b.id;
 }

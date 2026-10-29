@@ -5,12 +5,14 @@ import { Button } from '@/components/ui/button.tsx';
 // While the Plan Proposal is being made, and if it fails.
 export interface ProposalStatusProps {
   error: string | null;
+  offline?: boolean;
   onRetry: () => void;
   onBack: () => void;
 }
 
 export function ProposalStatus({
   error,
+  offline = false,
   onRetry,
   onBack,
 }: ProposalStatusProps): React.ReactElement {
@@ -33,11 +35,16 @@ export function ProposalStatus({
       <p role="alert" className="text-sm text-destructive">
         {error}
       </p>
+      {offline && (
+        <p className="text-sm text-muted-foreground">
+          You’re offline. Planning with AI needs a connection.
+        </p>
+      )}
       <div className="flex justify-between gap-2">
         <Button type="button" variant="outline" onClick={onBack}>
           Back
         </Button>
-        <Button type="button" onClick={onRetry}>
+        <Button type="button" onClick={onRetry} disabled={offline}>
           Try again
         </Button>
       </div>

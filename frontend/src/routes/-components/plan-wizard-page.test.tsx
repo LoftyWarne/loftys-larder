@@ -7,7 +7,8 @@ import type {
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   navigateMock,
@@ -276,7 +277,13 @@ describe('who’s eating and Fixed meals', () => {
       within(lunch)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['Plan it for me', 'A recipe', 'Eat out', 'Takeaway']);
+    ).toEqual([
+      'Plan it for me',
+      'A recipe',
+      'A batch to cook',
+      'Eat out',
+      'Takeaway',
+    ]);
     await user.selectOptions(lunch, 'recipe');
     await user.type(screen.getByLabelText(/^Recipe, Lunch, Mon/), 'Roast');
     await user.click(
@@ -300,6 +307,109 @@ describe('who’s eating and Fixed meals', () => {
       { kind: 'eat_out' },
       null,
     ]);
+  });
+
+  it('fixes a Batch, refusing fewer portions than the slot’s headcount', async () => {
+    const user = userEvent.setup();
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    await user.selectOptions(
+      screen.getByLabelText(/^Fixed meal, Dinner, Mon/),
+      'batch',
+    );
+    await user.type(screen.getByLabelText(/^Recipe, Dinner, Mon/), 'Roast');
+    await user.click(
+      await screen.findByRole('option', { name: /Sunday Roast/ }),
+    );
+    const portions = screen.getByLabelText('Portions cooked');
+    expect(portions).toHaveValue(4);
+    expect(portions).toHaveAccessibleDescription(
+      '2 eat it here. The rest is planned for later in the plan.',
+    );
+
+    await user.clear(portions);
+    await user.type(portions, '1');
+    expect(portions).toHaveAccessibleDescription(
+      'Cook at least 2 portions: everyone eating here eats it.',
+    );
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+
+    await user.clear(portions);
+    await user.type(portions, '6');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Plan my meals' }));
+
+    expect(lastProposeInput().slots[1]?.fixed).toEqual({
+      kind: 'batch',
+      recipeId: 31,
+      portions: 6,
+    });
+  });
+
+  it('keeps a Batch whose slot grew past its portions, asking for more', async () => {
+    const user = userEvent.setup();
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.selectOptions(
+      screen.getByLabelText(/^Fixed meal, Dinner, Mon/),
+      'batch',
+    );
+    await user.type(screen.getByLabelText(/^Recipe, Dinner, Mon/), 'Roast');
+    await user.click(
+      await screen.findByRole('option', { name: /Sunday Roast/ }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    const guests = screen.getByLabelText('Guests, every meal');
+    await user.clear(guests);
+    await user.type(guests, '3');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(
+      screen.getByRole('button', { name: /^Change recipe, Dinner, Mon/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Sunday Roast')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Portions cooked'),
+    ).toHaveAccessibleDescription(
+      'Cook at least 5 portions: everyone eating here eats it.',
+    );
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('fixes a Batch where nobody eats, but not a recipe', async () => {
+    const user = userEvent.setup();
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(
+      screen.getByRole('button', { name: /^Nobody eating, Lunch, Mon/ }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    const lunch = screen.getByLabelText(/^Fixed meal, Lunch, Mon/);
+    expect(
+      within(lunch).getByRole('option', { name: 'A recipe' }),
+    ).toBeDisabled();
+    await user.selectOptions(lunch, 'batch');
+    await user.type(screen.getByLabelText(/^Recipe, Lunch, Mon/), 'Roast');
+    await user.click(
+      await screen.findByRole('option', { name: /Sunday Roast/ }),
+    );
+    expect(
+      screen.getByLabelText('Portions cooked'),
+    ).toHaveAccessibleDescription(
+      'Nobody eats it here. It’s all planned for later in the plan.',
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Plan my meals' }));
+
+    expect(lastProposeInput().slots[0]).toMatchObject({
+      dinerUserIds: [],
+      fixed: { kind: 'batch', recipeId: 31, portions: 4 },
+    });
   });
 
   it('drops a Fixed meal whose date left the range, so it can’t return where nobody eats', async () => {
@@ -372,6 +482,10 @@ describe('asking for a proposal', () => {
       domainError('MEAL_PLAN_NO_RECIPES'),
       'There are no recipes to plan from yet.',
     ],
+    [
+      domainError('MEAL_PLAN_BATCH_TOO_SMALL'),
+      'A batch cooks fewer portions than the people eating at its meal.',
+    ],
   ])('shows an error plainly (%#)', async (error, message) => {
     const user = userEvent.setup();
     proposeMock.mockRejectedValueOnce(error);
@@ -427,6 +541,89 @@ describe('Plan Review', () => {
       },
       expect.anything(),
     );
+  });
+
+  it('shows what’s left in the plan, and updates it after a discard', async () => {
+    const user = userEvent.setup();
+    const batch = suggestion(MON, LUNCH.id, 21, 'Lentil Soup');
+    proposeMock.mockResolvedValueOnce({
+      ...PROPOSAL,
+      slots: [
+        {
+          ...batch,
+          items: batch.items.map((item) => ({ ...item, prepared: 6 })),
+        },
+        suggestion(MON, DINNER.id, 22, 'Bean Chilli'),
+        {
+          ...suggestion(TUE, LUNCH.id, 21, 'Lentil Soup'),
+          slotType: 'leftovers',
+          leftoversSource: 'plan_meal',
+          items: batch.items.map((item) => ({ ...item, prepared: 0 })),
+        },
+        suggestion(TUE, DINNER.id, 24, 'Fish Pie'),
+      ],
+    } satisfies ProposePlanResult);
+    render(<PlanWizardPage />);
+    await toReview(user);
+
+    const left = screen.getByRole('list', { name: 'Left in plan' });
+    expect(left).toHaveTextContent('Lentil Soup: 2 left in plan');
+
+    await user.click(
+      screen.getByRole('button', { name: /^Lunch on 2026-11-03/ }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(
+      await screen.findByRole('list', { name: 'Left in plan' }),
+    ).toHaveTextContent('Lentil Soup: 4 left in plan');
+  });
+
+  it('shows a fixed variation’s base shortfall in review, and still applies', async () => {
+    const user = userEvent.setup();
+    recipesFetchMock.mockResolvedValue({
+      items: [
+        {
+          id: 41,
+          name: 'Tomato Pasta',
+          imageUrl: null,
+          isBase: false,
+          baseRecipeId: 40,
+          isDeleted: false,
+        },
+      ],
+    });
+    proposeMock.mockResolvedValueOnce({
+      ...PROPOSAL,
+      slots: [
+        suggestion(MON, LUNCH.id, 21, 'Lentil Soup'),
+        suggestion(TUE, LUNCH.id, 23, 'Green Salad'),
+        suggestion(TUE, DINNER.id, 24, 'Fish Pie'),
+      ],
+    } satisfies ProposePlanResult);
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.selectOptions(
+      screen.getByLabelText(/^Fixed meal, Dinner, Mon/),
+      'recipe',
+    );
+    await user.type(screen.getByLabelText(/^Recipe, Dinner, Mon/), 'Pasta');
+    await user.click(
+      await screen.findByRole('option', { name: /Tomato Pasta/ }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Plan my meals' }));
+    await screen.findByRole('heading', { name: /^Review/ });
+
+    const dinner = screen.getByRole('button', {
+      name: /^Dinner on 2026-11-02/,
+    });
+    const slot = dinner.closest<HTMLElement>('[data-slot-id]');
+    expect(slot).not.toBeNull();
+    expect(
+      within(slot ?? dinner).getByTestId('slot-item-shortfall'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
   });
 
   it('swaps, discards and restores, then applies what was kept', async () => {
@@ -587,5 +784,64 @@ describe('Plan Review', () => {
     };
     expect(options.shouldBlockFn()).toBe(true);
     expect(applyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('offline', () => {
+  function setOnline(value: boolean): void {
+    Object.defineProperty(navigator, 'onLine', {
+      configurable: true,
+      get: () => value,
+    });
+    act(() => {
+      window.dispatchEvent(new Event(value ? 'online' : 'offline'));
+    });
+  }
+
+  afterEach(() => {
+    setOnline(true);
+  });
+
+  it('can’t ask for a proposal while offline', async () => {
+    const user = userEvent.setup();
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    setOnline(false);
+
+    expect(
+      screen.getByRole('button', { name: 'Plan my meals' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText('You’re offline. Planning with AI needs a connection.'),
+    ).toBeVisible();
+
+    setOnline(true);
+    expect(screen.getByRole('button', { name: 'Plan my meals' })).toBeEnabled();
+  });
+
+  it('can’t have another go or retry while offline', async () => {
+    const user = userEvent.setup();
+    render(<PlanWizardPage />);
+    await toReview(user);
+    setOnline(false);
+
+    expect(screen.getByRole('button', { name: 'Another go' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  });
+
+  it('can’t try a failed proposal again while offline', async () => {
+    const user = userEvent.setup();
+    proposeMock.mockRejectedValueOnce(new Error('Failed to fetch'));
+    render(<PlanWizardPage />);
+    await finishDates(user);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Plan my meals' }));
+    await screen.findByRole('button', { name: 'Try again' });
+    setOnline(false);
+
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDisabled();
   });
 });

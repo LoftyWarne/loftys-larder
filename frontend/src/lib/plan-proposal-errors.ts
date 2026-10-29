@@ -21,6 +21,8 @@ export function proposalErrorMessage(err: unknown): string {
       return 'A plan couldn’t be made. Try changing the brief.';
     case 'MEAL_PLAN_NO_RECIPES':
       return 'There are no recipes to plan from yet. Add some recipes first.';
+    case 'MEAL_PLAN_BATCH_TOO_SMALL':
+      return 'A batch cooks fewer portions than the people eating at its meal. Go back to the fixed meals and cook more.';
     default:
       return planErrorMessage(err, 'The plan didn’t work. Try again.');
   }

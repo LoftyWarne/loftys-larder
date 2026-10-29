@@ -12,6 +12,7 @@ import {
   type CreatedPlan,
 } from '../fixtures/db.ts';
 import {
+  FAKE_BATCH_BRIEF,
   FAKE_REFUSED_BRIEF,
   openBriefStep,
   openPlanReview,
@@ -378,6 +379,24 @@ test.describe('a11y — authed views', () => {
         page.getByRole('heading', { name: 'Any meals already decided?' }),
       ).toBeVisible();
       await runAxe(page, theme);
+      // A Batch Fixed meal, refused below its slot's headcount.
+      await page
+        .getByLabel(/^Fixed meal, Dinner/)
+        .first()
+        .selectOption('batch');
+      await page
+        .getByLabel(/^Recipe, Dinner/)
+        .first()
+        .fill('curry');
+      await page
+        .getByRole('listbox')
+        .getByRole('option', { name: /curry/i })
+        .first()
+        .click();
+      await page.getByLabel('Portions cooked').fill('0');
+      await expect(page.getByRole('button', { name: 'Next' })).toBeDisabled();
+      await runAxe(page, theme);
+      await page.getByLabel('Portions cooked').fill('6');
       await page.getByRole('button', { name: 'Next' }).click();
       await expect(
         page.getByRole('heading', { name: 'Anything to steer the plan?' }),
@@ -425,6 +444,23 @@ test.describe('a11y — authed views', () => {
           ),
         )
         .toBe(true);
+      await runAxe(page, theme);
+    });
+
+    // A Batch, its leftovers and what's left in the plan.
+    test(`plan review with batch cooking passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await openPlanReview(page, FAKE_BATCH_BRIEF);
+      await page.locator('[data-slot-type="leftovers"] button').first().click();
+      await page.getByRole('button', { name: 'Discard' }).click();
+      // The last slot may finish the Batch's base as a variation.
+      await page.locator('[data-slot-type="recipe"] button').last().click();
+      await page.getByRole('button', { name: 'Discard' }).click();
+      await expect(
+        page.getByRole('list', { name: 'Left in plan' }),
+      ).toBeVisible();
       await runAxe(page, theme);
     });
 

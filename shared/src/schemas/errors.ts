@@ -65,6 +65,9 @@ export const DOMAIN_ERROR_CODES = [
   'MEAL_PLAN_REQUEST_REJECTED',
   // There are no pickable recipes to propose from.
   'MEAL_PLAN_NO_RECIPES',
+  // A Batch Fixed meal cooks fewer portions than its slot's headcount.
+  // Metadata `date`, `occasionId`.
+  'MEAL_PLAN_BATCH_TOO_SMALL',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

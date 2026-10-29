@@ -316,6 +316,7 @@ export {
   type HealthScoreAverage,
 } from './schemas/health-scores.ts';
 export {
+  MEAL_PLAN_BATCH_MAX_PORTIONS,
   MEAL_PLAN_BRIEF_MAX_LENGTH,
   MEAL_PLAN_NOTE_MAX_LENGTH,
   MEAL_PLAN_REASON_MAX_LENGTH,
@@ -334,6 +335,8 @@ export {
   type ProposePlanInput,
   mealPlanRecipeSchema,
   type MealPlanRecipe,
+  mealPlanDishKindSchema,
+  type MealPlanDishKind,
   mealPlanRequestSchema,
   type MealPlanRequest,
   mealPlanCandidateSchema,
@@ -447,7 +450,11 @@ export {
   getPlanPlantPointsResultSchema,
   type GetPlanPlantPointsResult,
 } from './schemas/plants.ts';
-export { OCCASION_ORDER, compareOccasionByName } from './lib/occasion-order.ts';
+export {
+  OCCASION_ORDER,
+  compareOccasionByName,
+  compareSlotOrder,
+} from './lib/occasion-order.ts';
 export { toTitleCase } from './lib/title-case.ts';
 export { takeChars } from './lib/take-chars.ts';
 export {

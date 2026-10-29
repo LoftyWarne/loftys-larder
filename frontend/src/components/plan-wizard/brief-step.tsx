@@ -11,6 +11,8 @@ import { WizardStep } from '@/components/plan-wizard/wizard-step.tsx';
 export interface BriefStepProps {
   brief: string;
   nextLabel: string;
+  // Offline, a step that would ask for a proposal can't go on.
+  offline?: boolean;
   onBack: (brief: string) => void;
   onSubmit: (brief: string) => void;
 }
@@ -20,6 +22,7 @@ const FORM_ID = 'plan-wizard-brief-form';
 export function BriefStep({
   brief,
   nextLabel,
+  offline = false,
   onBack,
   onSubmit,
 }: BriefStepProps): React.ReactElement {
@@ -37,6 +40,7 @@ export function BriefStep({
       description="Optional. Mood, effort, cuisine, health, or ingredients to use up."
       formId={FORM_ID}
       nextLabel={nextLabel}
+      nextDisabled={offline}
       onBack={() => {
         onBack(form.getValues('brief'));
       }}
@@ -72,6 +76,11 @@ export function BriefStep({
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error.message}
+          </p>
+        )}
+        {offline && (
+          <p className="text-sm text-muted-foreground">
+            You’re offline. Planning with AI needs a connection.
           </p>
         )}
       </form>

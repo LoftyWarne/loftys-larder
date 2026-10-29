@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import {
+  compareSlotOrder,
   proposePlanInputSchema,
   proposePlanResultSchema,
   type DomainErrorCode,
@@ -86,18 +87,26 @@ export const planProposalsRouter = router({
       }
       const pickableRecipeIds = new Set(library.map((recipe) => recipe.id));
       for (const slot of input.slots) {
-        if (
-          slot.fixed?.kind === 'recipe' &&
-          !pickableRecipeIds.has(slot.fixed.recipeId)
-        ) {
+        const fixed = slot.fixed;
+        if (fixed?.kind !== 'recipe' && fixed?.kind !== 'batch') continue;
+        if (!pickableRecipeIds.has(fixed.recipeId)) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: 'A fixed recipe is not pickable',
             cause: {
               code: 'SLOT_RECIPE_NOT_PICKABLE',
-              recipeId: slot.fixed.recipeId,
+              recipeId: fixed.recipeId,
             },
           });
+        }
+        // People eating at a Batch's slot eat it there.
+        if (fixed.kind === 'batch' && fixed.portions < slotHeadcount(slot)) {
+          throw domainError(
+            'BAD_REQUEST',
+            'MEAL_PLAN_BATCH_TOO_SMALL',
+            'A batch cooks fewer portions than its slot’s headcount',
+            { date: slot.date, occasionId: slot.occasionId },
+          );
         }
       }
 
@@ -109,8 +118,24 @@ export const planProposalsRouter = router({
         headcount: slotHeadcount(slot),
         fixed: slot.fixed,
       }));
-      // Every slot is fixed or has nobody eating: nothing to ask the model.
-      if (!slots.some((slot) => slot.fixed === null && slot.headcount > 0)) {
+      // Nothing to ask the model when every slot is fixed or has nobody
+      // eating, unless an open slot nobody eats at could cook a fixed
+      // variation's base before it's needed.
+      const needsDish = slots.some(
+        (slot) => slot.fixed === null && slot.headcount > 0,
+      );
+      const canCookBase = request.basesToCook.some(({ neededBy }) =>
+        slots.some(
+          (slot) =>
+            slot.fixed === null &&
+            slot.headcount === 0 &&
+            compareSlotOrder(
+              { date: slot.date, occasionName: slot.occasion },
+              { date: neededBy.date, occasionName: neededBy.occasion },
+            ) < 0,
+        ),
+      );
+      if (!needsDish && !canCookBase) {
         return await withDishDetails(ctx.db, {
           slots: slots.filter((slot) => slot.fixed === null).map(emptySlot),
           summary: '',

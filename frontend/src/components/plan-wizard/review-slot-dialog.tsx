@@ -12,7 +12,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
 import { formatLongDayLabel } from '@/lib/date-utils.ts';
-import type { RecipeChoice, ReviewPlanSlot } from '@/lib/plan-wizard.ts';
+import {
+  headcount,
+  type RecipeChoice,
+  type ReviewPlanSlot,
+} from '@/lib/plan-wizard.ts';
 
 // What Plan Review offers for one slot: swap, suggest again, discard or
 // restore. Anything else is done in the planner after Apply.
@@ -70,8 +74,12 @@ function ReviewSlotActions({
   const { slot, kind } = reviewSlot;
   const dish = slot.items[0]?.recipeName;
   const canRestore = kind === 'swapped' || kind === 'discarded';
+  // Only where nobody eats: an empty slot where people eat was dropped.
   const nothingToCook =
-    kind === 'unfilled' && reviewSlot.suggestedAgain && !suggestPending;
+    kind === 'unfilled' &&
+    reviewSlot.suggestedAgain &&
+    headcount(slot) === 0 &&
+    !suggestPending;
 
   return (
     <>

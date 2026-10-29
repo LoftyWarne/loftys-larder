@@ -1074,6 +1074,80 @@ describe('Suggest again', () => {
     ).toBeVisible();
   });
 
+  it('fills a dropped slot, and the dropped count goes down', async () => {
+    const user = userEvent.setup();
+    proposeMock.mockResolvedValueOnce({
+      ...PROPOSAL,
+      slots: [
+        suggestion(MON, LUNCH.id, 21, 'Lentil Soup'),
+        {
+          ...suggestion(MON, DINNER.id, 22, 'x'),
+          slotType: 'empty',
+          items: [],
+          reason: null,
+        },
+        suggestion(TUE, LUNCH.id, 23, 'Green Salad'),
+        suggestion(TUE, DINNER.id, 24, 'Fish Pie'),
+      ],
+      dropped: 1,
+    } satisfies ProposePlanResult);
+    proposeSlotMock.mockResolvedValueOnce({
+      slot: suggestion(MON, DINNER.id, 25, 'Pea Risotto'),
+    });
+    render(<PlanWizardPage />);
+    await toReview(user);
+    expect(
+      screen.getByText('1 meal couldn’t be suggested and was left empty.'),
+    ).toBeVisible();
+
+    await user.click(
+      screen.getByRole('button', { name: /^Dinner on 2026-11-02/ }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+    expect(await screen.findByText('Why Pea Risotto')).toBeVisible();
+    expect(screen.queryByText(/couldn’t be suggested/)).not.toBeInTheDocument();
+  });
+
+  it('says nothing’s worth cooking ahead only where nobody eats', async () => {
+    const user = userEvent.setup();
+    proposeSlotMock.mockResolvedValueOnce({
+      slot: suggestion(MON, DINNER.id, 25, 'Pea Risotto'),
+    });
+    render(<PlanWizardPage />);
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: /Bean Chilli/ }));
+    await user.click(screen.getByRole('button', { name: 'Suggest again' }));
+    await screen.findByText('Why Pea Risotto');
+
+    // Another go leaves the slot empty where people eat.
+    proposeMock.mockResolvedValueOnce({
+      slots: [
+        suggestion(MON, LUNCH.id, 21, 'Lentil Soup'),
+        {
+          ...suggestion(MON, DINNER.id, 22, 'x'),
+          slotType: 'empty',
+          items: [],
+          reason: null,
+        },
+        suggestion(TUE, LUNCH.id, 23, 'Green Salad'),
+        suggestion(TUE, DINNER.id, 24, 'Fish Pie'),
+      ],
+      summary: 'Again.',
+      dropped: 1,
+    } satisfies ProposePlanResult);
+    await user.click(screen.getByRole('button', { name: 'Another go' }));
+    await screen.findByText('Again.');
+
+    await user.click(
+      screen.getByRole('button', { name: /^Dinner on 2026-11-02/ }),
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Nothing planned here.')).toBeVisible();
+    expect(
+      within(dialog).queryByText(/nothing’s worth cooking ahead/),
+    ).not.toBeInTheDocument();
+  });
+
   it('offers nothing on a fixed slot', async () => {
     const user = userEvent.setup();
     render(<PlanWizardPage />);

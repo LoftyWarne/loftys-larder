@@ -376,6 +376,12 @@ describe('anthropic meal planner, for one slot', () => {
     });
     const system = sent?.body.system;
     expect(system).toEqual(expect.stringContaining('plan.avoidRecipeIds'));
+    // The normaliser refuses a repeat while any other recipe is left.
+    expect(system).toEqual(
+      expect.stringContaining(
+        'Only when every recipe in the library is on the list may you repeat one.',
+      ),
+    );
     expect(system).toEqual(expect.stringContaining('plan.current'));
     expect(system).toEqual(expect.stringContaining('give dish null'));
     // The whole plan's rules for choosing recipes and batch cooking.

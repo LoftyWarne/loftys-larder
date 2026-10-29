@@ -493,6 +493,40 @@ describe('suggesting again for one slot', () => {
     expect(slots[3]?.canSwap).toBe(false);
   });
 
+  it('stops counting a dropped slot once Suggest again fills it', () => {
+    const dropped = { ...proposal(first.slots), dropped: 1 };
+    const tueDinner = slotKey(TUE, DINNER.id);
+    let review = applySlotSuggestion(
+      startReview(dropped),
+      key,
+      suggestion(TUE, LUNCH.id, 5),
+    );
+    // A slot that already had a dish wasn't dropped.
+    expect(review.dropped).toBe(1);
+    review = applySlotSuggestion(
+      review,
+      tueDinner,
+      suggestion(TUE, DINNER.id, 6),
+    );
+    expect(review.dropped).toBe(0);
+  });
+
+  it('keeps the dropped count for a prepared-only Batch where nobody eats', () => {
+    const batch: ProposedSlot = {
+      ...suggestion(TUE, DINNER.id, 6),
+      slotType: 'empty',
+    };
+    const onlyItem = batch.items[0];
+    if (!onlyItem) throw new Error('no item');
+    batch.items = [{ ...onlyItem, prepared: 4, eaten: 0 }];
+    const review = applySlotSuggestion(
+      startReview({ ...proposal(first.slots), dropped: 1 }),
+      slotKey(TUE, DINNER.id),
+      batch,
+    );
+    expect(review.dropped).toBe(1);
+  });
+
   it('counts each slot suggested again once', () => {
     let review = applySlotSuggestion(
       startReview(first),

@@ -363,7 +363,8 @@ export function rerunReview(
 
 // Suggest again's new suggestion replaces the slot's, whatever the cook had
 // done with it, and becomes the one "Another go" sends back and restore puts
-// back.
+// back. A slot the proposal dropped (empty where people eat) that now has a
+// dish no longer counts as dropped.
 export function applySlotSuggestion(
   review: ReviewState,
   key: string,
@@ -378,9 +379,13 @@ export function applySlotSuggestion(
     suggestedRecipeIds: withRecipeIds(slot.suggestedRecipeIds, suggestion),
     suggestedAgain: true,
   });
+  const filledDropped =
+    !hasDish(slot.suggestion) &&
+    suggestion.items.some((item) => item.eaten > 0);
   return {
     ...review,
     slots,
+    dropped: filledDropped ? Math.max(0, review.dropped - 1) : review.dropped,
     proposal: {
       ...review.proposal,
       slots: review.proposal.slots.map((entry) =>

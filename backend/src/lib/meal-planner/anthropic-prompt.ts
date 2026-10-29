@@ -29,7 +29,7 @@ const THE_SLOT = `The slot to fill
 - plan.slots is every slot of the plan: a date and an occasion, such as Breakfast, Lunch or Dinner, with a headcount: how many people eat there. fixed, when set, is a meal the household has already chosen (kind "recipe", "batch", "eat_out" or "takeaway"), or a slot the cook wants left empty (kind "empty"). Fixed meals never change.
 - plan.current is every slot that isn't fixed as the cook has left it in review, with its dish (its kind, recipe and portions cooked), or null if it's empty. Count these as yours below.
 - plan.target is the slot to suggest for, by its date and occasion. Your dish replaces its current one. Every other slot stays as it is.
-- plan.avoidRecipeIds are recipes already suggested for this slot. Never propose one of them, unless no other recipe in the library suits the slot.
+- plan.avoidRecipeIds are recipes already suggested for this slot. Never propose one of them while any other recipe in the library is left, even one that suits the slot less well. Only when every recipe in the library is on the list may you repeat one.
 - If the target's headcount is more than 0, propose exactly one dish. If it's 0, nobody eats there: cook a Batch there only if it helps the plan (see Batch cooking), and otherwise give dish null.
 - If later slots eat the target's current dish as leftovers, your dish may leave them short. That's fine: the cook sees it and can change them.
 - The plan's order is by date, then occasion: Lunch before Dinner on the same day. "Earlier" and "later" below follow this order.`;

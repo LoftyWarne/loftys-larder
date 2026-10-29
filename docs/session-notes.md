@@ -45,6 +45,17 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 - **Closing the dialog while a suggestion runs** still applies the result when it lands. Everything else in review stays disabled until then.
 - **The e2e test seeds a fourth recipe,** so the three suggestions all differ. With the shared three-recipe library, the third has to repeat, which the rules allow.
 
+**After an independent review (same day), three fixes:**
+- **The prompt's repeat rule now matches the normaliser's.** It had allowed a repeat when nothing else "suits the slot", while the normaliser refuses a repeat whenever any other pickable recipe is left. So a sensible repeat, such as a breakfast when only breakfasts were suggested, kept coming back as "try again".
+- **Suggest again on a dropped slot lowers the dropped count** when the new dish is eaten there. A prepared-only Batch where nobody eats doesn't lower it. Swap still doesn't, as before.
+- **"Nothing's worth cooking ahead" shows only where nobody eats.** Before, it could show on an empty slot where people eat after "Another go" dropped it.
+- **Left as notes:**
+  - An error is lost if the dialog closes mid-call.
+  - A cut-off at `max_tokens` is logged as `invalid_result`.
+  - A bad target is a `BAD_REQUEST` with no domain code.
+  - `current` and `avoidRecipeIds` have no size limit, as with `previous`.
+  - The summary can name a replaced dish.
+
 ---
 
 ## 2026-10-28 — Batch cooking in Plan Proposals, and the "Plan with AI" entry (FEAT-76)

@@ -96,7 +96,18 @@ export const RECIPE_IMPORT_PDF_LOOKUP_TIMEOUT_MS = 10_000;
 
 const FEATURE = 'recipe-import';
 
-type TryAgainReason = 'timeout' | 'unavailable' | 'invalid_proposal';
+type TryAgainReason =
+  | 'timeout'
+  | 'unavailable'
+  | 'invalid_proposal'
+  | 'client_closed';
+
+const TRY_AGAIN_CODES: Record<TryAgainReason, TRPCError['code']> = {
+  timeout: 'GATEWAY_TIMEOUT',
+  unavailable: 'SERVICE_UNAVAILABLE',
+  invalid_proposal: 'BAD_GATEWAY',
+  client_closed: 'CLIENT_CLOSED_REQUEST',
+};
 
 export const recipeImportsRouter = router({
   // Reads the input into a proposal and writes it into a new import draft
@@ -127,6 +138,10 @@ export const recipeImportsRouter = router({
         const importSignal = signal
           ? AbortSignal.any([signal, timeout])
           : timeout;
+        // The cook's connection closing aborts the same signal as the time
+        // limit, and isn't a server fault.
+        const abortReason = (): 'client_closed' | 'timeout' =>
+          signal?.aborted ? 'client_closed' : 'timeout';
         const startedAt = performance.now();
         let inputDetails: ModelUsageDetails = {};
         const logUsage = (
@@ -175,8 +190,9 @@ export const recipeImportsRouter = router({
             page = await fetchPage(link.url, importSignal);
           } catch (error) {
             if (importSignal.aborted) {
-              logUsage('IMPORT_TRY_AGAIN', null, { reason: 'timeout' });
-              throw tryAgain('timeout');
+              const reason = abortReason();
+              logUsage('IMPORT_TRY_AGAIN', null, { reason });
+              throw tryAgain(reason);
             }
             if (error instanceof LinkNotAllowedError) {
               logUsage('IMPORT_LINK_NOT_ALLOWED', null, {
@@ -244,7 +260,7 @@ export const recipeImportsRouter = router({
           try {
             upload = await lookUpPdf(publicId, lookupSignal);
           } catch {
-            const reason = lookupSignal.aborted ? 'timeout' : 'unavailable';
+            const reason = lookupSignal.aborted ? abortReason() : 'unavailable';
             logUsage('IMPORT_TRY_AGAIN', null, { reason, pdfLookup: true });
             throw tryAgain(reason);
           }
@@ -305,8 +321,9 @@ export const recipeImportsRouter = router({
           );
         } catch (error) {
           if (error instanceof RecipeReaderTimeoutError) {
-            logUsage('IMPORT_TRY_AGAIN', null, { reason: 'timeout' });
-            throw tryAgain('timeout');
+            const reason = abortReason();
+            logUsage('IMPORT_TRY_AGAIN', null, { reason });
+            throw tryAgain(reason);
           }
           if (error instanceof RecipeReaderUnavailableError) {
             logUsage('IMPORT_TRY_AGAIN', null, {
@@ -891,17 +908,15 @@ function importNotFound(): TRPCError {
 }
 
 // Timeouts, outages and unusable proposals are server-side failures, so they
-// reach Sentry, with the domain code and reason only (DEC-104).
+// reach Sentry, with the domain code and reason only (DEC-104). A closed
+// connection is the cook's, so its 499 stays out.
 function tryAgain(reason: TryAgainReason): TRPCError {
-  const code =
-    reason === 'timeout'
-      ? 'GATEWAY_TIMEOUT'
-      : reason === 'unavailable'
-        ? 'SERVICE_UNAVAILABLE'
-        : 'BAD_GATEWAY';
-  return domainError(code, 'IMPORT_TRY_AGAIN', 'The import didn’t work', {
-    reason,
-  });
+  return domainError(
+    TRY_AGAIN_CODES[reason],
+    'IMPORT_TRY_AGAIN',
+    'The import didn’t work',
+    { reason },
+  );
 }
 
 function domainError(

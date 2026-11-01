@@ -60,7 +60,18 @@ export const MEAL_PLAN_TIMEOUT_MS = 75_000;
 
 export const MEAL_PLAN_FEATURE = 'meal-plan';
 
-type TryAgainReason = 'timeout' | 'unavailable' | 'invalid_result';
+type TryAgainReason =
+  | 'timeout'
+  | 'unavailable'
+  | 'invalid_result'
+  | 'client_closed';
+
+const TRY_AGAIN_CODES: Record<TryAgainReason, TRPCError['code']> = {
+  timeout: 'GATEWAY_TIMEOUT',
+  unavailable: 'SERVICE_UNAVAILABLE',
+  invalid_result: 'BAD_GATEWAY',
+  client_closed: 'CLIENT_CLOSED_REQUEST',
+};
 
 export const planProposalsRouter = router({
   // Proposes meals for a new plan's slots that aren't fixed (DEC-117). Writes
@@ -330,8 +341,11 @@ async function callPlanner(
     planning = await plan(planSignal);
   } catch (error) {
     if (error instanceof MealPlannerTimeoutError) {
-      logUsage('MEAL_PLAN_TRY_AGAIN', { reason: 'timeout' });
-      throw tryAgain('timeout');
+      // The cook's connection closing aborts the same signal as the time
+      // limit, and isn't a server fault.
+      const reason = signal?.aborted ? 'client_closed' : 'timeout';
+      logUsage('MEAL_PLAN_TRY_AGAIN', { reason });
+      throw tryAgain(reason);
     }
     if (error instanceof MealPlannerUnavailableError) {
       logUsage('MEAL_PLAN_TRY_AGAIN', {
@@ -431,17 +445,15 @@ async function withDishDetails(
 }
 
 // Timeouts, outages and unusable results are server-side failures, so they
-// reach Sentry, with the domain code and reason only (DEC-104).
+// reach Sentry, with the domain code and reason only (DEC-104). A closed
+// connection is the cook's, so its 499 stays out.
 function tryAgain(reason: TryAgainReason): TRPCError {
-  const code =
-    reason === 'timeout'
-      ? 'GATEWAY_TIMEOUT'
-      : reason === 'unavailable'
-        ? 'SERVICE_UNAVAILABLE'
-        : 'BAD_GATEWAY';
-  return domainError(code, 'MEAL_PLAN_TRY_AGAIN', 'The plan didn’t work', {
-    reason,
-  });
+  return domainError(
+    TRY_AGAIN_CODES[reason],
+    'MEAL_PLAN_TRY_AGAIN',
+    'The plan didn’t work',
+    { reason },
+  );
 }
 
 function domainError(

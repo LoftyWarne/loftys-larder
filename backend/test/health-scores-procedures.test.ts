@@ -859,6 +859,35 @@ describe('health score procedures', () => {
       expect(await scoreRow(id)).toBeNull();
     });
 
+    it('keeps a closed connection apart from a timeout', async () => {
+      const id = await seedRecipe({ name: 'Lentil Soup' });
+      const client = new AbortController();
+      let scoring = false;
+      const scorer: RecipeScorer = {
+        adapter: 'fake',
+        model: 'slow',
+        score: (_request, signal) =>
+          new Promise((_resolve, reject) => {
+            scoring = true;
+            signal.addEventListener('abort', () => {
+              reject(new RecipeScorerTimeoutError());
+            });
+          }),
+      };
+      const pending = appRouter
+        .createCaller(makeContext({ scorer }), { signal: client.signal })
+        .healthScores.score({ recipeId: id, rescore: false });
+      await vi.waitFor(() => {
+        expect(scoring).toBe(true);
+      });
+      client.abort();
+      await expect(pending).rejects.toMatchObject({
+        code: 'CLIENT_CLOSED_REQUEST',
+        cause: { code: 'HEALTH_SCORE_TRY_AGAIN', reason: 'client_closed' },
+      });
+      expect(await scoreRow(id)).toBeNull();
+    });
+
     it('doesn’t score a recipe in another household', async () => {
       const id = await seedRecipe({
         name: 'Elsewhere',

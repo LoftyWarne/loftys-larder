@@ -35,7 +35,8 @@ export const DOMAIN_ERROR_CODES = [
   'ACCOUNT_DELETE_REAUTH_REQUIRED',
   'SHOPPING_INGREDIENT_NOT_IN_PLAN',
   'IMPORT_NOT_A_RECIPE',
-  // Metadata `reason`: `timeout`, `unavailable` or `invalid_proposal`.
+  // Metadata `reason`: `timeout`, `unavailable`, `invalid_proposal` or
+  // `client_closed`.
   'IMPORT_TRY_AGAIN',
   // The provider refused the request itself, so trying again won't help.
   'IMPORT_REQUEST_REJECTED',
@@ -49,7 +50,8 @@ export const DOMAIN_ERROR_CODES = [
   'IMPORT_DOCUMENT_TOO_LONG',
   // Metadata `retryAfterSeconds`.
   'HEALTH_SCORE_RATE_LIMITED',
-  // Metadata `reason`: `timeout`, `unavailable` or `invalid_result`.
+  // Metadata `reason`: `timeout`, `unavailable`, `invalid_result` or
+  // `client_closed`.
   'HEALTH_SCORE_TRY_AGAIN',
   // Every model refused to score the recipe.
   'HEALTH_SCORE_NOT_SCORED',
@@ -59,7 +61,8 @@ export const DOMAIN_ERROR_CODES = [
   'MEAL_PLAN_RATE_LIMITED',
   // Suggest again for one slot. Metadata `retryAfterSeconds`.
   'MEAL_PLAN_SLOT_RATE_LIMITED',
-  // Metadata `reason`: `timeout`, `unavailable` or `invalid_result`.
+  // Metadata `reason`: `timeout`, `unavailable`, `invalid_result` or
+  // `client_closed`.
   'MEAL_PLAN_TRY_AGAIN',
   // Every model refused to propose a plan.
   'MEAL_PLAN_NOT_PROPOSED',

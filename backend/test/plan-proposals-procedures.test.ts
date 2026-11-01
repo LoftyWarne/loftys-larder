@@ -1,7 +1,15 @@
 import { sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pino from 'pino';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import type {
   MealPlanRequest,
@@ -47,7 +55,10 @@ import {
   FAKE_PLANNER_SLOT_REASON,
   FAKE_PLANNER_SUMMARY,
 } from '../src/lib/meal-planner/fake.ts';
-import type { MealPlanner } from '../src/lib/meal-planner/types.ts';
+import {
+  MealPlannerTimeoutError,
+  type MealPlanner,
+} from '../src/lib/meal-planner/types.ts';
 import { loadPlannerLibrary } from '../src/lib/plan-proposal/request.ts';
 import type { ModelRateLimitVerdict } from '../src/plugins/rate-limit.ts';
 import type { AppContext } from '../src/trpc/context.ts';
@@ -278,51 +289,54 @@ describe('plan proposal procedures', () => {
     log?: AppContext['log'];
   }
 
-  function caller(options: ContextOptions = {}) {
+  function caller(options: ContextOptions = {}, signal?: AbortSignal) {
     const deps = contextDeps();
-    return appRouter.createCaller({
-      ...deps,
-      req: {} as AppContext['req'],
-      reply: {} as AppContext['reply'],
-      reqId: 'rid-test',
-      db,
-      cloudinary: {
-        cloudName: 'test-cloud',
-        apiKey: 'test-key',
-        apiSecret: 'test-secret',
+    return appRouter.createCaller(
+      {
+        ...deps,
+        req: {} as AppContext['req'],
+        reply: {} as AppContext['reply'],
+        reqId: 'rid-test',
+        db,
+        cloudinary: {
+          cloudName: 'test-cloud',
+          apiKey: 'test-key',
+          apiSecret: 'test-secret',
+        },
+        session: {
+          id: 'session-proposals-1',
+          userId: USER_ID,
+          token: 'tok',
+          expiresAt: new Date(Date.now() + 60_000),
+          ipAddress: null,
+          userAgent: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        user: {
+          id: USER_ID,
+          email: 'proposals@example.com',
+          name: 'Proposal Tester',
+          emailVerified: true,
+          image: null,
+          themePreference: 'system',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        log: options.log ?? deps.log,
+        mealPlan: {
+          planner: options.planner ?? createFakeMealPlanner(),
+          healthScoreSince: SINCE,
+          allowProposal:
+            options.allowProposal ??
+            (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
+          allowSlotSuggestion:
+            options.allowSlotSuggestion ??
+            (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
+        },
       },
-      session: {
-        id: 'session-proposals-1',
-        userId: USER_ID,
-        token: 'tok',
-        expiresAt: new Date(Date.now() + 60_000),
-        ipAddress: null,
-        userAgent: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      user: {
-        id: USER_ID,
-        email: 'proposals@example.com',
-        name: 'Proposal Tester',
-        emailVerified: true,
-        image: null,
-        themePreference: 'system',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      log: options.log ?? deps.log,
-      mealPlan: {
-        planner: options.planner ?? createFakeMealPlanner(),
-        healthScoreSince: SINCE,
-        allowProposal:
-          options.allowProposal ??
-          (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
-        allowSlotSuggestion:
-          options.allowSlotSuggestion ??
-          (() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })),
-      },
-    });
+      signal ? { signal } : {},
+    );
   }
 
   function spyPlanner(inner: MealPlanner = createFakeMealPlanner()) {
@@ -1103,6 +1117,37 @@ describe('plan proposal procedures', () => {
       await expect(
         caller().planProposals.propose(input({ brief: marker })),
       ).rejects.toMatchObject({ code, cause });
+      expect(await planCount()).toBe(before);
+    });
+  });
+
+  describe('a closed connection', () => {
+    it('is kept apart from a timeout', async () => {
+      await seedRecipe({ name: 'Lentil Soup' });
+      const client = new AbortController();
+      let planning = false;
+      const planner: MealPlanner = {
+        ...createFakeMealPlanner(),
+        propose: (_request, signal) =>
+          new Promise((_resolve, reject) => {
+            planning = true;
+            signal.addEventListener('abort', () => {
+              reject(new MealPlannerTimeoutError());
+            });
+          }),
+      };
+      const before = await planCount();
+      const pending = caller({ planner }, client.signal).planProposals.propose(
+        input(),
+      );
+      await vi.waitFor(() => {
+        expect(planning).toBe(true);
+      });
+      client.abort();
+      await expect(pending).rejects.toMatchObject({
+        code: 'CLIENT_CLOSED_REQUEST',
+        cause: { code: 'MEAL_PLAN_TRY_AGAIN', reason: 'client_closed' },
+      });
       expect(await planCount()).toBe(before);
     });
   });

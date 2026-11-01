@@ -632,6 +632,34 @@ describe('recipe imports procedures', () => {
       expect(await draftRows()).toHaveLength(0);
     });
 
+    it('keeps a closed connection apart from a timeout', async () => {
+      const client = new AbortController();
+      let reading = false;
+      const reader: RecipeReader = {
+        adapter: 'fake',
+        model: 'slow',
+        read: (_request, signal) =>
+          new Promise((_resolve, reject) => {
+            reading = true;
+            signal.addEventListener('abort', () => {
+              reject(new RecipeReaderTimeoutError());
+            });
+          }),
+      };
+      const pending = createCaller(makeContext({ reader }), {
+        signal: client.signal,
+      }).recipeImports.start({ input: { kind: 'text', text: RECIPE_TEXT } });
+      await vi.waitFor(() => {
+        expect(reading).toBe(true);
+      });
+      client.abort();
+      await expect(pending).rejects.toMatchObject({
+        code: 'CLIENT_CLOSED_REQUEST',
+        cause: { code: 'IMPORT_TRY_AGAIN', reason: 'client_closed' },
+      });
+      expect(await draftRows()).toHaveLength(0);
+    });
+
     it('refuses imports beyond the limit without calling the reader', async () => {
       const { reader, requests } = spyReader();
       const caller = createCaller(

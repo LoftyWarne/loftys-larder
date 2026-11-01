@@ -299,6 +299,7 @@ describe('shouldReportToSentry', () => {
     'FORBIDDEN',
     'NOT_FOUND',
     'TOO_MANY_REQUESTS',
+    'CLIENT_CLOSED_REQUEST',
   ] as const)('skips the client error %s (4xx)', (code) => {
     expect(shouldReportToSentry(new TRPCError({ code }))).toBe(false);
   });

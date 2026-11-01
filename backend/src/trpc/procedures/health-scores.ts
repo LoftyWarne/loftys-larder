@@ -53,7 +53,18 @@ export const HEALTH_SCORE_TIMEOUT_MS = 45_000;
 
 const FEATURE = 'health-score';
 
-type TryAgainReason = 'timeout' | 'unavailable' | 'invalid_result';
+type TryAgainReason =
+  | 'timeout'
+  | 'unavailable'
+  | 'invalid_result'
+  | 'client_closed';
+
+const TRY_AGAIN_CODES: Record<TryAgainReason, TRPCError['code']> = {
+  timeout: 'GATEWAY_TIMEOUT',
+  unavailable: 'SERVICE_UNAVAILABLE',
+  invalid_result: 'BAD_GATEWAY',
+  client_closed: 'CLIENT_CLOSED_REQUEST',
+};
 
 export const healthScoresRouter = router({
   // Scores one recipe (DEC-112). The browser calls it after Save & Finish and
@@ -138,8 +149,11 @@ export const healthScoresRouter = router({
           scoring = await scorer.score(scored.request, scoreSignal);
         } catch (error) {
           if (error instanceof RecipeScorerTimeoutError) {
-            logUsage('HEALTH_SCORE_TRY_AGAIN', null, { reason: 'timeout' });
-            throw tryAgain('timeout');
+            // The cook's connection closing aborts the same signal as the
+            // time limit, and isn't a server fault.
+            const reason = signal?.aborted ? 'client_closed' : 'timeout';
+            logUsage('HEALTH_SCORE_TRY_AGAIN', null, { reason });
+            throw tryAgain(reason);
           }
           if (error instanceof RecipeScorerUnavailableError) {
             logUsage('HEALTH_SCORE_TRY_AGAIN', null, {
@@ -362,17 +376,15 @@ function toDetail(row: HealthScoreRow): RecipeHealthScoreDetail {
 }
 
 // Timeouts, outages and unusable results are server-side failures, so they
-// reach Sentry, with the domain code and reason only (DEC-104).
+// reach Sentry, with the domain code and reason only (DEC-104). A closed
+// connection is the cook's, so its 499 stays out.
 function tryAgain(reason: TryAgainReason): TRPCError {
-  const code =
-    reason === 'timeout'
-      ? 'GATEWAY_TIMEOUT'
-      : reason === 'unavailable'
-        ? 'SERVICE_UNAVAILABLE'
-        : 'BAD_GATEWAY';
-  return domainError(code, 'HEALTH_SCORE_TRY_AGAIN', 'The score didn’t work', {
-    reason,
-  });
+  return domainError(
+    TRY_AGAIN_CODES[reason],
+    'HEALTH_SCORE_TRY_AGAIN',
+    'The score didn’t work',
+    { reason },
+  );
 }
 
 function domainError(

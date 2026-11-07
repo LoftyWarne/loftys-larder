@@ -4,6 +4,24 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-11-07 — Sentry LOFTYS-LARDER-FRONTEND-2, and every client resolving to one IP
+
+**Status:** Fixed in code on `ccr-1706b52e-7oudhh`. Takes effect on next deploy to `main`; the IP fix needs checking in Axiom after that deploy (below).
+
+### The Sentry TypeError
+
+`Failed to fetch dynamically imported module: …/virtual_pwa-register-*.js`, 2 events, 1 "user" (AWS IP, Mobile Safari 26 / iOS 18.7). Axiom showed an HTML-and-icons-only fetch, then a render that got the chunk as a 304 and tore down within a second; the `beforeLoad` session call never reached Fastify. A link-preview/snapshot client cutting its network mid-boot, not a real user or a stale deploy. Fixed by catching the import in `frontend/src/sw-register.ts` (registration is best-effort; the next load retries). Request logs now carry `req.userAgent` (`backend/src/plugins/logger.ts`) so this kind of client is identifiable; client IP deliberately not extended (PII).
+
+### Client IP always `66.241.124.105`
+
+From 2026-10-24 11:56 UTC (13 minutes after `3230fe9` replaced `trustProxy: true` with the allow-list) every request's `req.ip` was the app's shared Fly IPv4, including requests straight to `*.fly.dev`; IPv6 ones resolved to Fly's `2a09:8280::` block. Fly's proxy hands requests on from its public addresses, which the allow-list didn't cover, so all IP-keyed rate limits and the per-client sign-in entry limit shared one bucket. Added `66.241.124.105` and `2a09:8280::/29` to `TRUSTED_PROXIES` (DEC entry amended).
+
+**Not yet confirmed which hop it is** (socket peer vs. last `X-Forwarded-For` entry; tests cover both). **Verify after deploy:** `['loftys-larder-prod'] | where msg == 'incoming request' | summarize dcount(['req.remoteAddress'])` over an hour should be well above 1. If it is still only Fly addresses, the next step is a temporary log of `X-Forwarded-For` / `Fly-Client-IP` / `CF-Connecting-IP`. A dedicated IPv4 for the app would need adding to the list.
+
+Side note: the 787 requests "from" `127.0.0.1` on 2026-10-24 01:10–01:32 were a scanner forging `X-Forwarded-For` under `trustProxy: true` — the hole the allow-list closed.
+
+---
+
 ## 2026-10-29 — Suggest again for one slot in Plan Review (FEAT-77)
 
 **Status:** Implemented on `main`, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,246 tests green. Frontend: 1,071 green. e2e: 73 of 73. That includes a spec that runs manual verification step 1 against the fake adapter (three suggestions on one slot, each different, with the rest of the plan unchanged) and two new axe scans (the slot dialog while Suggest again runs, then with its error, at phone width in both themes). Manual verification step 1 hasn't been run in the app or against the real `anthropic` adapter. The FEAT-77 checkboxes are left for the user to tick.

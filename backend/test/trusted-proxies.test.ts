@@ -5,6 +5,8 @@ import { TRUSTED_PROXIES } from '../src/plugins/trusted-proxies.ts';
 
 const FLY_PROXY_V4 = '172.16.0.5';
 const FLY_PROXY_V6 = 'fdaa:0:1::3';
+const FLY_PUBLIC_V4 = '66.241.124.105';
+const FLY_PUBLIC_V6 = '2a09:8280:1::118:845e:0';
 const CLOUDFLARE_EDGE = '173.245.48.1';
 const CLIENT = '203.0.113.9';
 const SPOOFED = '6.6.6.6';
@@ -43,6 +45,19 @@ describe('trusted proxies', () => {
 
   it('resolves the address Fly saw when a request skips Cloudflare', async () => {
     expect(await ipFor(FLY_PROXY_V6, `${SPOOFED}, ${CLIENT}`)).toBe(CLIENT);
+  });
+
+  it("sees past Fly's public address when it is the forwarding hop", async () => {
+    expect(
+      await ipFor(
+        FLY_PROXY_V4,
+        `${SPOOFED}, ${CLIENT}, ${CLOUDFLARE_EDGE}, ${FLY_PUBLIC_V4}`,
+      ),
+    ).toBe(CLIENT);
+    expect(
+      await ipFor(FLY_PUBLIC_V4, `${SPOOFED}, ${CLIENT}, ${CLOUDFLARE_EDGE}`),
+    ).toBe(CLIENT);
+    expect(await ipFor(FLY_PUBLIC_V6, `${SPOOFED}, ${CLIENT}`)).toBe(CLIENT);
   });
 
   it('ignores X-Forwarded-For from an untrusted peer', async () => {

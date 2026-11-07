@@ -8,12 +8,20 @@
 //   client Cloudflare saw. A request straight to `*.fly.dev` skips Cloudflare
 //   and resolves to the address Fly saw, which the client can't fake either.
 //
+// - Fly's own public addresses: the app's shared IPv4 (the custom domain's A
+//   record) and Fly's IPv6 block. Fly's proxy also hands requests on from
+//   these, so without them every client resolved to 66.241.124.105 and shared
+//   one rate-limit bucket. A client can't send from them. Allocating the app a
+//   dedicated IPv4 means adding it here.
+//
 // Cloudflare's ranges are from https://www.cloudflare.com/ips/ (2026-10-24).
 // They rarely change; a missing range only makes those clients share a
 // rate-limit bucket keyed by the edge's address.
 export const TRUSTED_PROXIES: readonly string[] = [
   'loopback',
   'uniquelocal',
+  '66.241.124.105',
+  '2a09:8280::/29',
   '173.245.48.0/20',
   '103.21.244.0/22',
   '103.22.200.0/22',

@@ -6,7 +6,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ## 2026-11-07 — Sentry LOFTYS-LARDER-FRONTEND-2, and every client resolving to one IP
 
-**Status:** Fixed in code on `ccr-1706b52e-7oudhh`. Takes effect on next deploy to `main`; the IP fix needs checking in Axiom after that deploy (below).
+**Status:** Fixed and deployed (`4a9fdc5`, 2026-11-07 20:23 UTC). Verified in Axiom: requests since the deploy resolve to real client addresses, not `66.241.124.105`, and carry `req.userAgent`.
 
 ### The Sentry TypeError
 
@@ -16,7 +16,7 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 From 2026-10-24 11:56 UTC (13 minutes after `3230fe9` replaced `trustProxy: true` with the allow-list) every request's `req.ip` was the app's shared Fly IPv4, including requests straight to `*.fly.dev`; IPv6 ones resolved to Fly's `2a09:8280::` block. Fly's proxy hands requests on from its public addresses, which the allow-list didn't cover, so all IP-keyed rate limits and the per-client sign-in entry limit shared one bucket. Added `66.241.124.105` and `2a09:8280::/29` to `TRUSTED_PROXIES` (DEC entry amended).
 
-**Not yet confirmed which hop it is** (socket peer vs. last `X-Forwarded-For` entry; tests cover both). **Verify after deploy:** `['loftys-larder-prod'] | where msg == 'incoming request' | summarize dcount(['req.remoteAddress'])` over an hour should be well above 1. If it is still only Fly addresses, the next step is a temporary log of `X-Forwarded-For` / `Fly-Client-IP` / `CF-Connecting-IP`. A dedicated IPv4 for the app would need adding to the list.
+Which hop Fly's address arrives as (socket peer vs. last `X-Forwarded-For` entry) is still unknown; the tests cover both. The first post-deploy check saw one real client (60 requests in 10 minutes), so re-run `['loftys-larder-prod'] | where msg == 'incoming request' | summarize dcount(['req.remoteAddress'])` over a busier window to confirm many distinct addresses. If it ever drops back to only Fly addresses, the next step is a temporary log of `X-Forwarded-For` / `Fly-Client-IP` / `CF-Connecting-IP`. A dedicated IPv4 for the app would need adding to the list.
 
 Side note: the 787 requests "from" `127.0.0.1` on 2026-10-24 01:10–01:32 were a scanner forging `X-Forwarded-For` under `trustProxy: true` — the hole the allow-list closed.
 

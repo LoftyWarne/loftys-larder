@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
+import Fastify from 'fastify';
 import { createAxiomDestination } from '../src/plugins/axiom-destination.ts';
 import { buildLoggerBundle } from '../src/plugins/logger.ts';
 import type { Config } from '../src/config.ts';
@@ -78,6 +79,33 @@ describe('buildLoggerBundle', () => {
   it('does not construct an Axiom destination in test', () => {
     const { axiom } = buildLoggerBundle(makeConfig({ NODE_ENV: 'test' }));
     expect(axiom).toBeNull();
+  });
+
+  it('logs the user agent on the incoming-request line', async () => {
+    const { stream, lines } = collectStream();
+    const { logger } = buildLoggerBundle(makeConfig({ NODE_ENV: 'test' }), {
+      stdout: stream,
+    });
+    const app = Fastify({ loggerInstance: logger });
+    app.get('/', () => 'ok');
+    try {
+      await app.inject({
+        method: 'GET',
+        url: '/',
+        headers: { 'user-agent': 'PreviewBot/1.0' },
+      });
+    } finally {
+      await app.close();
+    }
+    const incoming = lines()
+      .map((line) => JSON.parse(line) as { msg?: string; req?: unknown })
+      .find((entry) => entry.msg === 'incoming request');
+    expect(incoming?.req).toMatchObject({
+      method: 'GET',
+      url: '/',
+      remoteAddress: '127.0.0.1',
+      userAgent: 'PreviewBot/1.0',
+    });
   });
 
   it('wires an Axiom destination in production and posts NDJSON to the ingest endpoint', async () => {

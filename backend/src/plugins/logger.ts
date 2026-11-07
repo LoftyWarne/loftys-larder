@@ -1,3 +1,4 @@
+import type { FastifyRequest } from 'fastify';
 import pino, { type Logger, type LoggerOptions } from 'pino';
 import pretty from 'pino-pretty';
 import type { Config } from '../config.ts';
@@ -26,6 +27,19 @@ export interface BuildLoggerOptions {
   errorStream?: NodeJS.WritableStream;
 }
 
+// Replaces Fastify's default `req` serializer (it merges ours over its own) to
+// add the user agent, so a bot or preview renderer is identifiable in Axiom.
+function serializeRequest(req: FastifyRequest): Record<string, unknown> {
+  return {
+    method: req.method,
+    url: req.url,
+    host: req.host,
+    remoteAddress: req.ip,
+    remotePort: req.socket.remotePort,
+    userAgent: req.headers['user-agent'],
+  };
+}
+
 export function buildLoggerBundle(
   config: Config,
   options: BuildLoggerOptions = {},
@@ -33,6 +47,7 @@ export function buildLoggerBundle(
   const baseOptions: LoggerOptions = {
     level: config.LOG_LEVEL,
     base: { env: config.NODE_ENV },
+    serializers: { req: serializeRequest },
   };
   const stdout = options.stdout ?? process.stdout;
 

@@ -8,7 +8,12 @@ export function registerServiceWorker(): void {
   }
   // Dynamic import keeps the virtual module out of dev/test bundles, where
   // `virtual:pwa-register` does not resolve.
-  void import('virtual:pwa-register').then(({ registerSW }) => {
-    registerSW({ immediate: true });
-  });
+  // Best-effort: if the chunk fetch fails (offline mid-boot, a preview
+  // renderer tearing the page down), the next page load retries. Left
+  // uncaught it surfaces in Sentry as an unhandled rejection.
+  import('virtual:pwa-register')
+    .then(({ registerSW }) => {
+      registerSW({ immediate: true });
+    })
+    .catch(() => undefined);
 }

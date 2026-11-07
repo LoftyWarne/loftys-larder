@@ -46,6 +46,29 @@ describe('registerServiceWorker', () => {
     expect(registerSWMock).toHaveBeenCalledWith({ immediate: true });
   });
 
+  it('swallows a failed chunk import instead of leaving an unhandled rejection', async () => {
+    vi.stubEnv('PROD', true);
+    vi.doMock('virtual:pwa-register', () => {
+      throw new TypeError('Failed to fetch dynamically imported module');
+    });
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const { registerServiceWorker } = await loadFresh();
+      expect(() => {
+        registerServiceWorker();
+      }).not.toThrow();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(registerSWMock).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+      vi.doUnmock('virtual:pwa-register');
+    }
+  });
+
   it('does nothing when serviceWorker API is missing (e.g. some older WebViews)', async () => {
     vi.stubEnv('PROD', true);
     vi.stubGlobal('navigator', { userAgent: 'test' });

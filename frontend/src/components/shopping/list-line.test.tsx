@@ -10,6 +10,10 @@ function makeLine(overrides: Partial<ShoppingListLine> = {}): ShoppingListLine {
     ingredient: { id: 100, name: 'Tomato' },
     unit: { id: 1, name: 'g' },
     totalQuantity: '500.000',
+    reserved: '0.000',
+    leftToBuy: '500.000',
+    fromStorage: false,
+    stockItems: [],
     contributingSlots: [
       {
         slotId: 1,

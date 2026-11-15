@@ -40,6 +40,7 @@ interface PickOption extends SearchableComboboxOption {
   averageShelfLifeDays: number | null;
   isBase: boolean;
   baseRecipeId: number | null;
+  stapleLocation: StorageLocation | null;
 }
 
 function shelfLifeTargetOf(option: PickOption): UseByTarget {
@@ -102,6 +103,9 @@ function AddForm({
   const [creatingName, setCreatingName] = useState<string | null>(null);
   const [createNameError, setCreateNameError] = useState<string>();
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // A Staple is never a Stock item (DEC-118). Picking one says where its
+  // state is kept instead.
+  const [staplePicked, setStaplePicked] = useState<PickOption | null>(null);
   const referencesQuery = trpc.ingredients.references.useQuery(undefined, {
     enabled: creatingName !== null,
   });
@@ -139,6 +143,12 @@ function AddForm({
   }
 
   function pick(option: PickOption | null): void {
+    if (option?.stapleLocation != null) {
+      setStaplePicked(option);
+      option = null;
+    } else {
+      setStaplePicked(null);
+    }
     setPicked(option);
     form.setValue(
       'target',
@@ -166,6 +176,7 @@ function AddForm({
         averageShelfLifeDays: row.averageShelfLifeDays,
         isBase: false,
         baseRecipeId: null,
+        stapleLocation: row.stapleLocation,
       }));
     }
     const result = await utils.recipes.list.fetch({
@@ -181,6 +192,7 @@ function AddForm({
       averageShelfLifeDays: null,
       isBase: recipe.isBase,
       baseRecipeId: recipe.baseRecipeId,
+      stapleLocation: null,
     }));
   }
 
@@ -199,6 +211,7 @@ function AddForm({
         averageShelfLifeDays: created.averageShelfLifeDays,
         isBase: false,
         baseRecipeId: null,
+        stapleLocation: null,
       });
       setCreatingName(null);
     } catch (error) {
@@ -260,6 +273,7 @@ function AddForm({
             submitLabel="Create ingredient"
             nameError={createNameError}
             onSubmit={handleCreateIngredient}
+            showStaple={false}
             onCancel={() => {
               setCreatingName(null);
             }}
@@ -343,6 +357,8 @@ function AddForm({
                 <span className="min-w-0 truncate">{option.label}</span>
                 {option.kind === 'recipe' ? (
                   <RecipeTypeBadge recipe={option} />
+                ) : option.stapleLocation !== null ? (
+                  <span className="text-xs text-muted-foreground">Staple</span>
                 ) : (
                   <span className="text-xs text-muted-foreground">
                     {option.unitName}
@@ -351,7 +367,14 @@ function AddForm({
               </span>
             )}
           />
-          {errors.target && (
+          {staplePicked?.stapleLocation != null && (
+            <p role="alert" className="text-sm text-destructive">
+              {staplePicked.label} is a Staple, tracked as in stock, running low
+              or out rather than by amount. Set it under Staples on the{' '}
+              {LOCATION_LABELS[staplePicked.stapleLocation]} tab.
+            </p>
+          )}
+          {errors.target && !staplePicked && (
             <p role="alert" className="text-sm text-destructive">
               {errors.target.message}
             </p>

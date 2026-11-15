@@ -533,7 +533,13 @@ describe('shopping procedures', () => {
       const result = await createCaller(makeContext()).shopping.getForPlan({
         planId,
       });
-      expect(result).toEqual({ planId, categories: [] });
+      expect(result).toEqual({
+        planId,
+        categories: [],
+        staplesToRestock: [],
+        staplesYouHave: [],
+        showStorageGlance: true,
+      });
     });
 
     it('excludes non-recipe slot ingredients alongside recipe slots', async () => {

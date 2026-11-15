@@ -511,6 +511,7 @@ describe('IngredientList', () => {
       defaultUnitId: 1,
       isPlant: false,
       averageShelfLifeDays: null,
+      stapleLocation: null,
     });
     expect(ingredientInput).toHaveValue('Carrot');
     // The create-form submit must not bubble to the outer ingredients form and

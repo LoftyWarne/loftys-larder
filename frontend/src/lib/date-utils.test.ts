@@ -9,6 +9,7 @@ import {
   formatShortDayRangeLabel,
   hourInLondon,
   parseCivilDate,
+  isPastPlan,
   todayInLondon,
 } from './date-utils.ts';
 
@@ -186,5 +187,13 @@ describe('formatShortDayRangeLabel', () => {
     expect(formatShortDayRangeLabel('2025-12-29', '2026-01-04')).toBe(
       '29 Dec 2025 – 4 Jan 2026',
     );
+  });
+});
+
+describe('isPastPlan', () => {
+  it('is past only once the last day is before today', () => {
+    expect(isPastPlan('2026-06-21', '2026-06-21')).toBe(false);
+    expect(isPastPlan('2026-06-21', '2026-06-22')).toBe(true);
+    expect(isPastPlan('2026-06-21', '2026-06-20')).toBe(false);
   });
 });

@@ -15,7 +15,9 @@ const {
   cancelMock,
   getDataMock,
   setDataMock,
+  storageInvalidateMock,
 } = vi.hoisted(() => ({
+  storageInvalidateMock: vi.fn().mockResolvedValue(undefined),
   listUseQueryMock: vi.fn(),
   createMutateAsyncMock: vi.fn(),
   duplicateMutateAsyncMock: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock('@/lib/trpc.ts', () => ({
           setData: setDataMock,
         },
       },
+      storage: { list: { invalidate: storageInvalidateMock } },
     }),
     plans: {
       list: { useQuery: listUseQueryMock },
@@ -332,5 +335,43 @@ describe('PlansPage', () => {
       { status: 'active' },
       snapshot,
     );
+  });
+
+  it('asks again before deleting a plan with food set aside from storage', async () => {
+    const user = userEvent.setup();
+    setup({ items: [ACTIVE_PLAN, FUTURE_PLAN] });
+    const held = new TRPCClientError<never>('held');
+    Object.assign(held, {
+      shape: {
+        data: {
+          cause: {
+            code: 'PLAN_HAS_RESERVATIONS',
+            reservations: 2,
+            stockItems: 2,
+          },
+        },
+      },
+    });
+    deleteMutateAsyncMock
+      .mockRejectedValueOnce(held)
+      .mockResolvedValueOnce({ id: 1 });
+    render(<PlansPage />);
+
+    const firstDelete = screen.getAllByRole('button', { name: /delete/i })[0];
+    if (!firstDelete) throw new Error('delete button missing');
+    await user.click(firstDelete);
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'food set aside from storage (2 items)',
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Delete and free it' }),
+    );
+    expect(deleteMutateAsyncMock).toHaveBeenLastCalledWith({
+      id: 1,
+      releaseReservations: true,
+    });
+    expect(storageInvalidateMock).toHaveBeenCalled();
   });
 });

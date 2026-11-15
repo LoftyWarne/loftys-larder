@@ -1,4 +1,8 @@
-import type { StockItem, StorageLocation } from '@loftys-larder/shared';
+import type {
+  StockItem,
+  StorageLocation,
+  StorageStaple,
+} from '@loftys-larder/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TRPCClientError } from '@trpc/client';
@@ -13,7 +17,11 @@ const {
   referencesUseQueryMock,
   useUtilsMock,
   searchMock,
+  ingredientsUpdateMock,
+  setStapleStateMock,
 } = vi.hoisted(() => ({
+  ingredientsUpdateMock: vi.fn(),
+  setStapleStateMock: vi.fn(),
   listUseQueryMock: vi.fn(),
   createUseMutationMock: vi.fn(),
   updateUseMutationMock: vi.fn(),
@@ -35,6 +43,8 @@ vi.mock('@/lib/trpc.ts', () => ({
     ingredients: {
       create: { useMutation: ingredientsCreateMock },
       references: { useQuery: referencesUseQueryMock },
+      update: { useMutation: ingredientsUpdateMock },
+      setStapleState: { useMutation: setStapleStateMock },
     },
     useUtils: useUtilsMock,
   },
@@ -144,6 +154,21 @@ function makeTrpcError(cause: Record<string, unknown>): TRPCClientError<never> {
   return err;
 }
 
+const STAPLES: StorageStaple[] = [
+  {
+    ingredientId: 20,
+    name: 'Olive Oil',
+    location: 'pantry',
+    state: 'in_stock',
+  },
+  { ingredientId: 21, name: 'Rice', location: 'pantry', state: 'running_low' },
+  { ingredientId: 22, name: 'Peas', location: 'freezer', state: 'out' },
+];
+
+const ingredientUpdate = vi.fn();
+const setStapleState = vi.fn();
+const ingredientsFetch = vi.fn();
+
 function setup(
   location: StorageLocation = 'freezer',
   update = vi
@@ -152,14 +177,15 @@ function setup(
 ): { update: ReturnType<typeof vi.fn>; invalidate: ReturnType<typeof vi.fn> } {
   searchMock.mockReturnValue({ location });
   listUseQueryMock.mockReturnValue({
-    data: { today: TODAY, items: ITEMS },
+    data: { today: TODAY, items: ITEMS, staples: STAPLES },
     isLoading: false,
     error: null,
   });
   const invalidate = vi.fn().mockResolvedValue(undefined);
   useUtilsMock.mockReturnValue({
     storage: { list: { invalidate } },
-    ingredients: { list: { invalidate: vi.fn(), fetch: vi.fn() } },
+    shopping: { getForPlan: { invalidate: vi.fn() } },
+    ingredients: { list: { invalidate: vi.fn(), fetch: ingredientsFetch } },
     recipes: { list: { fetch: vi.fn() } },
   });
   createUseMutationMock.mockReturnValue({ mutateAsync: vi.fn() });
@@ -173,6 +199,11 @@ function setup(
   });
   ingredientsCreateMock.mockReturnValue({ mutateAsync: vi.fn() });
   referencesUseQueryMock.mockReturnValue({ data: undefined });
+  ingredientsUpdateMock.mockReturnValue({
+    mutateAsync: ingredientUpdate,
+    isPending: false,
+  });
+  setStapleStateMock.mockReturnValue({ mutate: setStapleState });
   return { update, invalidate };
 }
 
@@ -383,6 +414,8 @@ describe('StoragePage', () => {
         defaultUnitName: 'g',
         isPlant: false,
         averageShelfLifeDays: 2,
+        stapleState: null,
+        stapleLocation: null,
       },
     ]);
     const invalidate = vi.fn().mockResolvedValue(undefined);
@@ -431,5 +464,126 @@ describe('StoragePage', () => {
       await within(dialog).findByText('Pick an ingredient or dish'),
     ).toBeInTheDocument();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  describe('Staples', () => {
+    it('lists the tab’s Staples, each with a one-tap state', async () => {
+      setup('pantry');
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      const section = screen.getByRole('region', { name: 'Staples' });
+      expect(within(section).getByText('Olive Oil')).toBeInTheDocument();
+      expect(within(section).getByText('Rice')).toBeInTheDocument();
+      expect(within(section).queryByText('Peas')).not.toBeInTheDocument();
+
+      const rice = within(section).getByRole('radiogroup', {
+        name: 'Rice: how much you have',
+      });
+      expect(
+        within(rice).getByRole('radio', { name: 'Running low' }),
+      ).toHaveAttribute('aria-checked', 'true');
+
+      await user.click(
+        within(
+          within(section).getByRole('radiogroup', {
+            name: 'Olive Oil: how much you have',
+          }),
+        ).getByRole('radio', { name: 'Out' }),
+      );
+      expect(setStapleState).toHaveBeenCalledWith(
+        { id: 20, state: 'out' },
+        expect.anything(),
+      );
+    });
+
+    it('makes a picked ingredient a Staple here, asking first if it is held', async () => {
+      setup('freezer');
+      ingredientsFetch.mockResolvedValue([
+        {
+          id: 1,
+          name: 'Cod',
+          categoryId: 1,
+          categoryName: 'Fish',
+          defaultUnitId: 1,
+          defaultUnitName: 'g',
+          isPlant: false,
+          averageShelfLifeDays: null,
+          stapleState: null,
+          stapleLocation: null,
+        },
+      ]);
+      ingredientUpdate
+        .mockRejectedValueOnce(
+          makeTrpcError({
+            code: 'INGREDIENT_STAPLE_HAS_STOCK',
+            stockItems: 2,
+            reservations: 1,
+          }),
+        )
+        .mockResolvedValueOnce({});
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      await user.type(
+        screen.getByLabelText('Add a Staple to the freezer'),
+        'cod',
+      );
+      await user.click(await screen.findByRole('option', { name: /cod/i }));
+
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('held in storage as 2 items');
+      expect(dialog).toHaveTextContent('will be freed');
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Make it a Staple' }),
+      );
+      await waitFor(() => {
+        expect(ingredientUpdate).toHaveBeenLastCalledWith({
+          id: 1,
+          patch: { stapleLocation: 'freezer' },
+          deleteStock: true,
+        });
+      });
+    });
+
+    it('won’t add a Staple as stock, and says where its state is kept', async () => {
+      setup('pantry');
+      useUtilsMock.mockReturnValue({
+        storage: { list: { invalidate: vi.fn() } },
+        shopping: { getForPlan: { invalidate: vi.fn() } },
+        ingredients: {
+          list: {
+            invalidate: vi.fn(),
+            fetch: vi.fn().mockResolvedValue([
+              {
+                id: 20,
+                name: 'Olive Oil',
+                categoryId: 1,
+                categoryName: 'Oils',
+                defaultUnitId: 1,
+                defaultUnitName: 'ml',
+                isPlant: false,
+                averageShelfLifeDays: null,
+                stapleState: 'in_stock',
+                stapleLocation: 'pantry',
+              },
+            ]),
+          },
+        },
+        recipes: { list: { fetch: vi.fn() } },
+      });
+      const user = userEvent.setup();
+      render(<StoragePage />);
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+      const dialog = await screen.findByRole('dialog');
+      await user.type(within(dialog).getByLabelText('Ingredient'), 'oil');
+      await user.click(
+        await screen.findByRole('option', { name: /olive oil/i }),
+      );
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'Olive Oil is a Staple',
+      );
+      expect(within(dialog).getByRole('alert')).toHaveTextContent('Pantry tab');
+    });
   });
 });

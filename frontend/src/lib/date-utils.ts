@@ -45,6 +45,15 @@ export function formatCivilDate(parts: {
   return `${y}-${m}-${d}`;
 }
 
+// A plan has ended once its last day is before today (Europe/London). Civil
+// YYYY-MM-DD strings compare in date order.
+export function isPastPlan(
+  endDate: string,
+  today: string = todayInLondon(),
+): boolean {
+  return endDate < today;
+}
+
 // Returns today's civil day in Europe/London as a YYYY-MM-DD string. Wraps
 // the one tolerated `new Date()` so domain code stays free of it (DEC-33).
 export function todayInLondon(now: Date = new Date()): string {

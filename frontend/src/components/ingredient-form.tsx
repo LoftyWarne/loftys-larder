@@ -1,11 +1,13 @@
 import {
   createIngredientInputSchema,
+  STORAGE_LOCATIONS,
   type CreateIngredientInput,
   type IngredientReferences,
 } from '@loftys-larder/shared';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+import { LOCATION_LABELS } from '@/components/storage/location-tabs.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 
@@ -19,6 +21,9 @@ export interface IngredientFormProps {
   submitLabel: string;
   nameError?: string;
   unitError?: string;
+  // The Staple location field. Off where a Staple can't be used, such as
+  // creating an ingredient to add to storage.
+  showStaple?: boolean;
 }
 
 const SHELF_LIFE_PLACEHOLDER = 'e.g. 7';
@@ -31,6 +36,7 @@ export function IngredientForm({
   submitLabel,
   nameError,
   unitError,
+  showStaple = true,
 }: IngredientFormProps): React.ReactElement {
   const form = useForm<IngredientFormValues>({
     resolver: zodResolver(createIngredientInputSchema),
@@ -165,6 +171,40 @@ export function IngredientForm({
         />
         <span>Counts towards plant points</span>
       </label>
+
+      {showStaple && (
+        <div className="space-y-1">
+          <label htmlFor="ingredient-staple" className="text-sm font-medium">
+            Staple
+          </label>
+          <select
+            id="ingredient-staple"
+            disabled={submitting}
+            aria-describedby="ingredient-staple-hint"
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            {...form.register('stapleLocation', {
+              setValueAs: (value: unknown) =>
+                value === '' || value === null || value === undefined
+                  ? null
+                  : value,
+            })}
+          >
+            <option value="">Not a Staple</option>
+            {STORAGE_LOCATIONS.map((location) => (
+              <option key={location} value={location}>
+                Staple in the {LOCATION_LABELS[location]}
+              </option>
+            ))}
+          </select>
+          <p
+            id="ingredient-staple-hint"
+            className="text-xs text-muted-foreground"
+          >
+            Something you always keep. It’s tracked as in stock, running low or
+            out, not by amount.
+          </p>
+        </div>
+      )}
 
       <div className="flex justify-end gap-2">
         <Button

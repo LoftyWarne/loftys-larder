@@ -82,6 +82,12 @@ export function useOptimisticCheckToggle({
       // Successful mutation supersedes any queued entry for the same line —
       // protects against a live toggle racing the reconnect-drain.
       void store.remove(input.planId, input.ingredientId);
+      // A Staple's tick changes its state (DEC-118), which the Storage
+      // screen shows.
+      const list = utils.shopping.getForPlan.getData({ planId });
+      if (list && isStapleLine(list, input.ingredientId)) {
+        void utils.storage.list.invalidate();
+      }
     },
     onSettled: (data) => {
       // The server response only carries `{ planId, ingredientId, isChecked }`
@@ -104,18 +110,30 @@ export function useOptimisticCheckToggle({
   };
 }
 
+function isStapleLine(
+  list: GetShoppingListForPlanResult,
+  ingredientId: number,
+): boolean {
+  return [...list.staplesToRestock, ...list.staplesYouHave].some(
+    (line) => line.ingredient.id === ingredientId,
+  );
+}
+
 function applyCheckPatch(
   list: GetShoppingListForPlanResult,
   ingredientId: number,
   isChecked: boolean,
 ): GetShoppingListForPlanResult {
+  const patch = <T extends { ingredient: { id: number }; isChecked: boolean }>(
+    line: T,
+  ): T => (line.ingredient.id === ingredientId ? { ...line, isChecked } : line);
   return {
     ...list,
     categories: list.categories.map((cat) => ({
       ...cat,
-      lines: cat.lines.map((line) =>
-        line.ingredient.id === ingredientId ? { ...line, isChecked } : line,
-      ),
+      lines: cat.lines.map(patch),
     })),
+    staplesToRestock: list.staplesToRestock.map(patch),
+    staplesYouHave: list.staplesYouHave.map(patch),
   };
 }

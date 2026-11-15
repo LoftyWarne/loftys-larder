@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm';
 
 import {
   createStockItemInputSchema,
@@ -16,6 +16,7 @@ import {
   type ListStorageResult,
   type StockItem,
   type StorageLocation,
+  type StorageStaple,
   type UpdateStockItemResult,
   type UseByTarget,
 } from '../../../../shared/src/index.ts';
@@ -158,6 +159,36 @@ async function listItems(tx: Tx): Promise<StockItem[]> {
   return items;
 }
 
+async function listStaples(tx: Tx): Promise<StorageStaple[]> {
+  const rows = await tx
+    .select({
+      ingredientId: ingredients.id,
+      name: ingredients.name,
+      location: ingredients.stapleLocation,
+      state: ingredients.stapleState,
+    })
+    .from(ingredients)
+    .where(
+      and(
+        eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+        isNotNull(ingredients.stapleState),
+      ),
+    )
+    .orderBy(asc(sql`lower(${ingredients.name})`), asc(ingredients.id));
+  const staples: StorageStaple[] = [];
+  for (const row of rows) {
+    if (row.location !== null && row.state !== null) {
+      staples.push({
+        ingredientId: row.ingredientId,
+        name: row.name,
+        location: row.location,
+        state: row.state,
+      });
+    }
+  }
+  return staples;
+}
+
 interface LoadedItem {
   id: number;
   location: StorageLocation;
@@ -278,11 +309,11 @@ export const storageRouter = router({
     .query(async ({ ctx }): Promise<ListStorageResult> => {
       const today = todayInLondon();
       const withTransaction = makeWithTransaction(ctx.db);
-      const items = await withTransaction(async (tx) => {
+      const { items, staples } = await withTransaction(async (tx) => {
         await settleReservations(tx, today);
-        return listItems(tx);
+        return { items: await listItems(tx), staples: await listStaples(tx) };
       });
-      return { today: formatCivilDate(today), items };
+      return { today: formatCivilDate(today), items, staples };
     }),
 
   create: protectedProcedure
@@ -297,7 +328,10 @@ export const storageRouter = router({
         let useByTarget: UseByTarget;
         if (input.target.kind === 'ingredient') {
           const rows = await tx
-            .select({ averageShelfLifeDays: ingredients.averageShelfLifeDays })
+            .select({
+              averageShelfLifeDays: ingredients.averageShelfLifeDays,
+              stapleState: ingredients.stapleState,
+            })
             .from(ingredients)
             .where(
               and(
@@ -314,6 +348,13 @@ export const storageRouter = router({
               'NOT_FOUND',
               'STOCK_TARGET_NOT_FOUND',
               'Ingredient not found',
+            );
+          }
+          if (row.stapleState !== null) {
+            throw domainError(
+              'CONFLICT',
+              'STOCK_INGREDIENT_IS_STAPLE',
+              'A Staple is tracked by its state, not as stock',
             );
           }
           useByTarget = {

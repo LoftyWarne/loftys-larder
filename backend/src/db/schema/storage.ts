@@ -5,7 +5,6 @@ import {
   index,
   integer,
   numeric,
-  pgEnum,
   pgTable,
   timestamp,
   uuid,
@@ -15,12 +14,7 @@ import { households } from './household.ts';
 import { ingredients } from './ingredients.ts';
 import { mealPlans, mealPlanSlotItems } from './meal-plans.ts';
 import { recipes } from './recipes.ts';
-
-export const storageLocation = pgEnum('storage_location', [
-  'freezer',
-  'fridge',
-  'pantry',
-]);
+import { storageLocation } from './storage-enums.ts';
 
 // What the household holds (DEC-118). The amount is stored, never derived from
 // Reservations, so deleting a past plan can't bring settled food back. A zero

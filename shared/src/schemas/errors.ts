@@ -82,6 +82,19 @@ export const DOMAIN_ERROR_CODES = [
   'STOCK_RESERVED',
   // Changing the unit would misread the amounts held in storage.
   'INGREDIENT_UNIT_IN_STOCK',
+  // Marking a held ingredient as a Staple deletes its Stock items. Metadata
+  // `stockItems`, `reservations`. Send again with `deleteStock`.
+  'INGREDIENT_STAPLE_HAS_STOCK',
+  // A Staple is never a Stock item.
+  'STOCK_INGREDIENT_IS_STAPLE',
+  // `setStapleState` on an ingredient that isn't a Staple.
+  'INGREDIENT_NOT_STAPLE',
+  // Deleting a plan would free food it has set aside from storage. Metadata
+  // `reservations`, `stockItems`. Send again with `releaseReservations`.
+  'PLAN_HAS_RESERVATIONS',
+  // A shopping line's Reservation asks for more than is available or
+  // needed. Metadata `available`, `needed`.
+  'SHOPPING_RESERVE_TOO_MUCH',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

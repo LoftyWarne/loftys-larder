@@ -59,6 +59,7 @@ describe('IngredientForm', () => {
         defaultUnitId: 11,
         isPlant: true,
         averageShelfLifeDays: 30,
+        stapleLocation: null,
       });
     });
   });

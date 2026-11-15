@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import {
   createIngredientInputSchema,
@@ -7,10 +7,12 @@ import {
   ingredientListItemSchema,
   ingredientReferencesSchema,
   listIngredientsInputSchema,
+  setStapleStateInputSchema,
   updateIngredientInputSchema,
   type DomainErrorCode,
   type IngredientListItem,
   type IngredientReferences,
+  type StorageLocation,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import { ingredients } from '../../db/schema/ingredients.ts';
@@ -22,8 +24,10 @@ import {
   recipeIngredients,
   recipeMethodIngredients,
 } from '../../db/schema/recipes.ts';
-import { stockItems } from '../../db/schema/storage.ts';
-import { makeWithTransaction } from '../../db/withTransaction.ts';
+import { stockItems, stockReservations } from '../../db/schema/storage.ts';
+import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
+import { todayInLondon } from '../../lib/date-utils.ts';
+import { settleReservations } from '../../lib/stock-settlement.ts';
 import { protectedProcedure, router } from '../init.ts';
 import { z } from 'zod';
 
@@ -107,6 +111,8 @@ export const ingredientsRouter = router({
           defaultUnitName: unitsOfMeasurement.name,
           isPlant: ingredients.isPlant,
           averageShelfLifeDays: ingredients.averageShelfLifeDays,
+          stapleState: ingredients.stapleState,
+          stapleLocation: ingredients.stapleLocation,
         })
         .from(ingredients)
         .innerJoin(
@@ -138,6 +144,11 @@ export const ingredientsRouter = router({
             defaultUnitId: input.defaultUnitId,
             isPlant: input.isPlant,
             averageShelfLifeDays: input.averageShelfLifeDays,
+            // A new ingredient holds no stock, so it can be a Staple at once.
+            ...(input.stapleLocation != null && {
+              stapleLocation: input.stapleLocation,
+              stapleState: 'in_stock' as const,
+            }),
           })
           .returning({ id: ingredients.id });
 
@@ -179,11 +190,22 @@ export const ingredientsRouter = router({
       if (patch.isPlant !== undefined) patchValues.isPlant = patch.isPlant;
       if (patch.averageShelfLifeDays !== undefined)
         patchValues.averageShelfLifeDays = patch.averageShelfLifeDays;
+      // `stapleLocation` is applied by `applyStapleLocation`, which also sets
+      // the state.
 
       const withTransaction = makeWithTransaction(ctx.db);
       let updatedId: number | undefined;
       try {
         updatedId = await withTransaction(async (tx) => {
+          if (patch.stapleLocation !== undefined) {
+            await applyStapleLocation(
+              tx,
+              id,
+              patch.stapleLocation,
+              input.deleteStock ?? false,
+            );
+          }
+
           // Held amounts are in the ingredient's one unit (DEC-18), so a new
           // unit would misread them. The cook clears the stock first. The
           // row lock holds off a Stock item being added meanwhile.
@@ -218,6 +240,19 @@ export const ingredientsRouter = router({
             }
           }
 
+          if (Object.keys(patchValues).length === 0) {
+            const [found] = await tx
+              .select({ id: ingredients.id })
+              .from(ingredients)
+              .where(
+                and(
+                  eq(ingredients.id, id),
+                  eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+                ),
+              );
+            return found?.id;
+          }
+
           const updated = await tx
             .update(ingredients)
             .set(patchValues)
@@ -250,6 +285,32 @@ export const ingredientsRouter = router({
       }
 
       return loadIngredient(ctx.db, updatedId);
+    }),
+
+  setStapleState: protectedProcedure
+    .input(setStapleStateInputSchema)
+    .output(ingredientListItemSchema)
+    .mutation(async ({ ctx, input }): Promise<IngredientListItem> => {
+      const updated = await ctx.db
+        .update(ingredients)
+        .set({ stapleState: input.state })
+        .where(
+          and(
+            eq(ingredients.id, input.id),
+            eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+            isNotNull(ingredients.stapleLocation),
+          ),
+        )
+        .returning({ id: ingredients.id });
+      const row = updated[0];
+      if (!row) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Staple not found',
+          cause: { code: 'INGREDIENT_NOT_STAPLE' },
+        });
+      }
+      return loadIngredient(ctx.db, row.id);
     }),
 
   delete: protectedProcedure
@@ -340,6 +401,98 @@ export const ingredientsRouter = router({
     }),
 });
 
+// Marks, moves or unmarks a Staple (DEC-118). A Staple is never a Stock item,
+// so marking a held ingredient deletes its Stock items, which releases their
+// Reservations, once the cook has agreed. Moving keeps the state, and a new
+// Staple starts in stock.
+async function applyStapleLocation(
+  tx: Tx,
+  id: number,
+  location: StorageLocation | null,
+  deleteStock: boolean,
+): Promise<void> {
+  if (location === null) {
+    await tx
+      .update(ingredients)
+      .set({ stapleState: null, stapleLocation: null })
+      .where(
+        and(
+          eq(ingredients.id, id),
+          eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+        ),
+      );
+    return;
+  }
+
+  // Settling locks Reservations before Stock items, the order every storage
+  // path takes. The ingredient's row lock then holds off a Stock item being
+  // added meanwhile.
+  await settleReservations(tx, todayInLondon());
+  const [current] = await tx
+    .select({ stapleState: ingredients.stapleState })
+    .from(ingredients)
+    .where(
+      and(
+        eq(ingredients.id, id),
+        eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .for('update');
+  if (!current) return;
+
+  if (current.stapleState === null) {
+    const [held] = await tx
+      .select({
+        stockItems: sql<number>`count(distinct ${stockItems.id})::int`,
+        reservations: sql<number>`count(${stockReservations.id})::int`,
+      })
+      .from(stockItems)
+      .leftJoin(
+        stockReservations,
+        and(
+          eq(stockReservations.stockItemId, stockItems.id),
+          eq(stockReservations.householdId, CURRENT_HOUSEHOLD_ID),
+        ),
+      )
+      .where(
+        and(
+          eq(stockItems.ingredientId, id),
+          eq(stockItems.householdId, CURRENT_HOUSEHOLD_ID),
+        ),
+      );
+    if (held && held.stockItems > 0) {
+      if (!deleteStock) {
+        throw domainConflict(
+          'INGREDIENT_STAPLE_HAS_STOCK',
+          'The ingredient is held in storage',
+          { stockItems: held.stockItems, reservations: held.reservations },
+        );
+      }
+      await tx
+        .delete(stockItems)
+        .where(
+          and(
+            eq(stockItems.ingredientId, id),
+            eq(stockItems.householdId, CURRENT_HOUSEHOLD_ID),
+          ),
+        );
+    }
+  }
+
+  await tx
+    .update(ingredients)
+    .set({
+      stapleLocation: location,
+      stapleState: current.stapleState ?? 'in_stock',
+    })
+    .where(
+      and(
+        eq(ingredients.id, id),
+        eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    );
+}
+
 async function loadIngredient(
   db: import('../../db/index.ts').Db,
   id: number,
@@ -354,6 +507,8 @@ async function loadIngredient(
       defaultUnitName: unitsOfMeasurement.name,
       isPlant: ingredients.isPlant,
       averageShelfLifeDays: ingredients.averageShelfLifeDays,
+      stapleState: ingredients.stapleState,
+      stapleLocation: ingredients.stapleLocation,
     })
     .from(ingredients)
     .innerJoin(

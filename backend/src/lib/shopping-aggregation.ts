@@ -7,10 +7,14 @@ import type {
 import { addDays, parseCivilDate } from './date-utils.ts';
 
 // Helper-local view of `ShoppingListLine` without the persistent `isChecked`
-// flag — that's stamped by the procedure after lazy-create + reset. Keeping
+// flag — that's stamped by the procedure after lazy-create + reset — or the
+// storage fields, added as a second step after the sum (DEC-118). Keeping
 // the helper output narrower than the wire DTO matches reality: the pure
-// aggregation knows nothing about check state.
-export type AggregatedShoppingListLine = Omit<ShoppingListLine, 'isChecked'>;
+// aggregation knows nothing about check state or storage.
+export type AggregatedShoppingListLine = Omit<
+  ShoppingListLine,
+  'isChecked' | 'reserved' | 'leftToBuy' | 'fromStorage' | 'stockItems'
+>;
 
 export interface AggregatedShoppingListCategory {
   category: ShoppingListCategory['category'];
@@ -252,7 +256,7 @@ export function parseMilliFromFixed3(value: string): bigint {
   return sign * (BigInt(wholePart) * 1000n + BigInt(fracPart));
 }
 
-function formatFixed3FromMilli(value: bigint): string {
+export function formatFixed3FromMilli(value: bigint): string {
   const negative = value < 0n;
   const abs = negative ? -value : value;
   const whole = abs / 1000n;

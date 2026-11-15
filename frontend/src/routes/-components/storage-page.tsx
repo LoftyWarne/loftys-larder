@@ -11,10 +11,13 @@ import {
   LocationTabs,
 } from '@/components/storage/location-tabs.tsx';
 import { ReleaseReservationsDialog } from '@/components/storage/release-reservations-dialog.tsx';
+import { StapleStockDialog } from '@/components/storage/staple-stock-dialog.tsx';
+import { StaplesSection } from '@/components/storage/staples-section.tsx';
 import { StockAddSheet } from '@/components/storage/stock-add-sheet.tsx';
 import { StockEditSheet } from '@/components/storage/stock-edit-sheet.tsx';
 import { StockRow } from '@/components/storage/stock-row.tsx';
 import { Button } from '@/components/ui/button.tsx';
+import { useStapleMarking } from '@/hooks/use-staple-marking.ts';
 import { useStockEdits } from '@/hooks/use-stock-edits.ts';
 import { groupStorage, type StorageRow } from '@/lib/storage-rows.ts';
 import { trpc } from '@/lib/trpc.ts';
@@ -60,6 +63,7 @@ export function StoragePage(): React.ReactElement {
   const { location } = useSearch({ from: '/_authed/storage' });
   const listQuery = trpc.storage.list.useQuery();
   const edits = useStockEdits();
+  const stapleMarking = useStapleMarking();
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
@@ -120,6 +124,11 @@ export function StoragePage(): React.ReactElement {
 
       {today !== undefined && (
         <>
+          <StaplesSection
+            location={location}
+            staples={listQuery.data?.staples ?? []}
+            marking={stapleMarking}
+          />
           {empty && (
             <p className="py-6 text-center text-sm text-muted-foreground">
               Nothing in the {LOCATION_LABELS[location].toLowerCase()} yet.
@@ -162,6 +171,7 @@ export function StoragePage(): React.ReactElement {
         </>
       )}
       <ReleaseReservationsDialog edits={edits} />
+      <StapleStockDialog marking={stapleMarking} />
     </section>
   );
 }

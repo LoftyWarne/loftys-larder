@@ -4,6 +4,8 @@ import {
   IngredientForm,
   type IngredientFormValues,
 } from '@/components/ingredient-form.tsx';
+import { StapleStockDialog } from '@/components/storage/staple-stock-dialog.tsx';
+import { LOCATION_LABELS } from '@/components/storage/location-tabs.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import {
   Dialog,
@@ -14,6 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { useStapleMarking } from '@/hooks/use-staple-marking.ts';
 import { getDomainErrorCause, getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
 
@@ -60,11 +63,7 @@ export function IngredientsPage(): React.ReactElement {
       await utils.ingredients.list.invalidate();
     },
   });
-  const updateMutation = trpc.ingredients.update.useMutation({
-    onSuccess: async () => {
-      await utils.ingredients.list.invalidate();
-    },
-  });
+  const stapleMarking = useStapleMarking();
   const deleteMutation = trpc.ingredients.delete.useMutation({
     onSuccess: async () => {
       await utils.ingredients.list.invalidate();
@@ -108,11 +107,13 @@ export function IngredientsPage(): React.ReactElement {
     setEditNameError(undefined);
     setEditUnitError(undefined);
     try {
-      await updateMutation.mutateAsync({
-        id: editTarget.id,
-        patch: values,
-      });
-      setEditTarget(null);
+      await stapleMarking.save(
+        { id: editTarget.id, patch: values },
+        values.name,
+        () => {
+          setEditTarget(null);
+        },
+      );
     } catch (error) {
       const code = getDomainErrorCode(error);
       if (code === 'INGREDIENT_NAME_TAKEN') {
@@ -204,6 +205,8 @@ export function IngredientsPage(): React.ReactElement {
                   {ingredient.isPlant && ' · 🌱'}
                   {ingredient.averageShelfLifeDays !== null &&
                     ` · ${String(ingredient.averageShelfLifeDays)} day shelf life`}
+                  {ingredient.stapleLocation !== null &&
+                    ` · Staple in the ${LOCATION_LABELS[ingredient.stapleLocation]}`}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -292,6 +295,7 @@ export function IngredientsPage(): React.ReactElement {
                 defaultUnitId: editTarget.defaultUnitId,
                 isPlant: editTarget.isPlant,
                 averageShelfLifeDays: editTarget.averageShelfLifeDays,
+                stapleLocation: editTarget.stapleLocation,
               }}
               submitLabel="Save changes"
               nameError={editNameError}
@@ -304,6 +308,8 @@ export function IngredientsPage(): React.ReactElement {
           </DialogContent>
         </Dialog>
       )}
+
+      <StapleStockDialog marking={stapleMarking} />
 
       <Dialog
         open={deleteState.kind !== 'idle'}

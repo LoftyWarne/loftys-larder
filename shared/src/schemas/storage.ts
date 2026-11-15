@@ -9,6 +9,13 @@ export const storageLocationSchema = z.enum(STORAGE_LOCATIONS);
 
 export type StorageLocation = z.infer<typeof storageLocationSchema>;
 
+// A Staple's state (DEC-118). It lives on the ingredient, never as an amount.
+export const STAPLE_STATES = ['in_stock', 'running_low', 'out'] as const;
+
+export const stapleStateSchema = z.enum(STAPLE_STATES);
+
+export type StapleState = z.infer<typeof stapleStateSchema>;
+
 const STOCK_QUANTITY_RE = /^\d+(\.\d{1,3})?$/;
 
 // `numeric(10,3)` travels as a decimal string, like recipe quantities.
@@ -142,10 +149,21 @@ export const stockItemSchema = z.object({
 
 export type StockItem = z.infer<typeof stockItemSchema>;
 
+// A Staple as the Storage screen lists it, on its location's tab.
+export const storageStapleSchema = z.object({
+  ingredientId: z.number().int().positive(),
+  name: z.string(),
+  location: storageLocationSchema,
+  state: stapleStateSchema,
+});
+
+export type StorageStaple = z.infer<typeof storageStapleSchema>;
+
 export const listStorageResultSchema = z.object({
   // Europe/London, as the server settled against.
   today: civilDateSchema,
   items: z.array(stockItemSchema),
+  staples: z.array(storageStapleSchema),
 });
 
 export type ListStorageResult = z.infer<typeof listStorageResultSchema>;

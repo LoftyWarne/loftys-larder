@@ -89,7 +89,7 @@ An amount of a Stock item set aside for a plan, by a slot that eats it or a shop
 _Avoid_: hold, allocation, claim
 
 **Staple**:
-An ingredient the household always keeps, such as olive oil, tracked only as in stock, running low or out, never as an amount. A Staple is never a Stock item.
+An ingredient the household always keeps in one Storage location, such as olive oil in the Pantry, tracked only as in stock, running low or out, never as an amount. A Staple is never a Stock item.
 _Avoid_: basic, essential, pantry item
 
 ### Judging recipes

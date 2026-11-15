@@ -620,16 +620,37 @@ describe('PlannerPage', () => {
     });
 
     it('shows day cards and an icon Shopping list link below `md`', () => {
-      mockIsLargeViewport(false);
-      setup();
-      render(<PlannerPage />);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-06-14T12:00:00Z'));
+      try {
+        mockIsLargeViewport(false);
+        setup();
+        render(<PlannerPage />);
 
-      expect(
-        screen.getByRole('list', { name: 'Meal plan' }),
-      ).toBeInTheDocument();
-      expect(screen.queryByRole('table')).not.toBeInTheDocument();
-      // The router mock renders an <a> without href, so it has no link role.
-      expect(screen.getByLabelText('Shopping list').tagName).toBe('A');
+        expect(
+          screen.getByRole('list', { name: 'Meal plan' }),
+        ).toBeInTheDocument();
+        expect(screen.queryByRole('table')).not.toBeInTheDocument();
+        // The router mock renders an <a> without href, so it has no link role.
+        expect(screen.getByLabelText('Shopping list').tagName).toBe('A');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('has no Shopping list link once the plan has ended', () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-07-01T12:00:00Z'));
+      try {
+        mockIsLargeViewport(false);
+        setup();
+        render(<PlannerPage />);
+        expect(
+          screen.queryByLabelText('Shopping list'),
+        ).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('opens the editor when an empty slot is tapped below `lg`', async () => {

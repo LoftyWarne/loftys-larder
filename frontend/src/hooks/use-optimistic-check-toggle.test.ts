@@ -8,14 +8,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createInMemoryQueueStore } from '@/lib/offline-queue.ts';
 
-const { toggleMutateMock, getDataMock, setDataMock, cancelMock } = vi.hoisted(
-  () => ({
-    toggleMutateMock: vi.fn(),
-    getDataMock: vi.fn(),
-    setDataMock: vi.fn(),
-    cancelMock: vi.fn().mockResolvedValue(undefined),
-  }),
-);
+const {
+  toggleMutateMock,
+  getDataMock,
+  setDataMock,
+  cancelMock,
+  storageInvalidateMock,
+} = vi.hoisted(() => ({
+  toggleMutateMock: vi.fn(),
+  getDataMock: vi.fn(),
+  setDataMock: vi.fn(),
+  cancelMock: vi.fn().mockResolvedValue(undefined),
+  storageInvalidateMock: vi.fn().mockResolvedValue(undefined),
+}));
 
 let mutationOptions: Record<string, unknown> = {};
 
@@ -29,6 +34,7 @@ vi.mock('@/lib/trpc.ts', () => ({
           setData: setDataMock,
         },
       },
+      storage: { list: { invalidate: storageInvalidateMock } },
     }),
     shopping: {
       toggleChecked: {
@@ -45,6 +51,9 @@ import { useOptimisticCheckToggle } from './use-optimistic-check-toggle.ts';
 
 const LIST: GetShoppingListForPlanResult = {
   planId: 9,
+  staplesToRestock: [],
+  staplesYouHave: [],
+  showStorageGlance: false,
   categories: [
     {
       category: { id: 1, name: 'Produce' },
@@ -53,6 +62,10 @@ const LIST: GetShoppingListForPlanResult = {
           ingredient: { id: 100, name: 'Tomato' },
           unit: { id: 1, name: 'g' },
           totalQuantity: '500.000',
+          reserved: '0.000',
+          leftToBuy: '500.000',
+          fromStorage: false,
+          stockItems: [],
           contributingSlots: [],
           isChecked: false,
           isOptional: false,
@@ -61,6 +74,10 @@ const LIST: GetShoppingListForPlanResult = {
           ingredient: { id: 101, name: 'Onion' },
           unit: { id: 1, name: 'g' },
           totalQuantity: '300.000',
+          reserved: '0.000',
+          leftToBuy: '300.000',
+          fromStorage: false,
+          stockItems: [],
           contributingSlots: [],
           isChecked: false,
           isOptional: false,
@@ -88,6 +105,7 @@ beforeEach(() => {
   getDataMock.mockReset();
   setDataMock.mockReset();
   cancelMock.mockClear();
+  storageInvalidateMock.mockClear();
   mutationOptions = {};
   setOnline(true);
 });
@@ -240,5 +258,41 @@ describe('useOptimisticCheckToggle', () => {
     if (!call) throw new Error('expected setData call');
     const reconciled = call[1] as GetShoppingListForPlanResult;
     expect(reconciled.categories[0]?.lines[0]?.isChecked).toBe(true);
+  });
+
+  it('patches a Staple line, and refreshes storage once its tick lands', async () => {
+    const withStaple: GetShoppingListForPlanResult = {
+      ...LIST,
+      staplesToRestock: [
+        {
+          ingredient: { id: 400, name: 'Olive Oil' },
+          unit: { id: 2, name: 'ml' },
+          location: 'pantry',
+          state: 'running_low',
+          neededQuantity: null,
+          contributingSlots: [],
+          isChecked: false,
+        },
+      ],
+    };
+    getDataMock.mockReturnValue(withStaple);
+    renderHook(() => useOptimisticCheckToggle({ planId: 9 }));
+    const input = { planId: 9, ingredientId: 400, isChecked: true };
+
+    const onMutate = mutationOptions.onMutate as (
+      input: ToggleShoppingItemCheckedInput,
+    ) => Promise<unknown>;
+    await onMutate(input);
+    const patched = setDataMock.mock.calls[0]?.[1] as
+      | GetShoppingListForPlanResult
+      | undefined;
+    expect(patched?.staplesToRestock[0]?.isChecked).toBe(true);
+
+    const onSuccess = mutationOptions.onSuccess as (
+      data: ToggleShoppingItemCheckedResult,
+      input: ToggleShoppingItemCheckedInput,
+    ) => void;
+    onSuccess(input, input);
+    expect(storageInvalidateMock).toHaveBeenCalled();
   });
 });

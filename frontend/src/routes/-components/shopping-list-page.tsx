@@ -1,9 +1,15 @@
-import type { ShoppingListLine } from '@loftys-larder/shared';
+import type {
+  ShoppingListLine,
+  ShoppingStapleLine,
+} from '@loftys-larder/shared';
 import { useParams } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
 import { CategorySection } from '@/components/shopping/category-section.tsx';
 import { ShoppingPlanPicker } from '@/components/shopping/plan-picker.tsx';
+import { StaplesGroups } from '@/components/shopping/staples-groups.tsx';
+import { StorageGlanceBanner } from '@/components/shopping/storage-glance-banner.tsx';
+import { StorageUseSheet } from '@/components/shopping/storage-use-sheet.tsx';
 import { useOfflineQueue } from '@/hooks/use-offline-queue.ts';
 import { useOptimisticCheckToggle } from '@/hooks/use-optimistic-check-toggle.ts';
 import { drainOfflineQueue } from '@/lib/offline-queue-drain.ts';
@@ -31,6 +37,9 @@ export function ShoppingListPage(): React.ReactElement {
     },
   });
 
+  const [storageLineId, setStorageLineId] = useState<number | null>(null);
+  const dismissGlance = trpc.shopping.dismissStorageGlance.useMutation();
+
   const drainMutation = trpc.shopping.toggleChecked.useMutation();
   const drainMutateAsyncRef = useRef(drainMutation.mutateAsync);
   drainMutateAsyncRef.current = drainMutation.mutateAsync;
@@ -48,7 +57,9 @@ export function ShoppingListPage(): React.ReactElement {
       );
       if (lifecycle.cancelled) return;
       if (result.drained > 0 && idIsValid) {
+        // A drained Staple tick restocks it (DEC-118).
         void utils.shopping.getForPlan.invalidate({ planId });
+        void utils.storage.list.invalidate();
       }
     })();
     return () => {
@@ -56,7 +67,10 @@ export function ShoppingListPage(): React.ReactElement {
     };
   }, [offline.isOnline, offline.store, utils, planId, idIsValid]);
 
-  function handleToggle(line: ShoppingListLine, nextChecked: boolean): void {
+  function handleToggle(
+    line: ShoppingListLine | ShoppingStapleLine,
+    nextChecked: boolean,
+  ): void {
     setMutationError(null);
     toggle({
       planId,
@@ -85,7 +99,28 @@ export function ShoppingListPage(): React.ReactElement {
   if (!listQuery.data) return <p role="alert">Shopping list not found.</p>;
 
   const list = listQuery.data;
-  const hasLines = list.categories.some((cat) => cat.lines.length > 0);
+  const hasLines =
+    list.categories.some((cat) => cat.lines.length > 0) ||
+    list.staplesToRestock.length > 0 ||
+    list.staplesYouHave.length > 0;
+  const storageLine =
+    list.categories
+      .flatMap((cat) => cat.lines)
+      .find((line) => line.ingredient.id === storageLineId) ?? null;
+
+  function handleDismissGlance(): void {
+    utils.shopping.getForPlan.setData({ planId }, (current) =>
+      current ? { ...current, showStorageGlance: false } : current,
+    );
+    dismissGlance.mutate(
+      { planId },
+      {
+        onError: () => {
+          void utils.shopping.getForPlan.invalidate({ planId });
+        },
+      },
+    );
+  }
 
   return (
     <section
@@ -110,6 +145,12 @@ export function ShoppingListPage(): React.ReactElement {
           </p>
         )}
       </header>
+      {list.showStorageGlance && (
+        <StorageGlanceBanner
+          onDismiss={handleDismissGlance}
+          dismissing={dismissGlance.isPending}
+        />
+      )}
       {mutationError && (
         <p role="alert" className="text-sm text-destructive">
           {mutationError}
@@ -123,14 +164,32 @@ export function ShoppingListPage(): React.ReactElement {
               category={cat}
               onToggle={handleToggle}
               queuedIngredientIds={offline.queuedIngredientIds}
+              onOpenStorage={(line) => {
+                setStorageLineId(line.ingredient.id);
+              }}
+              canReserve={offline.isOnline}
             />
           ))}
+          <StaplesGroups
+            toRestock={list.staplesToRestock}
+            youHave={list.staplesYouHave}
+            queuedIngredientIds={offline.queuedIngredientIds}
+            onToggle={handleToggle}
+          />
         </div>
       ) : (
         <p role="status" className="text-sm text-muted-foreground">
           Nothing to shop for — this plan has no ingredient-bearing slots yet.
         </p>
       )}
+      <StorageUseSheet
+        planId={planId}
+        line={storageLine}
+        online={offline.isOnline}
+        onClose={() => {
+          setStorageLineId(null);
+        }}
+      />
     </section>
   );
 }

@@ -2,7 +2,7 @@ import type { PlanListItem } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
 
 import { Button } from '@/components/ui/button.tsx';
-import { formatDayRangeLabel } from '@/lib/date-utils.ts';
+import { formatDayRangeLabel, isPastPlan } from '@/lib/date-utils.ts';
 
 export interface PlanListCardProps {
   plan: PlanListItem;
@@ -34,14 +34,17 @@ export function PlanListCard({
             Open
           </Link>
         </Button>
-        <Button asChild variant="outline" size="sm">
-          <Link
-            to="/plans/$planId/shopping"
-            params={{ planId: String(plan.id) }}
-          >
-            Shopping list
-          </Link>
-        </Button>
+        {/* A plan that has ended has nothing left to shop for. */}
+        {!isPastPlan(plan.endDate) && (
+          <Button asChild variant="outline" size="sm">
+            <Link
+              to="/plans/$planId/shopping"
+              params={{ planId: String(plan.id) }}
+            >
+              Shopping list
+            </Link>
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"

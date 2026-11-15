@@ -152,6 +152,9 @@ export type GetPlanResult = z.infer<typeof getPlanResultSchema>;
 
 export const deletePlanInputSchema = z.object({
   id: planIdSchema,
+  // Set once the cook has agreed to free the food the plan has set aside
+  // from storage (DEC-118).
+  releaseReservations: z.boolean().optional(),
 });
 export type DeletePlanInput = z.infer<typeof deletePlanInputSchema>;
 

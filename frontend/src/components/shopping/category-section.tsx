@@ -9,6 +9,8 @@ export interface CategorySectionProps {
   category: ShoppingListCategory;
   onToggle: (line: ShoppingListLine, nextChecked: boolean) => void;
   queuedIngredientIds?: ReadonlySet<number>;
+  onOpenStorage?: (line: ShoppingListLine) => void;
+  canReserve?: boolean;
 }
 
 // Section per ingredient category. Headers render in the order the server
@@ -17,6 +19,8 @@ export function CategorySection({
   category,
   onToggle,
   queuedIngredientIds,
+  onOpenStorage,
+  canReserve,
 }: CategorySectionProps): React.ReactElement {
   return (
     <section
@@ -34,6 +38,8 @@ export function CategorySection({
             line={line}
             onToggle={onToggle}
             isQueued={queuedIngredientIds?.has(line.ingredient.id) ?? false}
+            onOpenStorage={onOpenStorage}
+            canReserve={canReserve}
           />
         ))}
       </ul>

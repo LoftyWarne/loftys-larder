@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { toTitleCase } from '../lib/title-case.ts';
+import { stapleStateSchema, storageLocationSchema } from './storage.ts';
 
 export const ingredientNameSchema = z
   .string()
@@ -26,6 +27,9 @@ const ingredientFieldsSchema = z.object({
   defaultUnitId: ingredientReferenceIdSchema,
   isPlant: z.boolean(),
   averageShelfLifeDays: ingredientShelfLifeSchema.nullable(),
+  // The Staple's one Storage location, or null when it isn't a Staple
+  // (DEC-118). Omitted on create means not a Staple.
+  stapleLocation: storageLocationSchema.nullable().optional(),
 });
 
 export const createIngredientInputSchema = ingredientFieldsSchema;
@@ -39,6 +43,9 @@ export const updateIngredientInputSchema = z.object({
     .refine((value) => Object.keys(value).length > 0, {
       message: 'Provide at least one field to update',
     }),
+  // Set once the cook has agreed that marking a held ingredient as a Staple
+  // deletes its Stock items.
+  deleteStock: z.boolean().optional(),
 });
 
 export type UpdateIngredientInput = z.infer<typeof updateIngredientInputSchema>;
@@ -86,6 +93,16 @@ export const ingredientListItemSchema = z.object({
   defaultUnitName: z.string(),
   isPlant: z.boolean(),
   averageShelfLifeDays: z.number().int().positive().nullable(),
+  stapleState: stapleStateSchema.nullable(),
+  stapleLocation: storageLocationSchema.nullable(),
 });
 
 export type IngredientListItem = z.infer<typeof ingredientListItemSchema>;
+
+// The one-tap three-way state on a Staple.
+export const setStapleStateInputSchema = z.object({
+  id: ingredientIdSchema,
+  state: stapleStateSchema,
+});
+
+export type SetStapleStateInput = z.infer<typeof setStapleStateInputSchema>;

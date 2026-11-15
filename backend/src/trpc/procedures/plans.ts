@@ -46,6 +46,7 @@ import {
   mealPlanSlots,
 } from '../../db/schema/meal-plans.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
+import { stockReservations } from '../../db/schema/storage.ts';
 import { selectProposedHealthScore } from '../../lib/health-score/average.ts';
 import { logModelFeatureEvent } from '../../lib/model-features/usage-log.ts';
 import {
@@ -55,6 +56,7 @@ import {
 import { selectProposedPlantPoints } from '../../lib/plant-points.ts';
 import { loadSlotDiners } from '../../lib/slot-diners.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
+import { settleReservations } from '../../lib/stock-settlement.ts';
 import {
   assertDinersExist,
   assertRecipesPickable,
@@ -288,29 +290,76 @@ export const plansRouter = router({
     .input(deletePlanInputSchema)
     .output(deletePlanResultSchema)
     .mutation(async ({ ctx, input }): Promise<DeletePlanResult> => {
-      // Hard delete; FK cascade on `meal_plan_slots.plan_id` and
-      // `shopping_list_items.plan_id` removes the dependent rows.
-      // Household-scoped DELETE in one statement — the row either belongs to
-      // this household or `rowCount` stays at zero, in which case we surface
-      // NOT_FOUND (matching the cross-household isolation pattern).
-      const deleted = await ctx.db
-        .delete(mealPlans)
-        .where(
-          and(
-            eq(mealPlans.id, input.id),
-            eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
-          ),
-        )
-        .returning({ id: mealPlans.id });
+      // Hard delete; FK cascade on `meal_plan_slots.plan_id`,
+      // `shopping_list_items.plan_id` and `stock_reservations.plan_id` removes
+      // the dependent rows. Household-scoped DELETE in one statement — the
+      // row either belongs to this household or `rowCount` stays at zero, in
+      // which case we surface NOT_FOUND (matching the cross-household
+      // isolation pattern).
+      //
+      // Settling first leaves only food the plan hasn't eaten yet. Freeing
+      // that is the cook's call, so it's refused until they agree (DEC-118).
+      const today = todayInLondon();
+      const withTransaction = makeWithTransaction(ctx.db);
+      return await withTransaction(async (tx) => {
+        await settleReservations(tx, today);
+        // Locked before counting, so a Reservation can't be added between
+        // the count and the delete: its foreign key waits on this lock.
+        await tx
+          .select({ id: mealPlans.id })
+          .from(mealPlans)
+          .where(
+            and(
+              eq(mealPlans.id, input.id),
+              eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .for('update');
+        if (input.releaseReservations !== true) {
+          const [held] = await tx
+            .select({
+              reservations: sql<number>`count(*)::int`,
+              stockItems: sql<number>`count(distinct ${stockReservations.stockItemId})::int`,
+            })
+            .from(stockReservations)
+            .where(
+              and(
+                eq(stockReservations.planId, input.id),
+                eq(stockReservations.householdId, CURRENT_HOUSEHOLD_ID),
+              ),
+            );
+          if (held && held.reservations > 0) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: 'This plan has food set aside from storage',
+              cause: {
+                code: 'PLAN_HAS_RESERVATIONS',
+                reservations: held.reservations,
+                stockItems: held.stockItems,
+              },
+            });
+          }
+        }
 
-      const row = deleted[0];
-      if (!row) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Plan not found',
-        });
-      }
-      return { id: row.id };
+        const deleted = await tx
+          .delete(mealPlans)
+          .where(
+            and(
+              eq(mealPlans.id, input.id),
+              eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .returning({ id: mealPlans.id });
+
+        const row = deleted[0];
+        if (!row) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Plan not found',
+          });
+        }
+        return { id: row.id };
+      });
     }),
 
   updateRange: protectedProcedure

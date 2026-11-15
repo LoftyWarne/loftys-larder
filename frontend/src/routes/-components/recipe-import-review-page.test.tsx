@@ -36,6 +36,8 @@ const INGREDIENTS: IngredientListItem[] = [
     defaultUnitName: 'ml',
     isPlant: false,
     averageShelfLifeDays: null,
+    stapleState: null,
+    stapleLocation: null,
   },
   {
     id: 9,
@@ -46,6 +48,8 @@ const INGREDIENTS: IngredientListItem[] = [
     defaultUnitName: 'g',
     isPlant: true,
     averageShelfLifeDays: null,
+    stapleState: null,
+    stapleLocation: null,
   },
 ];
 

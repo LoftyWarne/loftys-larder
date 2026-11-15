@@ -33,6 +33,7 @@ import {
   clampRange,
   eachDateInRange,
   formatDayRangeLabel,
+  isPastPlan,
 } from '@/lib/date-utils.ts';
 import { trpc } from '@/lib/trpc.ts';
 
@@ -289,16 +290,18 @@ export function PlannerPage(): React.ReactElement {
               variant="plan"
             />
           </div>
-          <Button asChild size="sm" variant="outline">
-            <Link
-              to="/plans/$planId/shopping"
-              params={{ planId: String(plan.id) }}
-              aria-label="Shopping list"
-            >
-              <ShoppingCart className="h-4 w-4" aria-hidden="true" />
-              <span className="hidden md:inline">Shopping list</span>
-            </Link>
-          </Button>
+          {!isPastPlan(plan.endDate) && (
+            <Button asChild size="sm" variant="outline">
+              <Link
+                to="/plans/$planId/shopping"
+                params={{ planId: String(plan.id) }}
+                aria-label="Shopping list"
+              >
+                <ShoppingCart className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden md:inline">Shopping list</span>
+              </Link>
+            </Button>
+          )}
         </header>
         {mutationError && (
           <p role="alert" className="text-sm text-destructive">

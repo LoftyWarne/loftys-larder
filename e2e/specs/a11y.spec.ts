@@ -597,6 +597,52 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    // The holdings chip's sheet, and the Staples groups with "Staples you
+    // have" opened, on a list whose banner is showing.
+    test(`shopping against storage passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      const planId = await seedShoppingStorage();
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`/plans/${String(planId)}/shopping`);
+      await expect(
+        page.getByRole('heading', { name: 'Staples to restock' }),
+      ).toBeVisible();
+      await page.getByText(/^Staples you have/).click();
+      await runAxe(page, theme);
+
+      await page
+        .getByRole('button', {
+          name: /^Cod: In fridge: 150 g · In freezer: 500 g/,
+        })
+        .click();
+      const sheet = page.getByRole('dialog', { name: 'Cod' });
+      await expect(sheet).toBeVisible();
+      await sheet.getByText('Choose which items').click();
+      await runAxe(page, theme);
+    });
+
+    test(`storage's Staples section passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await seedShoppingStorage();
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto('/storage?location=pantry');
+      await expect(
+        page
+          .getByRole('region', { name: 'Staples' })
+          .getByRole('radiogroup', { name: /Olive oil/ }),
+      ).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            'document.documentElement.scrollWidth <= window.innerWidth',
+          ),
+        )
+        .toBe(true);
+      await runAxe(page, theme);
+    });
+
     test(`settings passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto('/settings');
       await expect(
@@ -617,6 +663,63 @@ async function openImportReview(page: Page): Promise<void> {
   await expect(
     page.getByRole('heading', { name: 'Review import' }),
   ).toBeVisible();
+}
+
+// Cod held in the Freezer for a plan that needs it, a running-low and an
+// in-stock Staple, the latter needed by the plan.
+async function seedShoppingStorage(): Promise<number> {
+  const cod = await createIngredient({
+    name: 'Cod',
+    unit: 'g',
+    category: 'Fish',
+  });
+  const oil = await createIngredient({
+    name: 'Olive oil',
+    unit: 'ml',
+    category: 'Pantry',
+  });
+  const butter = await createIngredient({
+    name: 'Butter',
+    unit: 'g',
+    category: 'Dairy',
+  });
+  await getPool().query(
+    `update ingredients set staple_state = 'running_low', staple_location = 'pantry' where id = $1`,
+    [oil],
+  );
+  await getPool().query(
+    `update ingredients set staple_state = 'in_stock', staple_location = 'fridge' where id = $1`,
+    [butter],
+  );
+  const pie = await createRecipe({
+    name: 'Fish pie',
+    baseServings: 1,
+    ingredients: [
+      { name: 'Cod', quantity: '400', unit: 'g', category: 'Fish' },
+      { name: 'Butter', quantity: '30', unit: 'g', category: 'Dairy' },
+    ],
+  });
+  const today = new Date();
+  await createStockItem({
+    location: 'freezer',
+    ingredientId: cod,
+    quantity: '500',
+    addedOn: ymd(addDays(today, -20)),
+  });
+  await createStockItem({
+    location: 'fridge',
+    ingredientId: cod,
+    quantity: '150',
+    addedOn: ymd(today),
+    useBy: ymd(addDays(today, 2)),
+  });
+  const start = ymd(today);
+  const end = ymd(addDays(today, 1));
+  const plan = await createPlan(start, end);
+  const slotId = plan.slotsByDateAndOccasion.get(`${end}|Dinner`);
+  if (slotId === undefined) throw new Error('missing Dinner slot');
+  await assignRecipeToSlot({ slotId, recipeId: pie.id, numberOfServings: 1 });
+  return plan.id;
 }
 
 async function seedStorage(): Promise<void> {

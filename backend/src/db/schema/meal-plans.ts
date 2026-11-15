@@ -58,6 +58,9 @@ export const mealPlans = pgTable(
     }),
     startDate: date({ mode: 'date' }).notNull(),
     endDate: date({ mode: 'date' }).notNull(),
+    // Set when the cook dismisses the "Check your Staples and storage" banner
+    // on this plan's list (DEC-118).
+    storageGlanceDismissedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`),

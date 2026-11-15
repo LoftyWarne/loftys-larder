@@ -4,6 +4,42 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-11-15 — Shopping against storage, and Staples (FEAT-80)
+
+**Status:** Implemented, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,354 tests green. Frontend: 1,127 green. e2e: 88 of 88, including `shopping-against-storage.spec.ts` (manual verification steps 1 and 2; "the day after" is the Reservation's `needed_on` moved into the past, since e2e can't move the clock) and axe scans of the chip's sheet, the Staples groups and the Staples section at phone width in both themes. The gate check hasn't been run by hand. The FEAT-80 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (FEAT-80, DEC-118 and CONTEXT.md amended to match; all 13 readings are in FEAT-80):
+- **A Staple has one Storage location.** `ingredients.staple_location` beside `staple_state`, with a CHECK that both are set or both NULL (migration `0030_staples`). Each location's tab lists its own Staples. No fourth tab.
+- **A tick records what's left to buy,** so reserving more after ticking resets it (DEC-31).
+- The rest as proposed: a ticked Staple stays on its plan through `replaced_staple_state`; a DEC-31 reset never restores a Staple's state; one write replaces a line's Reservations; `needed_on` follows the first slot; excess comes off the last-drawn item first.
+
+**How it's built:**
+- `shopping.getForPlan` settles first, sums (unchanged, DEC-18), splits off Staples, then `reconcileLineReservations` (release and `needed_on`, absolute writes so two reads agree) and `loadLineHoldings`, all in `backend/src/lib/shopping-storage.ts`. The pure rules (draw order, draws, release) are in `shopping-holdings.ts`; Staples in `staples.ts`.
+- `shopping.setLineReservations` deletes the line's Reservations, then locks the ingredient's Stock items before reading what's available, as the FEAT-79 note asked.
+- `toggleChecked` locks the ingredient row (`no key update`) so two plans' ticks store the state each really replaced. A replayed tick keeps the stored state.
+- Marking a Staple goes through `ingredients.update` (`patch.stapleLocation`, `deleteStock` once the cook agrees, `INGREDIENT_STAPLE_HAS_STOCK` first). `ingredients.setStapleState` is the one-tap toggle. `storage.create` refuses a Staple (`STOCK_INGREDIENT_IS_STAPLE`), which makes FEAT-78's Staple criterion live; the add sheet says where the Staple's state is kept.
+- The `storage_location` enum moved to `backend/src/db/schema/storage-enums.ts` with the new `staple_state` enum, so `ingredients.ts` and `storage.ts` don't import each other. No SQL change.
+- One error code differs from the kick-off: `SHOPPING_RESERVE_TOO_MUCH` (metadata `available`, `needed`) covers both "more than held" and "more than needed". `INGREDIENT_NOT_STAPLE` is new, for `setStapleState`.
+- Axe caught the Staple-state badge's tinted red failing contrast in light theme; it's now solid `bg-destructive`.
+
+- **Plan delete warns** (DEC-118, added after implementation at the user's request; not in FEAT-80's criteria). `plans.delete` settles first, then returns `PLAN_HAS_RESERVATIONS` (metadata `reservations`, `stockItems`) while the plan still holds food. The delete dialog says how many items it frees and resends with `releaseReservations`. Food already eaten stays settled.
+
+- **Independent review fixes:**
+  - **Lock order.** `replaceLineReservations` deleted the line's Reservations before locking its Stock items, the reverse of `storage.update`, `storage.delete` and marking a Staple, so reserving could deadlock against a Storage edit. It now locks the items first. `reconcileLineReservations` also locks the affected items before it writes.
+  - **Plan delete** locks the plan row before counting, so a Reservation can't slip in between the count and the delete. To keep that from deadlocking with reserving, every shopping procedure's `loadHouseholdPlan` now takes `for key share` on the plan first.
+  - The order is now: settle, then the plan, then the ingredient (ticks and Staple marking only), then Stock items, then Reservations. Two concurrency tests in `shopping-storage.test.ts` deadlock under the old order and pass under the new one.
+  - Left for the user: a Reservation's `needed_on` is the plan's first slot even if it has passed (reading 10), so reserving mid-plan can settle the whole amount on the next read. A past plan still lists a needed running-low Staple under "Staples to restock". The Staple state toggle lacks arrow-key navigation and its buttons are about 24px tall. A stale tick on a now-covered line can leave it struck through with no checkbox.
+
+- **Past plans lose their Shopping list button** (user's call after the review, DEC-92 amended). Hidden on the `/plans` card and in the planner header via `isPastPlan` in the frontend `date-utils`. The `/plans/:id/shopping` route still serves a past plan if typed in. This made the past-plan Staple question moot, so `groupStaples` is unchanged.
+- **`needed_on` stays the first slot** (reading 10, confirmed by the user after the review). The household shops once, before the plan starts (DEC-37), so a line showing "to buy" again after its first day, or a mid-plan reservation settling at once, isn't worth the last-slot alternative's Storage screen counting eaten food as held. Revisit with DEC-37 if top-up shops become routine.
+
+**Open, for the user:**
+- The ingredient form's Staple field shows wherever the form does, including inline create in the recipe editor and Import Review. It's hidden only in the storage add sheet.
+- Unmarking a Staple is from the ingredient form only; the Staples section has no remove.
+- README doesn't yet mention Storage (FEAT-78 to FEAT-80).
+
+---
+
 ## 2026-11-15 — Freezing and keeping in the fridge from the plan (FEAT-79)
 
 **Status:** Implemented, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,314 tests green. Frontend: 1,110 green. New e2e specs green: manual verification step 1 (`storing-from-plan.spec.ts`, all on one day, since e2e can't move the clock) and axe scans of the Dishes table and the Store dialog at phone width in both themes. The gate check hasn't been run by hand. The FEAT-79 checkboxes are left for the user to tick.

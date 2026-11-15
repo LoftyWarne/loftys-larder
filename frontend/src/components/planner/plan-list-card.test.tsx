@@ -49,4 +49,24 @@ describe('PlanListCard', () => {
     await user.click(screen.getByRole('button', { name: /delete/i }));
     expect(onDelete).toHaveBeenCalledWith(PLAN);
   });
+
+  it('links to the shopping list until the plan has ended', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-06-21T12:00:00Z'));
+      const { unmount } = render(
+        <PlanListCard plan={PLAN} onDuplicate={vi.fn()} onDelete={vi.fn()} />,
+      );
+      expect(screen.getByText('Shopping list')).toBeInTheDocument();
+      unmount();
+
+      vi.setSystemTime(new Date('2026-06-22T12:00:00Z'));
+      render(
+        <PlanListCard plan={PLAN} onDuplicate={vi.fn()} onDelete={vi.fn()} />,
+      );
+      expect(screen.queryByText('Shopping list')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

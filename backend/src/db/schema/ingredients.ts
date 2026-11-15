@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -12,6 +13,7 @@ import {
 
 import { households } from './household.ts';
 import { ingredientCategories, unitsOfMeasurement } from './reference.ts';
+import { stapleState, storageLocation } from './storage-enums.ts';
 
 // Master ingredient list — household-scoped (DEC-17). One enforced unit per
 // ingredient (DEC-18): every recipe using this ingredient requests the same
@@ -38,8 +40,16 @@ export const ingredients = pgTable(
       .references(() => unitsOfMeasurement.id, { onDelete: 'restrict' }),
     averageShelfLifeDays: smallint(),
     isPlant: boolean().notNull().default(false),
+    // A Staple (DEC-118): kept in one Storage location and tracked by state,
+    // never as a Stock item. Both NULL means not a Staple.
+    stapleState: stapleState(),
+    stapleLocation: storageLocation(),
   },
   (table) => [
+    check(
+      'ingredients_staple_state_with_location',
+      sql`(${table.stapleState} is null) = (${table.stapleLocation} is null)`,
+    ),
     index('ingredients_household_id_idx').on(table.householdId),
     index('ingredients_name_trgm_idx').using(
       'gin',

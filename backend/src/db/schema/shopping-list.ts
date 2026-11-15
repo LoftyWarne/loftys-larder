@@ -10,6 +10,7 @@ import {
 
 import { ingredients } from './ingredients.ts';
 import { mealPlans } from './meal-plans.ts';
+import { stapleState } from './storage-enums.ts';
 
 // Per-plan-per-ingredient checked state. Rows are lazy-created on the first
 // call to `shopping.getForPlan(planId)` (DEC-30). Quantities themselves are
@@ -28,6 +29,9 @@ export const shoppingListItems = pgTable(
       .references(() => ingredients.id, { onDelete: 'restrict' }),
     isChecked: boolean().notNull().default(false),
     lastCheckedQuantity: numeric({ precision: 10, scale: 3 }),
+    // The Staple state a tick replaced with in stock, so unticking can put it
+    // back (DEC-118). NULL when the tick changed nothing.
+    replacedStapleState: stapleState(),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
       .default(sql`now()`),

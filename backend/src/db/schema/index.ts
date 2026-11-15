@@ -10,4 +10,5 @@ export * from './recipe-social.ts';
 export * from './recipes.ts';
 export * from './reference.ts';
 export * from './shopping-list.ts';
+export * from './storage-enums.ts';
 export * from './storage.ts';

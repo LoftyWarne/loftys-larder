@@ -55,6 +55,8 @@ const ONION: IngredientListItem = {
   defaultUnitName: 'g',
   isPlant: true,
   averageShelfLifeDays: 30,
+  stapleState: null,
+  stapleLocation: null,
 };
 
 const CARROT: IngredientListItem = {
@@ -66,6 +68,8 @@ const CARROT: IngredientListItem = {
   defaultUnitName: 'g',
   isPlant: true,
   averageShelfLifeDays: null,
+  stapleState: null,
+  stapleLocation: null,
 };
 
 interface SetupOptions {
@@ -95,6 +99,10 @@ function setup(options: SetupOptions = {}): SetupResult {
   const listInvalidate = vi.fn().mockResolvedValue(undefined);
   useUtilsMock.mockReturnValue({
     ingredients: { list: { invalidate: listInvalidate } },
+    storage: { list: { invalidate: vi.fn().mockResolvedValue(undefined) } },
+    shopping: {
+      getForPlan: { invalidate: vi.fn().mockResolvedValue(undefined) },
+    },
   });
 
   const mutateAsyncCreate =
@@ -104,7 +112,10 @@ function setup(options: SetupOptions = {}): SetupResult {
   const mutateAsyncDelete =
     options.deleteMutation ?? vi.fn().mockResolvedValue({ id: ONION.id });
   createUseMutationMock.mockReturnValue({ mutateAsync: mutateAsyncCreate });
-  updateUseMutationMock.mockReturnValue({ mutateAsync: mutateAsyncUpdate });
+  updateUseMutationMock.mockReturnValue({
+    mutateAsync: mutateAsyncUpdate,
+    isPending: false,
+  });
   deleteUseMutationMock.mockReturnValue({
     mutateAsync: mutateAsyncDelete,
     isPending: false,
@@ -113,7 +124,9 @@ function setup(options: SetupOptions = {}): SetupResult {
   return { mutateAsyncCreate, mutateAsyncUpdate, mutateAsyncDelete };
 }
 
-function makeTrpcError(cause: { code: string }): TRPCClientError<never> {
+function makeTrpcError(
+  cause: { code: string } & Record<string, unknown>,
+): TRPCClientError<never> {
   const err = new TRPCClientError<never>('boom');
   Object.assign(err, { shape: { data: { cause } } });
   return err;
@@ -196,6 +209,47 @@ describe('IngredientsPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Name')).toHaveValue('Onion');
     });
+  });
+
+  it('marks an ingredient as a Staple, asking first when it is held in storage', async () => {
+    const user = userEvent.setup();
+    const update = vi
+      .fn()
+      .mockRejectedValueOnce(
+        makeTrpcError({
+          code: 'INGREDIENT_STAPLE_HAS_STOCK',
+          stockItems: 1,
+          reservations: 0,
+        }),
+      )
+      .mockResolvedValueOnce(ONION);
+    setup({ updateMutation: update });
+    render(<IngredientsPage />);
+
+    const onionRow = screen.getByTestId(`ingredient-row-${String(ONION.id)}`);
+    await user.click(findButton(onionRow, 'Edit'));
+    await user.selectOptions(
+      await screen.findByLabelText('Staple'),
+      'Staple in the Pantry',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('held in storage as 1 item');
+    await user.click(screen.getByRole('button', { name: 'Make it a Staple' }));
+    await waitFor(() => {
+      expect(update).toHaveBeenCalledTimes(2);
+    });
+    const last = update.mock.lastCall?.[0] as
+      | {
+          id: number;
+          patch: { stapleLocation?: string };
+          deleteStock?: boolean;
+        }
+      | undefined;
+    expect(last?.id).toBe(ONION.id);
+    expect(last?.patch.stapleLocation).toBe('pantry');
+    expect(last?.deleteStock).toBe(true);
   });
 
   it('confirms delete and calls the mutation', async () => {

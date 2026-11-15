@@ -1016,6 +1016,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
 - **Consequences (−):** the horizon is a hardcoded constant, not user-configurable; client-side status derivation duplicates the backend's bucketing logic (kept in sync via `todayInLondon`); the picker labels assume a small number of live plans (segmented tabs get wide beyond ~3 — acceptable since the current + upcoming window is realistically two, and it would fall back to a dropdown if that ever changed).
 - **Revisit when:** the household moves to multiple shops per plan (interacts with DEC-37's `shop_date` upgrade path), or the 2-day horizon proves wrong in lived use.
 - **Cross-refs:** DEC-33 (Europe/London civil dates), DEC-37 (single-shop assumption), DEC-82 (per-plan shopping list, hard-delete cascade); FEAT-27 (plan status buckets), FEAT-38, FEAT-39.
+- **Amended (2026-11-15) at FEAT-80.** A plan that has ended no longer links to its shopping list: the Shopping list button is hidden on its card in `/plans` and in the planner header. Once shopping can reserve stock and tick Staples (DEC-118), an old list's ticks would change today's household-wide Staple state and reserve food for meals already eaten. The route itself isn't blocked.
 
 ### DEC-93 — 30-day rolling sessions, with a recent-sign-in requirement on account deletion
 
@@ -1665,7 +1666,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - **Settling on read:** once a Reservation's day has passed (Europe/London, DEC-33), the next read of storage, the shopping list or the planner deletes it and lowers its Stock item, in one statement inside `withTransaction` (cross-cutting #23).
   - **Leftovers from Storage:** eating stored food is a `leftovers` slot with a new `leftovers_source` value, `storage` (DEC-25). The food is a Stock item while held and Leftovers once a slot eats it.
   - **A frozen base for a Variation:** the cook chooses "Use frozen base" on the slot, and the reserved portions join the base pool in the consumption balance (DEC-88). Only the Variation's own ingredients go on the list.
-  - **Staples:** a nullable state on an ingredient (in stock, running low, out). A Staple is never a Stock item. Running-low and out Staples appear on every current list. In-stock Staples the plan needs fold into a collapsed group. Ticking a Staple line restocks it, and unticking restores the previous state. This is the one exception to ticks having no side effects, because a Staple's state is a single flag that's easy to reverse.
+  - **Staples:** a nullable state on an ingredient (in stock, running low, out), with the one Storage location it's kept in (added at FEAT-80's kick-off). The state and the location are set together or both empty. Each location's tab on the Storage screen lists its own Staples. A Staple is never a Stock item, in any location. Running-low and out Staples appear on every current list. In-stock Staples the plan needs fold into a collapsed group. Ticking a Staple line restocks it, and unticking restores the previous state. This is the one exception to ticks having no side effects, because a Staple's state is a single flag that's easy to reverse.
   - **No periodic "check your freezer" prompt.** Fast editing keeps the record honest, plus a "Check your Staples and storage" banner on each plan's list, shown until dismissed.
   - **Plan Proposals** (DEC-117) receive the available Stock items, leaving out past-Use-by Fridge items. They're told to use Fridge food by soonest Use-by. They may propose Leftovers from Storage and Variations on a held base. They never net ingredients, and never plan food into the freezer.
     - **Data flow (cross-cutting #22):** new to Anthropic: the names, kinds, locations, amounts and Use-by dates of held stock. Logs gain only the count.
@@ -1673,7 +1674,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - **Schema, approved in principle** (kick-offs confirm names and constraints):
     - FEAT-78: `stock_items`, `stock_reservations`, and the `storage_location` enum
     - FEAT-79: `meal_plan_slot_items.frozen` and `meal_plan_slot_items.chilled`
-    - FEAT-80: `ingredients.staple_state`, `meal_plans.storage_glance_dismissed_at`, and the Staple state a tick replaced
+    - FEAT-80: `ingredients.staple_state` and `ingredients.staple_location`, `meal_plans.storage_glance_dismissed_at`, and the Staple state a tick replaced
     - FEAT-81: `leftovers_source` value `storage`
   - **Navigation:** Storage takes Ingredients' place in the phone tab bar. Ingredients is linked from Storage and Settings.
   - **Delivery:**

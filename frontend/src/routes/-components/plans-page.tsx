@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button.tsx';
 import { useOnlineStatus } from '@/hooks/use-online-status.ts';
 import { todayInLondon } from '@/lib/date-utils.ts';
+import { getDomainErrorCause } from '@/lib/domain-error.ts';
 import { planErrorMessage } from '@/lib/plan-errors.ts';
 import { trpc } from '@/lib/trpc.ts';
 
@@ -71,6 +72,9 @@ export function PlansPage(): React.ReactElement {
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PlanListItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Set when the plan has food set aside from storage (DEC-118). The cook
+  // confirms again to free it.
+  const [deleteHeld, setDeleteHeld] = useState<number | null>(null);
 
   const createMutation = trpc.plans.create.useMutation();
   const duplicateMutation = trpc.plans.duplicate.useMutation();
@@ -140,9 +144,21 @@ export function PlansPage(): React.ReactElement {
     if (!deleteTarget) return;
     setDeleteError(null);
     try {
-      await deleteMutation.mutateAsync({ id: deleteTarget.id });
+      await deleteMutation.mutateAsync({
+        id: deleteTarget.id,
+        ...(deleteHeld !== null && { releaseReservations: true }),
+      });
       setDeleteTarget(null);
+      setDeleteHeld(null);
+      if (deleteHeld !== null) await utils.storage.list.invalidate();
     } catch (err) {
+      const cause = getDomainErrorCause(err);
+      if (cause?.code === 'PLAN_HAS_RESERVATIONS') {
+        setDeleteHeld(
+          typeof cause.stockItems === 'number' ? cause.stockItems : 1,
+        );
+        return;
+      }
       setDeleteError(planErrorMessage(err, 'Could not delete plan.'));
     }
   }
@@ -290,6 +306,7 @@ export function PlansPage(): React.ReactElement {
           if (!open) {
             setDeleteTarget(null);
             setDeleteError(null);
+            setDeleteHeld(null);
           }
         }}
       >
@@ -302,6 +319,13 @@ export function PlansPage(): React.ReactElement {
                 {deleteTarget.endDate}? This removes all of its slots and cannot
                 be undone.
               </AlertDialogDescription>
+              {deleteHeld !== null && (
+                <p role="alert" className="text-sm text-destructive">
+                  This plan has food set aside from storage (
+                  {deleteHeld === 1 ? '1 item' : `${String(deleteHeld)} items`}
+                  ). Deleting it frees that food for other plans.
+                </p>
+              )}
             </AlertDialogHeader>
             {deleteError && (
               <p role="alert" className="text-sm text-destructive">
@@ -319,7 +343,11 @@ export function PlansPage(): React.ReactElement {
                 }}
                 disabled={deleteMutation.isPending}
               >
-                {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                {deleteMutation.isPending
+                  ? 'Deleting…'
+                  : deleteHeld !== null
+                    ? 'Delete and free it'
+                    : 'Delete'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

@@ -3796,16 +3796,16 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
 
 ### FEAT-80 — Shopping against storage, and Staples
 
-**Goal:** When a cook shops for a plan, the list shows what's already held and lets them use it rather than buy it again. Staples, the basics the household always keeps, are tracked as in stock, running low or out, and come onto the list when they need buying. (DEC-118, DEC-18, DEC-31, DEC-36, DEC-37)
+**Goal:** When a cook shops for a plan, the list shows what's already held and lets them use it rather than buy it again. Staples, the basics the household always keeps, each in one Storage location, are tracked as in stock, running low or out, and come onto the list when they need buying. (DEC-118, DEC-18, DEC-31, DEC-36, DEC-37)
 
 **Estimate:** 2 days. **Depends on:** FEAT-78. **Enables:** none specifically.
 
 **Files:**
-- `backend/src/db/schema/ingredients.ts` and a migration: `ingredients.staple_state`, a nullable enum (`in_stock`, `running_low`, `out`), where NULL means not a Staple. `meal_plans.storage_glance_dismissed_at`, a nullable timestamp. On the shopping check row, the Staple state a tick replaced, so unticking can restore it. Schema changes approved in principle by DEC-118
+- `backend/src/db/schema/ingredients.ts` and a migration: `ingredients.staple_state`, a nullable enum (`in_stock`, `running_low`, `out`), where NULL means not a Staple. `ingredients.staple_location`, a nullable `storage_location`, with a CHECK that it and `staple_state` are both set or both NULL. `meal_plans.storage_glance_dismissed_at`, a nullable timestamp. On the shopping check row, the Staple state a tick replaced, so unticking can restore it. Schema changes approved in principle by DEC-118, extended to `staple_location` at kick-off
 - `backend/src/lib/shopping-aggregation.ts`, `backend/src/trpc/procedures/shopping.ts` (holdings per line, Reservations from lines, Staple lines, settling first), `backend/src/trpc/procedures/ingredients.ts` (Staple state)
 - `shared/src/schemas/shopping.ts`, `shared/src/schemas/ingredients.ts`
 - `frontend/src/components/shopping/` (the holdings chip and the use / buy / part-use sheet, the Staples groups, the glance banner)
-- `frontend/src/components/storage/` (the Staples section), `frontend/src/components/ingredient-form.tsx` (the Staple flag)
+- `frontend/src/components/storage/` (each location's Staples section), `frontend/src/components/ingredient-form.tsx` (the Staple location)
 
 **Acceptance criteria:**
 - [ ] **Holdings on a line:** a line whose ingredient has available Stock items shows a chip with the location and amount ("In freezer: 500 g"). Tapping it opens:
@@ -3818,8 +3818,8 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
 - [ ] **Releasing:** if the plan stops needing the ingredient, or needs less than is reserved, the excess Reservation is released when the list is next read. A recipe edit that changes the needed amount otherwise leaves the Reservation at the amount the cook chose
 - [ ] **Ticks move no stock:** ticking or unticking a line never creates, changes or settles a Reservation. Bought food is never added to storage
 - [ ] **Staples:**
-  - [ ] An ingredient is marked as a Staple from the Storage screen's Staples section, by picking it, or from its edit form. Marking an ingredient that has Stock items asks first and deletes them
-  - [ ] The Staples section lists each Staple with a one-tap, three-way state: in stock, running low, out
+  - [ ] A Staple is kept in one Storage location. An ingredient is marked as a Staple from a location's Staples section on the Storage screen, by picking it, which puts it in that location, or from its edit form, by choosing a location. Marking an ingredient that has Stock items asks first and deletes them, in every location
+  - [ ] Each location's tab on the Storage screen has a Staples section listing that location's Staples, each with a one-tap, three-way state: in stock, running low, out
   - [ ] Every Staple that's running low or out appears on every current and future plan's list, under "Staples to restock", whether the plan needs it or not
   - [ ] A Staple the plan needs while it's in stock is listed under a collapsed "Staples you have", not as a line to buy
   - [ ] Ticking a running-low or out Staple sets it to in stock. Unticking puts back the state it replaced. This is the one exception to ticks having no side effects
@@ -3833,13 +3833,24 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
 - A Staple's state is household-wide. It's not per plan, so two plans' lists show the same Staple lines.
 - Shelf-life warnings (DEC-37) apply to what's left to buy. A line fully covered from storage shows no shelf-life warning.
 
-**Readings (for kick-off):**
+**Readings (agreed at kick-off):**
 1. **"Every current and future plan."** Staple lines appear on any plan whose end date hasn't passed. A past plan's list shows none.
 2. **Several lines, one item.** Two plans can't both reserve more than an item holds. The second sees only what's available.
+3. **A Staple's location.** Each Staple has exactly one Storage location. The same ingredient can't be a Staple in two locations. Staple lines on the list show their location. Changing the location keeps the state, and a new Staple starts in stock.
+4. **A tick records what's left to buy.** On an ordinary line, the DEC-31 quantity is the amount left to buy, so reserving more after ticking resets the tick.
+5. **A ticked Staple stays on its plan.** Ticking stores the state it replaced on that plan's check row, which keeps the line, ticked, under "Staples to restock" on that plan. Other plans drop it. Unticking restores the stored state, even over a later change (DEC-36).
+6. **DEC-31 and Staples.** A restock line the plan doesn't need has no quantity, so the reset never touches it. On one the plan needs, a reset unticks the line, leaves the Staple in stock and forgets the replaced state.
+7. **One line per Staple.** A running-low or out Staple the plan needs is listed once, under "Staples to restock", with the plan's amount.
+8. **Staples hold no stock.** Adding a Stock item of a Staple is refused. Marking a held ingredient as a Staple returns an error with the counts, and the client sends again to confirm the deletion.
+9. **One reservation write.** The sheet's choices replace the line's Reservations as a whole: all needed, none, an amount in the default order, or explicit amounts per item. The default order is worked out, never stored.
+10. **`needed_on` follows the plan.** Each read sets it to the current first slot needing the ingredient. If that date has passed, the Reservation settles on the next read.
+11. **Releasing excess** comes off the last-drawn item first. If the plan stops needing the ingredient, all its line Reservations are released.
+12. **The chip** shows one entry per location with ingredient stock available to the line: quantity minus other Reservations. Recipe portions don't net against ingredient lines.
+13. **Smaller points.** A fully covered line has no checkbox. The glance banner shows on every plan's list until dismissed. Unmarking a Staple clears its state and location.
 
 **Manual verification:**
 1. Hold 500 g of cod in the Freezer. Plan a dish needing 400 g. The cod line shows "In freezer: 500 g". Use from storage: the line shows "From storage" and the Freezer row shows "500 g, 400 g reserved". The day after that dish, open Storage: 100 g of cod is left.
-2. Mark olive oil as a Staple and set it to running low. It appears under "Staples to restock" on this plan's list. Tick it: Storage shows it as in stock. Untick it: it's running low again.
+2. On the Pantry tab, mark olive oil as a Staple and set it to running low. It appears under "Staples to restock" on this plan's list, marked Pantry. Tick it: the Pantry tab shows it as in stock. Untick it: it's running low again.
 
 **Definition of done:**
 - Tests cover:
@@ -3850,6 +3861,7 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
   - ticks moving no stock
   - each Staple rule: the groups, restock on tick, restore on untick, no change on a DEC-31 reset, the offline drain
   - marking a held ingredient as a Staple
+  - a Staple's location: set with its state, listed only on its location's tab
   - the glance banner dismissed per plan
   - axe scans of the chip's sheet, the Staples groups and the Staples section in both themes
 - Commit: `feat(storage): shop against storage and restock staples`

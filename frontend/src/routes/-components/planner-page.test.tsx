@@ -113,6 +113,13 @@ vi.mock('@/lib/trpc.ts', () => ({
       get: { useQuery: vi.fn().mockReturnValue({ data: undefined }) },
     },
     user: { listHouseholdMembers: { useQuery: membersUseQueryMock } },
+    storage: {
+      list: {
+        useQuery: () => ({
+          data: { today: '2026-06-01', items: [], staples: [] },
+        }),
+      },
+    },
     slots: {
       update: {
         useMutation: (opts: Record<string, unknown>) => {
@@ -189,6 +196,9 @@ const RECIPE_SLOT: PlanSlot = {
       eaten: 2,
       frozen: 0,
       chilled: 0,
+      fromStorage: 0,
+      reserved: 0,
+      storageLocations: [],
       sortOrder: 0,
     },
   ],

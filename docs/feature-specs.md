@@ -3876,7 +3876,7 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
 **Estimate:** 1.5–2 days. **Depends on:** FEAT-78, FEAT-76. **Enables:** FEAT-82's storage input.
 
 **Files:**
-- A migration: `leftovers_source` gains `storage`. A schema change approved in principle by DEC-118
+- A migration: `leftovers_source` gains `storage`. A schema change approved in principle by DEC-118. `meal_plan_slot_items.from_storage` added at kick-off (reading 3)
 - `backend/src/lib/slot-writes.ts`, `backend/src/trpc/procedures/slots.ts`, `backend/src/trpc/procedures/plans.ts` (Reservations from slots, release on change, settling on planner reads, the delete warning's count)
 - `frontend/src/lib/serving-variation-supply.ts`: reserved storage portions join the pool at their slot
 - `frontend/src/components/planner/slot-editor-sheet.tsx` (Storage in the leftovers picker, "Use frozen base" on a Variation), `slot-cell.tsx`, `frontend/src/lib/slot-display.ts`
@@ -3903,9 +3903,21 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
 - A Leftovers-from-Storage slot has one eat item for the Stock item's recipe with `prepared = 0`, as `plan_meal` leftovers do, so the shopping list leaves it out without a new rule.
 - Kick-off confirms how a Reservation links to its slot item, so a slot's edits and drags (`slots.relocate`) carry their Reservations.
 
-**Readings (for kick-off):**
-1. **Drag across days.** Dragging a storage slot to an earlier day moves `needed_on` with it. Dragging a slot whose day has passed to a later day is allowed only if its Reservation hasn't settled yet.
+**Readings (agreed at kick-off, 2026-11-15):**
+1. **Drag across days.** Dragging a storage slot to an earlier day moves `needed_on` with it. A drag settles first, so a slot whose day has passed moves with nothing reserved, and nothing re-reserves.
 2. **Plan Proposal ingredient stock.** Ingredient Stock items are sent so the model can plan around Fridge food, but the proposal never reserves them. Netting stays on the shopping list.
+3. **A lasting record: `meal_plan_slot_items.from_storage`** (smallint, default 0, CHECK `>= 0`; migration `0031_eat_from_storage`). The portions a dish takes from storage: the eaten portions on a Leftovers from Storage slot, or a Variation's prepared portions with "Use frozen base". Reservations settle and disappear, so without it a past storage slot would show a false shortfall. Approved at kick-off, beyond DEC-118's schema.
+4. **The balance:** before a slot's day has passed, only what's actually reserved joins the pool (so not enough held shows as a shortfall). After it, the `from_storage` record counts.
+5. **The picker** lists dish Stock items as the Storage screen groups them (Freezer and Pantry combined per dish, Fridge items one by one). Picking one reserves from those items only, in draw order. Saving again without a new pick draws from any held items of the dish.
+6. **Not enough held:** the slot reserves what's there, and the shortfall shows ("not enough held in storage"). The same rule applies at Apply if stock changed after the proposal.
+7. **"Use frozen base"** draws from the Freezer and Fridge, never the Pantry, and skips past-Use-by Fridge items. It reads "Use base from storage" when some of the held base is in the Fridge.
+8. **The snowflake** marks Freezer and Fridge food, never the Pantry's.
+9. **Stock deleted from the Storage screen** releases the slot's Reservation. The slot stays a storage slot, and the shortfall shows.
+10. **Proposals name recipes, not Stock items:** a `storage` dish kind, and `useHeldBase` on a cooked Variation. The normaliser and Apply draw by rule. A held soft-deleted recipe can be proposed as a storage dish.
+11. **Plan delete wording:** "This releases N reserved Stock items."
+12. **Duplicating a plan** copies a storage dish's `from_storage` and reserves what's held now. A dish whose recipe is no longer a Variation is copied as cooked from scratch.
+13. **Past slots** (added after review): once a slot's day has passed, the editor offers nothing new from storage, and hides "Use frozen base". A saved storage dish stays selectable.
+14. **Index** (added after review): `stock_reservations_slot_item_id_idx`, migration `0032_slot_reservations_index`.
 
 **Manual verification:**
 1. With 2 portions of lasagne in the Freezer, set Thursday dinner (headcount 2) to Leftovers and pick the lasagne. The Freezer shows "2 portions, 2 reserved". The day after Thursday, the Freezer has no lasagne.

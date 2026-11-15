@@ -5,6 +5,8 @@ import type {
   PlanSlotItem,
   RecipeListItem,
   SlotType,
+  StockItem,
+  StorageLocation,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import {
@@ -31,11 +33,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
 import { Input } from '@/components/ui/input.tsx';
-import { formatLongDayLabel } from '@/lib/date-utils.ts';
+import { formatLongDayLabel, todayInLondon } from '@/lib/date-utils.ts';
 import {
   deriveBaseBalances,
   itemConsumedBase,
 } from '@/lib/serving-variation-supply.ts';
+import {
+  dishPickerEntries,
+  heldBase,
+  type StoragePickerEntry,
+} from '@/lib/storage-picker.ts';
 import { trpc } from '@/lib/trpc.ts';
 import { cn } from '@/lib/utils.ts';
 
@@ -68,6 +75,10 @@ interface AddableRecipe {
 // strings so the inputs round-trip what the user types. Role (produce /
 // consume) is derived, not stored. `chilled` (kept in the Fridge) is set from
 // the slot card's "Store…" only, so it's read-only here.
+// `fromStorage` (FEAT-81): the dish is eaten from storage (on a Leftovers
+// from Storage slot), or a Variation cooked from its base held in storage
+// ("Use frozen base"). `savedReserved` and `storageLocations` are what the
+// saved dish holds now; `stockItemIds` is the picker entry chosen here.
 interface EditorItem {
   recipeId: number;
   name: string;
@@ -79,10 +90,16 @@ interface EditorItem {
   eaten: string;
   frozen: string;
   chilled: number;
+  fromStorage: boolean;
+  savedReserved: number;
+  storageLocations: StorageLocation[];
+  stockItemIds?: number[];
 }
 
 interface EditorState {
   slotType: SlotType;
+  // The storage picker entry chosen since opening, or null for the saved one.
+  stockChoice: string | null;
   // Set only when slotType is `leftovers`. `plan_meal` pairs with a single
   // `eat` item in `items` (the dish being eaten); `takeaway` / `other` clear it.
   leftoversSource: LeftoversSource | null;
@@ -147,6 +164,9 @@ function toEditorItem(
     eaten: String(eaten),
     frozen: '0',
     chilled: 0,
+    fromStorage: false,
+    savedReserved: 0,
+    storageLocations: [],
   };
 }
 
@@ -227,6 +247,7 @@ export function SlotEditorSheet({
         : slot.slotType;
     setState({
       slotType: initialSlotType,
+      stockChoice: null,
       leftoversSource: slot.leftoversSource,
       chefUserId: slot.chefUserId,
       comment: slot.comment ?? '',
@@ -241,6 +262,9 @@ export function SlotEditorSheet({
         eaten: String(item.eaten),
         frozen: String(item.frozen),
         chilled: item.chilled,
+        fromStorage: item.fromStorage > 0,
+        savedReserved: item.reserved,
+        storageLocations: item.storageLocations,
       })),
       dinerUserIds: [...slot.dinerUserIds],
       guestCount: String(slot.guestCount),
@@ -254,6 +278,26 @@ export function SlotEditorSheet({
   }, [isAddingDish]);
 
   const utils = trpc.useUtils();
+
+  // What's held (FEAT-81), for the leftovers picker and "Use frozen base".
+  const storageQuery = trpc.storage.list.useQuery(undefined, {
+    enabled: open,
+  });
+  const stock: readonly StockItem[] = storageQuery.data?.items ?? NO_STOCK;
+  const today = storageQuery.data?.today ?? todayInLondon();
+  const savedStorageRecipeId =
+    slot?.leftoversSource === 'storage'
+      ? (slot.items[0]?.recipeId ?? null)
+      : null;
+  // A slot whose day has passed has had its food settled, so storage can't
+  // be newly taken there: the picker offers only what it saved, and "Use
+  // frozen base" is hidden.
+  const isPastSlot = slot !== null && slot.date < today;
+  const storageEntries = useMemo(
+    () =>
+      isPastSlot ? [] : dishPickerEntries(stock, today, savedStorageRecipeId),
+    [isPastSlot, stock, today, savedStorageRecipeId],
+  );
 
   // Suggest cooking the base behind an eaten dish when nothing in this slot is
   // preparing it (carried over from the old base modal). Computed from the live
@@ -316,28 +360,27 @@ export function SlotEditorSheet({
     // eat item counts here exactly like a Cooking slot's dishes.
     const itemsCount =
       state.slotType === 'recipe' ||
-      (state.slotType === 'leftovers' && state.leftoversSource === 'plan_meal');
+      (state.slotType === 'leftovers' &&
+        (state.leftoversSource === 'plan_meal' ||
+          state.leftoversSource === 'storage'));
     const liveItems: PlanSlotItem[] = itemsCount
-      ? state.items.map((item, index) => ({
-          id: index + 1,
-          recipeId: item.recipeId,
-          recipeName: item.name,
-          recipeImageUrl: item.imageUrl,
-          isBase: item.isBase,
-          baseRecipeId: item.baseRecipeId,
-          isDeleted: item.isDeleted,
-          prepared: parseQuantity(item.prepared),
-          eaten: parseQuantity(item.eaten),
-          frozen: parseQuantity(item.frozen),
-          chilled: item.chilled,
-          sortOrder: index,
-        }))
+      ? state.items.map((item, index) =>
+          toPlanSlotItem(item, index, state, stock, today),
+        )
       : [];
-    return deriveBaseBalances([
-      ...slots.filter((s) => s.id !== slot.id),
-      { ...slot, slotType: state.slotType, items: liveItems },
-    ]);
-  }, [slots, slot, state]);
+    return deriveBaseBalances(
+      [
+        ...slots.filter((s) => s.id !== slot.id),
+        {
+          ...slot,
+          slotType: state.slotType,
+          leftoversSource: state.leftoversSource,
+          items: liveItems,
+        },
+      ],
+      today,
+    );
+  }, [slots, slot, state, stock, today]);
 
   if (!slot || !state) return null;
 
@@ -369,7 +412,7 @@ export function SlotEditorSheet({
   function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (!slot || !state) return;
-    const built = buildInputForSave(slot, state);
+    const built = buildInputForSave(slot, state, stock, today);
     if (!built) return;
     onSave(built.input, { optimisticItems: built.optimisticItems });
   }
@@ -633,6 +676,26 @@ export function SlotEditorSheet({
                             ×
                           </Button>
                         </div>
+                        <UseHeldBaseToggle
+                          hidden={isPastSlot}
+                          item={item}
+                          stock={stock}
+                          today={today}
+                          onChange={(checked) => {
+                            setState((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    items: prev.items.map((it, i) =>
+                                      i === index
+                                        ? { ...it, fromStorage: checked }
+                                        : it,
+                                    ),
+                                  }
+                                : prev,
+                            );
+                          }}
+                        />
                         {itemShort !== undefined && itemShort > 0 && (
                           <div className="col-span-full px-3 pb-2">
                             <ServingVariationWarning
@@ -640,9 +703,11 @@ export function SlotEditorSheet({
                               // A base or a variation-of-a-base is short on the
                               // base pool; a standalone is short on itself.
                               variant={
-                                item.isBase || item.baseRecipeId !== null
-                                  ? 'base'
-                                  : 'meal'
+                                item.fromStorage
+                                  ? 'storage'
+                                  : item.isBase || item.baseRecipeId !== null
+                                    ? 'base'
+                                    : 'meal'
                               }
                             />
                           </div>
@@ -766,6 +831,7 @@ export function SlotEditorSheet({
                           event.target.value,
                           earlierMeals,
                           remainingBefore,
+                          storageEntries,
                         )
                       : prev,
                   );
@@ -785,44 +851,68 @@ export function SlotEditorSheet({
                     ))}
                   </optgroup>
                 )}
+                {(storageEntries.length > 0 ||
+                  slot.leftoversSource === 'storage') && (
+                  <optgroup label="From storage">
+                    {slot.leftoversSource === 'storage' && slot.items[0] && (
+                      <option value={SAVED_STORAGE_TOKEN}>
+                        {savedStorageLabel(slot.items[0])}
+                      </option>
+                    )}
+                    {storageEntries.map((entry) => (
+                      <option key={entry.token} value={entry.token}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
                 <option value="takeaway">Takeaway</option>
                 <option value="other">Other</option>
               </select>
 
-              {state.leftoversSource === 'plan_meal' && state.items[0] && (
-                <label className="flex items-center gap-2 text-sm">
-                  <span>Servings</span>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    value={state.items[0].eaten}
-                    aria-label={`Servings for ${state.items[0].name}`}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setState((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              items: prev.items.map((it, i) =>
-                                i === 0 ? { ...it, eaten: value } : it,
-                              ),
-                            }
-                          : prev,
-                      );
-                    }}
-                    required
-                    className="w-20"
-                  />
-                </label>
-              )}
+              {(state.leftoversSource === 'plan_meal' ||
+                state.leftoversSource === 'storage') &&
+                state.items[0] && (
+                  <label className="flex items-center gap-2 text-sm">
+                    <span>Servings</span>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={state.items[0].eaten}
+                      aria-label={`Servings for ${state.items[0].name}`}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setState((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                items: prev.items.map((it, i) =>
+                                  i === 0 ? { ...it, eaten: value } : it,
+                                ),
+                              }
+                            : prev,
+                        );
+                      }}
+                      required
+                      className="w-20"
+                    />
+                  </label>
+                )}
 
               {shortBy !== undefined && shortBy > 0 && (
                 <ServingVariationWarning
                   shortBy={shortBy}
                   // Eating a base's leftovers is a base-pool deficit; eating a
                   // non-base meal's leftovers is "the meal didn't make enough".
-                  variant={state.items[0]?.isBase ? 'base' : 'meal'}
+                  // From storage, it's not enough held.
+                  variant={
+                    state.leftoversSource === 'storage'
+                      ? 'storage'
+                      : state.items[0]?.isBase
+                        ? 'base'
+                        : 'meal'
+                  }
                 />
               )}
             </fieldset>
@@ -964,7 +1054,146 @@ function leftoversSelectValue(state: EditorState): string {
     const item = state.items[0];
     return item ? `recipe:${String(item.recipeId)}` : '';
   }
+  if (state.leftoversSource === 'storage') {
+    return state.stockChoice ?? SAVED_STORAGE_TOKEN;
+  }
   return state.leftoversSource ?? '';
+}
+
+const NO_STOCK: readonly StockItem[] = [];
+
+// The picker's entry for the dish a saved Leftovers from Storage slot eats,
+// whichever Stock items now hold it.
+const SAVED_STORAGE_TOKEN = 'stock:saved';
+
+function savedStorageLabel(item: PlanSlotItem): string {
+  const pantryOnly =
+    item.storageLocations.length > 0 &&
+    item.storageLocations.every((location) => location === 'pantry');
+  const deleted = item.isDeleted ? ' (deleted)' : '';
+  return `${pantryOnly ? '' : '❄ '}${item.recipeName}${deleted} — as planned`;
+}
+
+// "Use frozen base" on a dish row (FEAT-81): a Variation being cooked whose
+// base is held in the Freezer or Fridge, or that already uses it. Never
+// automatic: the cook ticks it.
+function UseHeldBaseToggle({
+  hidden,
+  item,
+  stock,
+  today,
+  onChange,
+}: {
+  hidden: boolean;
+  item: EditorItem;
+  stock: readonly StockItem[];
+  today: string;
+  onChange: (checked: boolean) => void;
+}): React.ReactElement | null {
+  if (hidden) return null;
+  if (item.baseRecipeId === null || parseQuantity(item.prepared) <= 0) {
+    return null;
+  }
+  const held = heldBase(stock, item.baseRecipeId, today);
+  if (!item.fromStorage && held.free <= 0) return null;
+  const label =
+    held.allFrozen || held.free <= 0
+      ? 'Use frozen base'
+      : 'Use base from storage';
+  const portions = held.free + (item.fromStorage ? item.savedReserved : 0);
+  return (
+    <label className="col-span-full flex items-center gap-2 px-3 pb-2 text-xs">
+      <input
+        type="checkbox"
+        checked={item.fromStorage}
+        onChange={(event) => {
+          onChange(event.target.checked);
+        }}
+      />
+      <span>
+        ❄ {label}{' '}
+        <span className="text-muted-foreground">({String(portions)} held)</span>
+      </span>
+    </label>
+  );
+}
+
+// The portions a dish takes from storage, by the rules the server checks: all
+// it eats on a Leftovers from Storage slot, or all a Variation prepares.
+function storagePortions(item: EditorItem, state: EditorState): number {
+  if (!item.fromStorage) return 0;
+  if (state.slotType === 'leftovers' && state.leftoversSource === 'storage') {
+    return parseQuantity(item.eaten);
+  }
+  if (item.baseRecipeId === null) return 0;
+  return parseQuantity(item.prepared);
+}
+
+// How much the server would reserve for the dish, for the live warnings
+// before saving: what it holds now plus what's free where it may draw from.
+function estimateReserved(
+  item: EditorItem,
+  portions: number,
+  state: EditorState,
+  stock: readonly StockItem[],
+  today: string,
+): number {
+  if (portions === 0) return 0;
+  const eatsStoredDish =
+    state.slotType === 'leftovers' && state.leftoversSource === 'storage';
+  let free: number;
+  if (!eatsStoredDish && item.baseRecipeId !== null) {
+    free = heldBase(stock, item.baseRecipeId, today).free;
+  } else {
+    const chosen = item.stockItemIds ? new Set(item.stockItemIds) : null;
+    free =
+      stock
+        .filter(
+          (entry) =>
+            entry.target.kind === 'recipe' &&
+            entry.target.recipeId === item.recipeId &&
+            (chosen === null || chosen.has(entry.id)),
+        )
+        .reduce(
+          (sum, entry) =>
+            sum +
+            Math.max(
+              0,
+              Math.round(
+                (Number(entry.quantity) - Number(entry.reserved)) * 1000,
+              ),
+            ),
+          0,
+        ) / 1000;
+  }
+  return Math.min(portions, item.savedReserved + free);
+}
+
+function toPlanSlotItem(
+  item: EditorItem,
+  index: number,
+  state: EditorState,
+  stock: readonly StockItem[],
+  today: string,
+): PlanSlotItem {
+  const fromStorage = storagePortions(item, state);
+  return {
+    id: index + 1,
+    recipeId: item.recipeId,
+    recipeName: item.name,
+    recipeImageUrl: item.imageUrl,
+    isBase: item.isBase,
+    baseRecipeId: item.baseRecipeId,
+    isDeleted: item.isDeleted,
+    prepared: parseQuantity(item.prepared),
+    eaten: parseQuantity(item.eaten),
+    frozen: parseQuantity(item.frozen),
+    chilled: item.chilled,
+    fromStorage,
+    reserved: estimateReserved(item, fromStorage, state, stock, today),
+    storageLocations: item.storageLocations,
+    sortOrder: index,
+  };
 }
 
 // Fold a leftovers-picker choice back into editor state. A plan meal becomes
@@ -977,10 +1206,22 @@ function applyLeftoversChoice(
   value: string,
   earlierMeals: readonly PlanSlotItem[],
   remainingBefore: ReadonlyMap<number, number>,
+  storageEntries: readonly StoragePickerEntry[],
 ): EditorState {
   if (value === 'takeaway' || value === 'other') {
-    return { ...state, leftoversSource: value, items: [] };
+    return { ...state, stockChoice: null, leftoversSource: value, items: [] };
   }
+  if (value === SAVED_STORAGE_TOKEN) {
+    // Back to the dish as saved: keep the current item, drawing anywhere.
+    const item = state.items[0];
+    return {
+      ...state,
+      stockChoice: null,
+      items: item ? [{ ...item, stockItemIds: undefined }] : [],
+    };
+  }
+  const entry = storageEntries.find((candidate) => candidate.token === value);
+  if (entry) return applyStorageChoice(state, entry);
   const recipeId = value.startsWith('recipe:')
     ? Number.parseInt(value.slice('recipe:'.length), 10)
     : NaN;
@@ -994,6 +1235,7 @@ function applyLeftoversChoice(
   const eaten = remaining > 0 ? Math.min(wanted, remaining) : wanted;
   return {
     ...state,
+    stockChoice: null,
     leftoversSource: 'plan_meal',
     items: [
       {
@@ -1007,6 +1249,46 @@ function applyLeftoversChoice(
         eaten: String(eaten),
         frozen: '0',
         chilled: 0,
+        fromStorage: false,
+        savedReserved: 0,
+        storageLocations: [],
+      },
+    ],
+  };
+}
+
+// A dish picked from storage becomes the slot's one eaten item, eaten by the
+// headcount (or what's free, when nobody's set as eating yet). The slot holds
+// what it already reserved of the same dish.
+function applyStorageChoice(
+  state: EditorState,
+  entry: StoragePickerEntry,
+): EditorState {
+  const current = state.items[0];
+  const same =
+    state.leftoversSource === 'storage' && current?.recipeId === entry.recipeId;
+  const headcount = headcountOf(state);
+  const eaten = headcount > 0 ? headcount : Math.max(1, Math.floor(entry.free));
+  return {
+    ...state,
+    stockChoice: entry.token,
+    leftoversSource: 'storage',
+    items: [
+      {
+        recipeId: entry.recipeId,
+        name: entry.name,
+        imageUrl: null,
+        isBase: entry.isBase,
+        baseRecipeId: null,
+        isDeleted: entry.isDeleted,
+        prepared: '0',
+        eaten: String(eaten),
+        frozen: '0',
+        chilled: 0,
+        fromStorage: true,
+        savedReserved: same ? current.savedReserved : 0,
+        storageLocations: [entry.location],
+        stockItemIds: entry.stockItemIds,
       },
     ],
   };
@@ -1020,6 +1302,8 @@ interface BuiltSave {
 function buildInputForSave(
   slot: PlanSlot,
   state: EditorState,
+  stock: readonly StockItem[],
+  today: string,
 ): BuiltSave | null {
   const trimmedComment = state.comment.trim();
   const commentValue = trimmedComment === '' ? null : trimmedComment;
@@ -1033,9 +1317,10 @@ function buildInputForSave(
 
   // Dishes live on a "Cooking" slot, or as the single eaten dish of a
   // leftovers-of-a-plan-meal slot; every other state clears them.
-  const keepsItems = isRecipe || leftoversSource === 'plan_meal';
-  const items = keepsItems ? state.items : [];
-  if (leftoversSource === 'plan_meal' && items.length !== 1) return null;
+  const keepsDish =
+    leftoversSource === 'plan_meal' || leftoversSource === 'storage';
+  const items = isRecipe || keepsDish ? state.items : [];
+  if (keepsDish && items.length !== 1) return null;
 
   // DEC-91: `slot_type='recipe'` iff ≥1 item is eaten here; prepared-only
   // cook-ahead rows are allowed on any slot type. A "Cooking" slot the user
@@ -1072,32 +1357,25 @@ function buildInputForSave(
     leftoversSource,
     chefUserId,
     comment: commentValue,
-    items: parsed.map(({ item, prepared, eaten, frozen }, index) => ({
-      recipeId: item.recipeId,
-      prepared,
-      eaten,
-      frozen,
-      sortOrder: index,
-    })),
+    items: parsed.map(({ item, prepared, eaten, frozen }, index) => {
+      const fromStorage = storagePortions(item, state);
+      return {
+        recipeId: item.recipeId,
+        prepared,
+        eaten,
+        frozen,
+        ...(fromStorage > 0 && { fromStorage }),
+        ...(fromStorage > 0 &&
+          item.stockItemIds && { stockItemIds: item.stockItemIds }),
+        sortOrder: index,
+      };
+    }),
     dinerUserIds: state.dinerUserIds,
     guestCount,
   };
 
-  const optimisticItems: PlanSlotItem[] = parsed.map(
-    ({ item, prepared, eaten, frozen }, index) => ({
-      id: index + 1,
-      recipeId: item.recipeId,
-      recipeName: item.name,
-      recipeImageUrl: item.imageUrl,
-      isBase: item.isBase,
-      baseRecipeId: item.baseRecipeId,
-      isDeleted: item.isDeleted,
-      prepared,
-      eaten,
-      frozen,
-      chilled: item.chilled,
-      sortOrder: index,
-    }),
+  const optimisticItems: PlanSlotItem[] = parsed.map(({ item }, index) =>
+    toPlanSlotItem(item, index, state, stock, today),
   );
 
   return { input, optimisticItems };

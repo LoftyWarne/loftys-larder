@@ -1,16 +1,23 @@
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import type { PlanSlotItem } from '../../../shared/src/index.ts';
+import {
+  STORAGE_LOCATIONS,
+  type PlanSlotItem,
+  type StorageLocation,
+} from '../../../shared/src/index.ts';
+import { CURRENT_HOUSEHOLD_ID } from '../config.ts';
 import * as schema from '../db/schema/index.ts';
 import { mealPlanSlotItems } from '../db/schema/meal-plans.ts';
 import { recipes } from '../db/schema/recipes.ts';
+import { stockItems, stockReservations } from '../db/schema/storage.ts';
 import type { Tx } from '../db/withTransaction.ts';
 
 type DbHandle = NodePgDatabase<typeof schema> | Tx;
 
 // Loads the dishes for a set of slots, joined to `recipes` for the denormalised
-// fields the planner renders + the balance needs (`isBase`/`baseRecipeId`).
+// fields the planner renders + the balance needs (`isBase`/`baseRecipeId`),
+// and what each dish holds in storage now (FEAT-81).
 // Ordered by `(slot, sort_order, id)` so each slot's items come back stable.
 // Returned as a map keyed by slot id; slots with no items are simply absent.
 export async function loadSlotItems(
@@ -29,6 +36,11 @@ export async function loadSlotItems(
       eaten: mealPlanSlotItems.eaten,
       frozen: mealPlanSlotItems.frozen,
       chilled: mealPlanSlotItems.chilled,
+      fromStorage: mealPlanSlotItems.fromStorage,
+      reserved: sql<string>`(select coalesce(sum(${stockReservations.amount}), 0)::numeric(10,3)::text from ${stockReservations} where ${stockReservations.slotItemId} = ${mealPlanSlotItems.id} and ${stockReservations.householdId} = ${CURRENT_HOUSEHOLD_ID})`,
+      storageLocations: sql<
+        string[]
+      >`array(select distinct ${stockItems.location}::text from ${stockReservations} inner join ${stockItems} on ${stockItems.id} = ${stockReservations.stockItemId} where ${stockReservations.slotItemId} = ${mealPlanSlotItems.id} and ${stockReservations.householdId} = ${CURRENT_HOUSEHOLD_ID} order by 1)`,
       sortOrder: mealPlanSlotItems.sortOrder,
       recipeName: recipes.name,
       recipeImageUrl: recipes.imageUrl,
@@ -58,6 +70,9 @@ export async function loadSlotItems(
       eaten: row.eaten,
       frozen: row.frozen,
       chilled: row.chilled,
+      fromStorage: row.fromStorage,
+      reserved: Number(row.reserved),
+      storageLocations: row.storageLocations.filter(isStorageLocation),
       sortOrder: row.sortOrder,
     };
     const list = bySlot.get(row.slotId);
@@ -65,4 +80,8 @@ export async function loadSlotItems(
     else bySlot.set(row.slotId, [item]);
   }
   return bySlot;
+}
+
+function isStorageLocation(value: string): value is StorageLocation {
+  return (STORAGE_LOCATIONS as readonly string[]).includes(value);
 }

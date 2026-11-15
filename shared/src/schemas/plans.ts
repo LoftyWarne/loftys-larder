@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { storageLocationSchema } from './storage.ts';
+
 // Plan DTOs for the create/list/get/delete procedures. All dates flow over the
 // wire as `YYYY-MM-DD` strings (no time component); the project doesn't run a
 // tRPC data transformer, so a JS Date would serialise to an ISO timestamp that
@@ -33,7 +35,12 @@ export type SlotType = z.infer<typeof slotTypeSchema>;
 // enum). `plan_meal` carries the eaten dish as the slot's single `eat` item
 // (FK to the recipe); `takeaway` / `other` are bare markers. Present iff the
 // slot is `leftovers`.
-export const leftoversSourceSchema = z.enum(['plan_meal', 'takeaway', 'other']);
+export const leftoversSourceSchema = z.enum([
+  'plan_meal',
+  'takeaway',
+  'other',
+  'storage',
+]);
 export type LeftoversSource = z.infer<typeof leftoversSourceSchema>;
 
 // Slot item with the recipe fields denormalised for rendering (name/image,
@@ -55,6 +62,16 @@ export const planSlotItemSchema = z.object({
   // Leftovers in the plan are `prepared - eaten - frozen - chilled`.
   frozen: z.number().int().nonnegative(),
   chilled: z.number().int().nonnegative(),
+  // Portions taken from storage (FEAT-81): the dish itself on a Leftovers
+  // from Storage slot, or a Variation's base ("Use frozen base"). A record,
+  // like `frozen`, so it stays once the food has left storage.
+  fromStorage: z.number().int().nonnegative(),
+  // What this dish holds in storage right now, in portions (may be a half).
+  // Below `fromStorage` on a day not yet passed means not enough is held.
+  // Zero once the day has passed and its Reservations have settled.
+  reserved: z.number().nonnegative(),
+  // Where that's held, so the planner marks Freezer and Fridge food.
+  storageLocations: z.array(storageLocationSchema),
   sortOrder: z.number().int().nonnegative(),
 });
 export type PlanSlotItem = z.infer<typeof planSlotItemSchema>;

@@ -36,11 +36,15 @@ export const slotType = pgEnum('slot_type', [
 // `meal_plan_slot_items` row (FK to the recipe), so it draws the cooked-base
 // pool down (DEC-88) but is excluded from the shopping list (the meal was
 // already bought when it was cooked). `takeaway` / `other` carry no recipe —
-// they're bare markers. Non-null iff `slot_type = 'leftovers'` (CHECK below).
+// they're bare markers. `storage` = a dish eaten from storage (DEC-118): its
+// one item has `prepared = 0` and `from_storage = eaten`, and Reservations on
+// that item hold the Stock item until the day passes. Non-null iff
+// `slot_type = 'leftovers'` (CHECK below).
 export const leftoversSource = pgEnum('leftovers_source', [
   'plan_meal',
   'takeaway',
   'other',
+  'storage',
 ]);
 
 // Household-scoped dated window (DEC-17). `created_by_user_id` is informational
@@ -181,6 +185,11 @@ export const mealPlanSlotItems = pgTable(
     // as a record even after those items are edited or eaten.
     frozen: smallint().notNull().default(0),
     chilled: smallint().notNull().default(0),
+    // Portions this dish takes from storage (DEC-118, FEAT-81): the dish
+    // itself for Leftovers from Storage, or a Variation's base ("Use frozen
+    // base"). It's the plan's record, so it outlives the Reservations, which
+    // settle once the day has passed.
+    fromStorage: smallint().notNull().default(0),
     sortOrder: smallint().notNull(),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
@@ -207,6 +216,10 @@ export const mealPlanSlotItems = pgTable(
     check(
       'meal_plan_slot_items_chilled_non_negative',
       sql`${table.chilled} >= 0`,
+    ),
+    check(
+      'meal_plan_slot_items_from_storage_non_negative',
+      sql`${table.fromStorage} >= 0`,
     ),
     // Rows that store nothing are exempt: a leftovers row, or a recipe slot
     // eating food cooked earlier, has `prepared = 0` with `eaten > 0`.

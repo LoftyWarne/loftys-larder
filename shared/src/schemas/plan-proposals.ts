@@ -6,6 +6,7 @@ import {
 } from './health-scores.ts';
 import { leftoversSourceSchema, planSchema, slotTypeSchema } from './plans.ts';
 import { slotItemInputSchema, withSlotContentRules } from './slots.ts';
+import { storageLocationSchema } from './storage.ts';
 
 // AI meal planning (DEC-117): a model proposes meals for a new plan's slots
 // that aren't fixed, and the cook reviews them before anything is written.
@@ -39,10 +40,14 @@ export const fixedMealSchema = z.discriminatedUnion('kind', [
 
 export type FixedMeal = z.infer<typeof fixedMealSchema>;
 
+// `fromStorage` (FEAT-81), left out for none: the portions a Leftovers from
+// Storage dish eats, or a Variation's base portions taken from storage. Apply
+// reserves them from what's held then.
 export const planProposalItemSchema = z.object({
   recipeId: recipeIdSchema,
   prepared: z.number().int().nonnegative(),
   eaten: z.number().int().nonnegative(),
+  fromStorage: z.number().int().nonnegative().optional(),
 });
 
 export type PlanProposalItem = z.infer<typeof planProposalItemSchema>;
@@ -193,7 +198,25 @@ export const mealPlanRecipeSchema = z.object({
 
 export type MealPlanRecipe = z.infer<typeof mealPlanRecipeSchema>;
 
-export const mealPlanDishKindSchema = z.enum(['cook', 'leftovers']);
+export const mealPlanDishKindSchema = z.enum(['cook', 'leftovers', 'storage']);
+
+// One held Stock item, or a Freezer or Pantry entry combining one ingredient
+// or dish, as the planner is told it (DEC-118). Only what's available: past
+// Use-by Fridge items and fully reserved ones are left out. Dishes are in
+// portions; ingredients in their one unit (DEC-18). `recipeId` is set for a
+// dish, so the planner can name it.
+export const mealPlanStockSchema = z.object({
+  name: z.string(),
+  kind: z.enum(['ingredient', 'dish']),
+  recipeId: recipeIdSchema.nullable(),
+  isBase: z.boolean(),
+  location: storageLocationSchema,
+  available: z.number().positive(),
+  unit: z.string(),
+  useBy: civilDateSchema.nullable(),
+});
+
+export type MealPlanStock = z.infer<typeof mealPlanStockSchema>;
 
 export type MealPlanDishKind = z.infer<typeof mealPlanDishKindSchema>;
 
@@ -207,6 +230,7 @@ const mealPlanSlotDishSchema = z.object({
       kind: mealPlanDishKindSchema,
       recipeId: recipeIdSchema,
       prepared: z.number().int().nonnegative(),
+      useHeldBase: z.boolean(),
     })
     .nullable(),
 });
@@ -232,6 +256,7 @@ export const mealPlanRequestSchema = z.object({
     }),
   ),
   recipes: z.array(mealPlanRecipeSchema),
+  storage: z.array(mealPlanStockSchema),
   brief: z.string().nullable(),
   note: z.string().nullable(),
   previous: z
@@ -265,13 +290,22 @@ export const mealPlanCandidateSchema = z.object({
       date: z.string().describe('The slot’s date, as YYYY-MM-DD.'),
       occasion: z.string().describe('The slot’s occasion, as sent.'),
       kind: mealPlanDishKindSchema.describe(
-        '"cook" to cook the recipe here, "leftovers" to eat portions cooked at an earlier slot.',
+        '"cook" to cook the recipe here, "leftovers" to eat portions cooked at an earlier slot, "storage" to eat portions of a dish held in storage.',
       ),
-      recipeId: z.number().describe('The id of one recipe from the library.'),
+      recipeId: z
+        .number()
+        .describe(
+          'The id of one recipe from the library, or of a dish held in storage.',
+        ),
       prepared: z
         .number()
         .describe(
-          'For "cook", the portions cooked here in all, at least the headcount. 0 for "leftovers".',
+          'For "cook", the portions cooked here in all, at least the headcount. 0 for "leftovers" and "storage".',
+        ),
+      useHeldBase: z
+        .boolean()
+        .describe(
+          'For "cook" of a variation whose base is held in storage, true to make it from the held base. Otherwise false.',
         ),
       reason: z.string().describe('Why this recipe here, in plain text.'),
     }),
@@ -291,13 +325,22 @@ export const mealPlanSlotCandidateSchema = z.object({
   dish: z
     .object({
       kind: mealPlanDishKindSchema.describe(
-        '"cook" to cook the recipe here, "leftovers" to eat portions cooked at an earlier slot.',
+        '"cook" to cook the recipe here, "leftovers" to eat portions cooked at an earlier slot, "storage" to eat portions of a dish held in storage.',
       ),
-      recipeId: z.number().describe('The id of one recipe from the library.'),
+      recipeId: z
+        .number()
+        .describe(
+          'The id of one recipe from the library, or of a dish held in storage.',
+        ),
       prepared: z
         .number()
         .describe(
-          'For "cook", the portions cooked here in all, at least the headcount. 0 for "leftovers".',
+          'For "cook", the portions cooked here in all, at least the headcount. 0 for "leftovers" and "storage".',
+        ),
+      useHeldBase: z
+        .boolean()
+        .describe(
+          'For "cook" of a variation whose base is held in storage, true to make it from the held base. Otherwise false.',
         ),
       reason: z.string().describe('Why this recipe here, in plain text.'),
     })

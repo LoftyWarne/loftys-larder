@@ -218,6 +218,20 @@
       "when": 1794764939495,
       "tag": "0030_staples",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794771710405,
+      "tag": "0031_eat_from_storage",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794780285408,
+      "tag": "0032_slot_reservations_index",
+      "breakpoints": true
     }
   ]
 }

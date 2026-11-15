@@ -3,6 +3,7 @@ import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import type {
   MealPlanRecipe,
   MealPlanRequest,
+  MealPlanStock,
   MealPlanSlotRequest,
   PlanProposal,
   PlanProposalSlot,
@@ -18,6 +19,9 @@ import {
   mealPlans,
 } from '../../db/schema/meal-plans.ts';
 import { recipeHealthScores } from '../../db/schema/recipe-health.ts';
+import { unitsOfMeasurement } from '../../db/schema/reference.ts';
+import { stockItems, stockReservations } from '../../db/schema/storage.ts';
+import type { Tx } from '../../db/withTransaction.ts';
 import { recipeRatings } from '../../db/schema/recipe-social.ts';
 import {
   recipeIngredients,
@@ -26,6 +30,7 @@ import {
   recipes,
 } from '../../db/schema/recipes.ts';
 import { addDays, formatCivilDate } from '../date-utils.ts';
+import { parseMilliFromFixed3 } from '../shopping-aggregation.ts';
 import { healthScoreDueReason } from '../health-score/due.ts';
 import { pickableRecipesWhere } from '../pickable-recipes.ts';
 
@@ -186,6 +191,113 @@ function groupNames(
   return grouped;
 }
 
+// What the household holds, as the planner is told it (DEC-118), and the
+// portions of each dish the normaliser may plan with. The caller settles
+// Reservations first, in the same transaction.
+export interface PlannerStock {
+  storage: MealPlanStock[];
+  held: HeldDishes;
+}
+
+// Available portions of each held dish, by recipe id: in any location for
+// eating from storage, and in the Freezer or Fridge for a Variation's base.
+export interface HeldDishes {
+  dish: ReadonlyMap<number, number>;
+  base: ReadonlyMap<number, number>;
+}
+
+export async function loadPlannerStock(
+  tx: Tx,
+  today: Date,
+): Promise<PlannerStock> {
+  const todayIso = formatCivilDate(today);
+  const rows = await tx
+    .select({
+      id: stockItems.id,
+      location: stockItems.location,
+      quantity: stockItems.quantity,
+      useBy: stockItems.useBy,
+      ingredientId: stockItems.ingredientId,
+      ingredientName: ingredients.name,
+      recipeId: stockItems.recipeId,
+      recipeName: recipes.name,
+      isBase: recipes.isBase,
+      unitName: unitsOfMeasurement.name,
+      reserved: sql<string>`coalesce(sum(${stockReservations.amount}), 0)::numeric(10,3)::text`,
+    })
+    .from(stockItems)
+    .leftJoin(
+      ingredients,
+      and(
+        eq(ingredients.id, stockItems.ingredientId),
+        eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .leftJoin(
+      unitsOfMeasurement,
+      eq(unitsOfMeasurement.id, ingredients.defaultUnitId),
+    )
+    .leftJoin(
+      recipes,
+      and(
+        eq(recipes.id, stockItems.recipeId),
+        eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .leftJoin(
+      stockReservations,
+      and(
+        eq(stockReservations.stockItemId, stockItems.id),
+        eq(stockReservations.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .where(eq(stockItems.householdId, CURRENT_HOUSEHOLD_ID))
+    .groupBy(stockItems.id, ingredients.id, unitsOfMeasurement.id, recipes.id)
+    .orderBy(asc(stockItems.id));
+
+  const entries = new Map<string, MealPlanStock>();
+  const dish = new Map<number, number>();
+  const base = new Map<number, number>();
+  for (const row of rows) {
+    const availableMilli =
+      parseMilliFromFixed3(row.quantity) - parseMilliFromFixed3(row.reserved);
+    if (availableMilli <= 0n) continue;
+    const useBy = row.useBy ? formatCivilDate(row.useBy) : null;
+    if (useBy !== null && useBy < todayIso) continue;
+    const available = Number(availableMilli) / 1000;
+    const isDish = row.recipeId !== null;
+    if (isDish && row.recipeId !== null) {
+      dish.set(row.recipeId, (dish.get(row.recipeId) ?? 0) + available);
+      if (row.location !== 'pantry') {
+        base.set(row.recipeId, (base.get(row.recipeId) ?? 0) + available);
+      }
+    }
+    // As the Storage screen shows them: Fridge items one by one, Freezer
+    // and Pantry items combined per ingredient or dish.
+    const key =
+      row.location === 'fridge'
+        ? `item:${String(row.id)}`
+        : `${row.location}:${isDish ? 'r' : 'i'}:${String(row.recipeId ?? row.ingredientId)}`;
+    const existing = entries.get(key);
+    if (existing) {
+      existing.available =
+        Math.round((existing.available + available) * 1000) / 1000;
+      continue;
+    }
+    entries.set(key, {
+      name: (isDish ? row.recipeName : row.ingredientName) ?? '',
+      kind: isDish ? 'dish' : 'ingredient',
+      recipeId: row.recipeId,
+      isBase: isDish && row.isBase === true,
+      location: row.location,
+      available,
+      unit: isDish ? 'portions' : (row.unitName ?? ''),
+      useBy,
+    });
+  }
+  return { storage: [...entries.values()], held: { dish, base } };
+}
+
 export function slotHeadcount(slot: {
   dinerUserIds: string[];
   guestCount: number;
@@ -199,6 +311,7 @@ export function slotHeadcount(slot: {
 export function buildMealPlanRequest(
   input: ProposePlanInput,
   library: MealPlanRecipe[],
+  storage: MealPlanStock[],
   occasionNames: ReadonlyMap<number, string>,
 ): MealPlanRequest {
   const occasion = (id: number) => occasionNames.get(id) ?? String(id);
@@ -211,6 +324,7 @@ export function buildMealPlanRequest(
     })),
     basesToCook: basesToCook(input.slots, library, occasion),
     recipes: library,
+    storage,
     brief: input.brief === '' ? null : input.brief,
     note: input.note === '' ? null : input.note,
     previous:
@@ -249,6 +363,7 @@ function basesToCook(
 export function buildMealPlanSlotRequest(
   input: ProposeSlotInput,
   library: MealPlanRecipe[],
+  storage: MealPlanStock[],
   occasionNames: ReadonlyMap<number, string>,
 ): MealPlanSlotRequest {
   const occasion = (id: number) => occasionNames.get(id) ?? String(id);
@@ -264,6 +379,7 @@ export function buildMealPlanSlotRequest(
     })),
     basesToCook: basesToCook(input.slots, library, occasion),
     recipes: library,
+    storage,
     brief: input.brief === '' ? null : input.brief,
     current: input.current
       .filter((slot) => open.has(planSlotKey(slot)))
@@ -295,18 +411,28 @@ function toPrevious(
 }
 
 function toSlotDish(
-  slot: Pick<PlanProposalSlot, 'date' | 'occasionId' | 'slotType' | 'items'>,
+  slot: Pick<
+    PlanProposalSlot,
+    'date' | 'occasionId' | 'slotType' | 'leftoversSource' | 'items'
+  >,
   occasion: (id: number) => string,
 ): MealPlanSlotRequest['current'][number] {
   const item = slot.items[0];
+  const kind =
+    slot.slotType !== 'leftovers'
+      ? 'cook'
+      : slot.leftoversSource === 'storage'
+        ? 'storage'
+        : 'leftovers';
   return {
     date: slot.date,
     occasion: occasion(slot.occasionId),
     dish: item
       ? {
-          kind: slot.slotType === 'leftovers' ? 'leftovers' : 'cook',
+          kind,
           recipeId: item.recipeId,
           prepared: item.prepared,
+          useHeldBase: kind === 'cook' && (item.fromStorage ?? 0) > 0,
         }
       : null,
   };

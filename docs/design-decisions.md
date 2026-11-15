@@ -1675,7 +1675,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
     - FEAT-78: `stock_items`, `stock_reservations`, and the `storage_location` enum
     - FEAT-79: `meal_plan_slot_items.frozen` and `meal_plan_slot_items.chilled`
     - FEAT-80: `ingredients.staple_state` and `ingredients.staple_location`, `meal_plans.storage_glance_dismissed_at`, and the Staple state a tick replaced
-    - FEAT-81: `leftovers_source` value `storage`
+    - FEAT-81: `leftovers_source` value `storage`, and `meal_plan_slot_items.from_storage` (added at FEAT-81's kick-off: the plan's record of portions taken from storage, which outlives settled Reservations), and an index on `stock_reservations.slot_item_id`
   - **Navigation:** Storage takes Ingredients' place in the phone tab bar. Ingredients is linked from Storage and Settings.
   - **Delivery:**
     - FEAT-78: Stock items, the Storage screen, settling

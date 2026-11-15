@@ -3,17 +3,20 @@ import type {
   PlanSlot,
   PlanSlotItem,
   RecipeListItem,
+  StockItem,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listFetchMock, getQueryMock, listTagsQueryMock } = vi.hoisted(() => ({
-  listTagsQueryMock: vi.fn(),
-  listFetchMock: vi.fn(),
-  getQueryMock: vi.fn(),
-}));
+const { listFetchMock, getQueryMock, listTagsQueryMock, storageListMock } =
+  vi.hoisted(() => ({
+    listTagsQueryMock: vi.fn(),
+    listFetchMock: vi.fn(),
+    getQueryMock: vi.fn(),
+    storageListMock: vi.fn(),
+  }));
 
 vi.mock('@/lib/trpc.ts', () => ({
   trpc: {
@@ -25,6 +28,9 @@ vi.mock('@/lib/trpc.ts', () => ({
     recipes: {
       get: { useQuery: getQueryMock },
       listTags: { useQuery: listTagsQueryMock },
+    },
+    storage: {
+      list: { useQuery: storageListMock },
     },
   },
 }));
@@ -44,6 +50,9 @@ function eat(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     eaten: 4,
     frozen: 0,
     chilled: 0,
+    fromStorage: 0,
+    reserved: 0,
+    storageLocations: [],
     sortOrder: 0,
     ...overrides,
   };
@@ -62,6 +71,9 @@ function cook(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     eaten: 0,
     frozen: 0,
     chilled: 0,
+    fromStorage: 0,
+    reserved: 0,
+    storageLocations: [],
     sortOrder: 1,
     ...overrides,
   };
@@ -118,6 +130,10 @@ beforeEach(() => {
   getQueryMock.mockReturnValue({ data: undefined });
   listTagsQueryMock.mockReset();
   listTagsQueryMock.mockReturnValue({ data: [] });
+  storageListMock.mockReset();
+  storageListMock.mockReturnValue({
+    data: { today: '2026-06-01', items: [], staples: [] },
+  });
   setupListMock([]);
 });
 
@@ -1181,5 +1197,250 @@ describe('SlotEditorSheet — leftovers', () => {
     expect(screen.getByTestId('serving-variation-warning')).toHaveTextContent(
       'Not enough base cooked yet',
     );
+  });
+});
+
+describe('SlotEditorSheet — eating from storage', () => {
+  const SLOT: PlanSlot = {
+    id: 9,
+    planId: 1,
+    date: '2026-06-17',
+    occasionId: 2,
+    occasionName: 'Dinner',
+    slotType: 'empty',
+    leftoversSource: null,
+    chefUserId: null,
+    comment: null,
+    items: [],
+    dinerUserIds: [],
+    guestCount: 2,
+  };
+
+  function stockItem(
+    id: number,
+    recipe: { recipeId: number; name: string; isDeleted?: boolean },
+    overrides: Partial<StockItem> = {},
+  ): StockItem {
+    return {
+      id,
+      location: 'freezer',
+      target: {
+        kind: 'recipe',
+        recipeId: recipe.recipeId,
+        name: recipe.name,
+        isBase: false,
+        isDeleted: recipe.isDeleted ?? false,
+      },
+      quantity: '2.000',
+      reserved: '0.000',
+      addedOn: '2026-05-01',
+      useBy: null,
+      ...overrides,
+    };
+  }
+
+  function holding(items: StockItem[]): void {
+    storageListMock.mockReturnValue({
+      data: { today: '2026-06-10', items, staples: [] },
+    });
+  }
+
+  function renderSheet(slot: PlanSlot = SLOT, onSave = vi.fn()): typeof onSave {
+    render(
+      <SlotEditorSheet
+        open
+        slot={slot}
+        members={[]}
+        isSaving={false}
+        slots={[slot]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+    return onSave;
+  }
+
+  function optionLabels(): (string | null)[] {
+    return Array.from(
+      screen
+        .getByLabelText('Leftovers of which meal')
+        .querySelectorAll('optgroup[label="From storage"] option'),
+      (option) => option.textContent,
+    );
+  }
+
+  it('lists held dishes with a snowflake, location and age, including deleted and past use-by', async () => {
+    holding([
+      stockItem(1, { recipeId: 40, name: 'Lasagne' }),
+      stockItem(2, { recipeId: 41, name: 'Old Curry', isDeleted: true }),
+      stockItem(
+        3,
+        { recipeId: 42, name: 'Chicken Stew' },
+        { location: 'fridge', useBy: '2026-06-09' },
+      ),
+      stockItem(4, { recipeId: 43, name: 'Beans' }, { location: 'pantry' }),
+    ]);
+    const user = userEvent.setup();
+    renderSheet();
+    await user.click(screen.getByText('Leftovers'));
+    const labels = optionLabels();
+    expect(labels).toContain(
+      '❄ Lasagne — Freezer · frozen 5 weeks ago · 2 portions free',
+    );
+    expect(labels.some((label) => label?.includes('Old Curry (deleted)'))).toBe(
+      true,
+    );
+    expect(
+      labels.some(
+        (label) =>
+          label?.startsWith('❄ Chicken Stew — Fridge') &&
+          label.includes('past use-by'),
+      ),
+    ).toBe(true);
+    expect(labels.some((label) => label?.startsWith('Beans — Pantry'))).toBe(
+      true,
+    );
+  });
+
+  it('saves a picked dish as Leftovers from Storage, taking the headcount from those items', async () => {
+    holding([stockItem(7, { recipeId: 40, name: 'Lasagne' })]);
+    const user = userEvent.setup();
+    const onSave = renderSheet();
+    await user.click(screen.getByText('Leftovers'));
+    await user.selectOptions(
+      screen.getByLabelText('Leftovers of which meal'),
+      'stock:freezer:recipe:40',
+    );
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.leftoversSource).toBe('storage');
+    expect(input.items).toEqual([
+      expect.objectContaining({
+        recipeId: 40,
+        prepared: 0,
+        eaten: 2,
+        fromStorage: 2,
+        stockItemIds: [7],
+      }),
+    ]);
+  });
+
+  it('warns when the picked entry holds fewer portions than are eaten', async () => {
+    holding([
+      stockItem(7, { recipeId: 40, name: 'Lasagne' }, { quantity: '1.000' }),
+    ]);
+    const user = userEvent.setup();
+    renderSheet();
+    await user.click(screen.getByText('Leftovers'));
+    await user.selectOptions(
+      screen.getByLabelText('Leftovers of which meal'),
+      'stock:freezer:recipe:40',
+    );
+    expect(screen.getByTestId('serving-variation-warning')).toHaveTextContent(
+      'Not enough held in storage — short by 1',
+    );
+  });
+
+  const VARIATION_SLOT: PlanSlot = {
+    ...SLOT,
+    slotType: 'recipe',
+    items: [
+      eat({
+        recipeId: 51,
+        recipeName: 'Stew Pie',
+        baseRecipeId: 50,
+        prepared: 2,
+        eaten: 2,
+      }),
+    ],
+  };
+
+  it('offers "Use frozen base" when the base is held, and saves it', async () => {
+    holding([stockItem(8, { recipeId: 50, name: 'Stew Base' })]);
+    const user = userEvent.setup();
+    const onSave = renderSheet(VARIATION_SLOT);
+    expect(screen.getByTestId('serving-variation-warning')).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('checkbox', { name: /use frozen base/i }),
+    );
+    expect(
+      screen.queryByTestId('serving-variation-warning'),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.items[0]).toMatchObject({ recipeId: 51, fromStorage: 2 });
+  });
+
+  it('offers no "Use frozen base" when no base is held', () => {
+    renderSheet(VARIATION_SLOT);
+    expect(
+      screen.queryByRole('checkbox', { name: /base/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('says "Use base from storage" when some of the base is in the Fridge', () => {
+    holding([
+      stockItem(
+        8,
+        { recipeId: 50, name: 'Stew Base' },
+        { location: 'fridge', useBy: '2026-06-12' },
+      ),
+    ]);
+    renderSheet(VARIATION_SLOT);
+    expect(
+      screen.getByRole('checkbox', { name: /use base from storage/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers nothing new from storage on a slot whose day has passed', async () => {
+    holding([
+      stockItem(7, { recipeId: 40, name: 'Lasagne' }),
+      stockItem(8, { recipeId: 50, name: 'Stew Base' }),
+    ]);
+    const user = userEvent.setup();
+    const past = { ...SLOT, date: '2026-06-09' };
+    renderSheet(past);
+    await user.click(screen.getByText('Leftovers'));
+    expect(
+      screen
+        .getByLabelText('Leftovers of which meal')
+        .querySelector('optgroup[label="From storage"]'),
+    ).toBeNull();
+  });
+
+  it('hides "Use frozen base" on a slot whose day has passed', () => {
+    holding([stockItem(8, { recipeId: 50, name: 'Stew Base' })]);
+    renderSheet({ ...VARIATION_SLOT, date: '2026-06-09' });
+    expect(
+      screen.queryByRole('checkbox', { name: /base/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('still shows the dish a past storage slot saved', async () => {
+    const user = userEvent.setup();
+    holding([]);
+    renderSheet({
+      ...SLOT,
+      date: '2026-06-09',
+      slotType: 'leftovers',
+      leftoversSource: 'storage',
+      items: [
+        eat({
+          recipeId: 40,
+          recipeName: 'Lasagne',
+          prepared: 0,
+          eaten: 2,
+          fromStorage: 2,
+        }),
+      ],
+    });
+    await user.click(screen.getByText('Leftovers'));
+    expect(optionLabels()).toEqual(['❄ Lasagne — as planned']);
   });
 });

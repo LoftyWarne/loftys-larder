@@ -30,6 +30,7 @@ import {
   type DeletePlanResult,
   type DuplicatePlanResult,
   type GetPlanResult,
+  type LeftoversSource,
   type ListPlansResult,
   type Plan,
   type PlanListItem,
@@ -45,6 +46,7 @@ import {
   mealPlanSlotItems,
   mealPlanSlots,
 } from '../../db/schema/meal-plans.ts';
+import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
 import { stockReservations } from '../../db/schema/storage.ts';
 import { selectProposedHealthScore } from '../../lib/health-score/average.ts';
@@ -58,7 +60,12 @@ import { loadSlotDiners } from '../../lib/slot-diners.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
 import { settleReservations } from '../../lib/stock-settlement.ts';
 import {
+  reconcileSlotItemReservations,
+  storageNeedsFor,
+} from '../../lib/slot-reservations.ts';
+import {
   assertDinersExist,
+  assertRecipesInHousehold,
   assertRecipesPickable,
   replaceSlotDiners,
   insertSlotItems,
@@ -142,17 +149,30 @@ export const plansRouter = router({
         eachDateInRange(startDate, endDate),
         occasionIds,
       );
+      const fromStorage = (slot: (typeof input.slots)[number]): boolean =>
+        slot.leftoversSource === 'storage';
       await assertRecipesPickable(
         ctx.db,
-        input.slots.flatMap((slot) => slot.items.map((item) => item.recipeId)),
+        input.slots
+          .filter((slot) => !fromStorage(slot))
+          .flatMap((slot) => slot.items.map((item) => item.recipeId)),
+      );
+      await assertRecipesInHousehold(
+        ctx.db,
+        input.slots
+          .filter(fromStorage)
+          .flatMap((slot) => slot.items.map((item) => item.recipeId)),
       );
       await assertDinersExist(
         ctx.db,
         input.slots.flatMap((slot) => slot.dinerUserIds),
       );
 
+      const today = todayInLondon();
       const withTransaction = makeWithTransaction(ctx.db);
       const plan = await withTransaction(async (tx) => {
+        // Settled first, so the storage slots reserve only what's held.
+        await settleReservations(tx, today);
         const created = await insertPlanWithEmptySlots(tx, {
           userId: ctx.user.id,
           startDate,
@@ -191,7 +211,19 @@ export const plansRouter = router({
               guestCount: slot.guestCount,
             })
             .where(eq(mealPlanSlots.id, slotId));
-          await insertSlotItems(tx, slotId, slot.items);
+          const itemIds = await insertSlotItems(tx, slotId, slot.items);
+          const needs = await storageNeedsFor(tx, {
+            leftoversSource: slot.leftoversSource,
+            items: slot.items,
+            itemIds,
+            date: parseCivilDate(slot.date),
+          });
+          await reconcileSlotItemReservations(
+            tx,
+            created.plan.id,
+            needs,
+            today,
+          );
           await replaceSlotDiners(tx, slotId, [...new Set(slot.dinerUserIds)]);
         }
         return created.plan;
@@ -281,9 +313,16 @@ export const plansRouter = router({
     .input(getPlanInputSchema)
     .output(getPlanResultSchema)
     .query(async ({ ctx, input }): Promise<GetPlanResult> => {
-      const planRow = await loadHouseholdPlan(ctx.db, input.id);
-      const slots = await selectPlanSlots(ctx.db, planRow.id);
-      return { ...toPlanDto(planRow), slots };
+      // Settled first, so a past day's food has left storage (cross-cutting
+      // #23) and each dish's `reserved` is what's still held.
+      const today = todayInLondon();
+      const withTransaction = makeWithTransaction(ctx.db);
+      return withTransaction(async (tx) => {
+        await settleReservations(tx, today);
+        const planRow = await loadHouseholdPlan(tx, input.id);
+        const slots = await selectPlanSlots(tx, planRow.id);
+        return { ...toPlanDto(planRow), slots };
+      });
     }),
 
   delete: protectedProcedure
@@ -604,9 +643,12 @@ export const plansRouter = router({
           recipeId: mealPlanSlotItems.recipeId,
           prepared: mealPlanSlotItems.prepared,
           eaten: mealPlanSlotItems.eaten,
+          fromStorage: mealPlanSlotItems.fromStorage,
           sortOrder: mealPlanSlotItems.sortOrder,
+          baseRecipeId: recipes.baseRecipeId,
         })
         .from(mealPlanSlotItems)
+        .innerJoin(recipes, eq(recipes.id, mealPlanSlotItems.recipeId))
         .where(
           inArray(
             mealPlanSlotItems.slotId,
@@ -641,6 +683,7 @@ export const plansRouter = router({
 
       const withTransaction = makeWithTransaction(ctx.db);
       const { plan, slotCount } = await withTransaction(async (tx) => {
+        await settleReservations(tx, today);
         const inserted = await tx
           .insert(mealPlans)
           .values({
@@ -721,11 +764,40 @@ export const plansRouter = router({
             recipeId: item.recipeId,
             prepared: item.prepared,
             eaten: item.eaten,
+            // A cooked dish takes only a Variation's base from storage. One
+            // whose recipe has stopped being a Variation since is copied as
+            // cooked from scratch.
+            fromStorage:
+              slot.leftoversSource === 'storage' ||
+              (item.prepared > 0 && item.baseRecipeId !== null)
+                ? item.fromStorage
+                : 0,
             sortOrder: item.sortOrder,
           }));
         });
         if (itemValues.length > 0) {
-          await tx.insert(mealPlanSlotItems).values(itemValues);
+          const copied = await tx
+            .insert(mealPlanSlotItems)
+            .values(itemValues)
+            .returning({
+              id: mealPlanSlotItems.id,
+              slotId: mealPlanSlotItems.slotId,
+              recipeId: mealPlanSlotItems.recipeId,
+              prepared: mealPlanSlotItems.prepared,
+              eaten: mealPlanSlotItems.eaten,
+              fromStorage: mealPlanSlotItems.fromStorage,
+              sortOrder: mealPlanSlotItems.sortOrder,
+            });
+          // A copied storage dish reserves what's held now, as if planned
+          // afresh. Food the source plan ate is never brought back.
+          await reserveCopiedStorage(
+            tx,
+            row.id,
+            insertedSlots,
+            slotValues,
+            copied,
+            today,
+          );
         }
 
         const dinerValues = sourceSlots.flatMap((slot) => {
@@ -749,6 +821,48 @@ export const plansRouter = router({
       return { plan, slotCount };
     }),
 });
+
+async function reserveCopiedStorage(
+  tx: Tx,
+  planId: number,
+  slots: readonly { id: number; date: Date; occasionId: number }[],
+  slotValues: readonly {
+    date: Date;
+    occasionId: number;
+    leftoversSource: LeftoversSource | null;
+  }[],
+  items: readonly {
+    id: number;
+    slotId: number;
+    recipeId: number;
+    prepared: number;
+    eaten: number;
+    fromStorage: number;
+    sortOrder: number;
+  }[],
+  today: Date,
+): Promise<void> {
+  const sourceByKey = new Map(
+    slotValues.map((slot) => [
+      `${formatCivilDate(slot.date)}:${String(slot.occasionId)}`,
+      slot.leftoversSource,
+    ]),
+  );
+  for (const slot of slots) {
+    const own = items.filter((item) => item.slotId === slot.id);
+    if (!own.some((item) => item.fromStorage > 0)) continue;
+    const needs = await storageNeedsFor(tx, {
+      leftoversSource:
+        sourceByKey.get(
+          `${formatCivilDate(slot.date)}:${String(slot.occasionId)}`,
+        ) ?? null,
+      items: own,
+      itemIds: new Map(own.map((item) => [item.recipeId, item.id])),
+      date: slot.date,
+    });
+    await reconcileSlotItemReservations(tx, planId, needs, today);
+  }
+}
 
 interface PlanRow {
   id: number;

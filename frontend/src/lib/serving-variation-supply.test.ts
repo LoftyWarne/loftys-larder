@@ -11,6 +11,8 @@ interface ItemSpec {
   eaten: number;
   frozen?: number;
   chilled?: number;
+  fromStorage?: number;
+  reserved?: number;
   isBase?: boolean;
   baseRecipeId?: number | null;
 }
@@ -35,6 +37,9 @@ function item(spec: ItemSpec): PlanSlotItem {
     eaten: spec.eaten,
     frozen: spec.frozen ?? 0,
     chilled: spec.chilled ?? 0,
+    fromStorage: spec.fromStorage ?? 0,
+    reserved: spec.reserved ?? 0,
+    storageLocations: [],
     sortOrder: 0,
   };
 }
@@ -267,5 +272,71 @@ describe('deriveBaseBalances', () => {
     const { remainingByBase } = deriveBaseBalances([cookSlot, eatSlot]);
     expect(remainingByBase.get(22)).toBe(6);
     expect(remainingByBase.get(922)).toBe(2);
+  });
+
+  describe('storage portions', () => {
+    const today = '2026-06-16';
+
+    it('lets reserved storage portions feed a Leftovers from Storage dish', () => {
+      const eat = slot({
+        date: '2026-06-17',
+        items: [
+          { recipeId: 40, prepared: 0, eaten: 2, fromStorage: 2, reserved: 2 },
+        ],
+      });
+      const { shortfallBySlot, remainingByBase } = deriveBaseBalances(
+        [eat],
+        today,
+      );
+      expect(shortfallBySlot.size).toBe(0);
+      expect(remainingByBase.get(40)).toBe(0);
+    });
+
+    it('shows what isn’t held as a shortfall before the day', () => {
+      const eat = slot({
+        date: '2026-06-17',
+        items: [
+          { recipeId: 40, prepared: 0, eaten: 3, fromStorage: 3, reserved: 1 },
+        ],
+      });
+      expect(deriveBaseBalances([eat], today).shortfallBySlot.get(eat.id)).toBe(
+        2,
+      );
+    });
+
+    it('counts the record once the day has passed and its food has settled', () => {
+      const eat = slot({
+        date: '2026-06-15',
+        items: [
+          { recipeId: 40, prepared: 0, eaten: 2, fromStorage: 2, reserved: 0 },
+        ],
+      });
+      expect(deriveBaseBalances([eat], today).shortfallBySlot.size).toBe(0);
+    });
+
+    it('puts a frozen base into the base pool at the Variation’s slot', () => {
+      const variation = slot({
+        date: '2026-06-18',
+        items: [{ ...eatVariation(22, 2), fromStorage: 2, reserved: 2 }],
+      });
+      const { shortfallBySlot, remainingByBase } = deriveBaseBalances(
+        [variation],
+        today,
+      );
+      expect(shortfallBySlot.size).toBe(0);
+      expect(remainingByBase.get(22)).toBe(0);
+    });
+
+    it('still shows a base shortfall for a Variation not using storage', () => {
+      const variation = slot({
+        date: '2026-06-18',
+        items: [eatVariation(22, 2)],
+      });
+      expect(
+        deriveBaseBalances([variation], today).shortfallBySlot.get(
+          variation.id,
+        ),
+      ).toBe(2);
+    });
   });
 });

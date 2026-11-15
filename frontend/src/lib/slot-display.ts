@@ -9,14 +9,39 @@ import {
 // data access — so the two surfaces render dishes and leftovers identically.
 
 // A `leftovers` slot eating a takeaway/other source shows the source name; a
-// `plan_meal` source instead carries the eaten dish in `items`.
-export const LEFTOVERS_SOURCE_LABEL: Record<
-  Exclude<NonNullable<PlanSlot['leftoversSource']>, 'plan_meal'>,
-  string
-> = {
+// `plan_meal` or `storage` source instead carries the eaten dish in `items`.
+type BareLeftoversSource = Exclude<
+  NonNullable<PlanSlot['leftoversSource']>,
+  'plan_meal' | 'storage'
+>;
+
+export const LEFTOVERS_SOURCE_LABEL: Record<BareLeftoversSource, string> = {
   takeaway: 'Takeaway',
   other: 'Other',
 };
+
+export function bareLeftoversSource(
+  source: PlanSlot['leftoversSource'],
+): BareLeftoversSource | null {
+  return source === 'takeaway' || source === 'other' ? source : null;
+}
+
+// Food taken from storage (FEAT-81) is marked with a snowflake, except food
+// held only in the Pantry. Once its day has passed the Reservations have
+// settled and the location isn't known, so it keeps the snowflake.
+export function takesFromStorage(item: PlanSlotItem): boolean {
+  return item.fromStorage > 0;
+}
+
+export function showsSnowflake(item: PlanSlotItem): boolean {
+  return (
+    takesFromStorage(item) &&
+    !(
+      item.storageLocations.length > 0 &&
+      item.storageLocations.every((location) => location === 'pantry')
+    )
+  );
+}
 
 // Quantity label (DEC-91): what's eaten here, with a `+N` marker when the dish
 // cooks more than it eats or stores (surplus into the pool). A prepared-only
@@ -36,6 +61,9 @@ function eatenLabel(item: PlanSlotItem): string {
 
 function storedLabels(item: PlanSlotItem): string[] {
   const labels: string[] = [];
+  if (item.fromStorage > 0 && item.prepared > 0) {
+    labels.push('base from storage');
+  }
   if (item.frozen > 0) labels.push(`${String(item.frozen)} frozen`);
   if (item.chilled > 0) labels.push(`${String(item.chilled)} in fridge`);
   return labels;
@@ -46,11 +74,12 @@ function storedLabels(item: PlanSlotItem): string[] {
 // a dash when nothing is set yet.
 export function leftoversSummary(slot: PlanSlot): string {
   const dish = slot.items[0];
-  if (dish) return `${dish.recipeName} ${dishQtyLabel(dish)}`;
-  if (slot.leftoversSource !== null && slot.leftoversSource !== 'plan_meal') {
-    return LEFTOVERS_SOURCE_LABEL[slot.leftoversSource];
+  if (dish) {
+    const from = slot.leftoversSource === 'storage' ? ' from storage' : '';
+    return `${dish.recipeName} ${dishQtyLabel(dish)}${from}`;
   }
-  return '—';
+  const bare = bareLeftoversSource(slot.leftoversSource);
+  return bare ? LEFTOVERS_SOURCE_LABEL[bare] : '—';
 }
 
 // The portions a dish's recipe opens at (DEC-98), on its recipe page or in

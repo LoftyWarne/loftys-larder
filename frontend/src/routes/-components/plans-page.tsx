@@ -321,9 +321,11 @@ export function PlansPage(): React.ReactElement {
               </AlertDialogDescription>
               {deleteHeld !== null && (
                 <p role="alert" className="text-sm text-destructive">
-                  This plan has food set aside from storage (
-                  {deleteHeld === 1 ? '1 item' : `${String(deleteHeld)} items`}
-                  ). Deleting it frees that food for other plans.
+                  This releases{' '}
+                  {deleteHeld === 1
+                    ? '1 reserved Stock item'
+                    : `${String(deleteHeld)} reserved Stock items`}
+                  . Food already eaten stays used.
                 </p>
               )}
             </AlertDialogHeader>

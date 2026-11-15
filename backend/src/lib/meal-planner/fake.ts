@@ -18,6 +18,8 @@ import {
 // double its headcount and the next eats the rest as leftovers. For one slot,
 // the first recipe not already suggested there is cooked for its headcount,
 // or nothing where nobody eats; with `repeat`, an already suggested one.
+// With `storage`, the first such slot eats the first held dish from storage,
+// and the next cooks the first variation whose base is held, from that base.
 export const FAKE_PLANNER_MARKERS = {
   refused: '[fake:refused]',
   timeout: '[fake:timeout]',
@@ -26,6 +28,7 @@ export const FAKE_PLANNER_MARKERS = {
   rejected: '[fake:rejected]',
   batch: '[fake:batch]',
   repeat: '[fake:repeat]',
+  storage: '[fake:storage]',
 } as const;
 
 export const FAKE_PLANNER_MODEL = 'fake';
@@ -108,6 +111,7 @@ function proposeFakeSlot(
             kind: 'cook',
             recipeId: recipe.id,
             prepared: target.headcount,
+            useHeldBase: false,
             reason: FAKE_PLANNER_SLOT_REASON,
           }
         : null,
@@ -125,8 +129,50 @@ function proposeFake(
     (slot) => slot.fixed === null && slot.headcount > 0,
   );
   const batch = has('batch');
+  const heldDish = has('storage')
+    ? request.storage.find((entry) => entry.recipeId !== null)
+    : undefined;
+  const heldBases = new Set(
+    request.storage.flatMap((entry) =>
+      entry.isBase && entry.location !== 'pantry' && entry.recipeId !== null
+        ? [entry.recipeId]
+        : [],
+    ),
+  );
+  const onHeldBase = has('storage')
+    ? request.recipes.find(
+        (recipe) =>
+          recipe.baseRecipeId !== null && heldBases.has(recipe.baseRecipeId),
+      )
+    : undefined;
   const candidate: MealPlanCandidate = {
     slots: open.flatMap((slot, index): MealPlanCandidate['slots'] => {
+      if (index === 0 && heldDish?.recipeId) {
+        return [
+          {
+            date: slot.date,
+            occasion: slot.occasion,
+            kind: 'storage',
+            recipeId: heldDish.recipeId,
+            prepared: 0,
+            useHeldBase: false,
+            reason: FAKE_PLANNER_REASON,
+          },
+        ];
+      }
+      if (index === 1 && onHeldBase) {
+        return [
+          {
+            date: slot.date,
+            occasion: slot.occasion,
+            kind: 'cook',
+            recipeId: onHeldBase.id,
+            prepared: slot.headcount,
+            useHeldBase: true,
+            reason: FAKE_PLANNER_REASON,
+          },
+        ];
+      }
       const first = request.recipes[0];
       if (batch && index === 1 && first) {
         return [
@@ -136,6 +182,7 @@ function proposeFake(
             kind: 'leftovers',
             recipeId: first.id,
             prepared: 0,
+            useHeldBase: false,
             reason: FAKE_PLANNER_REASON,
           },
         ];
@@ -150,6 +197,7 @@ function proposeFake(
               recipeId: recipe.id,
               prepared:
                 batch && index === 0 ? slot.headcount * 2 : slot.headcount,
+              useHeldBase: false,
               reason: FAKE_PLANNER_REASON,
             },
           ]

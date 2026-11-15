@@ -27,7 +27,7 @@ const WHICH_SLOTS = `Which slots to fill
 
 const THE_SLOT = `The slot to fill
 - plan.slots is every slot of the plan: a date and an occasion, such as Breakfast, Lunch or Dinner, with a headcount: how many people eat there. fixed, when set, is a meal the household has already chosen (kind "recipe", "batch", "eat_out" or "takeaway"), or a slot the cook wants left empty (kind "empty"). Fixed meals never change.
-- plan.current is every slot that isn't fixed as the cook has left it in review, with its dish (its kind, recipe and portions cooked), or null if it's empty. Count these as yours below.
+- plan.current is every slot that isn't fixed as the cook has left it in review, with its dish (its kind, recipe, portions cooked and whether it uses a held base), or null if it's empty. Count these as yours below.
 - plan.target is the slot to suggest for, by its date and occasion. Your dish replaces its current one. Every other slot stays as it is.
 - plan.avoidRecipeIds are recipes already suggested for this slot. Never propose one of them while any other recipe in the library is left, even one that suits the slot less well. Only when every recipe in the library is on the list may you repeat one.
 - If the target's headcount is more than 0, propose exactly one dish. If it's 0, nobody eats there: cook a Batch there only if it helps the plan (see Batch cooking), and otherwise give dish null.
@@ -58,6 +58,13 @@ const BATCH_COOKING = `Batch cooking
 - plan.basesToCook lists the base each fixed variation needs, with the portions and the slot it's needed by. Where you can, cook a Batch of that base at an earlier slot, eaten there or at headcount 0, with enough portions for that slot and anything else you plan to finish from it.
 - Leftovers can make the week easier, but don't let them crowd out variety: mix them in where a busy day suits them.`;
 
+const STORAGE = `What's held in storage
+- library.storage is food the household already holds, in the Freezer, the Fridge or the Pantry. Each entry is an ingredient or a dish: its name, location, how much is available (dishes in portions, ingredients in their unit), whether a dish is a base, and for Fridge food its useBy date. Everything listed is free to use.
+- Use Fridge food before its useBy, soonest useBy first: plan meals that use it early in the plan. Freezer and Pantry food keeps, so there's no need to use the oldest first.
+- To eat a held dish at a slot, give kind "storage" with the dish's recipeId and prepared 0. The slot's headcount eat it there, so it needs at least that many portions available, counting what your other slots already take. It can be a dish that's no longer in library.recipes.
+- To cook a variation whose base is held in the Freezer or the Fridge, give kind "cook" with useHeldBase true. The held base is used instead of cooking one, so it needs as many base portions available as prepared. Otherwise give useHeldBase false.
+- Held ingredients are there to cook with: favour recipes whose ingredientNames use them, Fridge ones first. Never subtract them from anything, and never plan portions into the freezer.`;
+
 const BRIEF = `- plan.brief is the household's own steer for this plan, in their words, or null. It may be about mood, effort, cuisine or health, and may name ingredients to use up: favour recipes whose ingredientNames include them. Follow the brief over the general guidance above.`;
 
 const BRIEF_AND_NOTE = `The brief and the note
@@ -65,13 +72,13 @@ ${BRIEF}
 - plan.previous, when set, is the proposal you made before, with each slot's dish (its kind, recipe and portions cooked), and plan.note is what the cook would like changed this time. Slots the cook kept or swapped now arrive as Fixed meals. Take the note into account and change what it asks for.`;
 
 const REPLY = `Your reply
-- For each slot you fill: its date, its occasion, the kind, the recipe's id, prepared, and a reason of up to 120 characters saying why this dish suits this slot, in words a home cook would use. For a Batch, the reason says when the rest is eaten.
+- For each slot you fill: its date, its occasion, the kind, the recipe's id, prepared, useHeldBase, and a reason of up to 120 characters saying why this dish suits this slot, in words a home cook would use. For a Batch, the reason says when the rest is eaten.
 - A summary of the plan of up to 300 characters, always written as one or two full sentences, even when there is no brief or note. Say what shapes the week: its balance, its variety, and how the Batches are used up, such as "Two Batches carry the busy midweek, with fish twice and plenty of veg." Never leave it as a placeholder.
 - When there is a brief or a note, the summary must also say how you read it, such as "I took 'light' to mean under 30 minutes and no cream", so the cook can see a misreading.
 - Write in British English, as plain text: no markdown, bullet characters or emphasis. Never mention ids in the reason or summary.`;
 
 const SLOT_REPLY = `Your reply
-- dish: the kind, the recipe's id, prepared, and a reason of up to 120 characters saying why this dish suits this slot, in words a home cook would use. For a Batch, the reason says when the rest is eaten. Don't say it's a new or different suggestion.
+- dish: the kind, the recipe's id, prepared, useHeldBase, and a reason of up to 120 characters saying why this dish suits this slot, in words a home cook would use. For a Batch, the reason says when the rest is eaten. Don't say it's a new or different suggestion.
 - Write in British English, as plain text: no markdown, bullet characters or emphasis. Never mention ids in the reason.`;
 
 export const MEAL_PLANNER_SYSTEM_PROMPT = [
@@ -80,6 +87,7 @@ export const MEAL_PLANNER_SYSTEM_PROMPT = [
   WHICH_SLOTS,
   CHOOSING_RECIPES,
   BATCH_COOKING,
+  STORAGE,
   BRIEF_AND_NOTE,
   REPLY,
 ].join('\n\n');
@@ -92,6 +100,7 @@ export const MEAL_PLANNER_SLOT_SYSTEM_PROMPT = [
   THE_SLOT,
   CHOOSING_RECIPES,
   BATCH_COOKING,
+  STORAGE,
   `The brief
 ${BRIEF}`,
   SLOT_REPLY,
@@ -102,8 +111,8 @@ ${BRIEF}`,
 export function buildMealPlannerUserMessage(
   request: MealPlanRequest | MealPlanSlotRequest,
 ): string {
-  const { recipes, ...plan } = request;
-  const library = JSON.stringify({ recipes }).replaceAll('</', '<\\/');
+  const { recipes, storage, ...plan } = request;
+  const library = JSON.stringify({ recipes, storage }).replaceAll('</', '<\\/');
   const planJson = JSON.stringify(plan).replaceAll('</', '<\\/');
   return `<library>\n${library}\n</library>\n<plan>\n${planJson}\n</plan>`;
 }

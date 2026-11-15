@@ -549,6 +549,9 @@ describe('plans procedures', () => {
           eaten: 2,
           frozen: 0,
           chilled: 0,
+          fromStorage: 0,
+          reserved: 0,
+          storageLocations: [],
           sortOrder: 0,
         },
       ]);

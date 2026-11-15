@@ -7,7 +7,13 @@ import { CookLink } from '@/components/cook-link.tsx';
 import { RecipeNameLink } from '@/components/recipe-name-link.tsx';
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
 import { SlotCommentLine } from '@/components/planner/slot-comment-line.tsx';
-import { dishQtyLabel, LEFTOVERS_SOURCE_LABEL } from '@/lib/slot-display.ts';
+import {
+  bareLeftoversSource,
+  dishQtyLabel,
+  LEFTOVERS_SOURCE_LABEL,
+  showsSnowflake,
+  takesFromStorage,
+} from '@/lib/slot-display.ts';
 import { cn } from '@/lib/utils.ts';
 
 // Reusable slot card (DEC-89). A slot's dishes — the eaten meal and any base
@@ -145,23 +151,36 @@ function SlotBody({
   if (slot.slotType === 'leftovers') {
     const dish = slot.items[0];
     const short = dish ? shortfallByItem?.get(dish.id) : undefined;
+    const bare = bareLeftoversSource(slot.leftoversSource);
+    const fromStorage = slot.leftoversSource === 'storage';
     return (
       <div className="flex flex-col gap-0.5">
-        <span className="text-xs text-muted-foreground">Leftovers</span>
+        <span
+          className="flex items-center gap-1 text-xs text-muted-foreground"
+          data-testid="leftovers-label"
+        >
+          {dish && showsSnowflake(dish) && (
+            <Snowflake aria-hidden className="size-3" />
+          )}
+          {fromStorage ? 'Leftovers from storage' : 'Leftovers'}
+        </span>
         <span className="min-w-0 font-medium break-words">
           {dish ? (
             <>
               <RecipeNameLink item={dish} /> {dishQtyLabel(dish)}
             </>
-          ) : slot.leftoversSource !== null &&
-            slot.leftoversSource !== 'plan_meal' ? (
-            LEFTOVERS_SOURCE_LABEL[slot.leftoversSource]
+          ) : bare ? (
+            LEFTOVERS_SOURCE_LABEL[bare]
           ) : (
             '—'
           )}
         </span>
         {short !== undefined && short > 0 && dish && (
-          <ShortfallNudge shortBy={short} needsBase={dishNeedsBase(dish)} />
+          <ShortfallNudge
+            shortBy={short}
+            needsBase={dishNeedsBase(dish)}
+            fromStorage={takesFromStorage(dish)}
+          />
         )}
       </div>
     );
@@ -180,6 +199,13 @@ function SlotBody({
                 <span className="min-w-0 self-center break-words">
                   <RecipeNameLink item={item} />
                   <span className="ml-1 text-xs text-muted-foreground">
+                    {showsSnowflake(item) && (
+                      <Snowflake
+                        aria-hidden
+                        className="mr-0.5 inline size-3 align-[-2px]"
+                        data-testid="slot-item-snowflake"
+                      />
+                    )}
                     {dishQtyLabel(item)}
                   </span>
                 </span>
@@ -198,6 +224,7 @@ function SlotBody({
                 <ShortfallNudge
                   shortBy={short}
                   needsBase={dishNeedsBase(item)}
+                  fromStorage={takesFromStorage(item)}
                 />
               )}
             </div>
@@ -226,11 +253,17 @@ function SlotBody({
 // planned to eat/use more of a recipe than has been cooked up to this point in
 // the plan (DEC-91). Kept short but self-explanatory. A dish drawing on a base
 // pool (a serving variation, or a base eaten directly) names the base.
-function shortfallText(shortBy: number, needsBase = false): string {
+function shortfallText(
+  shortBy: number,
+  needsBase = false,
+  fromStorage = false,
+): string {
   const unit = shortBy === 1 ? 'serving' : 'servings';
-  const cause = needsBase
-    ? 'not enough base cooked yet'
-    : 'not enough cooked yet';
+  const cause = fromStorage
+    ? 'not enough held in storage'
+    : needsBase
+      ? 'not enough base cooked yet'
+      : 'not enough cooked yet';
   return `Short ${String(shortBy)} ${unit} — ${cause}`;
 }
 
@@ -274,16 +307,18 @@ function dishNeedsBase(item: PlanSlotItem): boolean {
 function ShortfallNudge({
   shortBy,
   needsBase,
+  fromStorage = false,
 }: {
   shortBy: number;
   needsBase: boolean;
+  fromStorage?: boolean;
 }): React.ReactElement {
   return (
     <span
       className="text-xs text-amber-700 dark:text-amber-400"
       data-testid="slot-item-shortfall"
     >
-      ⚠ {shortfallText(shortBy, needsBase)}
+      ⚠ {shortfallText(shortBy, needsBase, fromStorage)}
     </span>
   );
 }
@@ -302,12 +337,17 @@ function describeSlotForA11y(slot: PlanSlot, shortBy?: number): string {
   const base = `${slot.occasionName} on ${slot.date}`;
   if (slot.slotType === 'leftovers') {
     const dish = slot.items[0];
+    const bare = bareLeftoversSource(slot.leftoversSource);
     const what = dish
       ? `${dish.recipeName} ${dishQtyLabel(dish)}`
-      : slot.leftoversSource !== null && slot.leftoversSource !== 'plan_meal'
-        ? LEFTOVERS_SOURCE_LABEL[slot.leftoversSource]
+      : bare
+        ? LEFTOVERS_SOURCE_LABEL[bare]
         : 'unset';
-    return `${base}: leftovers, ${what}${short}${eating}${note}`;
+    const kind =
+      slot.leftoversSource === 'storage'
+        ? 'leftovers from storage'
+        : 'leftovers';
+    return `${base}: ${kind}, ${what}${short}${eating}${note}`;
   }
   if (slot.items.length > 0) {
     const names = slot.items

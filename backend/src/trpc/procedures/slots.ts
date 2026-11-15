@@ -33,6 +33,11 @@ import {
   replaceSlotDiners,
 } from '../../lib/slot-writes.ts';
 import { changeStored } from '../../lib/slot-storing.ts';
+import {
+  followSlotItemsToTheirDay,
+  reconcileSlotItemReservations,
+  storageNeedsFor,
+} from '../../lib/slot-reservations.ts';
 import { settleReservations } from '../../lib/stock-settlement.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
@@ -56,10 +61,16 @@ export const slotsRouter = router({
       // caller is *adding*. New items must reference a pickable recipe; any
       // recipe may be over-cooked now, so there's no base-only restriction
       // (DEC-91 dropped the cook-ahead-must-be-a-base rule).
+      // Leftovers from Storage eats what's held, and a soft-deleted recipe's
+      // Stock item can still be eaten (DEC-118), so only its household is
+      // checked.
       const existingRecipeIds = await loadSlotItemRecipeIds(ctx.db, slot.id);
+      const fromStorage = input.leftoversSource === 'storage';
       for (const item of input.items) {
         if (existingRecipeIds.has(item.recipeId)) continue;
-        await assertRecipeAssignable(ctx.db, item.recipeId);
+        await assertRecipeAssignable(ctx.db, item.recipeId, {
+          allowDeleted: fromStorage,
+        });
       }
 
       if (input.chefUserId !== null) {
@@ -72,6 +83,11 @@ export const slotsRouter = router({
       const today = todayInLondon();
       const withTransaction = makeWithTransaction(ctx.db);
       const storedLimits = await withTransaction(async (tx) => {
+        // Settled first, so what's reserved below is only what's still held.
+        // The plan's key-share lock comes before the slot's, as in the
+        // shopping procedures, so a plan delete can't deadlock with this.
+        await settleReservations(tx, today);
+        await lockPlanKeyShare(tx, slot.planId);
         await tx
           .update(mealPlanSlots)
           .set({
@@ -82,12 +98,19 @@ export const slotsRouter = router({
             guestCount: input.guestCount,
           })
           .where(eq(mealPlanSlots.id, slot.id));
-        const limits = await reconcileSlotItems(
+        const { limits, itemIds } = await reconcileSlotItems(
           tx,
           slot.id,
           input.items,
           today,
         );
+        const needs = await storageNeedsFor(tx, {
+          leftoversSource: input.leftoversSource,
+          items: input.items,
+          itemIds,
+          date: slot.date,
+        });
+        await reconcileSlotItemReservations(tx, slot.planId, needs, today);
         await replaceSlotDiners(tx, slot.id, input.dinerUserIds);
         return limits;
       });
@@ -105,8 +128,12 @@ export const slotsRouter = router({
     .input(relocateSlotInputSchema)
     .output(relocateSlotResultSchema)
     .mutation(async ({ ctx, input }): Promise<RelocateSlotResult> => {
+      const today = todayInLondon();
       const withTransaction = makeWithTransaction(ctx.db);
       const { sourceSlotId, destSlotId } = await withTransaction(async (tx) => {
+        // A past slot's food has left storage by now, so only what's still
+        // held moves with a dish (FEAT-81).
+        await settleReservations(tx, today);
         const [source, dest] = await Promise.all([
           loadHouseholdSlotContent(tx, input.sourceSlotId),
           loadHouseholdSlotContent(tx, input.destSlotId),
@@ -118,6 +145,7 @@ export const slotsRouter = router({
             cause: { code: 'SLOT_RELOCATE_CROSS_PLAN' },
           });
         }
+        await lockPlanKeyShare(tx, source.planId);
         // Lock both slot rows, lowest id first, before their dishes: a slot
         // save locks its slot row before its items, so taking the same order
         // here can't deadlock against it or against an opposite drag.
@@ -151,6 +179,7 @@ export const slotsRouter = router({
         // Dishes move by id, so what was stored from them stays linked.
         await moveSlotItems(tx, sourceItemIds, dest.id);
         await moveSlotItems(tx, destItemIds, source.id);
+        await followSlotItemsToTheirDay(tx, [...sourceItemIds, ...destItemIds]);
 
         // Diners ride along with the slot's content (the "who's eating" set).
         await tx
@@ -314,9 +343,13 @@ async function loadSlotItemRecipeIds(
 async function loadHouseholdSlotId(
   db: DbHandle,
   slotId: number,
-): Promise<{ id: number }> {
+): Promise<{ id: number; planId: number; date: Date }> {
   const rows = await db
-    .select({ id: mealPlanSlots.id })
+    .select({
+      id: mealPlanSlots.id,
+      planId: mealPlanSlots.planId,
+      date: mealPlanSlots.date,
+    })
     .from(mealPlanSlots)
     .innerJoin(mealPlans, eq(mealPlanSlots.planId, mealPlans.id))
     .where(
@@ -414,9 +447,31 @@ async function loadHouseholdSlotContent(
   return row;
 }
 
+// Waits on a plan being deleted; once it's gone, the slot is too.
+async function lockPlanKeyShare(tx: Tx, planId: number): Promise<void> {
+  const rows = await tx
+    .select({ id: mealPlans.id })
+    .from(mealPlans)
+    .where(
+      and(
+        eq(mealPlans.id, planId),
+        eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .for('key share');
+  if (rows.length === 0) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Slot not found',
+      cause: { code: 'SLOT_NOT_FOUND' },
+    });
+  }
+}
+
 async function assertRecipeAssignable(
   db: DbHandle,
   recipeId: number,
+  { allowDeleted }: { allowDeleted: boolean },
 ): Promise<void> {
   const rows = await db
     .select({
@@ -434,7 +489,7 @@ async function assertRecipeAssignable(
       cause: { code: 'SLOT_RECIPE_CROSS_HOUSEHOLD' },
     });
   }
-  if (row.isDeleted) {
+  if (row.isDeleted && !allowDeleted) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: 'Recipe is deleted and cannot be assigned',

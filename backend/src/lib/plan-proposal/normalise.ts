@@ -11,6 +11,7 @@ import {
   type PlanProposalSlot,
 } from '../../../../shared/src/index.ts';
 import { stripMarkdown } from '../model-features/plain-text.ts';
+import type { HeldDishes } from './request.ts';
 
 // The one gate every planner's output passes before the cook sees it,
 // whichever adapter produced it (DEC-117). Model output is untrusted:
@@ -21,6 +22,10 @@ import { stripMarkdown } from '../model-features/plain-text.ts';
 //     dish (`plan_meal`, DEC-90) eats a recipe cooked at an earlier slot;
 //   - a slot nobody eats at may cook a Batch for later (prepared-only,
 //     DEC-91). Anything else there is ignored and the slot stays empty;
+//   - a "storage" dish (Leftovers from Storage, DEC-118) eats a dish held in
+//     storage, soft-deleted or not, and a cooked Variation may take its base
+//     from storage. Either is dropped unless enough is held, counting what
+//     earlier slots in the proposal already took;
 //   - text is stripped of markdown (DEC-49) and cut at a word when too long.
 //     Unlike a Health Score's, reasons and the summary are never stored, so a
 //     long one isn't worth a rerun.
@@ -42,6 +47,19 @@ export interface ProposalSlotContext {
 export interface ProposalContext {
   slots: ProposalSlotContext[];
   pickableRecipeIds: ReadonlySet<number>;
+  held: HeldDishes;
+  // Each pickable recipe's base, or null.
+  baseOf: ReadonlyMap<number, number | null>;
+}
+
+// The rules one entry is checked against. `taken` is what slots already
+// normalised take from storage, by recipe id.
+interface EntryRules {
+  cookedEarlier: ReadonlySet<number>;
+  pickableRecipeIds: ReadonlySet<number>;
+  held: HeldDishes;
+  baseOf: ReadonlyMap<number, number | null>;
+  taken: ReadonlyMap<number, number>;
 }
 
 type CandidateEntry = MealPlanCandidate['slots'][number];
@@ -68,6 +86,7 @@ export function normalisePlanProposal(
   // only eat what a strictly earlier slot cooked.
   const walk = walkOrder(context.slots);
   const cookedEarlier = new Set<number>();
+  const taken = new Map<number, number>();
   const normalised = new Map<number, PlanProposalSlot>();
   let dropped = 0;
   let needed = 0;
@@ -79,15 +98,21 @@ export function normalisePlanProposal(
     }
     const entry = entries.get(slotKey(slot.date, slot.occasion));
     if (slot.headcount > 0) needed += 1;
-    const result =
-      entry && context.pickableRecipeIds.has(entry.recipeId)
-        ? normaliseEntry(slot, entry, cookedEarlier)
-        : null;
+    const result = entry
+      ? normaliseEntry(slot, entry, {
+          cookedEarlier,
+          pickableRecipeIds: context.pickableRecipeIds,
+          held: context.held,
+          baseOf: context.baseOf,
+          taken,
+        })
+      : null;
     if (result) {
       normalised.set(index, result);
       for (const item of result.items) {
         if (item.prepared > 0) cookedEarlier.add(item.recipeId);
       }
+      addTaken(taken, result, context.baseOf);
     } else {
       // A slot nobody eats at needed nothing, so it isn't counted.
       if (slot.headcount > 0) dropped += 1;
@@ -112,6 +137,10 @@ export interface SlotSuggestionContext {
   pickableRecipeIds: ReadonlySet<number>;
   // The recipes already suggested for the slot in this review.
   avoidRecipeIds: ReadonlySet<number>;
+  held: HeldDishes;
+  baseOf: ReadonlyMap<number, number | null>;
+  // What the review's other slots take from storage.
+  taken: ReadonlyMap<number, number>;
 }
 
 // Suggest again for one slot, by the same rules as a whole plan's slot. A
@@ -127,7 +156,6 @@ export function normaliseSlotSuggestion(
   const { slot } = context;
   const dish = parsed.data.dish;
   if (dish === null) return slot.headcount === 0 ? emptySlot(slot) : null;
-  if (!context.pickableRecipeIds.has(dish.recipeId)) return null;
   if (
     context.avoidRecipeIds.has(dish.recipeId) &&
     [...context.pickableRecipeIds].some((id) => !context.avoidRecipeIds.has(id))
@@ -137,8 +165,60 @@ export function normaliseSlotSuggestion(
   return normaliseEntry(
     slot,
     { ...dish, date: slot.date, occasion: slot.occasion },
-    context.cookedEarlier,
+    {
+      cookedEarlier: context.cookedEarlier,
+      pickableRecipeIds: context.pickableRecipeIds,
+      held: context.held,
+      baseOf: context.baseOf,
+      taken: context.taken,
+    },
   );
+}
+
+// The recipe a dish's storage portions are of: a cooked Variation's base, or
+// the dish itself on a Leftovers from Storage slot.
+function storageTarget(
+  slot: Pick<PlanProposalSlot, 'slotType' | 'leftoversSource'>,
+  recipeId: number,
+  baseOf: ReadonlyMap<number, number | null>,
+): number {
+  if (slot.slotType === 'leftovers' && slot.leftoversSource === 'storage') {
+    return recipeId;
+  }
+  return baseOf.get(recipeId) ?? recipeId;
+}
+
+function addTaken(
+  taken: Map<number, number>,
+  slot: Pick<PlanProposalSlot, 'slotType' | 'leftoversSource' | 'items'>,
+  baseOf: ReadonlyMap<number, number | null>,
+): void {
+  for (const item of slot.items) {
+    const portions = item.fromStorage ?? 0;
+    if (portions === 0) continue;
+    const target = storageTarget(slot, item.recipeId, baseOf);
+    taken.set(target, (taken.get(target) ?? 0) + portions);
+  }
+}
+
+// What the review's slots other than `target` take from storage, by recipe
+// id. Storage isn't used in order, so every other slot counts.
+export function storageTakenExcept(
+  target: Pick<ProposalSlotContext, 'date' | 'occasionId'>,
+  current: readonly Pick<
+    PlanProposalSlot,
+    'date' | 'occasionId' | 'slotType' | 'leftoversSource' | 'items'
+  >[],
+  baseOf: ReadonlyMap<number, number | null>,
+): Map<number, number> {
+  const taken = new Map<number, number>();
+  for (const slot of current) {
+    if (slot.date === target.date && slot.occasionId === target.occasionId) {
+      continue;
+    }
+    addTaken(taken, slot, baseOf);
+  }
+  return taken;
 }
 
 // The recipes cooked before `target` in the consumption walk's order: each
@@ -201,7 +281,7 @@ function fixedRecipeCooked(slot: ProposalSlotContext): number | null {
 function normaliseEntry(
   slot: ProposalSlotContext,
   entry: CandidateEntry,
-  cookedEarlier: ReadonlySet<number>,
+  rules: EntryRules,
 ): PlanProposalSlot | null {
   const reasonText = cutAtWord(
     stripMarkdown(entry.reason),
@@ -214,8 +294,31 @@ function normaliseEntry(
     reason,
   };
   const { headcount } = slot;
+  const left = (recipeId: number, pool: ReadonlyMap<number, number>): number =>
+    (pool.get(recipeId) ?? 0) - (rules.taken.get(recipeId) ?? 0);
+  if (entry.kind === 'storage') {
+    if (headcount === 0 || left(entry.recipeId, rules.held.dish) < headcount) {
+      return null;
+    }
+    return {
+      ...base,
+      slotType: 'leftovers',
+      leftoversSource: 'storage',
+      items: [
+        {
+          recipeId: entry.recipeId,
+          prepared: 0,
+          eaten: headcount,
+          fromStorage: headcount,
+        },
+      ],
+    };
+  }
+  if (!rules.pickableRecipeIds.has(entry.recipeId)) return null;
   if (entry.kind === 'leftovers') {
-    if (headcount === 0 || !cookedEarlier.has(entry.recipeId)) return null;
+    if (headcount === 0 || !rules.cookedEarlier.has(entry.recipeId)) {
+      return null;
+    }
     return {
       ...base,
       slotType: 'leftovers',
@@ -232,11 +335,25 @@ function normaliseEntry(
   ) {
     return null;
   }
+  // Only a Variation has a base to take; the flag means nothing elsewhere.
+  const heldBase = entry.useHeldBase
+    ? (rules.baseOf.get(entry.recipeId) ?? null)
+    : null;
+  if (heldBase !== null && left(heldBase, rules.held.base) < prepared) {
+    return null;
+  }
   return {
     ...base,
     slotType: headcount === 0 ? 'empty' : 'recipe',
     leftoversSource: null,
-    items: [{ recipeId: entry.recipeId, prepared, eaten: headcount }],
+    items: [
+      {
+        recipeId: entry.recipeId,
+        prepared,
+        eaten: headcount,
+        ...(heldBase !== null && { fromStorage: prepared }),
+      },
+    ],
   };
 }
 

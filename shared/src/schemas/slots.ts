@@ -30,12 +30,19 @@ const slotCommentSchema = z
 // dishes within the slot. `frozen` (FEAT-79) is the Freezer count the slot
 // editor sets; left out, a dish keeps its current count (a new dish, none).
 // The Fridge count is set by `slots.store` only.
+// `fromStorage` (FEAT-81) is the portions taken from storage, left out for
+// none: the dish itself on a Leftovers from Storage slot (`= eaten`), or a
+// Variation's base when the cook chooses "Use frozen base" (`= prepared`).
+// `stockItemIds` names the picker entry the cook chose, so the slot reserves
+// from those Stock items; left out, it draws from any held in draw order.
 export const slotItemInputSchema = z
   .object({
     recipeId: recipeIdSchema,
     prepared: quantitySchema,
     eaten: quantitySchema,
     frozen: quantitySchema.optional(),
+    fromStorage: quantitySchema.optional(),
+    stockItemIds: z.array(z.number().int().positive()).max(50).optional(),
     sortOrder: z.number().int().nonnegative(),
   })
   .refine((value) => value.prepared + value.eaten > 0, {
@@ -49,6 +56,13 @@ export const slotItemInputSchema = z
     {
       path: ['frozen'],
       message: 'Eat plus Freeze cannot exceed Prepare',
+    },
+  )
+  .refine(
+    (value) => value.stockItemIds === undefined || (value.fromStorage ?? 0) > 0,
+    {
+      path: ['stockItemIds'],
+      message: 'Stock items can only be named for a dish taken from storage',
     },
   );
 export type SlotItemInput = z.infer<typeof slotItemInputSchema>;
@@ -87,12 +101,18 @@ export function withSlotContentRules<T extends z.ZodType<SlotContentFields>>(
         // consume — the food was cooked earlier), no cooking here.
         if (value.slotType === 'leftovers') {
           const only = value.items[0];
-          return value.leftoversSource === 'plan_meal'
-            ? value.items.length === 1 &&
-                only !== undefined &&
-                only.eaten > 0 &&
-                only.prepared === 0
-            : value.items.length === 0;
+          if (
+            value.leftoversSource === 'plan_meal' ||
+            value.leftoversSource === 'storage'
+          ) {
+            return (
+              value.items.length === 1 &&
+              only !== undefined &&
+              only.eaten > 0 &&
+              only.prepared === 0
+            );
+          }
+          return value.items.length === 0;
         }
         // empty / eat_out / takeaway: nothing eaten here (prepared-only
         // cook-ahead rows are still allowed).
@@ -101,7 +121,32 @@ export function withSlotContentRules<T extends z.ZodType<SlotContentFields>>(
       {
         path: ['items'],
         message:
-          'eaten items are required when slotType is recipe, are exactly one pure-consume dish for leftovers of a planned meal, and not allowed otherwise',
+          'eaten items are required when slotType is recipe, are exactly one pure-consume dish for leftovers of a planned meal or from storage, and not allowed otherwise',
+      },
+    )
+    .refine(
+      (value) =>
+        value.items.every((item) => {
+          const fromStorage = item.fromStorage ?? 0;
+          // Leftovers from Storage eats only what storage holds.
+          if (
+            value.slotType === 'leftovers' &&
+            value.leftoversSource === 'storage'
+          ) {
+            return fromStorage === item.eaten;
+          }
+          // Otherwise only a cooked dish's base comes from storage, all of
+          // it ("Use frozen base"). That the dish is a Variation is checked
+          // in the procedure.
+          return (
+            fromStorage === 0 ||
+            (item.prepared > 0 && fromStorage === item.prepared)
+          );
+        }),
+      {
+        path: ['items'],
+        message:
+          'fromStorage is the portions eaten on a Leftovers from Storage slot, or a cooked dish’s prepared portions, and 0 otherwise',
       },
     );
 }
@@ -114,8 +159,8 @@ export const updateSlotInputSchema = withSlotContentRules(
     slotId: slotIdSchema,
     slotType: slotTypeSchema,
     // Required (and only allowed) when slotType is `leftovers`. `plan_meal`
-    // pairs with exactly one `eat` item (the dish being eaten as leftovers);
-    // `takeaway` / `other` carry no items.
+    // and `storage` pair with exactly one `eat` item (the dish being eaten as
+    // leftovers); `takeaway` / `other` carry no items.
     leftoversSource: leftoversSourceSchema.nullable(),
     chefUserId: z.string().min(1).nullable(),
     comment: slotCommentSchema.nullable(),

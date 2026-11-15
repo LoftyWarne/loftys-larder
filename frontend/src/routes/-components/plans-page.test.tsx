@@ -363,7 +363,7 @@ describe('PlansPage', () => {
     await user.click(screen.getByRole('button', { name: /^delete$/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'food set aside from storage (2 items)',
+      'This releases 2 reserved Stock items',
     );
     await user.click(
       screen.getByRole('button', { name: 'Delete and free it' }),

@@ -49,6 +49,9 @@ function eatItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     eaten: 2,
     frozen: 0,
     chilled: 0,
+    fromStorage: 0,
+    reserved: 0,
+    storageLocations: [],
     sortOrder: 0,
     ...overrides,
   };
@@ -67,6 +70,9 @@ function cookItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     eaten: 0,
     frozen: 0,
     chilled: 0,
+    fromStorage: 0,
+    reserved: 0,
+    storageLocations: [],
     sortOrder: 1,
     ...overrides,
   };
@@ -447,5 +453,83 @@ describe('SlotCell — storing', () => {
     expect(
       screen.queryByRole('button', { name: 'Store Tomato pasta…' }),
     ).not.toBeInTheDocument();
+  });
+
+  describe('food from storage', () => {
+    const storageSlot = (item: Partial<PlanSlotItem>): PlanSlot => ({
+      ...BASE_SLOT,
+      slotType: 'leftovers',
+      leftoversSource: 'storage',
+      items: [
+        eatItem({
+          recipeName: 'Lasagne',
+          prepared: 0,
+          eaten: 2,
+          fromStorage: 2,
+          reserved: 2,
+          storageLocations: ['freezer'],
+          ...item,
+        }),
+      ],
+    });
+
+    it('labels Leftovers from Storage with a snowflake', () => {
+      render(<SlotCell slot={storageSlot({})} onClick={() => undefined} />);
+      const label = screen.getByTestId('leftovers-label');
+      expect(label).toHaveTextContent('Leftovers from storage');
+      expect(label.querySelector('svg')).not.toBeNull();
+      expect(
+        screen.getByRole('button', {
+          name: /leftovers from storage, lasagne/i,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it('gives Pantry food no snowflake', () => {
+      render(
+        <SlotCell
+          slot={storageSlot({ storageLocations: ['pantry'] })}
+          onClick={() => undefined}
+        />,
+      );
+      expect(
+        screen.getByTestId('leftovers-label').querySelector('svg'),
+      ).toBeNull();
+    });
+
+    it('says when not enough is held', () => {
+      render(
+        <SlotCell
+          slot={storageSlot({ reserved: 1 })}
+          onClick={() => undefined}
+          shortfallByItem={new Map([[1, 1]])}
+        />,
+      );
+      expect(screen.getByTestId('slot-item-shortfall')).toHaveTextContent(
+        'Short 1 serving — not enough held in storage',
+      );
+    });
+
+    it('marks a Variation cooked from a frozen base', () => {
+      render(
+        <SlotCell
+          slot={{
+            ...RECIPE_SLOT,
+            items: [
+              eatItem({
+                recipeName: 'Stew Pie',
+                baseRecipeId: 50,
+                fromStorage: 2,
+                reserved: 2,
+                storageLocations: ['freezer'],
+              }),
+            ],
+          }}
+          onClick={() => undefined}
+        />,
+      );
+      expect(screen.getByTestId('slot-item-snowflake')).toBeInTheDocument();
+      expect(screen.getByText(/base from storage/)).toBeInTheDocument();
+    });
   });
 });

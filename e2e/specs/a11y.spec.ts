@@ -643,6 +643,31 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    // The leftovers picker's "From storage" entries, and a Leftovers from
+    // Storage slot card beside a Variation cooked from its frozen base.
+    test(`eating from storage passes axe in ${theme} theme`, async ({
+      page,
+    }) => {
+      const { planId, emptySlotId } = await seedEatingFromStorage();
+      await page.goto(`/plans/${String(planId)}`);
+      await expect(
+        page.getByTestId('leftovers-label').filter({
+          hasText: 'Leftovers from storage',
+        }),
+      ).toBeVisible();
+      await runAxe(page, theme);
+
+      await page
+        .locator(`[data-slot-id="${String(emptySlotId)}"]`)
+        .getByRole('button')
+        .first()
+        // An empty slot's button is aria-disabled for dragging only.
+        .click({ force: true });
+      await page.getByText('Leftovers', { exact: true }).click();
+      await expect(page.getByLabel('Leftovers of which meal')).toBeVisible();
+      await runAxe(page, theme);
+    });
+
     test(`settings passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto('/settings');
       await expect(
@@ -784,4 +809,114 @@ function addDays(d: Date, days: number): Date {
   const out = new Date(d);
   out.setUTCDate(out.getUTCDate() + days);
   return out;
+}
+
+// A Leftovers from Storage slot tomorrow, a stew Variation on its frozen
+// base, and stock for the picker: a deleted recipe's and one past Use-by.
+async function seedEatingFromStorage(): Promise<{
+  planId: number;
+  emptySlotId: number;
+}> {
+  const lasagne = await createRecipe({
+    name: 'Lasagne',
+    baseServings: 4,
+    ingredients: [
+      { name: 'Beef mince', quantity: '500', unit: 'g', category: 'Meat' },
+    ],
+  });
+  const curry = await createRecipe({
+    name: 'Old curry',
+    baseServings: 4,
+    ingredients: [
+      { name: 'Chicken thigh', quantity: '600', unit: 'g', category: 'Meat' },
+    ],
+  });
+  const stew = await createRecipe({
+    name: 'Beef stew base',
+    baseServings: 4,
+    isBase: true,
+    ingredients: [
+      { name: 'Beef', quantity: '800', unit: 'g', category: 'Meat' },
+    ],
+  });
+  const pie = await createRecipe({
+    name: 'Stew pie',
+    baseServings: 2,
+    baseRecipeId: stew.id,
+    ingredients: [
+      { name: 'Puff pastry', quantity: '320', unit: 'g', category: 'Bakery' },
+    ],
+  });
+  const today = new Date();
+  const lasagneStock = await createStockItem({
+    location: 'freezer',
+    recipeId: lasagne.id,
+    quantity: '4',
+    addedOn: ymd(addDays(today, -20)),
+  });
+  const stewStock = await createStockItem({
+    location: 'freezer',
+    recipeId: stew.id,
+    quantity: '2',
+    addedOn: ymd(addDays(today, -40)),
+  });
+  await createStockItem({
+    location: 'fridge',
+    recipeId: curry.id,
+    quantity: '2',
+    addedOn: ymd(addDays(today, -5)),
+    useBy: ymd(addDays(today, -1)),
+  });
+  await getPool().query('update recipes set is_deleted = true where id = $1', [
+    curry.id,
+  ]);
+
+  const start = ymd(today);
+  const end = ymd(addDays(today, 1));
+  const plan = await createPlan(start, end);
+  const storageSlotId = plan.slotsByDateAndOccasion.get(`${end}|Dinner`);
+  const pieSlotId = plan.slotsByDateAndOccasion.get(`${end}|Lunch`);
+  const emptySlotId = plan.slotsByDateAndOccasion.get(`${start}|Dinner`);
+  if (
+    storageSlotId === undefined ||
+    pieSlotId === undefined ||
+    emptySlotId === undefined
+  ) {
+    throw new Error('eating-from-storage fixture: missing slot');
+  }
+  await getPool().query(
+    `update meal_plan_slots
+       set slot_type = 'leftovers', leftovers_source = 'storage', guest_count = 2
+     where id = $1`,
+    [storageSlotId],
+  );
+  const storageItem = await getPool().query<{ id: number }>(
+    `insert into meal_plan_slot_items
+       (slot_id, recipe_id, prepared, eaten, from_storage, sort_order)
+     values ($1, $2, 0, 2, 2, 0) returning id`,
+    [storageSlotId, lasagne.id],
+  );
+  await assignRecipeToSlot({
+    slotId: pieSlotId,
+    recipeId: pie.id,
+    numberOfServings: 2,
+  });
+  const pieItem = await getPool().query<{ id: number }>(
+    `update meal_plan_slot_items set from_storage = 2
+     where slot_id = $1 returning id`,
+    [pieSlotId],
+  );
+  await getPool().query(
+    `insert into stock_reservations
+       (household_id, stock_item_id, plan_id, slot_item_id, amount, needed_on)
+     select household_id, $1, $2, $3, 2, $4 from stock_items where id = $1`,
+    [lasagneStock, plan.id, storageItem.rows[0]?.id, end],
+  );
+  await getPool().query(
+    `insert into stock_reservations
+       (household_id, stock_item_id, plan_id, slot_item_id, amount, needed_on)
+     select household_id, $1, $2, $3, 2, $4 from stock_items where id = $1`,
+    [stewStock, plan.id, pieItem.rows[0]?.id, end],
+  );
+  return { planId: plan.id, emptySlotId };
 }

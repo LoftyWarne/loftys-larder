@@ -30,6 +30,7 @@ import {
 } from '../src/db/schema/meal-plans.ts';
 import { recipeHealthScores } from '../src/db/schema/recipe-health.ts';
 import { recipeRatings } from '../src/db/schema/recipe-social.ts';
+import { stockItems, stockReservations } from '../src/db/schema/storage.ts';
 import {
   recipeIngredients,
   recipeMethod,
@@ -618,7 +619,12 @@ describe('plan proposal procedures', () => {
           {
             date: dates[0],
             occasion: 'Dinner',
-            dish: { kind: 'cook', recipeId: id, prepared: 2 },
+            dish: {
+              kind: 'cook',
+              recipeId: id,
+              prepared: 2,
+              useHeldBase: false,
+            },
           },
         ],
         summary: 'Soup week.',
@@ -667,12 +673,22 @@ describe('plan proposal procedures', () => {
         {
           date: dates[0],
           occasion: 'Lunch',
-          dish: { kind: 'cook', recipeId: id, prepared: 6 },
+          dish: {
+            kind: 'cook',
+            recipeId: id,
+            prepared: 6,
+            useHeldBase: false,
+          },
         },
         {
           date: dates[0],
           occasion: 'Dinner',
-          dish: { kind: 'leftovers', recipeId: id, prepared: 0 },
+          dish: {
+            kind: 'leftovers',
+            recipeId: id,
+            prepared: 0,
+            useHeldBase: false,
+          },
         },
         { date: dates[1], occasion: 'Dinner', dish: null },
       ]);
@@ -1243,12 +1259,17 @@ describe('plan proposal procedures', () => {
     }
 
     // A planner whose single-slot reply is `dish`.
-    function replying(dish: unknown): MealPlanner {
+    function replying(dish: object | null): MealPlanner {
       return {
         ...createFakeMealPlanner(),
         proposeSlot: () =>
           Promise.resolve({
-            outcome: { kind: 'candidate', candidate: { dish } },
+            outcome: {
+              kind: 'candidate',
+              candidate: {
+                dish: dish && { useHeldBase: false, ...dish },
+              },
+            },
             usage: { model: 'fake', inputTokens: 0, outputTokens: 0 },
           }),
       };
@@ -1302,17 +1323,32 @@ describe('plan proposal procedures', () => {
         {
           date: dates[0],
           occasion: 'Dinner',
-          dish: { kind: 'cook', recipeId: soup, prepared: 4 },
+          dish: {
+            kind: 'cook',
+            recipeId: soup,
+            prepared: 4,
+            useHeldBase: false,
+          },
         },
         {
           date: dates[1],
           occasion: 'Lunch',
-          dish: { kind: 'leftovers', recipeId: soup, prepared: 0 },
+          dish: {
+            kind: 'leftovers',
+            recipeId: soup,
+            prepared: 0,
+            useHeldBase: false,
+          },
         },
         {
           date: dates[1],
           occasion: 'Dinner',
-          dish: { kind: 'cook', recipeId: chilli, prepared: 2 },
+          dish: {
+            kind: 'cook',
+            recipeId: chilli,
+            prepared: 2,
+            useHeldBase: false,
+          },
         },
       ]);
       expect(request?.target).toEqual({ date: dates[1], occasion: 'Dinner' });
@@ -1645,6 +1681,201 @@ describe('plan proposal procedures', () => {
       const output = lines.join('');
       expect(output).not.toMatch(/secret/i);
       expect(output).not.toContain(FAKE_PLANNER_SLOT_REASON);
+    });
+  });
+
+  describe('storage', () => {
+    async function holdStock(
+      values: Partial<typeof stockItems.$inferInsert> & {
+        location: 'freezer' | 'fridge' | 'pantry';
+        quantity: string;
+      },
+    ): Promise<number> {
+      const [row] = await db
+        .insert(stockItems)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          addedOn: addDays(todayInLondon(), -5),
+          ...values,
+        })
+        .returning({ id: stockItems.id });
+      if (!row) throw new Error('stock seed failed');
+      return row.id;
+    }
+
+    it('sends what’s available, as the Storage screen groups it, and logs only the count', async () => {
+      const lasagne = await seedRecipe({ name: 'Lasagne' });
+      const stewBase = await seedRecipe({ name: 'Stew Base', isBase: true });
+      const today = todayInLondon();
+      await holdStock({
+        location: 'freezer',
+        recipeId: lasagne,
+        quantity: '2',
+      });
+      await holdStock({
+        location: 'freezer',
+        recipeId: lasagne,
+        quantity: '1',
+      });
+      await holdStock({
+        location: 'freezer',
+        recipeId: stewBase,
+        quantity: '4',
+      });
+      await holdStock({
+        location: 'fridge',
+        ingredientId: spinachId,
+        quantity: '200',
+        useBy: addDays(today, 1),
+      });
+      // Left out: past its Use-by, and fully reserved.
+      await holdStock({
+        location: 'fridge',
+        ingredientId: lentilsId,
+        quantity: '100',
+        useBy: addDays(today, -1),
+      });
+      const reserved = await holdStock({
+        location: 'pantry',
+        ingredientId: lentilsId,
+        quantity: '500',
+      });
+      const [plan] = await db
+        .insert(mealPlans)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          startDate: addDays(today, 30),
+          endDate: addDays(today, 31),
+        })
+        .returning({ id: mealPlans.id });
+      await db.insert(stockReservations).values({
+        householdId: CURRENT_HOUSEHOLD_ID,
+        stockItemId: reserved,
+        planId: plan?.id ?? 0,
+        ingredientId: lentilsId,
+        amount: '500',
+        neededOn: addDays(today, 30),
+      });
+
+      const lines: string[] = [];
+      const log = pino(
+        { level: 'info' },
+        { write: (line) => lines.push(line) },
+      ).child({ reqId: 'req-plan-storage' });
+      const { planner, requests } = spyPlanner();
+      await caller({ planner, log }).planProposals.propose(input());
+
+      expect(requests[0]?.storage).toEqual(
+        expect.arrayContaining([
+          {
+            name: 'Lasagne',
+            kind: 'dish',
+            recipeId: lasagne,
+            isBase: false,
+            location: 'freezer',
+            available: 3,
+            unit: 'portions',
+            useBy: null,
+          },
+          {
+            name: 'Stew Base',
+            kind: 'dish',
+            recipeId: stewBase,
+            isBase: true,
+            location: 'freezer',
+            available: 4,
+            unit: 'portions',
+            useBy: null,
+          },
+          {
+            name: 'Spinach',
+            kind: 'ingredient',
+            recipeId: null,
+            isBase: false,
+            location: 'fridge',
+            available: 200,
+            unit: 'g',
+            useBy: formatCivilDate(addDays(today, 1)),
+          },
+        ]),
+      );
+      expect(requests[0]?.storage).toHaveLength(3);
+
+      const usage = lines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((entry) => 'modelUsage' in entry);
+      expect(usage?.modelUsage).toMatchObject({ storageCount: 3 });
+      expect(lines.join('')).not.toContain('Lasagne');
+      expect(lines.join('')).not.toContain('Spinach');
+    });
+
+    it('proposes eating a held dish and a Variation on a held base, which Apply reserves', async () => {
+      const lasagne = await seedRecipe({ name: 'Lasagne' });
+      const stewBase = await seedRecipe({ name: 'Stew Base', isBase: true });
+      const pie = await seedRecipe({
+        name: 'Stew Pie',
+        baseRecipeId: stewBase,
+      });
+      const lasagneStock = await holdStock({
+        location: 'freezer',
+        recipeId: lasagne,
+        quantity: '2',
+      });
+      const baseStock = await holdStock({
+        location: 'freezer',
+        recipeId: stewBase,
+        quantity: '2',
+      });
+
+      const proposal = await caller().planProposals.propose(
+        input({ brief: FAKE_PLANNER_MARKERS.storage }),
+      );
+      const [first, second] = proposal.slots;
+      expect(first).toMatchObject({
+        slotType: 'leftovers',
+        leftoversSource: 'storage',
+        items: [{ recipeId: lasagne, prepared: 0, eaten: 2, fromStorage: 2 }],
+      });
+      expect(second).toMatchObject({
+        slotType: 'recipe',
+        items: [{ recipeId: pie, prepared: 2, eaten: 2, fromStorage: 2 }],
+      });
+
+      const { plan } = await caller().plans.createWithSlots({
+        startDate: dates[0] ?? '',
+        endDate: dates.at(-1) ?? '',
+        slots: proposal.slots.map((slot) => ({
+          date: slot.date,
+          occasionId: slot.occasionId,
+          slotType: slot.slotType,
+          leftoversSource: slot.leftoversSource,
+          items: slot.items.map((item, index) => ({
+            recipeId: item.recipeId,
+            prepared: item.prepared,
+            eaten: item.eaten,
+            ...(item.fromStorage !== undefined && {
+              fromStorage: item.fromStorage,
+            }),
+            sortOrder: index,
+          })),
+          dinerUserIds: [USER_ID, PARTNER_ID],
+          guestCount: 0,
+        })),
+        reviewCounts: null,
+      });
+      const held = await db
+        .select({
+          stockItemId: stockReservations.stockItemId,
+          amount: stockReservations.amount,
+        })
+        .from(stockReservations);
+      expect(held).toEqual(
+        expect.arrayContaining([
+          { stockItemId: lasagneStock, amount: '2.000' },
+          { stockItemId: baseStock, amount: '2.000' },
+        ]),
+      );
+      expect(plan.id).toBeGreaterThan(0);
     });
   });
 });

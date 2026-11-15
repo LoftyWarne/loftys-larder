@@ -608,6 +608,46 @@ describe('applying', () => {
   });
 });
 
+describe('storage in review', () => {
+  it('carries a Leftovers from Storage suggestion to Apply, counted as held', () => {
+    const fromStorage: ProposedSlot = {
+      date: MON,
+      occasionId: DINNER.id,
+      slotType: 'leftovers',
+      leftoversSource: 'storage',
+      items: [
+        {
+          recipeId: 30,
+          prepared: 0,
+          eaten: 2,
+          fromStorage: 2,
+          recipeName: 'Lasagne',
+          recipeImageUrl: null,
+          isBase: false,
+          baseRecipeId: null,
+        },
+      ],
+      reason: 'From the freezer.',
+    };
+    const review = startReview(proposal([fromStorage]));
+    const slot = reviewPlanSlots(inputs(), review).find(
+      (entry) => entry.slot.date === MON && entry.slot.occasionId === DINNER.id,
+    )?.slot;
+    expect(slot?.items[0]).toMatchObject({ fromStorage: 2, reserved: 2 });
+
+    const input = buildApplyInput(inputs(), review);
+    expect(input.slots).toContainEqual(
+      expect.objectContaining({
+        slotType: 'leftovers',
+        leftoversSource: 'storage',
+        items: [
+          { recipeId: 30, prepared: 0, eaten: 2, fromStorage: 2, sortOrder: 0 },
+        ],
+      }),
+    );
+  });
+});
+
 describe('batch cooking', () => {
   const KEEMA: RecipeChoice = {
     id: 20,

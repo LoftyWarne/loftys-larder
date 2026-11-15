@@ -4,6 +4,44 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-11-15 — Eating from storage: Leftovers from Storage, frozen bases, and storage in Plan Proposals (FEAT-81)
+
+**Status:** Implemented and committed on `main`. Typecheck, lint and format are clean in every workspace. Backend: 1,395 tests green. Frontend: 1,155 green. e2e: 92 of 92, including `eating-from-storage.spec.ts` (manual verification steps 1 and 2; "the day after" is the Reservation's `needed_on` moved into the past) and axe scans of the leftovers picker and a storage slot card in both themes. Manual verification step 3 (the real `anthropic` adapter) and the gate check haven't been run by hand. The FEAT-81 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (all twelve readings are in FEAT-81; DEC-118 amended):
+- **New column, beyond DEC-118's approved schema:** `meal_plan_slot_items.from_storage` (migration `0031_eat_from_storage`, with the `storage` enum value). Reservations settle and vanish, so the slot item keeps its own record.
+- Snowflake on Freezer and Fridge food, never the Pantry's (the user's amendment to reading E).
+- The rest as proposed: reserve what's held when short; "Use frozen base" from Freezer and Fridge; proposals name recipe ids only; delete wording "This releases N reserved Stock items".
+
+**How it's built:**
+- `backend/src/lib/slot-reservations.ts`: `storageNeedsFor` (one need per dish, so turning storage off releases) and `reconcileSlotItemReservations` (locks Stock items, keeps, lowers or adds Reservations using FEAT-80's `planDraws`/`planRelease`, then sets `needed_on`). Skips a slot whose day has passed, so a re-save can't eat food twice. `followSlotItemsToTheirDay` re-dates after a drag.
+- `slots.update` and `slots.relocate` settle first, then take a key-share lock on the plan before the slot rows (so plan delete can't deadlock with them). `plans.get`, Apply and duplicate settle first too.
+- The slot item DTO gained `fromStorage`, `reserved` and `storageLocations`. `deriveBaseBalances` adds storage supply at the slot: `min(fromStorage, reserved)` before the day, `fromStorage` after. It takes `today` (defaults to `todayInLondon()`).
+- The picker reuses `storage.list` (no new procedure). Pure helpers in `frontend/src/lib/storage-picker.ts`. The editor estimates what will be reserved for its live warnings; the server's figure replaces it on save.
+- Proposals: `loadPlannerStock` (after settling) groups stock as the Storage screen does and leaves out past-Use-by Fridge items and anything fully reserved. The request carries it in `<library>`. The candidate gained a `storage` kind and a required `useHeldBase` boolean. The normaliser tracks what earlier slots took; Suggest again counts the rest of the review (`storageTakenExcept`). Logs gain `storageCount` only. The fake planner gained `[fake:storage]`.
+
+**Drift from the kick-off plan:**
+- No `storage.availableDishes` procedure: `storage.list` already had everything.
+- `storageLocations` on the slot item DTO wasn't in the plan. It's needed so the card can leave the snowflake off Pantry food.
+- The plan delete warning already existed (FEAT-80). Only its wording changed.
+
+**Independent review fixes** (a separate session reviewed the diff; the user chose the fixes):
+- **Past slots** offer nothing new from storage: the editor hides the "From storage" entries (keeping a saved one) and "Use frozen base" once the slot's day has passed. Without this, the record could change with no stock moving.
+- **Duplicating a plan** copies a dish as cooked from scratch if its recipe has stopped being a Variation, instead of failing with `SLOT_FROM_STORAGE_NOT_VARIATION`. Apply from a stale review still refuses that case.
+- **Household filters** added to every new query touching `stock_reservations`, `ingredients` and `recipes` (hard constraint #5).
+- **Index** `stock_reservations_slot_item_id_idx` (migration `0032_slot_reservations_index`), approved by the user: the planner reads each dish's Reservations, and removing a dish cascades by it.
+- `slots.update`/`relocate` now refuse with `SLOT_NOT_FOUND` when the plan was deleted while they waited on its lock.
+- New tests: deleting held stock from the Storage screen, the shopping list with a frozen base and a storage dish, duplicating a Variation that lost its base, two lock-order tests, and the editor on past slots.
+- Left as review notes: per-slot lock rounds in Apply and duplicate could in theory deadlock two concurrent writers on one dish (Postgres aborts one; rare with one household), and every slot save now runs the reconcile path even without storage.
+
+**Open, for the user:**
+- A settled past storage slot has no locations left, so it always shows the snowflake, even if it ate Pantry food.
+- The picker is the existing native `<select>`, so the snowflake is a text character in the option, not an icon.
+- The editor's live "short by" for storage is an estimate (held now plus what's free); it can differ from what the server reserves when another plan reserves at the same time.
+- README doesn't yet mention Storage (FEAT-78 to FEAT-81).
+
+---
+
 ## 2026-11-15 — Shopping against storage, and Staples (FEAT-80)
 
 **Status:** Implemented, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,354 tests green. Frontend: 1,127 green. e2e: 88 of 88, including `shopping-against-storage.spec.ts` (manual verification steps 1 and 2; "the day after" is the Reservation's `needed_on` moved into the past, since e2e can't move the clock) and axe scans of the chip's sheet, the Staples groups and the Staples section at phone width in both themes. The gate check hasn't been run by hand. The FEAT-80 checkboxes are left for the user to tick.

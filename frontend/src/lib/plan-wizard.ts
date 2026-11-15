@@ -421,6 +421,7 @@ export function buildProposeSlotInput(
           recipeId: item.recipeId,
           prepared: item.prepared,
           eaten: item.eaten,
+          ...(item.fromStorage > 0 && { fromStorage: item.fromStorage }),
         })),
       })),
     target: {
@@ -488,6 +489,9 @@ function recipeContent(
         eaten,
         frozen: 0,
         chilled: 0,
+        fromStorage: 0,
+        reserved: 0,
+        storageLocations: [],
         sortOrder: 0,
       },
     ],
@@ -520,6 +524,11 @@ function suggestionContent(suggestion: ProposedSlot): SlotContent {
       eaten: item.eaten,
       frozen: 0,
       chilled: 0,
+      // Nothing is reserved until Apply. The normaliser checked enough was
+      // held, so review counts it all as there.
+      fromStorage: item.fromStorage ?? 0,
+      reserved: item.fromStorage ?? 0,
+      storageLocations: [],
       sortOrder: index,
     })),
   };
@@ -674,6 +683,7 @@ export function buildApplyInput(
           recipeId: item.recipeId,
           prepared: item.prepared,
           eaten: item.eaten,
+          ...(item.fromStorage > 0 && { fromStorage: item.fromStorage }),
           sortOrder: item.sortOrder,
         })),
         dinerUserIds: slot.dinerUserIds,

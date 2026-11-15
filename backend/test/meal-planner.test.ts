@@ -50,6 +50,7 @@ const request: MealPlanRequest = {
     { ...recipe, id: 2, name: 'Bean Chilli' },
   ],
   basesToCook: [],
+  storage: [],
   brief: 'Something light',
   note: null,
   previous: null,
@@ -59,17 +60,18 @@ const slotRequest: MealPlanSlotRequest = {
   slots: request.slots,
   basesToCook: [],
   recipes: request.recipes,
+  storage: [],
   brief: null,
   current: [
     {
       date: '2026-11-02',
       occasion: 'Lunch',
-      dish: { kind: 'cook', recipeId: 1, prepared: 2 },
+      dish: { kind: 'cook', recipeId: 1, prepared: 2, useHeldBase: false },
     },
     {
       date: '2026-11-02',
       occasion: 'Dinner',
-      dish: { kind: 'cook', recipeId: 2, prepared: 2 },
+      dish: { kind: 'cook', recipeId: 2, prepared: 2, useHeldBase: false },
     },
   ],
   target: { date: '2026-11-02', occasion: 'Dinner' },
@@ -263,7 +265,10 @@ describe('anthropic meal planner', () => {
     const library = match?.groups?.library ?? '';
     const plan = match?.groups?.plan ?? '';
     expect(library).not.toContain('</library>');
-    expect(JSON.parse(library)).toEqual({ recipes: request.recipes });
+    expect(JSON.parse(library)).toEqual({
+      recipes: request.recipes,
+      storage: [],
+    });
     expect(JSON.parse(plan)).toEqual({
       slots: request.slots,
       basesToCook: request.basesToCook,
@@ -449,6 +454,7 @@ describe('fake meal planner', () => {
             kind: 'cook',
             recipeId: 1,
             prepared: 2,
+            useHeldBase: false,
             reason: FAKE_PLANNER_REASON,
           },
           {
@@ -457,6 +463,7 @@ describe('fake meal planner', () => {
             kind: 'cook',
             recipeId: 2,
             prepared: 2,
+            useHeldBase: false,
             reason: FAKE_PLANNER_REASON,
           },
         ],
@@ -480,6 +487,7 @@ describe('fake meal planner', () => {
             kind: 'cook',
             recipeId: 1,
             prepared: 4,
+            useHeldBase: false,
             reason: FAKE_PLANNER_REASON,
           },
           {
@@ -488,6 +496,7 @@ describe('fake meal planner', () => {
             kind: 'leftovers',
             recipeId: 1,
             prepared: 0,
+            useHeldBase: false,
             reason: FAKE_PLANNER_REASON,
           },
         ],
@@ -523,6 +532,7 @@ describe('fake meal planner', () => {
             kind: 'cook',
             recipeId: 1,
             prepared: 2,
+            useHeldBase: false,
             reason: FAKE_PLANNER_SLOT_REASON,
           },
         },

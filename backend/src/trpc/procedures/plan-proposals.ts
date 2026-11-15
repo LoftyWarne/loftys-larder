@@ -20,7 +20,11 @@ import type { Db } from '../../db/index.ts';
 import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
-import { eachDateInRange, parseCivilDate } from '../../lib/date-utils.ts';
+import {
+  eachDateInRange,
+  parseCivilDate,
+  todayInLondon,
+} from '../../lib/date-utils.ts';
 import {
   MealPlannerRequestError,
   MealPlannerTimeoutError,
@@ -42,14 +46,19 @@ import {
   emptySlot,
   normalisePlanProposal,
   normaliseSlotSuggestion,
+  storageTakenExcept,
   type ProposalSlotContext,
 } from '../../lib/plan-proposal/normalise.ts';
 import {
   buildMealPlanRequest,
   buildMealPlanSlotRequest,
   loadPlannerLibrary,
+  loadPlannerStock,
   slotHeadcount,
+  type PlannerStock,
 } from '../../lib/plan-proposal/request.ts';
+import { settleReservations } from '../../lib/stock-settlement.ts';
+import { makeWithTransaction } from '../../db/withTransaction.ts';
 import { assertDinersExist } from '../../lib/slot-writes.ts';
 import type { AppContext } from '../context.ts';
 import { protectedProcedure, router } from '../init.ts';
@@ -82,10 +91,15 @@ export const planProposalsRouter = router({
     .output(proposePlanResultSchema)
     .mutation(async ({ ctx, input, signal }): Promise<ProposePlanResult> => {
       const { planner, allowProposal } = ctx.mealPlan;
-      const { library, pickableRecipeIds, occasionNames } =
+      const { library, pickableRecipeIds, occasionNames, stock, baseOf } =
         await checkPlanInput(ctx, input);
 
-      const request = buildMealPlanRequest(input, library, occasionNames);
+      const request = buildMealPlanRequest(
+        input,
+        library,
+        stock.storage,
+        occasionNames,
+      );
       const slots = slotContexts(input.slots, request.slots);
       // Nothing to ask the model when every slot is fixed or has nobody
       // eating, unless an open slot nobody eats at could cook a fixed
@@ -127,13 +141,15 @@ export const planProposalsRouter = router({
         (plannerSignal) => planner.propose(request, plannerSignal),
         signal,
         {
-          ...inputDetails(input, library.length, request.brief),
+          ...inputDetails(input, library.length, request),
           rerun: input.previous !== null,
         },
       );
       const proposal = normalisePlanProposal(outcome.candidate, {
         slots,
         pickableRecipeIds,
+        held: stock.held,
+        baseOf,
       });
       if (!proposal) {
         logUsage('MEAL_PLAN_TRY_AGAIN', { reason: 'invalid_result' });
@@ -151,10 +167,15 @@ export const planProposalsRouter = router({
     .output(proposeSlotResultSchema)
     .mutation(async ({ ctx, input, signal }): Promise<ProposeSlotResult> => {
       const { planner, allowSlotSuggestion } = ctx.mealPlan;
-      const { library, pickableRecipeIds, occasionNames } =
+      const { library, pickableRecipeIds, occasionNames, stock, baseOf } =
         await checkPlanInput(ctx, input);
 
-      const request = buildMealPlanSlotRequest(input, library, occasionNames);
+      const request = buildMealPlanSlotRequest(
+        input,
+        library,
+        stock.storage,
+        occasionNames,
+      );
       const slots = slotContexts(input.slots, request.slots);
       const target = slots.find(
         (slot) =>
@@ -183,7 +204,7 @@ export const planProposalsRouter = router({
         (plannerSignal) => planner.proposeSlot(request, plannerSignal),
         signal,
         {
-          ...inputDetails(input, library.length, request.brief),
+          ...inputDetails(input, library.length, request),
           singleSlot: true,
           avoidCount: request.avoidRecipeIds.length,
         },
@@ -193,6 +214,9 @@ export const planProposalsRouter = router({
         cookedEarlier: cookedBefore(target, slots, input.current),
         pickableRecipeIds,
         avoidRecipeIds: new Set(request.avoidRecipeIds),
+        held: stock.held,
+        baseOf,
+        taken: storageTakenExcept(target, input.current, baseOf),
       });
       if (!slot) {
         logUsage('MEAL_PLAN_TRY_AGAIN', { reason: 'invalid_result' });
@@ -221,6 +245,8 @@ async function checkPlanInput(
   library: MealPlanRecipe[];
   pickableRecipeIds: Set<number>;
   occasionNames: Map<number, string>;
+  stock: PlannerStock;
+  baseOf: Map<number, number | null>;
 }> {
   const startDate = parseCivilDate(input.startDate);
   const endDate = parseCivilDate(input.endDate);
@@ -269,7 +295,16 @@ async function checkPlanInput(
       );
     }
   }
-  return { library, pickableRecipeIds, occasionNames };
+  // Settled first, so food a past day ate isn't offered (cross-cutting #23).
+  const today = todayInLondon();
+  const stock = await makeWithTransaction(ctx.db)(async (tx) => {
+    await settleReservations(tx, today);
+    return loadPlannerStock(tx, today);
+  });
+  const baseOf = new Map(
+    library.map((recipe) => [recipe.id, recipe.baseRecipeId]),
+  );
+  return { library, pickableRecipeIds, occasionNames, stock, baseOf };
 }
 
 function slotContexts(
@@ -285,19 +320,21 @@ function slotContexts(
   }));
 }
 
-// Metadata only: never the Brief, the note, reasons, the summary or recipe
-// names (DEC-117).
+// Metadata only: never the Brief, the note, reasons, the summary, recipe
+// names or what's held (DEC-117, DEC-118). Of storage, only the count.
 function inputDetails(
   input: PlanInput,
   libraryCount: number,
-  brief: string | null,
+  request: { brief: string | null; storage: readonly unknown[] },
 ): ModelUsageDetails {
+  const { brief } = request;
   return {
     slotCount: input.slots.length,
     fixedCount: input.slots.filter(
       (slot) => slot.fixed !== null && slot.fixed.kind !== 'empty',
     ).length,
     libraryCount,
+    storageCount: request.storage.length,
     briefLength: brief?.length ?? 0,
   };
 }
@@ -394,7 +431,7 @@ async function loadOccasionNames(db: Db): Promise<Map<number, string>> {
 }
 
 // Adds each dish's recipe fields for Plan Review to show. Every recipe is in
-// the household: the normaliser keeps only pickable ones.
+// the household: the normaliser keeps only pickable ones, and held dishes.
 async function withDishDetails(
   db: Db,
   proposal: PlanProposal,

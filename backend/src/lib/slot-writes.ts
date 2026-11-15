@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import type { SlotItemInput, StoredLimit } from '../../../shared/src/index.ts';
+import { CURRENT_HOUSEHOLD_ID } from '../config.ts';
 import type { Db } from '../db/index.ts';
 import { users } from '../db/schema/auth.ts';
 import {
@@ -26,21 +27,32 @@ import { settleReservations } from './stock-settlement.ts';
 
 // Insert dishes into a slot that has none yet (a new plan's slot). Nothing is
 // stored from a dish that has just been made.
+// Returns each dish's new id by recipe.
 export async function insertSlotItems(
   tx: Tx,
   slotId: number,
   items: readonly SlotItemInput[],
-): Promise<void> {
-  if (items.length === 0) return;
-  await tx.insert(mealPlanSlotItems).values(
-    items.map((item) => ({
-      slotId,
-      recipeId: item.recipeId,
-      prepared: item.prepared,
-      eaten: item.eaten,
-      sortOrder: item.sortOrder,
-    })),
-  );
+): Promise<Map<number, number>> {
+  const ids = new Map<number, number>();
+  if (items.length === 0) return ids;
+  const rows = await tx
+    .insert(mealPlanSlotItems)
+    .values(
+      items.map((item) => ({
+        slotId,
+        recipeId: item.recipeId,
+        prepared: item.prepared,
+        eaten: item.eaten,
+        fromStorage: item.fromStorage ?? 0,
+        sortOrder: item.sortOrder,
+      })),
+    )
+    .returning({
+      id: mealPlanSlotItems.id,
+      recipeId: mealPlanSlotItems.recipeId,
+    });
+  for (const row of rows) ids.set(row.recipeId, row.id);
+  return ids;
 }
 
 // Make the slot's dishes match `items`. Each incoming dish takes over the
@@ -48,13 +60,14 @@ export async function insertSlotItems(
 // keeping its id and its Fridge count. A dish's `frozen`, when given, moves
 // its Freezer stock with it (FEAT-79); a lowered count that can't all be taken
 // back is reported in the result. Rows no incoming dish matches are deleted,
-// and Stock items stored from them stay, unlinked.
+// and Stock items stored from them stay, unlinked; their Reservations go with
+// them. Returns the limits and each dish's id by recipe.
 export async function reconcileSlotItems(
   tx: Tx,
   slotId: number,
   items: readonly SlotItemInput[],
   today: Date,
-): Promise<StoredLimit[]> {
+): Promise<{ limits: StoredLimit[]; itemIds: Map<number, number> }> {
   const existing = await tx
     .select({
       id: mealPlanSlotItems.id,
@@ -71,6 +84,7 @@ export async function reconcileSlotItems(
     if (!unmatched.has(row.recipeId)) unmatched.set(row.recipeId, row);
   }
   const keptIds = new Set<number>();
+  const itemIds = new Map<number, number>();
   const limits: StoredLimit[] = [];
   let settled = false;
 
@@ -86,9 +100,11 @@ export async function reconcileSlotItems(
           prepared: item.prepared,
           eaten: item.eaten,
           frozen,
+          fromStorage: item.fromStorage ?? 0,
           sortOrder: item.sortOrder,
         })
         .returning({ id: mealPlanSlotItems.id });
+      if (inserted) itemIds.set(item.recipeId, inserted.id);
       if (inserted && frozen > 0) {
         await changeStored(
           tx,
@@ -106,6 +122,7 @@ export async function reconcileSlotItems(
     }
     unmatched.delete(item.recipeId);
     keptIds.add(match.id);
+    itemIds.set(item.recipeId, match.id);
 
     const wanted = item.frozen ?? match.frozen;
     if (wanted < match.frozen && !settled) {
@@ -138,6 +155,7 @@ export async function reconcileSlotItems(
         prepared: item.prepared,
         eaten: item.eaten,
         frozen,
+        fromStorage: item.fromStorage ?? 0,
         sortOrder: item.sortOrder,
       })
       .where(eq(mealPlanSlotItems.id, match.id));
@@ -151,7 +169,7 @@ export async function reconcileSlotItems(
       .delete(mealPlanSlotItems)
       .where(inArray(mealPlanSlotItems.id, removed));
   }
-  return limits;
+  return { limits, itemIds };
 }
 
 // Stored portions that can't be taken back still count against what was
@@ -229,6 +247,34 @@ export async function assertRecipesPickable(
       code: 'BAD_REQUEST',
       message: 'A recipe is not pickable',
       cause: { code: 'SLOT_RECIPE_NOT_PICKABLE', recipeId: missing },
+    });
+  }
+}
+
+// Leftovers from Storage may eat a soft-deleted recipe's Stock item
+// (DEC-118), so its recipe only has to be the household's.
+export async function assertRecipesInHousehold(
+  db: Db | Tx,
+  recipeIds: readonly number[],
+): Promise<void> {
+  const ids = [...new Set(recipeIds)];
+  if (ids.length === 0) return;
+  const rows = await db
+    .select({ id: recipes.id })
+    .from(recipes)
+    .where(
+      and(
+        inArray(recipes.id, ids),
+        eq(recipes.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    );
+  const found = new Set(rows.map((row) => row.id));
+  const missing = ids.find((id) => !found.has(id));
+  if (missing !== undefined) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Recipe not available in this household',
+      cause: { code: 'SLOT_RECIPE_CROSS_HOUSEHOLD', recipeId: missing },
     });
   }
 }

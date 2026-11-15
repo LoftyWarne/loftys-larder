@@ -5,6 +5,7 @@ import {
   cutAtWord,
   normalisePlanProposal,
   normaliseSlotSuggestion,
+  storageTakenExcept,
   type ProposalContext,
   type ProposalSlotContext,
   type SlotSuggestionContext,
@@ -31,8 +32,15 @@ function slot(
 function context(
   slots: ProposalSlotContext[],
   pickable: number[] = [10, 11, 12],
+  storage: Partial<Pick<ProposalContext, 'held' | 'baseOf'>> = {},
 ): ProposalContext {
-  return { slots, pickableRecipeIds: new Set(pickable) };
+  return {
+    slots,
+    pickableRecipeIds: new Set(pickable),
+    held: { dish: new Map(), base: new Map() },
+    baseOf: new Map(),
+    ...storage,
+  };
 }
 
 function entry(
@@ -40,8 +48,9 @@ function entry(
   occasion: string,
   recipeId: number,
   overrides: Partial<{
-    kind: 'cook' | 'leftovers';
+    kind: 'cook' | 'leftovers' | 'storage';
     prepared: number;
+    useHeldBase: boolean;
     reason: string;
   }> = {},
 ) {
@@ -51,6 +60,7 @@ function entry(
     kind: 'cook',
     recipeId,
     prepared: 2,
+    useHeldBase: false,
     reason: 'A good fit.',
     ...overrides,
   };
@@ -502,6 +512,9 @@ describe('normaliseSlotSuggestion', () => {
       cookedEarlier: new Set(),
       pickableRecipeIds: new Set([10, 11, 12]),
       avoidRecipeIds: new Set(),
+      held: { dish: new Map(), base: new Map() },
+      baseOf: new Map(),
+      taken: new Map(),
       ...overrides,
     };
   }
@@ -509,8 +522,9 @@ describe('normaliseSlotSuggestion', () => {
   function dish(
     recipeId: number,
     overrides: Partial<{
-      kind: 'cook' | 'leftovers';
+      kind: 'cook' | 'leftovers' | 'storage';
       prepared: number;
+      useHeldBase: boolean;
       reason: string;
     }> = {},
   ) {
@@ -519,6 +533,7 @@ describe('normaliseSlotSuggestion', () => {
         kind: 'cook',
         recipeId,
         prepared: 2,
+        useHeldBase: false,
         reason: 'Something **fresh**.',
         ...overrides,
       },
@@ -688,6 +703,207 @@ describe('cookedBefore', () => {
       ],
     );
     expect(cooked.size).toBe(0);
+  });
+});
+
+describe('storage in a Plan Proposal', () => {
+  const LASAGNE = 30;
+  const STEW_BASE = 31;
+  const STEW_PIE = 32;
+  const held = {
+    dish: new Map([
+      [LASAGNE, 2],
+      [STEW_BASE, 2],
+    ]),
+    base: new Map([[STEW_BASE, 2]]),
+  };
+  const baseOf = new Map<number, number | null>([
+    [10, null],
+    [STEW_PIE, STEW_BASE],
+  ]);
+  const storageContext = (slots: ProposalSlotContext[]) =>
+    context(slots, [10, STEW_PIE], { held, baseOf });
+
+  it('keeps a Leftovers from Storage slot eating a held dish', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [
+          entry('2026-11-02', 'Dinner', LASAGNE, {
+            kind: 'storage',
+            prepared: 0,
+          }),
+        ],
+        summary: 'Uses the lasagne.',
+      },
+      storageContext([slot('2026-11-02', DINNER)]),
+    );
+    expect(proposal?.slots[0]).toMatchObject({
+      slotType: 'leftovers',
+      leftoversSource: 'storage',
+      items: [{ recipeId: LASAGNE, prepared: 0, eaten: 2, fromStorage: 2 }],
+    });
+  });
+
+  it('accepts a held dish whose recipe isn’t pickable', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [
+          entry('2026-11-02', 'Dinner', LASAGNE, { kind: 'storage' }),
+          entry('2026-11-03', 'Dinner', 99, { kind: 'storage' }),
+        ],
+        summary: 'Uses the lasagne.',
+      },
+      storageContext([slot('2026-11-02', DINNER), slot('2026-11-03', DINNER)]),
+    );
+    expect(proposal?.slots[0]?.leftoversSource).toBe('storage');
+    expect(proposal?.slots[1]?.slotType).toBe('empty');
+    expect(proposal?.dropped).toBe(1);
+  });
+
+  it('drops a storage slot when fewer portions are held than its headcount', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [
+          entry('2026-11-02', 'Lunch', 10),
+          entry('2026-11-02', 'Dinner', LASAGNE, { kind: 'storage' }),
+        ],
+        summary: 'Uses the lasagne.',
+      },
+      storageContext([
+        slot('2026-11-02', LUNCH),
+        slot('2026-11-02', DINNER, { headcount: 3 }),
+      ]),
+    );
+    expect(proposal?.slots[1]).toMatchObject({ slotType: 'empty' });
+    expect(proposal?.dropped).toBe(1);
+  });
+
+  it('drops the second of two slots wanting the same held dish', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [
+          entry('2026-11-02', 'Dinner', LASAGNE, { kind: 'storage' }),
+          entry('2026-11-03', 'Dinner', LASAGNE, { kind: 'storage' }),
+        ],
+        summary: 'Lasagne twice.',
+      },
+      storageContext([slot('2026-11-02', DINNER), slot('2026-11-03', DINNER)]),
+    );
+    expect(proposal?.slots.map((s) => s.slotType)).toEqual([
+      'leftovers',
+      'empty',
+    ]);
+    expect(proposal?.dropped).toBe(1);
+  });
+
+  it('never eats from storage where nobody eats', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [
+          entry('2026-11-02', 'Lunch', 10),
+          entry('2026-11-02', 'Dinner', LASAGNE, { kind: 'storage' }),
+        ],
+        summary: 'A week.',
+      },
+      storageContext([
+        slot('2026-11-02', LUNCH),
+        slot('2026-11-02', DINNER, { headcount: 0 }),
+      ]),
+    );
+    expect(proposal?.slots[1]).toMatchObject({ slotType: 'empty', items: [] });
+    expect(proposal?.dropped).toBe(0);
+  });
+
+  it('cooks a Variation from its held base, taking its prepared portions', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [entry('2026-11-02', 'Dinner', STEW_PIE, { useHeldBase: true })],
+        summary: 'Pie from the stew.',
+      },
+      storageContext([slot('2026-11-02', DINNER)]),
+    );
+    expect(proposal?.slots[0]).toMatchObject({
+      slotType: 'recipe',
+      items: [{ recipeId: STEW_PIE, prepared: 2, eaten: 2, fromStorage: 2 }],
+    });
+  });
+
+  it('drops a Variation whose held base is already taken by an earlier slot', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [
+          entry('2026-11-02', 'Dinner', STEW_BASE, { kind: 'storage' }),
+          entry('2026-11-03', 'Dinner', STEW_PIE, { useHeldBase: true }),
+        ],
+        summary: 'Stew twice.',
+      },
+      context(
+        [slot('2026-11-02', DINNER), slot('2026-11-03', DINNER)],
+        [10, STEW_PIE],
+        { held, baseOf },
+      ),
+    );
+    expect(proposal?.slots.map((s) => s.slotType)).toEqual([
+      'leftovers',
+      'empty',
+    ]);
+  });
+
+  it('ignores useHeldBase on a dish with no base', () => {
+    const proposal = normalisePlanProposal(
+      {
+        slots: [entry('2026-11-02', 'Dinner', 10, { useHeldBase: true })],
+        summary: 'A dish.',
+      },
+      storageContext([slot('2026-11-02', DINNER)]),
+    );
+    expect(proposal?.slots[0]?.items[0]).not.toHaveProperty('fromStorage');
+  });
+
+  it('counts what the review’s other slots take when suggesting again', () => {
+    const target = slot('2026-11-03', DINNER);
+    const taken = storageTakenExcept(
+      target,
+      [
+        {
+          date: '2026-11-02',
+          occasionId: DINNER,
+          slotType: 'leftovers',
+          leftoversSource: 'storage',
+          items: [{ recipeId: LASAGNE, prepared: 0, eaten: 2, fromStorage: 2 }],
+        },
+        {
+          date: '2026-11-03',
+          occasionId: DINNER,
+          slotType: 'leftovers',
+          leftoversSource: 'storage',
+          items: [{ recipeId: LASAGNE, prepared: 0, eaten: 2, fromStorage: 2 }],
+        },
+      ],
+      baseOf,
+    );
+    expect(taken.get(LASAGNE)).toBe(2);
+    const suggestion = normaliseSlotSuggestion(
+      {
+        dish: {
+          kind: 'storage',
+          recipeId: LASAGNE,
+          prepared: 0,
+          useHeldBase: false,
+          reason: 'The lasagne.',
+        },
+      },
+      {
+        slot: target,
+        cookedEarlier: new Set(),
+        pickableRecipeIds: new Set([10]),
+        avoidRecipeIds: new Set(),
+        held,
+        baseOf,
+        taken,
+      },
+    );
+    expect(suggestion).toBeNull();
   });
 });
 

@@ -109,5 +109,8 @@ export const stockReservations = pgTable(
       table.neededOn,
     ),
     index('stock_reservations_stock_item_id_idx').on(table.stockItemId),
+    // A slot item's Reservations: read for each dish on every planner read,
+    // and found by the cascade when a dish is removed (FEAT-81).
+    index('stock_reservations_slot_item_id_idx').on(table.slotItemId),
   ],
 );

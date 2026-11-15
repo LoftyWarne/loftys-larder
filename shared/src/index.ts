@@ -335,6 +335,8 @@ export {
   type ProposePlanInput,
   mealPlanRecipeSchema,
   type MealPlanRecipe,
+  mealPlanStockSchema,
+  type MealPlanStock,
   mealPlanDishKindSchema,
   type MealPlanDishKind,
   mealPlanRequestSchema,

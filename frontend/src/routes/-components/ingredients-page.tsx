@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
 import { Input } from '@/components/ui/input.tsx';
-import { getDomainErrorCode } from '@/lib/domain-error.ts';
+import { getDomainErrorCause, getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -52,6 +52,7 @@ export function IngredientsPage(): React.ReactElement {
   const [addNameError, setAddNameError] = useState<string | undefined>();
   const [editTarget, setEditTarget] = useState<IngredientListItem | null>(null);
   const [editNameError, setEditNameError] = useState<string | undefined>();
+  const [editUnitError, setEditUnitError] = useState<string | undefined>();
   const [deleteState, setDeleteState] = useState<DeleteState>({ kind: 'idle' });
 
   const createMutation = trpc.ingredients.create.useMutation({
@@ -105,6 +106,7 @@ export function IngredientsPage(): React.ReactElement {
   async function handleUpdate(values: IngredientFormValues): Promise<void> {
     if (!editTarget) return;
     setEditNameError(undefined);
+    setEditUnitError(undefined);
     try {
       await updateMutation.mutateAsync({
         id: editTarget.id,
@@ -115,6 +117,12 @@ export function IngredientsPage(): React.ReactElement {
       const code = getDomainErrorCode(error);
       if (code === 'INGREDIENT_NAME_TAKEN') {
         setEditNameError('An ingredient with this name already exists');
+        return;
+      }
+      if (code === 'INGREDIENT_UNIT_IN_STOCK') {
+        setEditUnitError(
+          'This ingredient is held in storage in its current unit. Remove it from storage first.',
+        );
         return;
       }
       throw error;
@@ -128,11 +136,13 @@ export function IngredientsPage(): React.ReactElement {
       await deleteMutation.mutateAsync({ id: ingredient.id });
       setDeleteState({ kind: 'idle' });
     } catch (error) {
-      const code = getDomainErrorCode(error);
+      const cause = getDomainErrorCause(error);
       const message =
-        code === 'INGREDIENT_IN_USE'
-          ? 'This ingredient is used in one or more recipes.'
-          : 'Could not delete this ingredient.';
+        cause?.code !== 'INGREDIENT_IN_USE'
+          ? 'Could not delete this ingredient.'
+          : cause.inStorage === true
+            ? 'This ingredient is held in storage.'
+            : 'This ingredient is used in one or more recipes.';
       setDeleteState({ kind: 'confirming-error', ingredient, message });
     }
   }
@@ -202,6 +212,7 @@ export function IngredientsPage(): React.ReactElement {
                   size="sm"
                   onClick={() => {
                     setEditNameError(undefined);
+                    setEditUnitError(undefined);
                     setEditTarget(ingredient);
                   }}
                 >
@@ -260,6 +271,7 @@ export function IngredientsPage(): React.ReactElement {
             if (!open) {
               setEditTarget(null);
               setEditNameError(undefined);
+              setEditUnitError(undefined);
             }
           }}
         >
@@ -283,6 +295,7 @@ export function IngredientsPage(): React.ReactElement {
               }}
               submitLabel="Save changes"
               nameError={editNameError}
+              unitError={editUnitError}
               onSubmit={handleUpdate}
               onCancel={() => {
                 setEditTarget(null);

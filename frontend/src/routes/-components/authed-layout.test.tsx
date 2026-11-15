@@ -128,7 +128,7 @@ describe('AuthedLayout', () => {
     },
   );
 
-  it('renders the top-row nav with all six destinations at lg+', () => {
+  it('renders the top-row nav with all seven destinations at lg+', () => {
     mockIsLargeViewport(true);
     render(<AuthedLayout />);
 
@@ -137,12 +137,13 @@ describe('AuthedLayout', () => {
       screen.queryByRole('navigation', { name: /primary/i }),
     ).not.toBeInTheDocument();
 
-    // All six destinations are present as plain text links.
+    // All seven destinations are present as plain text links.
     for (const label of [
       'Home',
       'Recipes',
       'Plans',
       'Shopping list',
+      'Storage',
       'Ingredients',
       'Settings',
     ]) {
@@ -167,12 +168,15 @@ describe('AuthedLayout', () => {
     // Bottom nav with four primary tabs.
     const bottomNav = screen.getByRole('navigation', { name: /primary/i });
     expect(bottomNav).toBeInTheDocument();
-    for (const label of ['Plans', 'Shopping list', 'Recipes', 'Ingredients']) {
+    for (const label of ['Plans', 'Shopping list', 'Recipes', 'Storage']) {
       // The label appears in the tab bar; bottom nav contains it.
       expect(
         bottomNav.querySelector(`a[href="/${labelToPath(label)}"]`),
       ).not.toBeNull();
     }
+    expect(bottomNav.querySelectorAll('a')).toHaveLength(4);
+    // Storage takes Ingredients' place on phones (DEC-118).
+    expect(bottomNav.querySelector('a[href="/ingredients"]')).toBeNull();
   });
 });
 
@@ -205,8 +209,8 @@ function labelToPath(label: string): string {
       return 'shopping';
     case 'Recipes':
       return 'recipes';
-    case 'Ingredients':
-      return 'ingredients';
+    case 'Storage':
+      return 'storage';
     default:
       throw new Error(`unknown label: ${label}`);
   }

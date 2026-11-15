@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Carrot,
   Home,
+  Refrigerator,
   Settings as SettingsIcon,
   ShoppingBasket,
   type LucideIcon,
@@ -27,7 +28,14 @@ export async function authedBeforeLoad(): Promise<void> {
 }
 
 interface NavItem {
-  to: '/' | '/recipes' | '/plans' | '/shopping' | '/ingredients' | '/settings';
+  to:
+    | '/'
+    | '/recipes'
+    | '/plans'
+    | '/shopping'
+    | '/storage'
+    | '/ingredients'
+    | '/settings';
   label: string;
   Icon: LucideIcon;
 }
@@ -35,17 +43,19 @@ interface NavItem {
 // The primary destinations live under the thumb on phones (bottom tab bar)
 // and across the top on desktop. Home and Settings are de-emphasised on
 // phones — Home is the app-title link, Settings is a gear icon — so they
-// stay out of the four-tab bar.
+// stay out of the four-tab bar. Ingredients is off the bar too, linked from
+// Storage and Settings (DEC-118); desktop keeps it in the top nav.
 const PRIMARY_NAV: NavItem[] = [
   { to: '/plans', label: 'Plans', Icon: CalendarDays },
   { to: '/shopping', label: 'Shopping list', Icon: ShoppingBasket },
   { to: '/recipes', label: 'Recipes', Icon: BookOpen },
-  { to: '/ingredients', label: 'Ingredients', Icon: Carrot },
+  { to: '/storage', label: 'Storage', Icon: Refrigerator },
 ];
 
 const ALL_NAV: NavItem[] = [
   { to: '/', label: 'Home', Icon: Home },
   ...PRIMARY_NAV,
+  { to: '/ingredients', label: 'Ingredients', Icon: Carrot },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon },
 ];
 

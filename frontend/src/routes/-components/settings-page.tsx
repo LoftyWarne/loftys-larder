@@ -5,7 +5,8 @@ import {
   type UpdateProfileInput,
 } from '@loftys-larder/shared';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { DangerConfirmDialog } from '@/components/danger-confirm-dialog.tsx';
@@ -264,6 +265,14 @@ export function SettingsPage(): React.ReactElement {
           {saving ? 'Saving…' : 'Save changes'}
         </Button>
       </form>
+
+      <Link
+        to="/ingredients"
+        className="flex items-center justify-between rounded-md border px-4 py-3 text-sm font-medium hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        Ingredients
+        <ChevronRight aria-hidden className="size-4 text-muted-foreground" />
+      </Link>
 
       <DangerZone
         email={me.email}

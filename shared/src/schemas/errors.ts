@@ -73,6 +73,15 @@ export const DOMAIN_ERROR_CODES = [
   // A Batch Fixed meal cooks fewer portions than its slot's headcount.
   // Metadata `date`, `occasionId`.
   'MEAL_PLAN_BATCH_TOO_SMALL',
+  'STOCK_ITEM_NOT_FOUND',
+  'STOCK_TARGET_NOT_FOUND',
+  'STOCK_PORTIONS_NOT_HALVES',
+  'STOCK_ADDED_ON_FUTURE',
+  // Lowering or deleting would leave Reservations uncovered. Metadata
+  // `quantity`, `reserved`. Send again with `releaseReservations`.
+  'STOCK_RESERVED',
+  // Changing the unit would misread the amounts held in storage.
+  'INGREDIENT_UNIT_IN_STOCK',
 ] as const;
 
 export const domainErrorCodeSchema = z.enum(DOMAIN_ERROR_CODES);

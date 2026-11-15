@@ -56,6 +56,19 @@ vi.mock('@/lib/auth-client.ts', async () => {
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigateMock,
+  Link: ({
+    to,
+    children,
+    className,
+  }: {
+    to: string;
+    children: React.ReactNode;
+    className?: string;
+  }) => (
+    <a href={to} className={className}>
+      {children}
+    </a>
+  ),
 }));
 
 import { SettingsPage } from './settings-page.tsx';
@@ -161,6 +174,15 @@ describe('SettingsPage', () => {
     });
     const systemRadio = screen.getByRole('radio', { name: /system/i });
     expect(systemRadio).toBeChecked();
+  });
+
+  it('links to Ingredients, which is off the phone tab bar', () => {
+    setup();
+    render(<SettingsPage />);
+    expect(screen.getByRole('link', { name: 'Ingredients' })).toHaveAttribute(
+      'href',
+      '/ingredients',
+    );
   });
 
   it('calls updateProfile with name-only when the name changes', async () => {

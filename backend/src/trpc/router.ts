@@ -10,6 +10,7 @@ import { recipeImportsRouter } from './procedures/recipe-imports.ts';
 import { recipesRouter } from './procedures/recipes.ts';
 import { shoppingRouter } from './procedures/shopping.ts';
 import { slotsRouter } from './procedures/slots.ts';
+import { storageRouter } from './procedures/storage.ts';
 import { uploadsRouter } from './procedures/uploads.ts';
 import { userRouter } from './procedures/user.ts';
 
@@ -27,6 +28,7 @@ export const appRouter = router({
   plants: plantsRouter,
   slots: slotsRouter,
   shopping: shoppingRouter,
+  storage: storageRouter,
 });
 
 export type AppRouter = typeof appRouter;

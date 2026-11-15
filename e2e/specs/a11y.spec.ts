@@ -4,7 +4,9 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   assignRecipeToSlot,
   createPlan,
+  createIngredient,
   createRecipe,
+  createStockItem,
   E2E_USER_NAME,
   resetHouseholdData,
   setCooksBaseOnSlot,
@@ -521,6 +523,49 @@ test.describe('a11y — authed views', () => {
       await runAxe(page, theme);
     });
 
+    // A combined row, a base dish, and Fridge items past and before Use-by.
+    test(`storage passes axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await seedStorage();
+      await page.setViewportSize({ width: 375, height: 812 });
+      for (const location of ['freezer', 'fridge'] as const) {
+        await page.goto(`/storage?location=${location}`);
+        await expect(
+          page.getByRole('region', { name: 'Ingredients' }),
+        ).toBeVisible();
+        await expect
+          .poll(() =>
+            page.evaluate(
+              'document.documentElement.scrollWidth <= window.innerWidth',
+            ),
+          )
+          .toBe(true);
+        await runAxe(page, theme);
+      }
+    });
+
+    test(`storage's add and edit sheets pass axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await seedStorage();
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto('/storage?location=fridge');
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+      await expect(
+        page.getByRole('dialog', { name: 'Add to storage' }),
+      ).toBeVisible();
+      await runAxe(page, theme);
+      await page.keyboard.press('Escape');
+
+      await page
+        .getByRole('button', { name: /^Edit Chicken thigh$/i })
+        .first()
+        .click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await runAxe(page, theme);
+    });
+
     test(`settings passes axe in ${theme} theme`, async ({ page }) => {
       await page.goto('/settings');
       await expect(
@@ -541,6 +586,60 @@ async function openImportReview(page: Page): Promise<void> {
   await expect(
     page.getByRole('heading', { name: 'Review import' }),
   ).toBeVisible();
+}
+
+async function seedStorage(): Promise<void> {
+  const cod = await createIngredient({
+    name: 'Cod',
+    unit: 'g',
+    category: 'Fish',
+  });
+  const chicken = await createIngredient({
+    name: 'Chicken thigh',
+    unit: 'g',
+    category: 'Meat',
+  });
+  const stew = await createRecipe({
+    name: 'Beef stew base',
+    baseServings: 4,
+    isBase: true,
+    ingredients: [
+      { name: 'Beef', quantity: '800', unit: 'g', category: 'Meat' },
+    ],
+  });
+  const today = new Date();
+  await createStockItem({
+    location: 'freezer',
+    ingredientId: cod,
+    quantity: '500',
+    addedOn: ymd(addDays(today, -42)),
+  });
+  await createStockItem({
+    location: 'freezer',
+    ingredientId: cod,
+    quantity: '300',
+    addedOn: ymd(today),
+  });
+  await createStockItem({
+    location: 'freezer',
+    recipeId: stew.id,
+    quantity: '2',
+    addedOn: ymd(today),
+  });
+  await createStockItem({
+    location: 'fridge',
+    ingredientId: chicken,
+    quantity: '200',
+    addedOn: ymd(addDays(today, -3)),
+    useBy: ymd(addDays(today, -1)),
+  });
+  await createStockItem({
+    location: 'fridge',
+    ingredientId: chicken,
+    quantity: '100',
+    addedOn: ymd(today),
+    useBy: ymd(addDays(today, 2)),
+  });
 }
 
 function ymd(d: Date): string {

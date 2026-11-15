@@ -18,6 +18,7 @@ export interface IngredientFormProps {
   onCancel: () => void;
   submitLabel: string;
   nameError?: string;
+  unitError?: string;
 }
 
 const SHELF_LIFE_PLACEHOLDER = 'e.g. 7';
@@ -29,6 +30,7 @@ export function IngredientForm({
   onCancel,
   submitLabel,
   nameError,
+  unitError,
 }: IngredientFormProps): React.ReactElement {
   const form = useForm<IngredientFormValues>({
     resolver: zodResolver(createIngredientInputSchema),
@@ -41,10 +43,16 @@ export function IngredientForm({
     }
   }, [nameError, form]);
 
+  useEffect(() => {
+    if (unitError) {
+      form.setError('defaultUnitId', { type: 'server', message: unitError });
+    }
+  }, [unitError, form]);
+
   const submitting = form.formState.isSubmitting;
 
   const submit = form.handleSubmit(async (values) => {
-    form.clearErrors('name');
+    form.clearErrors(['name', 'defaultUnitId']);
     await onSubmit(values);
   });
 
@@ -115,6 +123,11 @@ export function IngredientForm({
               </option>
             ))}
           </select>
+          {form.formState.errors.defaultUnitId && (
+            <p role="alert" className="text-sm text-destructive">
+              {form.formState.errors.defaultUnitId.message}
+            </p>
+          )}
         </div>
       </div>
 

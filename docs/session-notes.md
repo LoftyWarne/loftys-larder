@@ -4,6 +4,31 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-11-15 — Stock items and the Storage screen (FEAT-78)
+
+**Status:** Implemented and committed on `main`, not pushed. An independent review's six suggestions are fixed. Typecheck, lint and format are clean in every workspace. Backend: 1,289 tests green. Frontend: 1,093 green. e2e: 79 of 79, including a spec that runs manual verification step 1 and axe scans of the Storage screen and both sheets at phone width in both themes. The gate check hasn't been run by hand. The FEAT-78 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (all readings as proposed):
+- **Schema:** `stock_items` and `stock_reservations` (migration `0028_storage`). A Reservation names its reserver as a slot item or as `ingredient_id`. With `plan_id` that's the shopping line, since `shopping_list_items` only holds tick state. Deleting a Stock item, slot item or plan cascades its Reservations, which releases them. `source_slot_item_id` is in place, SET NULL, for FEAT-79.
+- **Amounts:** `numeric(10,3)` strings on the wire. Portions take whole or half numbers.
+- **Stepper:** steps by 1 portion, 50 g or ml, 0.1 kg or l, and 1 of anything else. On a combined row it edits the newest item, so the oldest date stays shown; lowering takes the newest item with some of it unreserved, falling back to the newest (changed after review, at the user's request). Lowering stops at zero, which deletes the item.
+- **Releasing:** going below what's reserved returns `STOCK_RESERVED`. Once the cook agrees, the client sends again with `releaseReservations`, which drops whole Reservations, latest `needed_on` first, until what's left fits.
+- **`added_on`** can't be after today (`STOCK_ADDED_ON_FUTURE`).
+- **Ingredient guards (FEAT-68 surface):** deleting an ingredient held in storage gives `INGREDIENT_IN_USE` with `inStorage: true`. Changing its unit gives `INGREDIENT_UNIT_IN_STOCK`, shown under the unit field.
+- **Recipe stock** uses `pickable-recipes` with `includePickerHidden`.
+- **Use-by default:** `defaultUseBy` in `shared/src/lib/stock-use-by.ts` is shared by the server and both sheets.
+
+**How it's built:**
+- `settleReservations(tx, today)` in `backend/src/lib/stock-settlement.ts` is one statement. A data-modifying CTE deletes due Reservations, then deletes or lowers their items. Its test holds one settle's transaction open while a second starts, and the Reservations are counted once.
+- The location tab is the `?location=` search param (`storageSearchSchema`). Desktop nav keeps Ingredients. Settings has a link row to it.
+
+**Also:**
+- Review fixes: `storage.update` and `storage.delete` settle first, so every path locks Reservations before Stock items. Settling locks its items (`locked` CTE) and works from their latest quantity, so an edit committed meanwhile isn't lost. `storage.create` takes a key-share lock on the ingredient, and the ingredient delete and unit-change guards run in a transaction with the ingredient row locked. The stepper stays disabled until the list has refetched.
+- Done: AGENTS.md now has the `settleReservations` convention (Code conventions), approved by the user.
+- The Staple criterion has nothing in it. It goes live with FEAT-80.
+
+---
+
 ## 2026-11-15 — Storage scoped (DEC-118, FEAT-78 to FEAT-81); "Pantry / inventory tracking" non-goal reversed; eval runner renumbered FEAT-82
 
 **Status:** Docs only, no code. The user's source spec ("Storage inventory, freezer first") was worked through over four rounds of questions, then written up. Nothing ticked. Start with FEAT-78's kick-off.

@@ -69,6 +69,8 @@ async function truncateHouseholdData(): Promise<void> {
   try {
     await client.query(`
       truncate table
+        stock_reservations,
+        stock_items,
         shopping_list_items,
         meal_plan_slot_diners,
         meal_plan_slot_items,
@@ -190,6 +192,37 @@ export async function createIngredient(
   } finally {
     client.release();
   }
+}
+
+export interface StockItemSpec {
+  location: 'freezer' | 'fridge' | 'pantry';
+  ingredientId?: number;
+  recipeId?: number;
+  quantity: string;
+  addedOn: string;
+  useBy?: string | null;
+}
+
+// A Stock item on its own, for the Storage screen.
+export async function createStockItem(spec: StockItemSpec): Promise<number> {
+  const result = await getPool().query<{ id: number }>(
+    `insert into stock_items
+       (household_id, location, ingredient_id, recipe_id, quantity, added_on, use_by)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     returning id`,
+    [
+      HOUSEHOLD_ID,
+      spec.location,
+      spec.ingredientId ?? null,
+      spec.recipeId ?? null,
+      spec.quantity,
+      spec.addedOn,
+      spec.useBy ?? null,
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('createStockItem: insert returned no row');
+  return row.id;
 }
 
 // Create a recipe + its ingredient rows in one transaction. Returns the recipe

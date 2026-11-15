@@ -22,6 +22,7 @@ import {
   recipeIngredients,
   recipeMethodIngredients,
 } from '../../db/schema/recipes.ts';
+import { stockItems } from '../../db/schema/storage.ts';
 import { makeWithTransaction } from '../../db/withTransaction.ts';
 import { protectedProcedure, router } from '../init.ts';
 import { z } from 'zod';
@@ -179,19 +180,56 @@ export const ingredientsRouter = router({
       if (patch.averageShelfLifeDays !== undefined)
         patchValues.averageShelfLifeDays = patch.averageShelfLifeDays;
 
+      const withTransaction = makeWithTransaction(ctx.db);
       let updatedId: number | undefined;
       try {
-        const updated = await ctx.db
-          .update(ingredients)
-          .set(patchValues)
-          .where(
-            and(
-              eq(ingredients.id, id),
-              eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
-            ),
-          )
-          .returning({ id: ingredients.id });
-        updatedId = updated[0]?.id;
+        updatedId = await withTransaction(async (tx) => {
+          // Held amounts are in the ingredient's one unit (DEC-18), so a new
+          // unit would misread them. The cook clears the stock first. The
+          // row lock holds off a Stock item being added meanwhile.
+          if (patch.defaultUnitId !== undefined) {
+            const [current] = await tx
+              .select({ defaultUnitId: ingredients.defaultUnitId })
+              .from(ingredients)
+              .where(
+                and(
+                  eq(ingredients.id, id),
+                  eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+                ),
+              )
+              .for('update');
+            if (current && current.defaultUnitId !== patch.defaultUnitId) {
+              const held = await tx
+                .select({ id: stockItems.id })
+                .from(stockItems)
+                .where(
+                  and(
+                    eq(stockItems.ingredientId, id),
+                    eq(stockItems.householdId, CURRENT_HOUSEHOLD_ID),
+                  ),
+                )
+                .limit(1);
+              if (held.length > 0) {
+                throw domainConflict(
+                  'INGREDIENT_UNIT_IN_STOCK',
+                  'The ingredient is held in storage in its current unit',
+                );
+              }
+            }
+          }
+
+          const updated = await tx
+            .update(ingredients)
+            .set(patchValues)
+            .where(
+              and(
+                eq(ingredients.id, id),
+                eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+              ),
+            )
+            .returning({ id: ingredients.id });
+          return updated[0]?.id;
+        });
       } catch (error) {
         if (
           isUniqueViolation(error, 'ingredients_household_lower_name_unique')
@@ -237,6 +275,35 @@ export const ingredientsRouter = router({
       // (DEC-99), so it shouldn't block deletion; clear it first.
       const withTransaction = makeWithTransaction(ctx.db);
       const deleted = await withTransaction(async (tx) => {
+        // The row lock holds off a Stock item being added meanwhile.
+        await tx
+          .select({ id: ingredients.id })
+          .from(ingredients)
+          .where(
+            and(
+              eq(ingredients.id, input.id),
+              eq(ingredients.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .for('update');
+        const held = await tx
+          .select({ id: stockItems.id })
+          .from(stockItems)
+          .where(
+            and(
+              eq(stockItems.ingredientId, input.id),
+              eq(stockItems.householdId, CURRENT_HOUSEHOLD_ID),
+            ),
+          )
+          .limit(1);
+        if (held.length > 0) {
+          throw domainConflict(
+            'INGREDIENT_IN_USE',
+            'Ingredient is held in storage',
+            { inStorage: true },
+          );
+        }
+
         await tx.delete(recipeMethodIngredients).where(
           inArray(
             recipeMethodIngredients.ingredientId,

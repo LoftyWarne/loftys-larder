@@ -173,6 +173,7 @@ Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the und
 - **Optimistic updates:** use the shared hook (`useOptimisticSlotUpdate`, FEAT-31). Don't reimplement `onMutate`/`onError`/`onSettled` per consumer. (cross-cutting #7)
 - **Pickable recipes:** use the helper. Don't filter recipes by hand. (cross-cutting #5)
 - **Health-score staleness:** a recipe write that changes ingredients, method text, servings, nutrition or a variation's base calls `markHealthScoreStale` inside its transaction. (cross-cutting #21, DEC-101)
+- **Settling Reservations:** every read that shows held stock, or plans against it, calls `settleReservations` from `backend/src/lib/stock-settlement.ts` first, inside its `withTransaction`. A read that skips it shows food already eaten. (cross-cutting #23, DEC-118)
 - **Model features:** any feature that calls a model follows cross-cutting #22: its own seam with a `fake` adapter, `<FEATURE>_ADAPTER` / `<FEATURE>_MODEL` config, its rules applied outside the seam, and metadata-only logging. (DEC-109, DEC-110)
 - **Searchable combobox primitive** (FEAT-21) is the only combobox. Don't fork it per picker. (cross-cutting #6)
 - **Slot card** (FEAT-31) has explicit slots for future content. Extend, don't rewrite. (cross-cutting #14)

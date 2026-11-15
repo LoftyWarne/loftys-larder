@@ -3,7 +3,7 @@ import {
   type StockItem,
   type StorageLocation,
 } from '@loftys-larder/shared';
-import { Link, useSearch } from '@tanstack/react-router';
+import { useSearch } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 
 import {
@@ -11,6 +11,7 @@ import {
   LocationTabs,
 } from '@/components/storage/location-tabs.tsx';
 import { ReleaseReservationsDialog } from '@/components/storage/release-reservations-dialog.tsx';
+import { RemoveStockDialog } from '@/components/storage/remove-stock-dialog.tsx';
 import { StapleStockDialog } from '@/components/storage/staple-stock-dialog.tsx';
 import { StaplesSection } from '@/components/storage/staples-section.tsx';
 import { StockAddSheet } from '@/components/storage/stock-add-sheet.tsx';
@@ -29,6 +30,7 @@ function RowGroup({
   today,
   edits,
   onEdit,
+  onRemove,
 }: {
   title: string;
   rows: StorageRow[];
@@ -36,25 +38,33 @@ function RowGroup({
   today: string;
   edits: ReturnType<typeof useStockEdits>;
   onEdit: (item: StockItem) => void;
-}): React.ReactElement | null {
-  if (rows.length === 0) return null;
+  onRemove: (row: StorageRow) => void;
+}): React.ReactElement {
   return (
     <section aria-label={title} className="space-y-1">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </h2>
-      <ul className="divide-y">
-        {rows.map((row) => (
-          <StockRow
-            key={row.key}
-            row={row}
-            location={location}
-            today={today}
-            edits={edits}
-            onEdit={onEdit}
-          />
-        ))}
-      </ul>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No {title.toLowerCase()} in the{' '}
+          {LOCATION_LABELS[location].toLowerCase()}.
+        </p>
+      ) : (
+        <ul className="divide-y">
+          {rows.map((row) => (
+            <StockRow
+              key={row.key}
+              row={row}
+              location={location}
+              today={today}
+              edits={edits}
+              onEdit={onEdit}
+              onRemove={onRemove}
+            />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -66,6 +76,7 @@ export function StoragePage(): React.ReactElement {
   const stapleMarking = useStapleMarking();
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [removingRow, setRemovingRow] = useState<StorageRow | null>(null);
 
   const items = listQuery.data?.items;
   const today = listQuery.data?.today;
@@ -82,28 +93,19 @@ export function StoragePage(): React.ReactElement {
     return result;
   }, [items]);
   const editing = items?.find((item) => item.id === editingId) ?? null;
-  const empty = groups.ingredients.length === 0 && groups.dishes.length === 0;
 
   return (
     <section className="mx-auto max-w-3xl space-y-4">
       <header className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Storage</h1>
-        <div className="flex items-center gap-3">
-          <Link
-            to="/ingredients"
-            className="text-sm text-primary underline-offset-2 hover:underline"
-          >
-            Ingredients
-          </Link>
-          <Button
-            disabled={today === undefined}
-            onClick={() => {
-              setAdding(true);
-            }}
-          >
-            Add
-          </Button>
-        </div>
+        <Button
+          disabled={today === undefined}
+          onClick={() => {
+            setAdding(true);
+          }}
+        >
+          Add
+        </Button>
       </header>
 
       <LocationTabs current={location} counts={counts} />
@@ -129,11 +131,6 @@ export function StoragePage(): React.ReactElement {
             staples={listQuery.data?.staples ?? []}
             marking={stapleMarking}
           />
-          {empty && (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              Nothing in the {LOCATION_LABELS[location].toLowerCase()} yet.
-            </p>
-          )}
           <RowGroup
             title="Ingredients"
             rows={groups.ingredients}
@@ -143,6 +140,7 @@ export function StoragePage(): React.ReactElement {
             onEdit={(item) => {
               setEditingId(item.id);
             }}
+            onRemove={setRemovingRow}
           />
           <RowGroup
             title="Dishes"
@@ -153,12 +151,14 @@ export function StoragePage(): React.ReactElement {
             onEdit={(item) => {
               setEditingId(item.id);
             }}
+            onRemove={setRemovingRow}
           />
           <StockAddSheet
             open={adding}
             onOpenChange={setAdding}
             location={location}
             today={today}
+            marking={stapleMarking}
           />
           <StockEditSheet
             item={editing}
@@ -170,6 +170,14 @@ export function StoragePage(): React.ReactElement {
           />
         </>
       )}
+      <RemoveStockDialog
+        row={removingRow}
+        location={location}
+        edits={edits}
+        onClose={() => {
+          setRemovingRow(null);
+        }}
+      />
       <ReleaseReservationsDialog edits={edits} />
       <StapleStockDialog marking={stapleMarking} />
     </section>

@@ -13,6 +13,7 @@ const {
   createUseMutationMock,
   updateUseMutationMock,
   deleteUseMutationMock,
+  deleteManyUseMutationMock,
   ingredientsCreateMock,
   referencesUseQueryMock,
   useUtilsMock,
@@ -26,6 +27,7 @@ const {
   createUseMutationMock: vi.fn(),
   updateUseMutationMock: vi.fn(),
   deleteUseMutationMock: vi.fn(),
+  deleteManyUseMutationMock: vi.fn(),
   ingredientsCreateMock: vi.fn(),
   referencesUseQueryMock: vi.fn(),
   useUtilsMock: vi.fn(),
@@ -39,6 +41,7 @@ vi.mock('@/lib/trpc.ts', () => ({
       create: { useMutation: createUseMutationMock },
       update: { useMutation: updateUseMutationMock },
       delete: { useMutation: deleteUseMutationMock },
+      deleteMany: { useMutation: deleteManyUseMutationMock },
     },
     ingredients: {
       create: { useMutation: ingredientsCreateMock },
@@ -166,6 +169,7 @@ const STAPLES: StorageStaple[] = [
 ];
 
 const ingredientUpdate = vi.fn();
+const deleteMany = vi.fn();
 const setStapleState = vi.fn();
 const ingredientsFetch = vi.fn();
 
@@ -197,6 +201,11 @@ function setup(
     mutateAsync: vi.fn().mockResolvedValue({ id: 1, releasedReservations: 0 }),
     isPending: false,
   });
+  deleteMany.mockResolvedValue({ ids: [], releasedReservations: 0 });
+  deleteManyUseMutationMock.mockReturnValue({
+    mutateAsync: deleteMany,
+    isPending: false,
+  });
   ingredientsCreateMock.mockReturnValue({ mutateAsync: vi.fn() });
   referencesUseQueryMock.mockReturnValue({ data: undefined });
   ingredientsUpdateMock.mockReturnValue({
@@ -223,10 +232,9 @@ describe('StoragePage', () => {
       'Pantry(0)',
     ]);
     expect(links[0]).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Ingredients' })).toHaveAttribute(
-      'href',
-      '/ingredients',
-    );
+    expect(
+      screen.queryByRole('link', { name: 'Ingredients' }),
+    ).not.toBeInTheDocument();
   });
 
   it('combines Freezer items into one row, aged from the oldest, with dishes apart', async () => {
@@ -466,6 +474,98 @@ describe('StoragePage', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('always shows Staples, Ingredients and Dishes, saying when one is empty', () => {
+    setup('fridge');
+    render(<StoragePage />);
+    expect(
+      within(screen.getByRole('region', { name: 'Staples' })).getByText(
+        'No Staples in the fridge.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Dishes' })).getByText(
+        'No dishes in the fridge.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Ingredients' })).queryByText(
+        /^No ingredients/,
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Add a Staple/)).not.toBeInTheDocument();
+  });
+
+  describe('removing a row', () => {
+    it('removes every item a combined row holds, once confirmed', async () => {
+      const { invalidate } = setup('freezer');
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      await user.click(screen.getByRole('button', { name: 'Remove Cod' }));
+      let dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('Remove Cod from the freezer?');
+      expect(dialog).toHaveTextContent('All 2 items, 800 g in total');
+      await user.click(within(dialog).getByRole('button', { name: 'Keep it' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+      expect(deleteMany).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: 'Remove Cod' }));
+      dialog = await screen.findByRole('alertdialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+      await waitFor(() => {
+        expect(deleteMany).toHaveBeenCalledWith({
+          ids: [1, 2],
+          releaseReservations: undefined,
+        });
+      });
+      expect(invalidate).toHaveBeenCalled();
+    });
+
+    it('says when a plan counts on a dish, and frees it on removal', async () => {
+      setup('freezer');
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      await user.click(
+        screen.getByRole('button', { name: 'Remove Beef Stew Base' }),
+      );
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('2 portions will be removed');
+      expect(dialog).toHaveTextContent('A plan is counting on some of this');
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+      await waitFor(() => {
+        expect(deleteMany).toHaveBeenCalledWith({
+          ids: [3],
+          releaseReservations: true,
+        });
+      });
+    });
+
+    it('removes one Fridge item', async () => {
+      setup('fridge');
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      const [first] = screen.getAllByRole('button', {
+        name: 'Remove Chicken Thigh',
+      });
+      if (!first) throw new Error('no remove button');
+      await user.click(first);
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('Remove Chicken Thigh from the fridge?');
+      expect(dialog).toHaveTextContent('200 g will be removed');
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+      await waitFor(() => {
+        expect(deleteMany).toHaveBeenCalledWith({
+          ids: [5],
+          releaseReservations: undefined,
+        });
+      });
+    });
+  });
+
   describe('Staples', () => {
     it('lists the tab’s Staples, each with a one-tap state', async () => {
       setup('pantry');
@@ -497,7 +597,7 @@ describe('StoragePage', () => {
       );
     });
 
-    it('makes a picked ingredient a Staple here, asking first if it is held', async () => {
+    it('asks before making a held ingredient a Staple from the Add dialog', async () => {
       setup('freezer');
       ingredientsFetch.mockResolvedValue([
         {
@@ -525,17 +625,22 @@ describe('StoragePage', () => {
       const user = userEvent.setup();
       render(<StoragePage />);
 
-      await user.type(
-        screen.getByLabelText('Add a Staple to the freezer'),
-        'cod',
-      );
-      await user.click(await screen.findByRole('option', { name: /cod/i }));
-
-      const dialog = await screen.findByRole('alertdialog');
-      expect(dialog).toHaveTextContent('held in storage as 2 items');
-      expect(dialog).toHaveTextContent('will be freed');
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+      const addDialog = await screen.findByRole('dialog');
       await user.click(
-        within(dialog).getByRole('button', { name: 'Make it a Staple' }),
+        within(addDialog).getByRole('radio', { name: 'Staple' }),
+      );
+      await user.type(within(addDialog).getByLabelText('Staple'), 'cod');
+      await user.click(await screen.findByRole('option', { name: /cod/i }));
+      await user.click(
+        within(addDialog).getByRole('button', { name: 'Add Staple' }),
+      );
+
+      const confirm = await screen.findByRole('alertdialog');
+      expect(confirm).toHaveTextContent('held in storage as 2 items');
+      expect(confirm).toHaveTextContent('will be freed');
+      await user.click(
+        within(confirm).getByRole('button', { name: 'Make it a Staple' }),
       );
       await waitFor(() => {
         expect(ingredientUpdate).toHaveBeenLastCalledWith({
@@ -543,6 +648,159 @@ describe('StoragePage', () => {
           patch: { stapleLocation: 'freezer' },
           deleteStock: true,
         });
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+    });
+
+    it('says when a new Staple’s name is already an ingredient', async () => {
+      setup('pantry');
+      ingredientsFetch.mockResolvedValue([]);
+      referencesUseQueryMock.mockReturnValue({
+        data: {
+          categories: [{ id: 3, name: 'Baking' }],
+          units: [{ id: 4, name: 'g' }],
+        },
+      });
+      ingredientsCreateMock.mockReturnValue({
+        mutateAsync: vi
+          .fn()
+          .mockRejectedValue(makeTrpcError({ code: 'INGREDIENT_NAME_TAKEN' })),
+      });
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('radio', { name: 'Staple' }));
+      await user.type(within(dialog).getByLabelText('Staple'), 'Flour');
+      await user.click(
+        await screen.findByRole('option', { name: 'Create “Flour”' }),
+      );
+      await user.click(
+        await within(dialog).findByRole('button', { name: 'Create Staple' }),
+      );
+      expect(
+        await within(dialog).findByText(
+          'An ingredient with this name already exists',
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('removes a Staple from its location once confirmed', async () => {
+      setup('pantry');
+      ingredientUpdate.mockResolvedValue({});
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      const section = screen.getByRole('region', { name: 'Staples' });
+      const removeRice = within(section).getByRole('button', {
+        name: 'Remove Rice from Staples',
+      });
+
+      await user.click(removeRice);
+      let dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('Remove Rice from Staples?');
+      await user.click(within(dialog).getByRole('button', { name: 'Keep it' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+      expect(ingredientUpdate).not.toHaveBeenCalled();
+
+      await user.click(removeRice);
+      dialog = await screen.findByRole('alertdialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+      await waitFor(() => {
+        expect(ingredientUpdate).toHaveBeenCalledWith({
+          id: 21,
+          patch: { stapleLocation: null },
+        });
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+    });
+
+    it('makes a Staple from the Add dialog, in the location picked', async () => {
+      setup('freezer');
+      ingredientsFetch.mockResolvedValue([
+        {
+          id: 1,
+          name: 'Cod',
+          categoryId: 1,
+          categoryName: 'Fish',
+          defaultUnitId: 1,
+          defaultUnitName: 'g',
+          isPlant: false,
+          averageShelfLifeDays: null,
+          stapleState: null,
+          stapleLocation: null,
+        },
+      ]);
+      ingredientUpdate.mockResolvedValue({});
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('radio', { name: 'Staple' }));
+      expect(within(dialog).getByLabelText('Where')).toHaveValue('freezer');
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Add Staple' }),
+      );
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'Pick an ingredient',
+      );
+
+      await user.type(within(dialog).getByLabelText('Staple'), 'cod');
+      await user.click(await screen.findByRole('option', { name: /cod/i }));
+      await user.selectOptions(
+        within(dialog).getByLabelText('Where'),
+        'pantry',
+      );
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Add Staple' }),
+      );
+      await waitFor(() => {
+        expect(ingredientUpdate).toHaveBeenCalledWith({
+          id: 1,
+          patch: { stapleLocation: 'pantry' },
+        });
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+    });
+
+    it('creates a new Staple from the Add dialog', async () => {
+      setup('fridge');
+      ingredientsFetch.mockResolvedValue([]);
+      referencesUseQueryMock.mockReturnValue({
+        data: {
+          categories: [{ id: 3, name: 'Dairy' }],
+          units: [{ id: 4, name: 'g' }],
+        },
+      });
+      const createIngredient = vi.fn().mockResolvedValue({ id: 30 });
+      ingredientsCreateMock.mockReturnValue({ mutateAsync: createIngredient });
+      const user = userEvent.setup();
+      render(<StoragePage />);
+
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('radio', { name: 'Staple' }));
+      await user.type(within(dialog).getByLabelText('Staple'), 'Butter');
+      await user.click(
+        await screen.findByRole('option', { name: 'Create “Butter”' }),
+      );
+      await user.click(
+        await within(dialog).findByRole('button', { name: 'Create Staple' }),
+      );
+      await waitFor(() => {
+        expect(createIngredient).toHaveBeenCalledWith(
+          expect.objectContaining({ name: 'Butter', stapleLocation: 'fridge' }),
+        );
       });
     });
 

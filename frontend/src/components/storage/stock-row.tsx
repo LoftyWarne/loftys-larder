@@ -1,6 +1,6 @@
 import type { StockItem, StorageLocation } from '@loftys-larder/shared';
 import { Link } from '@tanstack/react-router';
-import { ChevronDown, Minus, Pencil, Plus } from 'lucide-react';
+import { ChevronDown, Minus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useId, useState } from 'react';
 
 import { RecipeTypeBadge } from '@/components/planner/recipe-type-badge.tsx';
@@ -24,6 +24,7 @@ interface StockRowProps {
   today: string;
   edits: StockEdits;
   onEdit: (item: StockItem) => void;
+  onRemove: (row: StorageRow) => void;
 }
 
 function RowName({ row }: { row: StorageRow }): React.ReactElement {
@@ -62,6 +63,7 @@ export function StockRow({
   today,
   edits,
   onEdit,
+  onRemove,
 }: StockRowProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false);
   const itemsId = useId();
@@ -161,6 +163,18 @@ export function StockRow({
               </Button>
             )
           )}
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label={`Remove ${name}`}
+            disabled={edits.pending}
+            onClick={() => {
+              onRemove(row);
+            }}
+          >
+            <Trash2 aria-hidden className="size-4" />
+          </Button>
         </div>
       </div>
       {combined && expanded && (

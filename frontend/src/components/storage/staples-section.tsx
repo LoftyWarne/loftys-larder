@@ -3,23 +3,27 @@ import type {
   StorageLocation,
   StorageStaple,
 } from '@loftys-larder/shared';
+import { X } from 'lucide-react';
 import { useId, useState } from 'react';
 
-import {
-  SearchableCombobox,
-  type SearchableComboboxOption,
-} from '@/components/searchable-combobox.tsx';
 import { LOCATION_LABELS } from '@/components/storage/location-tabs.tsx';
 import { StapleStateToggle } from '@/components/storage/staple-state-toggle.tsx';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog.tsx';
+import { Button } from '@/components/ui/button.tsx';
 import type { StapleMarking } from '@/hooks/use-staple-marking.ts';
 import { trpc } from '@/lib/trpc.ts';
 
-interface StapleOption extends SearchableComboboxOption {
-  stapleLocation: StorageLocation | null;
-}
-
-// A location's Staples (DEC-118), each with its one-tap state. Picking an
-// ingredient makes it a Staple here, or moves it here from another location.
+// A location's Staples (DEC-118), each with its one-tap state. New ones are
+// added from the Storage screen's Add dialog.
 export function StaplesSection({
   location,
   staples,
@@ -33,6 +37,9 @@ export function StaplesSection({
   const utils = trpc.useUtils();
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [removing, setRemoving] = useState<StorageStaple | null>(null);
+  const [removePending, setRemovePending] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const setState = trpc.ingredients.setStapleState.useMutation({
     onSettled: async () => {
       setSavingId(null);
@@ -44,20 +51,6 @@ export function StaplesSection({
   });
   const here = staples.filter((staple) => staple.location === location);
   const label = LOCATION_LABELS[location];
-
-  async function search(query: string): Promise<readonly StapleOption[]> {
-    const trimmed = query.trim();
-    const rows = await utils.ingredients.list.fetch(
-      trimmed ? { search: trimmed } : undefined,
-    );
-    return rows
-      .filter((row) => row.stapleLocation !== location)
-      .map((row) => ({
-        id: row.id,
-        label: row.name,
-        stapleLocation: row.stapleLocation,
-      }));
-  }
 
   function change(staple: StorageStaple, state: StapleState): void {
     setError(null);
@@ -72,17 +65,20 @@ export function StaplesSection({
     );
   }
 
-  async function mark(option: StapleOption | null): Promise<void> {
-    if (!option) return;
-    setError(null);
+  async function remove(staple: StorageStaple): Promise<void> {
+    setRemoveError(null);
+    setRemovePending(true);
     try {
       await marking.save(
-        { id: option.id, patch: { stapleLocation: location } },
-        option.label,
+        { id: staple.ingredientId, patch: { stapleLocation: null } },
+        staple.name,
         () => undefined,
       );
+      setRemoving(null);
     } catch {
-      setError(`Couldn’t make ${option.label} a Staple. Try again.`);
+      setRemoveError(`Couldn’t remove ${staple.name}. Try again.`);
+    } finally {
+      setRemovePending(false);
     }
   }
 
@@ -96,8 +92,7 @@ export function StaplesSection({
       </h2>
       {here.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No Staples in the {label.toLowerCase()}. Add the basics you always
-          keep here.
+          No Staples in the {label.toLowerCase()}.
         </p>
       ) : (
         <ul className="divide-y">
@@ -109,49 +104,74 @@ export function StaplesSection({
               <span className="min-w-0 truncate text-sm font-medium">
                 {staple.name}
               </span>
-              <StapleStateToggle
-                name={staple.name}
-                state={staple.state}
-                disabled={savingId === staple.ingredientId}
-                onChange={(state) => {
-                  change(staple, state);
-                }}
-              />
+              <div className="flex shrink-0 items-center gap-1">
+                <StapleStateToggle
+                  name={staple.name}
+                  state={staple.state}
+                  disabled={savingId === staple.ingredientId}
+                  onChange={(state) => {
+                    change(staple, state);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Remove ${staple.name} from Staples`}
+                  onClick={() => {
+                    setRemoveError(null);
+                    setRemoving(staple);
+                  }}
+                >
+                  <X aria-hidden="true" className="h-4 w-4" />
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
       )}
-      <div className="space-y-1">
-        <label htmlFor={`${fieldId}-add`} className="text-sm font-medium">
-          Add a Staple to the {label.toLowerCase()}
-        </label>
-        <SearchableCombobox<StapleOption>
-          key={here.length}
-          id={`${fieldId}-add`}
-          value={null}
-          onChange={(option) => {
-            void mark(option);
-          }}
-          searchQuery={search}
-          placeholder="Search ingredients"
-          disabled={marking.isPending}
-          renderOption={(option) => (
-            <span className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate">{option.label}</span>
-              {option.stapleLocation !== null && (
-                <span className="text-xs text-muted-foreground">
-                  Staple in the {LOCATION_LABELS[option.stapleLocation]}
-                </span>
-              )}
-            </span>
-          )}
-        />
-      </div>
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}
+      <AlertDialog
+        open={removing !== null}
+        onOpenChange={(open) => {
+          if (!open && !removePending) setRemoving(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove {removing?.name} from Staples?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              It stays in your ingredients, but its state is forgotten and it
+              won’t come onto shopping lists to restock.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {removeError && (
+            <p role="alert" className="text-sm text-destructive">
+              {removeError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removePending}>
+              Keep it
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={removePending}
+              onClick={(event) => {
+                event.preventDefault();
+                if (removing) void remove(removing);
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

@@ -118,6 +118,23 @@ export const deleteStockItemResultSchema = z.object({
 
 export type DeleteStockItemResult = z.infer<typeof deleteStockItemResultSchema>;
 
+// Removes a whole Storage row at once: every Stock item it combines.
+export const deleteStockItemsInputSchema = z.object({
+  ids: z.array(stockItemIdSchema).min(1).max(100),
+  releaseReservations: z.boolean().optional(),
+});
+
+export type DeleteStockItemsInput = z.infer<typeof deleteStockItemsInputSchema>;
+
+export const deleteStockItemsResultSchema = z.object({
+  ids: z.array(stockItemIdSchema),
+  releasedReservations: z.number().int().nonnegative(),
+});
+
+export type DeleteStockItemsResult = z.infer<
+  typeof deleteStockItemsResultSchema
+>;
+
 export const stockTargetSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('ingredient'),

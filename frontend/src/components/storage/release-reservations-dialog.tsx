@@ -16,7 +16,8 @@ export function ReleaseReservationsDialog({
 }: {
   edits: StockEdits;
 }): React.ReactElement {
-  const deleting = edits.confirming?.edit.kind === 'delete';
+  const kind = edits.confirming?.edit.kind;
+  const deleting = kind === 'delete' || kind === 'deleteMany';
   return (
     <AlertDialog
       open={edits.confirming !== null}

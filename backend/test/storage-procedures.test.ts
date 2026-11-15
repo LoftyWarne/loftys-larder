@@ -478,6 +478,51 @@ describe('storage procedures', () => {
     });
   });
 
+  describe('removing a whole row', () => {
+    it('deletes every item at once', async () => {
+      const first = await addCod('500');
+      const second = await addCod('250');
+      const result = await caller().storage.deleteMany({
+        ids: [second, first, second],
+      });
+      expect(result).toEqual({
+        ids: [first, second].sort((a, b) => a - b),
+        releasedReservations: 0,
+      });
+      expect(await itemById(first)).toBeUndefined();
+      expect(await itemById(second)).toBeUndefined();
+    });
+
+    it('asks before deleting items with Reservations, and removes none', async () => {
+      const free = await addCod('500');
+      const held = await addCod('250');
+      await reserve(held, '100', addDays(today, 1));
+      await expectDomainError(
+        caller().storage.deleteMany({ ids: [free, held] }),
+        'CONFLICT',
+        'STOCK_RESERVED',
+      );
+      expect(await itemById(free)).toBeDefined();
+
+      const result = await caller().storage.deleteMany({
+        ids: [free, held],
+        releaseReservations: true,
+      });
+      expect(result.releasedReservations).toBe(1);
+      expect(await db.select().from(stockReservations)).toHaveLength(0);
+    });
+
+    it('removes none if one item has already gone', async () => {
+      const own = await addCod('500');
+      await expectDomainError(
+        caller().storage.deleteMany({ ids: [own, own + 1000] }),
+        'NOT_FOUND',
+        'STOCK_ITEM_NOT_FOUND',
+      );
+      expect(await itemById(own)).toBeDefined();
+    });
+  });
+
   describe('settling before a write', () => {
     it('settles before an edit, so eaten food isn’t counted as reserved', async () => {
       const id = await addCod('500');
@@ -547,6 +592,11 @@ describe('storage procedures', () => {
       );
       await expectDomainError(
         caller().storage.delete({ id: foreign }),
+        'NOT_FOUND',
+        'STOCK_ITEM_NOT_FOUND',
+      );
+      await expectDomainError(
+        caller().storage.deleteMany({ ids: [foreign] }),
         'NOT_FOUND',
         'STOCK_ITEM_NOT_FOUND',
       );

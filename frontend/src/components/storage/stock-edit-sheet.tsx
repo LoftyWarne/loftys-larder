@@ -13,7 +13,7 @@ import { useId, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { LOCATION_LABELS } from '@/components/storage/location-tabs.tsx';
-import { SELECT_CLASS } from '@/components/storage/stock-add-sheet.tsx';
+import { SELECT_CLASS } from '@/components/storage/select-class.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { DateInput } from '@/components/ui/date-input.tsx';
 import {

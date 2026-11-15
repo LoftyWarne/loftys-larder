@@ -10,6 +10,12 @@ export const STAPLE_STATE_LABELS: Record<StapleState, string> = {
 
 const ORDER: StapleState[] = ['in_stock', 'running_low', 'out'];
 
+const CHECKED_CLASSES: Record<StapleState, string> = {
+  in_stock: 'bg-primary text-primary-foreground',
+  running_low: 'bg-amber-500 text-amber-950',
+  out: 'bg-destructive text-destructive-foreground',
+};
+
 // One tap sets a Staple's state (DEC-118).
 export function StapleStateToggle({
   name,
@@ -43,9 +49,7 @@ export function StapleStateToggle({
             className={cn(
               'px-2 py-1 text-xs font-medium first:rounded-l-md last:rounded-r-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
               checked
-                ? value === 'in_stock'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-destructive text-destructive-foreground'
+                ? CHECKED_CLASSES[value]
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >

@@ -6,7 +6,8 @@ import { trpc } from '@/lib/trpc.ts';
 
 export type StockEdit =
   | { kind: 'update'; input: UpdateStockItemInput }
-  | { kind: 'delete'; id: number };
+  | { kind: 'delete'; id: number }
+  | { kind: 'deleteMany'; ids: number[] };
 
 export interface ReservedConfirm {
   edit: StockEdit;
@@ -14,7 +15,13 @@ export interface ReservedConfirm {
 }
 
 export interface StockEdits {
-  run: (edit: StockEdit, onDone?: () => void) => Promise<void>;
+  // `release` sends the go-ahead up front, for an edit the cook has already
+  // agreed frees what a plan set aside.
+  run: (
+    edit: StockEdit,
+    onDone?: () => void,
+    options?: { release?: boolean },
+  ) => Promise<void>;
   pending: boolean;
   error: string | null;
   // Set while the cook is asked whether to release Reservations.
@@ -30,6 +37,7 @@ export function useStockEdits(): StockEdits {
   const utils = trpc.useUtils();
   const updateMutation = trpc.storage.update.useMutation();
   const deleteMutation = trpc.storage.delete.useMutation();
+  const deleteManyMutation = trpc.storage.deleteMany.useMutation();
   const [confirming, setConfirming] = useState<ReservedConfirm | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Stays set until the list has refetched: the stepper sends an absolute
@@ -42,9 +50,14 @@ export function useStockEdits(): StockEdits {
         ...edit.input,
         releaseReservations: release || undefined,
       });
-    } else {
+    } else if (edit.kind === 'delete') {
       await deleteMutation.mutateAsync({
         id: edit.id,
+        releaseReservations: release || undefined,
+      });
+    } else {
+      await deleteManyMutation.mutateAsync({
+        ids: edit.ids,
         releaseReservations: release || undefined,
       });
     }
@@ -78,8 +91,13 @@ export function useStockEdits(): StockEdits {
   }
 
   return {
-    run: (edit, onDone) => attempt(edit, false, onDone),
-    pending: busy || updateMutation.isPending || deleteMutation.isPending,
+    run: (edit, onDone, options) =>
+      attempt(edit, options?.release ?? false, onDone),
+    pending:
+      busy ||
+      updateMutation.isPending ||
+      deleteMutation.isPending ||
+      deleteManyMutation.isPending,
     error,
     confirming,
     confirm: async () => {

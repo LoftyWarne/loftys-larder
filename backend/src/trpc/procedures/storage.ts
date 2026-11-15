@@ -6,12 +6,15 @@ import {
   defaultUseBy,
   deleteStockItemInputSchema,
   deleteStockItemResultSchema,
+  deleteStockItemsInputSchema,
+  deleteStockItemsResultSchema,
   isValidPortions,
   listStorageResultSchema,
   stockItemSchema,
   updateStockItemInputSchema,
   updateStockItemResultSchema,
   type DeleteStockItemResult,
+  type DeleteStockItemsResult,
   type DomainErrorCode,
   type ListStorageResult,
   type StockItem,
@@ -512,6 +515,32 @@ export const storageRouter = router({
         );
         await deleteItem(tx, item.id);
         return { id: item.id, releasedReservations: released };
+      });
+    }),
+
+  deleteMany: protectedProcedure
+    .input(deleteStockItemsInputSchema)
+    .output(deleteStockItemsResultSchema)
+    .mutation(async ({ ctx, input }): Promise<DeleteStockItemsResult> => {
+      const today = todayInLondon();
+      const withTransaction = makeWithTransaction(ctx.db);
+      // Ascending ids lock in a stable order, so two overlapping removals
+      // can't deadlock.
+      const ids = [...new Set(input.ids)].sort((a, b) => a - b);
+      return withTransaction(async (tx) => {
+        await settleReservations(tx, today);
+        let released = 0;
+        for (const id of ids) {
+          const item = await loadItemForUpdate(tx, id);
+          released += await releaseUncovered(
+            tx,
+            item.id,
+            0,
+            input.releaseReservations ?? false,
+          );
+          await deleteItem(tx, item.id);
+        }
+        return { ids, releasedReservations: released };
       });
     }),
 });

@@ -18,6 +18,8 @@ import {
   type SearchableComboboxOption,
 } from '@/components/searchable-combobox.tsx';
 import { LOCATION_LABELS } from '@/components/storage/location-tabs.tsx';
+import { SELECT_CLASS } from '@/components/storage/select-class.ts';
+import { StapleAddForm } from '@/components/storage/staple-add-form.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { DateInput } from '@/components/ui/date-input.tsx';
 import {
@@ -29,13 +31,20 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import type { StapleMarking } from '@/hooks/use-staple-marking.ts';
 import { getDomainErrorCode } from '@/lib/domain-error.ts';
 import { trpc } from '@/lib/trpc.ts';
 
-type Kind = 'ingredient' | 'recipe';
+type Kind = 'ingredient' | 'recipe' | 'staple';
+
+const KIND_LABELS: Record<Kind, string> = {
+  ingredient: 'Ingredient',
+  recipe: 'Dish',
+  staple: 'Staple',
+};
 
 interface PickOption extends SearchableComboboxOption {
-  kind: Kind;
+  kind: Exclude<Kind, 'staple'>;
   unitName: string | null;
   averageShelfLifeDays: number | null;
   isBase: boolean;
@@ -49,23 +58,22 @@ function shelfLifeTargetOf(option: PickOption): UseByTarget {
     : { kind: 'ingredient', averageShelfLifeDays: option.averageShelfLifeDays };
 }
 
-export const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
-
 interface StockAddSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   location: StorageLocation;
   today: string;
+  marking: StapleMarking;
 }
 
 // Adds a Stock item: always an existing ingredient or recipe, never free text
-// (DEC-118). An ingredient can be created inline.
+// (DEC-118). An ingredient can be created inline. Also makes a Staple.
 export function StockAddSheet({
   open,
   onOpenChange,
   location,
   today,
+  marking,
 }: StockAddSheetProps): React.ReactElement {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -74,6 +82,7 @@ export function StockAddSheet({
           <AddForm
             location={location}
             today={today}
+            marking={marking}
             onDone={() => {
               onOpenChange(false);
             }}
@@ -87,10 +96,12 @@ export function StockAddSheet({
 function AddForm({
   location,
   today,
+  marking,
   onDone,
 }: {
   location: StorageLocation;
   today: string;
+  marking: StapleMarking;
   onDone: () => void;
 }): React.ReactElement {
   const fieldId = useId();
@@ -285,6 +296,54 @@ function AddForm({
     );
   }
 
+  const kindToggle = (
+    <div
+      role="radiogroup"
+      aria-label="What are you adding?"
+      className="grid grid-cols-3 gap-2"
+    >
+      {(['ingredient', 'recipe', 'staple'] as const).map((value) => (
+        <Button
+          key={value}
+          type="button"
+          role="radio"
+          aria-checked={kind === value}
+          variant={kind === value ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => {
+            if (kind === value) return;
+            setKind(value);
+            pick(null);
+          }}
+        >
+          {KIND_LABELS[value]}
+        </Button>
+      ))}
+    </div>
+  );
+
+  if (kind === 'staple') {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>Add to storage</DialogTitle>
+          <DialogDescription>
+            A Staple is something you always keep, tracked by whether you have
+            it.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {kindToggle}
+          <StapleAddForm
+            location={location}
+            marking={marking}
+            onDone={onDone}
+          />
+        </div>
+      </>
+    );
+  }
+
   const submitting = form.formState.isSubmitting;
   const unitLabel = picked
     ? picked.kind === 'recipe'
@@ -307,29 +366,7 @@ function AddForm({
           void submit(event);
         }}
       >
-        <div
-          role="radiogroup"
-          aria-label="What are you adding?"
-          className="grid grid-cols-2 gap-2"
-        >
-          {(['ingredient', 'recipe'] as const).map((value) => (
-            <Button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={kind === value}
-              variant={kind === value ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => {
-                if (kind === value) return;
-                setKind(value);
-                pick(null);
-              }}
-            >
-              {value === 'ingredient' ? 'Ingredient' : 'Dish'}
-            </Button>
-          ))}
-        </div>
+        {kindToggle}
 
         <div className="space-y-1">
           <label htmlFor={`${fieldId}-target`} className="text-sm font-medium">
@@ -370,7 +407,7 @@ function AddForm({
           {staplePicked?.stapleLocation != null && (
             <p role="alert" className="text-sm text-destructive">
               {staplePicked.label} is a Staple, tracked as in stock, running low
-              or out rather than by amount. Set it under Staples on the{' '}
+              or out rather than by amount. Set its state under Staples on the{' '}
               {LOCATION_LABELS[staplePicked.stapleLocation]} tab.
             </p>
           )}

@@ -2457,7 +2457,7 @@ Conventions:
 - `backend/package.json` (`@anthropic-ai/sdk`), `backend/src/config.ts` (`ANTHROPIC_API_KEY`, `RECIPE_IMPORT_ADAPTER`, `RECIPE_IMPORT_MODEL`), `docs/secrets-checklist.md`
 - `backend/src/lib/recipe-reader/` (new): the `RecipeReader` interface, the `anthropic` adapter (prompt, structured outputs), the `fake` adapter, and choosing an adapter from config
 - `backend/src/lib/recipe-import/` (new): `normaliseProposal`
-- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-78 at kick-off
+- Shared model-feature helpers (new, named generically for scoring to reuse, cross-cutting #22), in `backend/src/lib/model-features/`: the Anthropic client setup, the feature-tagged usage logger, plain-text stripping and the structured-output schema helper. The eval runner moved to FEAT-82 at kick-off
 - `backend/src/trpc/procedures/recipe-imports.ts` (new: start, list, get, discard, create recipe), `backend/src/trpc/router.ts`
 - `backend/src/lib/recipe-writes.ts` (new: write code shared by `recipes.ts` and create recipe), `backend/src/trpc/procedures/recipes.ts` (uses it)
 - `backend/src/plugins/rate-limit.ts` (import limit), `backend/src/trpc/context.ts` and `backend/src/server.ts` (the reader and the limit on the context)
@@ -2512,7 +2512,7 @@ Conventions:
   - The import limit is 14 `start` calls per user per hour, every call counted, checked inside `start` so the refusal is `TOO_MANY_REQUESTS` with `IMPORT_RATE_LIMITED`.
   - Adapters return a candidate shaped by `recipeImportCandidateSchema` (structured-output friendly); its rows refer to household ingredients as `{ id, name }`. A proposed new ingredient keeps a category or unit that wasn't sent as null (DEC-109 amended).
   - Create from import: an existing ingredient's row carries `unitId` for the unit-mismatch check; cost and image are accepted from the cook; a source proposed by name that exists by then is linked; step amounts are checked against the submitted lines; `INGREDIENT_NAME_TAKEN` carries the `newKey`. The draft is deleted first inside the transaction, so a second "Create recipe" finds nothing and rolls back (DEC-108 amended).
-  - The eval runner and eval set move to FEAT-78, with manual verification steps 1 and 2.
+  - The eval runner and eval set move to FEAT-82, with manual verification steps 1 and 2.
 - Amended after the FEAT-62 deploy (2026-10-04): Anthropic refused the structured-output schema, so every import failed in production. The `anthropic` adapter now describes the reply in its prompt instead of using structured outputs, and a request the provider refuses outright is `IMPORT_REQUEST_REJECTED` rather than "try again" (DEC-104 and DEC-109 amended).
 
 **Manual verification:**
@@ -2520,7 +2520,7 @@ Conventions:
 2. Run it on a shopping list. It reports not a recipe.
 3. Against a signed-in local app with a real key, call `start` and check the `recipe_drafts` row: `kind = 'import'`, the proposal, and the adapter and model.
 
-Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
+Steps 1 and 2 moved to FEAT-82 with the eval runner (kick-off, 2026-10-04).
 
 **Common gotchas:**
 - `baseServings` is required. If the text doesn't state it, it's an Estimate.
@@ -2535,9 +2535,9 @@ Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
   - `start`: a `fake` outcome becoming an import draft that records the reader; several recipes; not a recipe; timeout and provider error; the rate limit; household scoping of the lists sent.
   - Create recipe: one transaction; keys resolved for rows, step links and the source; rollback on a failure partway; `INGREDIENT_NAME_TAKEN`; the draft deleted.
   - `list`, `get` and `discard`: ownership, newest first, and manual drafts untouched.
-- Eval set: moved to FEAT-78 (kick-off, 2026-10-04).
+- Eval set: moved to FEAT-82 (kick-off, 2026-10-04).
 - Commit: `feat(recipes): read a pasted recipe into an import draft and create it in one transaction`
-- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-78).
+- Gate check: manual verification step 3 (steps 1 and 2 moved to FEAT-82).
 
 ---
 
@@ -2887,7 +2887,7 @@ Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
 - The encryption check reads the file in the browser and looks for `/Encrypt` in the trailer dictionary near the end of the file (the last 2 KB, and the first 2 KB for linearised files). It's a courtesy, not a guarantee. An encrypted PDF that gets through gives the provider's 400, which stays `IMPORT_REQUEST_REJECTED` so it reaches Sentry.
 - The PDF credential has no eager transformation. The image import preset's `c_limit,…,f_jpg` would make a JPEG of page 1, which nothing uses.
 - Read the `claude-api` skill before changing the `anthropic` adapter. Claude reads each PDF page as text and as an image: about 1,500–3,000 text tokens per page plus the image, so a page costs more time and money than a photo. Claude's own limits (32 MB and 600 pages per request) are far above this feature's caps.
-- 8 pages is provisional. Manual verification step 3 times a real 8-page PDF, and FEAT-78 tunes the cap.
+- 8 pages is provisional. Manual verification step 3 times a real 8-page PDF, and FEAT-82 tunes the cap.
 - Create recipe reads the PDF's public id from the stored input in the draft it deletes, as it does image ids (DEC-108 amended), and keeps it only if it's in the imports folder. A public id kept as an Original is never destroyed, whatever a draft says (DEC-107).
 - The existing signed destroy (`image/destroy`) deletes a PDF, because a PDF is an `image` resource.
 - Household scope for Originals still comes through the join to `recipes` (DEC-17).
@@ -2945,7 +2945,7 @@ Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
 
 **Goal:** A model scores a recipe from 1 to 10, with a summary and an optional Suggestion. The browser scores a recipe automatically after Save & Finish and after an import's "Create recipe". A cook can Score or Rescore from the recipe page. The score shows on recipe cards and the recipe page as an AI health score. (DEC-112, DEC-101, DEC-109, DEC-110)
 
-**Estimate:** 2 days. **Depends on:** FEAT-57 (storage and staleness), FEAT-58 (nutrition), FEAT-60 (the model-feature helpers). **Enables:** FEAT-67 to FEAT-71, and FEAT-78's Health Score set.
+**Estimate:** 2 days. **Depends on:** FEAT-57 (storage and staleness), FEAT-58 (nutrition), FEAT-60 (the model-feature helpers). **Enables:** FEAT-67 to FEAT-71, and FEAT-82's Health Score set.
 
 **Files** (names provisional until kick-off):
 - `backend/src/lib/recipe-scorer/` (new): the `RecipeScorer` interface, the `anthropic` adapter and its prompt, the `fake` adapter, and choosing an adapter from config, laid out like `recipe-reader/`
@@ -3064,7 +3064,7 @@ Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
 
 **Manual verification:**
 1. With a real API key, Score a recipe that has nutrition, from its page. A score, summary and Suggestion appear. Record the time and tokens in the session notes. This is cross-cutting #22's real call before the first deploy.
-2. Consistency check until FEAT-78: score a salad, a lasagne and a fry-up three times each with Rescore, and record the scores in the session notes. Each recipe's scores should be within a point of each other, and the salad should score above the fry-up.
+2. Consistency check until FEAT-82: score a salad, a lasagne and a fry-up three times each with Rescore, and record the scores in the session notes. Each recipe's scores should be within a point of each other, and the salad should score above the fry-up.
 3. Change an ingredient amount and Save & Finish. The recipe page shows "Scoring…", then a current score.
 4. Edit a base with serving variations and Save & Finish. Each variation gets a new score.
 5. Import a recipe and "Create recipe". It's scored with no further step.
@@ -3387,7 +3387,7 @@ Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
 
 **Goal:** Given a plan's dates, who's eating at each slot, the Fixed meals and an optional Brief, return a normalised Plan Proposal for the slots that aren't fixed. This first cut proposes one main dish per slot, with no batch cooking. Nothing is written. (DEC-117, DEC-109, DEC-110)
 
-**Estimate:** 2 days. **Depends on:** FEAT-19 (`pickable-recipes`), FEAT-27 (plan creation's date rules), FEAT-60 (the model-feature helpers), FEAT-66 (Health Scores). **Enables:** FEAT-75, FEAT-76, FEAT-77, and FEAT-78's Plan Proposal set.
+**Estimate:** 2 days. **Depends on:** FEAT-19 (`pickable-recipes`), FEAT-27 (plan creation's date rules), FEAT-60 (the model-feature helpers), FEAT-66 (Health Scores). **Enables:** FEAT-75, FEAT-76, FEAT-77, and FEAT-82's Plan Proposal set.
 
 **Files** (names provisional until kick-off):
 - `backend/src/lib/meal-planner/` (new): the `MealPlanner` interface, the `anthropic` adapter and its prompt, the `fake` adapter, and choosing an adapter from config. Laid out like `recipe-scorer/`.
@@ -3459,7 +3459,7 @@ Steps 1 and 2 moved to FEAT-78 with the eval runner (kick-off, 2026-10-04).
 1. **The time limit.** Time a real 14-day call against the household's library, aiming for a 75-second hard timeout like import's, under Cloudflare's 100-second origin limit (DEC-72). If it can't fit in one request, stop: that's cross-cutting #22's background-work trigger, and DEC-117 gets amended.
 2. **Brief and note length.** The Brief is capped at 500 characters and "Another go"'s note at 200.
 3. **The recency window.** "The 4 weeks before the plan starts" counts slots dated in the 28 days before `startDate`, from non-deleted plans. Slots on or after the start don't count.
-4. **Default effort.** `MEAL_PLAN_EFFORT` defaults to `medium` until FEAT-78 measures it.
+4. **Default effort.** `MEAL_PLAN_EFFORT` defaults to `medium` until FEAT-82 measures it.
 
 **Manual verification:**
 1. Call `propose` through the `anthropic` adapter for a 14-day plan with two Fixed meals and a Brief. It finishes within the time limit, fixed slots are untouched, and every recipe is from the library.
@@ -3674,7 +3674,243 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
 
 ---
 
-### FEAT-78 — Model feature evals: the eval runner, and the Recipe Import and Health Score eval sets
+### FEAT-78 — Storage: Stock items and the Storage screen
+
+**Goal:** The household records what it already holds, in the Freezer, the Fridge or the Pantry, and can correct that record in seconds. A Stock item is an amount of one ingredient, in that ingredient's unit, or portions of one recipe, with the date it went in. Fridge items carry a Use-by. Reservations are introduced here, along with settling them on read, so the later storage features share one mechanism. Nothing yet creates a Reservation. (DEC-118, DEC-18, DEC-17, DEC-21, DEC-33, DEC-36, cross-cutting #23)
+
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-21 (the searchable combobox), FEAT-68 (ingredient edits). **Enables:** FEAT-79, FEAT-80, FEAT-81.
+
+**Files:**
+- `backend/src/db/schema/storage.ts` (new) and a migration: the `storage_location` enum (`freezer`, `fridge`, `pantry`), `stock_items` and `stock_reservations`. This is a schema change, approved in principle by DEC-118. Kick-off confirms names and constraints
+- `backend/src/lib/stock-settlement.ts` (new): `settleReservations`, cross-cutting #23
+- `backend/src/trpc/procedures/storage.ts` (new): `storage.list`, `storage.create`, `storage.update`, `storage.delete`
+- `shared/src/schemas/storage.ts` (new)
+- `frontend/src/routes/_authed/storage.tsx` (thin shell) and `frontend/src/routes/-components/storage-page.tsx`
+- `frontend/src/components/storage/` (new): the location tabs, the grouped rows, the add and edit sheet
+- `frontend/src/routes/-components/authed-layout.tsx`: Storage takes Ingredients' place in the phone tab bar
+
+**Shapes:**
+- `stock_items`: `household_id`, `location`, `ingredient_id` or `recipe_id` (exactly one, by CHECK), `quantity` (> 0, in the ingredient's unit, or portions for a recipe), `added_on` (a date), `use_by` (a date, NULL unless `location = 'fridge'`, by CHECK), `source_slot_item_id` (NULL here, set by FEAT-79), `created_at`, `updated_at` via `$onUpdate` (DEC-16).
+- `stock_reservations`: `household_id`, `stock_item_id`, `plan_id`, what reserved it (a slot item, or a plan's shopping line for one ingredient), `amount` (> 0), `needed_on` (a date). A Stock item's available amount is its quantity minus its Reservations.
+
+**Acceptance criteria:**
+- [ ] **The screen:** `/storage` has a tab for each Storage location. On phones, Storage replaces Ingredients in the four-tab bar. Ingredients is linked from the Storage screen and from Settings. On desktop, both stay in the top nav
+- [ ] **Rows:** each row shows the name, the amount with its unit ("500 g", "2 portions") and the age as elapsed time ("added 6 weeks ago", "frozen 6 weeks ago" in the Freezer)
+  - [ ] **Freezer and Pantry** rows combine every Stock item of the same ingredient or recipe into one row, showing the total and the oldest date. Opening the row shows each item
+  - [ ] **Fridge** rows are never combined. Each shows its Use-by ("use by Thu"), sorted soonest first, and one past its Use-by is marked "past use-by"
+  - [ ] Within a location, ingredients and dishes are grouped separately. A dish row shows whether it's a base
+  - [ ] Reserved amounts show on the row ("2 portions, 1 reserved")
+- [ ] **Adding:** a Stock item is an existing ingredient or recipe, picked with the searchable combobox, which can create an ingredient inline. No free-text items. The amount uses the ingredient's unit, shown beside the input, or portions for a recipe. `added_on` defaults to today
+  - [ ] A Staple ingredient can't be added. The picker says it's a Staple and points to its state (FEAT-80). This criterion becomes live with FEAT-80's Staple flag
+- [ ] **Fridge Use-by:** defaults to `added_on` plus the ingredient's average shelf life, or plus 3 days for a recipe. The cook can edit it. An ingredient with no average shelf life has no default, and Use-by may be left blank. A blank one sorts last
+- [ ] **Editing in seconds:** changing an amount takes at most two taps from the Storage screen (a stepper on the row). Location, date and Use-by are edited in the item's sheet. Moving an item to the Fridge sets a fresh default Use-by from today. Moving it out clears Use-by
+- [ ] **Lowering below what's reserved:** lowering an amount below what's reserved, or deleting an item that has Reservations, asks first and then releases the Reservations it no longer covers
+- [ ] **Zero means gone:** an amount brought to zero by an edit deletes the item
+- [ ] **Soft-deleted recipes:** a Stock item whose recipe is soft-deleted stays, shown "(deleted)" without a link (DEC-21)
+- [ ] **Settling on read:** `storage.list` settles the household's due Reservations first (cross-cutting #23). Settling lowers each Stock item by the Reservations whose `needed_on` is before today (Europe/London, via `dateUtils`), deletes those Reservations, and deletes any item that reaches zero, all in one `withTransaction`. Two reads at once never settle the same Reservation twice
+- [ ] Every query is household-scoped (DEC-17). Two cooks editing one item is last write wins (DEC-36)
+
+**Implementation notes:**
+- Settling's correctness rests on deleting a Reservation and lowering its Stock item in one statement (`WITH settled AS (DELETE … RETURNING …) UPDATE …`), so a concurrent read finds nothing left to settle. Most reads settle nothing, so this is one indexed check by household and `needed_on`.
+- An item's amount is stored, not derived from its Reservations, so deleting a past plan never brings settled food back (DEC-118).
+- Units: one unit per ingredient (DEC-18). "5 cod fillets" is entered as about 500 g. There's no conversion.
+- Ages and Use-by come from `dateUtils`. No `new Date()` in domain code.
+- Plain text only (DEC-49). Stock items carry no free text.
+
+**Readings (for kick-off):**
+1. **Desktop nav.** Storage is added to the desktop top nav beside Ingredients, not in place of it.
+2. **Ingredients link in Settings.** A plain link row, not a new section.
+3. **Recipe stock picker.** Uses `pickable-recipes` when adding (a soft-deleted recipe can't be newly added). It's a stop-and-ask surface, so kick-off confirms this reading.
+
+**Manual verification:**
+1. Add 500 g of cod and 2 portions of beef stew base to the Freezer, then 300 g of cod to the Freezer a week later (by editing its date). The Freezer shows one cod row, 800 g, aged from the older date. Add 200 g of chicken thighs to the Fridge. Its Use-by defaults from chicken's shelf life. Lower the stew to 1 portion with the stepper.
+
+**Definition of done:**
+- Tests cover:
+  - the CHECKs: exactly one of ingredient or recipe, a positive amount, Use-by only in the Fridge
+  - household scoping on every procedure
+  - Use-by defaults, including moving into and out of the Fridge
+  - Freezer and Pantry combining, and Fridge ordering
+  - lowering below a Reservation, and deleting at zero
+  - settling: due Reservations only, today's left alone, idempotent, two concurrent settles count once (Testcontainers)
+  - the tab bar at phone width, and axe scans of the Storage screen and its sheet in both themes
+- Commit: `feat(storage): add stock items and the storage screen`
+- Gate check: manual verification step 1.
+
+---
+
+### FEAT-79 — Freezing from the plan
+
+**Goal:** A cook sends portions of a cooked dish to the Freezer from the plan, when planning (cook 8, eat 2, freeze 2, leaving 4 as leftovers) or at any time afterwards, including after the day has passed. Each freeze creates Stock items that then stand on their own. (DEC-118, DEC-88, DEC-90, DEC-91)
+
+**Estimate:** 1 day. **Depends on:** FEAT-78. **Enables:** none specifically.
+
+**Files:**
+- `backend/src/db/schema/meal-plans.ts` and a migration: `meal_plan_slot_items.frozen smallint NOT NULL DEFAULT 0`, with a CHECK that `eaten + frozen <= prepared`. A schema change approved in principle by DEC-118
+- `backend/src/lib/slot-items.ts`, `backend/src/trpc/procedures/slots.ts` (setting `frozen`)
+- `shared/src/schemas/slots.ts`
+- `frontend/src/lib/serving-variation-supply.ts`: `deriveBaseBalances` takes `frozen` out of the pool
+- `frontend/src/components/planner/slot-editor-sheet.tsx` (a Freeze count beside Prepare and Eat), `slot-cell.tsx` (a "Freeze" action on a dish with portions left)
+
+**Acceptance criteria:**
+- [ ] **At plan time:** the slot editor's Dishes table has a Freeze count beside Prepare and Eat. Leftovers are `prepared − eaten − frozen`. Eat plus Freeze can't exceed Prepare, using the same capping as Eat can't exceed Prepare
+- [ ] **At any time:** a dish whose recipe has portions left in the plan offers "Freeze…" on its slot card. This works on any day, including a day that has passed. It raises that slot item's `frozen` count
+- [ ] **What a freeze creates:** raising `frozen` by N creates one Freezer Stock item of N portions of that recipe, with `added_on` set to today and `source_slot_item_id` set, in the same `withTransaction`
+- [ ] **Undoing:** lowering `frozen` by N removes up to N portions from Stock items linked to that slot item, but only portions still held and not reserved. If fewer are left, `frozen` stops at what can be undone, and the cook is told why
+- [ ] **Standing on its own:** editing, moving or deleting a frozen Stock item never changes the plan. The plan's `frozen` count stays as a record
+- [ ] **Balances:** freezing portions a later Leftovers slot was counting on shows the usual shortfall warning (DEC-88). It never blocks the freeze
+- [ ] **Shopping:** the shopping list is unchanged by freezing, because it provisions `prepared` portions
+- [ ] Plant points and the Health Score count eaten portions only, so freezing doesn't change them
+
+**Implementation notes:**
+- The migration backfills `frozen = 0`. No existing row breaks the new CHECK, because `eaten <= prepared` already holds, except for `plan_meal` leftovers rows (`prepared = 0`), whose `frozen` stays 0. Kick-off confirms whether the CHECK exempts them or is written as `frozen = 0 OR eaten + frozen <= prepared`.
+- Freezing is a slot-item write, so it routes through the existing slot write path, inside `withTransaction`.
+
+**Readings (for kick-off):**
+1. **Fridge as well as Freezer?** The action is "Freeze", into the Freezer only. Cooked portions get into the Fridge by hand (FEAT-78) or by moving a frozen item. Kick-off asks the user whether a "Keep in fridge" option belongs beside it.
+2. **Variations.** Freezing a Variation's portions stores that Variation's recipe, not its base.
+
+**Manual verification:**
+1. Plan a dish with Prepare 8 and Eat 2, and set Freeze 2. The slot shows 4 left in plan, and the Freezer has 2 portions frozen today. The next day, on the same slot, freeze 2 more: "left in plan" drops to 2 and the Freezer row shows 4. Lower Freeze to 3: the Freezer shows 3.
+
+**Definition of done:**
+- Tests cover:
+  - the CHECK and the backfill
+  - Stock items created and removed with the count, in one transaction
+  - undo stopping at reserved or already-used portions
+  - Stock-item edits leaving the plan unchanged
+  - `deriveBaseBalances` with `frozen`, and the shortfall it can cause
+  - the shopping list unchanged
+  - "Freeze…" on a past day
+  - axe scans of the Dishes table and the freeze dialog in both themes
+- Commit: `feat(storage): freeze portions from the plan`
+- Gate check: manual verification step 1.
+
+---
+
+### FEAT-80 — Shopping against storage, and Staples
+
+**Goal:** When a cook shops for a plan, the list shows what's already held and lets them use it rather than buy it again. Staples, the basics the household always keeps, are tracked as in stock, running low or out, and come onto the list when they need buying. (DEC-118, DEC-18, DEC-31, DEC-36, DEC-37)
+
+**Estimate:** 2 days. **Depends on:** FEAT-78. **Enables:** none specifically.
+
+**Files:**
+- `backend/src/db/schema/ingredients.ts` and a migration: `ingredients.staple_state`, a nullable enum (`in_stock`, `running_low`, `out`), where NULL means not a Staple. `meal_plans.storage_glance_dismissed_at`, a nullable timestamp. On the shopping check row, the Staple state a tick replaced, so unticking can restore it. Schema changes approved in principle by DEC-118
+- `backend/src/lib/shopping-aggregation.ts`, `backend/src/trpc/procedures/shopping.ts` (holdings per line, Reservations from lines, Staple lines, settling first), `backend/src/trpc/procedures/ingredients.ts` (Staple state)
+- `shared/src/schemas/shopping.ts`, `shared/src/schemas/ingredients.ts`
+- `frontend/src/components/shopping/` (the holdings chip and the use / buy / part-use sheet, the Staples groups, the glance banner)
+- `frontend/src/components/storage/` (the Staples section), `frontend/src/components/ingredient-form.tsx` (the Staple flag)
+
+**Acceptance criteria:**
+- [ ] **Holdings on a line:** a line whose ingredient has available Stock items shows a chip with the location and amount ("In freezer: 500 g"). Tapping it opens:
+  - [ ] **Use from storage:** reserves the line's amount, or all that's available if less
+  - [ ] **Buy anyway:** no Reservation
+  - [ ] **Use some, buy the rest:** reserves an amount the cook enters
+  - [ ] The line then shows what's left to buy (needed minus reserved). A fully covered line shows as "From storage" and needs no tick
+- [ ] **Which items it draws from:** by default, Fridge items with the soonest Use-by first, then the oldest Freezer and Pantry items. The cook can change this in the sheet. One line can reserve from several items
+- [ ] **When it leaves storage:** a line's Reservation has `needed_on` set to the date of the first slot in the plan that uses the ingredient, and it settles after that day passes (cross-cutting #23)
+- [ ] **Releasing:** if the plan stops needing the ingredient, or needs less than is reserved, the excess Reservation is released when the list is next read. A recipe edit that changes the needed amount otherwise leaves the Reservation at the amount the cook chose
+- [ ] **Ticks move no stock:** ticking or unticking a line never creates, changes or settles a Reservation. Bought food is never added to storage
+- [ ] **Staples:**
+  - [ ] An ingredient is marked as a Staple from the Storage screen's Staples section, by picking it, or from its edit form. Marking an ingredient that has Stock items asks first and deletes them
+  - [ ] The Staples section lists each Staple with a one-tap, three-way state: in stock, running low, out
+  - [ ] Every Staple that's running low or out appears on every current and future plan's list, under "Staples to restock", whether the plan needs it or not
+  - [ ] A Staple the plan needs while it's in stock is listed under a collapsed "Staples you have", not as a line to buy
+  - [ ] Ticking a running-low or out Staple sets it to in stock. Unticking puts back the state it replaced. This is the one exception to ticks having no side effects
+  - [ ] A DEC-31 quantity reset never changes a Staple's state
+- [ ] **The glance:** a plan's list opens with a "Check your Staples and storage" banner, linking to the Storage screen, until it's dismissed for that plan
+- [ ] **Settling first:** the list settles due Reservations before it aggregates
+- [ ] **Offline:** ticks still queue offline (DEC-36), and a Staple's restock happens when the queued tick drains. Reserving from storage needs a connection and is off while offline
+
+**Implementation notes:**
+- The aggregation stays a pure sum per ingredient (DEC-18). Holdings and Reservations are a second step after the sum, never folded into it.
+- A Staple's state is household-wide. It's not per plan, so two plans' lists show the same Staple lines.
+- Shelf-life warnings (DEC-37) apply to what's left to buy. A line fully covered from storage shows no shelf-life warning.
+
+**Readings (for kick-off):**
+1. **"Every current and future plan."** Staple lines appear on any plan whose end date hasn't passed. A past plan's list shows none.
+2. **Several lines, one item.** Two plans can't both reserve more than an item holds. The second sees only what's available.
+
+**Manual verification:**
+1. Hold 500 g of cod in the Freezer. Plan a dish needing 400 g. The cod line shows "In freezer: 500 g". Use from storage: the line shows "From storage" and the Freezer row shows "500 g, 400 g reserved". The day after that dish, open Storage: 100 g of cod is left.
+2. Mark olive oil as a Staple and set it to running low. It appears under "Staples to restock" on this plan's list. Tick it: Storage shows it as in stock. Untick it: it's running low again.
+
+**Definition of done:**
+- Tests cover:
+  - holdings per line, and each of the three choices
+  - the default draw order, and reserving across several items
+  - `needed_on` from the first slot that needs the ingredient, and settling
+  - release when the plan needs less
+  - ticks moving no stock
+  - each Staple rule: the groups, restock on tick, restore on untick, no change on a DEC-31 reset, the offline drain
+  - marking a held ingredient as a Staple
+  - the glance banner dismissed per plan
+  - axe scans of the chip's sheet, the Staples groups and the Staples section in both themes
+- Commit: `feat(storage): shop against storage and restock staples`
+- Gate check: manual verification steps 1 and 2.
+
+---
+
+### FEAT-81 — Eating from storage: Leftovers from Storage, and storage in Plan Proposals
+
+**Goal:** Food in storage becomes meals in the plan. A slot can eat a dish from storage as Leftovers, or cook a Variation on a frozen base so only the Variation's extra ingredients go on the list. The Plan Proposal sees what's held and can plan these meals too. (DEC-118, DEC-117, DEC-25, DEC-88, DEC-110, cross-cutting #22)
+
+**Estimate:** 1.5–2 days. **Depends on:** FEAT-78, FEAT-76. **Enables:** FEAT-82's storage input.
+
+**Files:**
+- A migration: `leftovers_source` gains `storage`. A schema change approved in principle by DEC-118
+- `backend/src/lib/slot-writes.ts`, `backend/src/trpc/procedures/slots.ts`, `backend/src/trpc/procedures/plans.ts` (Reservations from slots, release on change, settling on planner reads, the delete warning's count)
+- `frontend/src/lib/serving-variation-supply.ts`: reserved storage portions join the pool at their slot
+- `frontend/src/components/planner/slot-editor-sheet.tsx` (Storage in the leftovers picker, "Use frozen base" on a Variation), `slot-cell.tsx`, `frontend/src/lib/slot-display.ts`
+- `backend/src/lib/plan-proposal/` and `backend/src/lib/meal-planner/` (the request, the prompt, the normaliser), `shared/src/schemas/plan-proposals.ts`, `frontend/src/components/plan-wizard/`
+
+**Acceptance criteria:**
+- [ ] **Leftovers from Storage:** the leftovers "Which meal?" picker lists available dish Stock items, marked with a snowflake, their location and age. Picking one makes the slot a Leftovers slot with source `storage`, reserving the slot's eaten portions (`needed_on` = the slot's date)
+  - [ ] A Stock item whose recipe is soft-deleted is still offered, shown "(deleted)"
+  - [ ] A Fridge item past its Use-by is offered, marked "past use-by"
+- [ ] **A frozen base for a Variation:** a slot cooking a Variation whose base is held offers "Use frozen base". Choosing it reserves the Variation's `prepared` base portions, and those portions join the base pool at that slot in `deriveBaseBalances`. So no shortfall shows, and only the Variation's own ingredients go on the shopping list. It's never automatic
+- [ ] **Releasing:** changing the slot's type or dish, lowering its portions, or moving it releases or moves its Reservation. A moved slot's `needed_on` follows it
+- [ ] **When it leaves storage:** once the slot's day has passed, its Reservations settle on the next planner, storage or shopping read (cross-cutting #23)
+- [ ] **Deleting a plan:** if the plan has Reservations not yet settled, the confirmation says "This releases N reserved Stock items". Deleting releases them. Settled food stays used, and Stock items frozen from the plan stay in storage
+- [ ] **Plan Proposals:**
+  - [ ] The request carries the household's available Stock items: name, ingredient or dish, whether a dish is a base, location, available amount and Fridge Use-by. Fridge items past their Use-by and fully reserved items are left out
+  - [ ] The prompt tells the model to use Fridge items in order of soonest Use-by. It gives no age preference for Freezer or Pantry items
+  - [ ] The model may propose a Leftovers-from-Storage slot eating a held dish, or a Variation on a held base. The normaliser drops either if what it needs isn't available, counting what earlier slots in the proposal already took
+  - [ ] Apply writes these slots and their Reservations in its one `withTransaction`
+  - [ ] Review marks storage slots with the snowflake. Swap, discard and suggest again work as for other slots
+  - [ ] The model never nets ingredients against the shopping list, and never plans food into the freezer ("Freezer surplus" stays excluded)
+- [ ] **Data flow:** the stock list is new data sent to Anthropic, named in DEC-118. Logs gain only the number of Stock items sent (metadata only, cross-cutting #22)
+
+**Implementation notes:**
+- A Leftovers-from-Storage slot has one eat item for the Stock item's recipe with `prepared = 0`, as `plan_meal` leftovers do, so the shopping list leaves it out without a new rule.
+- Kick-off confirms how a Reservation links to its slot item, so a slot's edits and drags (`slots.relocate`) carry their Reservations.
+
+**Readings (for kick-off):**
+1. **Drag across days.** Dragging a storage slot to an earlier day moves `needed_on` with it. Dragging a slot whose day has passed to a later day is allowed only if its Reservation hasn't settled yet.
+2. **Plan Proposal ingredient stock.** Ingredient Stock items are sent so the model can plan around Fridge food, but the proposal never reserves them. Netting stays on the shopping list.
+
+**Manual verification:**
+1. With 2 portions of lasagne in the Freezer, set Thursday dinner (headcount 2) to Leftovers and pick the lasagne. The Freezer shows "2 portions, 2 reserved". The day after Thursday, the Freezer has no lasagne.
+2. With 2 portions of beef stew base in the Freezer, plan a stew Variation for 2 on Tuesday and choose "Use frozen base". No shortfall shows, and the list has only the Variation's own ingredients.
+3. Run the planning wizard with chicken thighs in the Fridge (Use-by tomorrow) and a frozen lasagne. The proposal uses the chicken early in the plan, and may use the lasagne.
+
+**Definition of done:**
+- Tests cover:
+  - the picker's storage entries, including soft-deleted and past-use-by items
+  - Reservations created, moved and released by slot edits and drags
+  - "Use frozen base" in `deriveBaseBalances` and on the shopping list
+  - plan deletion: its warning, released Reservations, settled food staying used
+  - the proposal request's stock list and what it leaves out
+  - each normaliser rule for storage slots, including two slots wanting the same item
+  - Apply writing Reservations
+  - the fake planner gaining a storage case
+  - axe scans of the picker and the storage slot card in both themes
+- Commit: `feat(storage): eat from storage in the planner and plan proposals`
+- Gate check: manual verification steps 1 and 2.
+
+---
+
+### FEAT-82 — Model feature evals: the eval runner, and the Recipe Import and Health Score eval sets
 
 **Goal:** Measure a model feature on real inputs before a model, effort or prompt change ships. One runner takes a feature and an adapter and runs that feature's inputs through its real reader; Recipe Import brings the first set, supplied by the user. The first run settles the import model (Opus 5.5 or Sonnet 5.5) and its effort level. Health scoring brings a second set, which checks that each recipe's score holds steady across runs and that scores fall in the expected order; its run settles the scoring model and effort. (DEC-104, DEC-109, DEC-112, cross-cutting #22)
 
@@ -3720,6 +3956,7 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
     - whether the summary's reading of the Brief matches the Brief
     - time against the time limit
   - The run settles `MEAL_PLAN_MODEL` and `MEAL_PLAN_EFFORT`.
+- Amended at storage scoping (2026-11-15): renumbered from FEAT-78 to FEAT-82, so the evals stay last after the storage features (FEAT-78 to FEAT-81, DEC-118). The Plan Proposal set gains a seventh input once FEAT-81 lands: a week with Fridge stock near its Use-by and a frozen dish. The report adds whether Fridge items were used in Use-by order, and whether any storage slot was dropped by the normaliser.
 
 **Manual verification:**
 1. Run the runner on a pasted recipe through the `anthropic` adapter. It finishes within the time limit, and the proposal shows "2 tbsp olive oil" as millilitres with its original line.
@@ -3875,19 +4112,27 @@ A stored health score (DEC-101) is only trustworthy if it's marked stale when it
 
 ### 22. Model features
 
-**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 and FEAT-67 (health scoring), FEAT-74 to FEAT-77 (AI meal planning), FEAT-78 (evals), and any future feature that calls a model.
+**Threads through:** FEAT-60 (sets the pattern with Recipe Import), FEAT-61 to FEAT-65, FEAT-66 and FEAT-67 (health scoring), FEAT-74 to FEAT-77 (AI meal planning), FEAT-82 (evals), and any future feature that calls a model.
 
 Every model feature follows the rules in DEC-110 and is built the same way (DEC-109). A new feature that skips a step drifts from the others, and the drift is costly to undo once a second provider or model is in play. The checklist:
 - **Its own seam.** One narrow, domain-level interface per feature (`RecipeReader`, `RecipeScorer`), never a shared "AI service". It has an adapter per provider and a `fake` adapter for tests and e2e.
 - **Config.** `<FEATURE>_ADAPTER` and `<FEATURE>_MODEL` in `config.ts`, validated by Zod. Config refuses `fake` in production. Where the provider has an effort setting, `<FEATURE>_EFFORT` too, since a level means different things on different models.
 - **Rules outside the seam.** Input preparation happens before the seam, and the feature's normaliser runs after it, on every adapter's output (schema, plain text, household references). Adapters only call the model.
 - **Logging.** Through one shared helper that takes a `feature` field and logs metadata only: `reqId`, feature, adapter, model, tokens, latency, outcome. No prompt or model text in logs or Sentry (DEC-104).
-- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-78.
+- **Evals.** One eval runner that takes any feature's inputs and any adapter. Each feature brings its own inputs. The runner arrives with FEAT-82.
 - **Data flow.** The feature's DEC names any new data it sends to a provider.
 - **Shared code is helpers, not seams:** the provider client setup, provider error sorting, the logging helper, plain-text stripping and the structured-output schema helper (all in `backend/src/lib/model-features/`), and the eval runner.
 - **A real call before the first deploy.** The `fake` adapter can't catch a provider's limits. Recipe Import shipped with a schema Anthropic refused on every request, so send one real request through the real adapter before a model feature first deploys.
 
 **Named triggers:** the first model feature that can't finish within one request decides background work at its kick-off, against auto-stop (DEC-64) and the lack of a scheduler. Health scoring settled it for itself with no background work: the browser drives scoring one request per recipe (DEC-112). AI meal planning assumes a 14-day Plan Proposal fits in one request, and FEAT-74's kick-off times a real call to confirm it. If it doesn't fit, the trigger fires there (DEC-117). The first feature that needs streamed output decides the tRPC link change against cross-cutting #16.
+
+### 23. Settling Reservations
+
+**Threads through:** FEAT-78 (the helper and the Storage screen), FEAT-80 (the shopping list), FEAT-81 (the planner and Plan Proposals), and any future read that shows what's held or what a plan will use.
+
+A Reservation leaves storage once the day it's needed has passed, but nothing runs on a schedule: Fly auto-stops (DEC-64) and there is no job runner. So **every read that shows held stock, or plans against it, calls `settleReservations` from `backend/src/lib/stock-settlement.ts` first**, inside a `withTransaction`. A read that skips it shows food that has already been eaten. The helper deletes each due Reservation and lowers its Stock item in one statement, so two reads at once can't count one Reservation twice (DEC-118). Today comes from `dateUtils` (DEC-33).
+
+**Named trigger:** if a background job runner ever arrives, settling moves to it, and this list of call sites is the checklist for removing them.
 
 ---
 

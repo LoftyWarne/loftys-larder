@@ -66,6 +66,7 @@ Revisit: on the first formal access request, or if the user count grows past the
 What it is: separate shelf-life accounting for cooked dishes (typically shorter raw, much longer when frozen).
 Why not: raw-ingredient shelf life from purchase covers the shopping-side decisions. Cooked-base shelf life only matters if batch-cooking patterns regularly stretch consumption past safe limits — an empirical question the plan can't answer yet.
 Revisit: when real cooking patterns produce a slot more than N days past the base cook and the household notices something has gone off. Trigger condition: explicit feedback from either cook that consumption windows have caused waste.
+Narrowed (2026-11-15) by DEC-118: cooked portions held in the Fridge get a Use-by, defaulting to 3 days after they went in and editable. It's a prompt, not a safety judgement. Per-recipe shelf lives, frozen shelf lives, and any shelf-life accounting within a plan stay excluded.
 `[→ decision log]`
 
 ### Multi-shop shelf-life planning
@@ -133,7 +134,7 @@ Why not:
 Revisit:
 - **Existing plans:** when the cooks want to fill the rest of a plan they started by hand.
 - **Clarifying questions:** when Briefs are often misread despite the summary.
-- **Freezer surplus:** when the forthcoming storage feature records which recipes freeze well. That feature will also need the "Pantry / inventory tracking" and "Cooked-base shelf-life tracking" entries reversed or narrowed.
+- **Freezer surplus:** when something records which recipes freeze well. The storage feature (DEC-118, FEAT-78 to FEAT-81) lets proposals eat from storage, but it records no such thing, so freezer surplus stays excluded.
 
 `[→ decision log]`
 
@@ -234,6 +235,7 @@ Trigger: cold-start measurement in Phase 6 exceeding 3 seconds.
 What it would be: tracking what's already in the cupboard / fridge / freezer and netting it against the shopping list.
 Why not part of this: requires constant manual upkeep to be useful (or barcode scanning, smart-shelf hardware, etc.). The shopping list aggregates *what the plan needs*, not *what the household lacks*. The cooks reconcile against the cupboard at shopping time — a 30-second human task that doesn't repay weeks of engineering.
 Adjacency note: a future "starting inventory" field on a plan could subtract from the list. That's a feature for a different product spec, not a v1 extension.
+Reversed (2026-11-15) by DEC-118 (FEAT-78 to FEAT-81). The household chose to pay the upkeep for two returns: not buying food it already holds, and eating Fridge food before its Use-by. To keep that upkeep small, the following stay excluded: barcode or photo entry, weighing, unit conversion, freezer space, true expiry dates, a periodic "check your freezer" prompt, stock changing on a shopping tick, and anything pushing old frozen or Pantry food to be eaten first. Staples are tracked as a state, never an amount.
 
 ### AI / LLM features
 What it would be: meal-plan suggestions, recipe recommendations, ingredient substitution advice, "what can I cook with X."

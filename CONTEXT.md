@@ -62,6 +62,36 @@ _Avoid_: pinned slot, locked slot
 A dish cooked at one slot for more portions than that slot eats, so the rest is eaten later in the plan. Nobody may eat it at the slot where it's cooked.
 _Avoid_: cook-ahead, extra portions, meal prep
 
+**Leftovers**:
+A meal of food cooked earlier, either earlier in the same plan or taken from storage. While food is held in storage it's a Stock item; it becomes Leftovers when a slot eats it.
+_Avoid_: frozen meal, reheat
+
+**Variation**:
+A recipe built on a base recipe: a cooked base plus the Variation's own extra ingredients. A base can't itself be a Variation.
+_Avoid_: variant, version
+
+### Storage
+
+**Storage location**:
+Where the household keeps food it already holds: the Freezer, the Fridge or the Pantry.
+_Avoid_: cupboard, larder, inventory
+
+**Stock item**:
+One thing the household holds in a Storage location: an amount of an ingredient, or portions of a recipe, with the date it went in.
+_Avoid_: inventory item, pantry item, frozen meal
+
+**Use-by**:
+The date a Fridge Stock item should be eaten by. It's a prompt, not a safety judgement. Freezer and Pantry Stock items have none.
+_Avoid_: expiry, best-before, shelf life (an ingredient's typical life from purchase)
+
+**Reservation**:
+An amount of a Stock item set aside for a plan, by a slot that eats it or a shopping-list line it covers. Reserved stock isn't available to anything else, and it leaves storage once the day it's needed has passed.
+_Avoid_: hold, allocation, claim
+
+**Staple**:
+An ingredient the household always keeps, such as olive oil, tracked only as in stock, running low or out, never as an amount. A Staple is never a Stock item.
+_Avoid_: basic, essential, pantry item
+
 ### Judging recipes
 
 **Health Score**:

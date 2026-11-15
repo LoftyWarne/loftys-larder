@@ -114,7 +114,7 @@ const configSchema = z
     // days before it are due again as "from an older scorer".
     HEALTH_SCORE_SINCE: z.iso.date().optional(),
     // AI meal planning (DEC-117), set up the same way as the reader. The
-    // default effort stands until FEAT-78 measures it.
+    // default effort stands until FEAT-82 measures it.
     MEAL_PLAN_ADAPTER: mealPlanAdapterSchema.optional(),
     MEAL_PLAN_MODEL: z.string().min(1).default('claude-opus-5-5'),
     MEAL_PLAN_EFFORT: modelEffortSchema.default('medium'),

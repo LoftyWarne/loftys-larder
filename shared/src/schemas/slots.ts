@@ -27,18 +27,30 @@ const slotCommentSchema = z
 // `eaten` = portions consumed here; a dish must do at least one (`prepared +
 // eaten > 0`). The household scope of each recipe is checked in the procedure
 // (it needs a DB read); the schema just shapes the input. `sortOrder` orders
-// dishes within the slot.
+// dishes within the slot. `frozen` (FEAT-79) is the Freezer count the slot
+// editor sets; left out, a dish keeps its current count (a new dish, none).
+// The Fridge count is set by `slots.store` only.
 export const slotItemInputSchema = z
   .object({
     recipeId: recipeIdSchema,
     prepared: quantitySchema,
     eaten: quantitySchema,
+    frozen: quantitySchema.optional(),
     sortOrder: z.number().int().nonnegative(),
   })
   .refine((value) => value.prepared + value.eaten > 0, {
     path: ['prepared'],
     message: 'A dish must have a prepared or eaten quantity',
-  });
+  })
+  .refine(
+    (value) =>
+      (value.frozen ?? 0) === 0 ||
+      value.eaten + (value.frozen ?? 0) <= value.prepared,
+    {
+      path: ['frozen'],
+      message: 'Eat plus Freeze cannot exceed Prepare',
+    },
+  );
 export type SlotItemInput = z.infer<typeof slotItemInputSchema>;
 
 // The rules a slot's content follows, wherever a slot is written: the slot
@@ -119,8 +131,27 @@ export const updateSlotInputSchema = withSlotContentRules(
 );
 export type UpdateSlotInput = z.infer<typeof updateSlotInputSchema>;
 
+// Where a dish's portions go from the plan (FEAT-79): the Freezer or the
+// Fridge. The Pantry isn't offered for cooked food.
+export const PLAN_STORE_LOCATIONS = ['freezer', 'fridge'] as const;
+export const planStoreLocationSchema = z.enum(PLAN_STORE_LOCATIONS);
+export type PlanStoreLocation = z.infer<typeof planStoreLocationSchema>;
+
+// A count that stopped short of what was asked. Lowering: only linked portions
+// still held and not reserved can be taken back, so `applied` is above
+// `requested`. Raising: portions that couldn't be taken back from the other
+// location still count, so `applied` is below `requested`.
+export const storedLimitSchema = z.object({
+  slotItemId: z.number().int().positive(),
+  location: planStoreLocationSchema,
+  requested: quantitySchema,
+  applied: quantitySchema,
+});
+export type StoredLimit = z.infer<typeof storedLimitSchema>;
+
 export const updateSlotResultSchema = z.object({
   slot: planSlotSchema,
+  storedLimits: z.array(storedLimitSchema),
 });
 export type UpdateSlotResult = z.infer<typeof updateSlotResultSchema>;
 
@@ -145,3 +176,19 @@ export const relocateSlotResultSchema = z.object({
   destSlot: planSlotSchema,
 });
 export type RelocateSlotResult = z.infer<typeof relocateSlotResultSchema>;
+
+// "Store…" on a slot card (FEAT-79): the dish's new Freezer and Fridge counts.
+// Raising one makes a Stock item; lowering one takes back linked portions
+// still held and unreserved, as far as it can.
+export const storeSlotItemInputSchema = z.object({
+  slotItemId: z.number().int().positive(),
+  frozen: quantitySchema,
+  chilled: quantitySchema,
+});
+export type StoreSlotItemInput = z.infer<typeof storeSlotItemInputSchema>;
+
+export const storeSlotItemResultSchema = z.object({
+  slot: planSlotSchema,
+  storedLimits: z.array(storedLimitSchema),
+});
+export type StoreSlotItemResult = z.infer<typeof storeSlotItemResultSchema>;

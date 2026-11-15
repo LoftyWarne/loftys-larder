@@ -2,6 +2,7 @@ import type {
   GetPlanResult,
   PlanSlot,
   PlanSlotItem,
+  StoredLimit,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { useRef } from 'react';
@@ -24,6 +25,11 @@ export interface OptimisticSlotMutationOptions {
    * surfacing a toast or invoking the editor's error state.
    */
   onError?: (error: unknown) => void;
+  /**
+   * Called when a lowered Freezer count couldn't all be taken back from
+   * storage (FEAT-79), so the cook can be told why.
+   */
+  onStoredLimits?: (limits: StoredLimit[]) => void;
 }
 
 export interface OptimisticUpdateArgs {
@@ -46,6 +52,7 @@ export interface UseOptimisticSlotUpdateResult {
 export function useOptimisticSlotUpdate({
   planId,
   onError,
+  onStoredLimits,
 }: OptimisticSlotMutationOptions): UseOptimisticSlotUpdateResult {
   const utils = trpc.useUtils();
   // Side channel: `mutate(input)` only forwards the input to `onMutate`, so the
@@ -83,10 +90,13 @@ export function useOptimisticSlotUpdate({
       // The day and plan Health Scores are derived the same way (DEC-113).
       void utils.healthScores.forDay.invalidate({ planId });
       void utils.healthScores.forPlan.invalidate({ planId });
+      // A dish's Freezer count moves Stock items with it (FEAT-79).
+      void utils.storage.list.invalidate();
       // Swap the server-returned row into the cache without invalidating —
       // LWW reconciliation (DEC-36). The server result mirrors
       // `selectPlanSlots` exactly so the shape lines up.
       if (!data) return;
+      if (data.storedLimits.length > 0) onStoredLimits?.(data.storedLimits);
       const current = utils.plans.get.getData({ id: planId });
       if (!current) return;
       utils.plans.get.setData({ id: planId }, replaceSlot(current, data.slot));
@@ -125,7 +135,12 @@ function applySlotPatch(
   };
 }
 
-function replaceSlot(plan: GetPlanResult, serverSlot: PlanSlot): GetPlanResult {
+// Swap a server-returned slot into the cached plan (LWW, DEC-36). Shared with
+// other slot mutations, such as storing from a dish (FEAT-79).
+export function replaceSlot(
+  plan: GetPlanResult,
+  serverSlot: PlanSlot,
+): GetPlanResult {
   return {
     ...plan,
     slots: plan.slots.map((slot) =>

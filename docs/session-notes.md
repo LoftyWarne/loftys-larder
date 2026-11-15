@@ -4,6 +4,25 @@ Rolling working doc. Pending questions, in-flight context, and drift-from-plan n
 
 ---
 
+## 2026-11-15 — Freezing and keeping in the fridge from the plan (FEAT-79)
+
+**Status:** Implemented, not committed. Typecheck, lint and format are clean in every workspace. Backend: 1,314 tests green. Frontend: 1,110 green. New e2e specs green: manual verification step 1 (`storing-from-plan.spec.ts`, all on one day, since e2e can't move the clock) and axe scans of the Dishes table and the Store dialog at phone width in both themes. The gate check hasn't been run by hand. The FEAT-79 checkboxes are left for the user to tick.
+
+**Agreed at kick-off** (FEAT-79 and DEC-118 amended to match):
+- **Fridge too:** a second count, `chilled`, beside `frozen`. CHECK `frozen + chilled = 0 OR eaten + frozen + chilled <= prepared` (migration `0029_slot_item_stored`), which exempts leftovers rows and recipe slots eating food cooked earlier (`prepared = 0`).
+- **Slot item ids stay stable.** `replaceSlotItems` used to delete and re-insert, which would cut every `source_slot_item_id` link (and FEAT-81's slot-item Reservations) on any save. Now `slots.update` matches dishes by recipe (`reconcileSlotItems`), `slots.relocate` moves rows by `slot_id` (`moveSlotItems`), and Apply inserts (`insertSlotItems`).
+- **Two ways in:** the editor's Freeze column sets `frozen` (omitted means "keep"). The card's "Store…" dialog (`slots.store`) sets both counts up or down. It opens at the current counts, and the first raise of a count adds the plan's leftovers, capped at what the dish has spare. It's hidden while a slot save is in flight, because the dishes carry placeholder ids until it returns. Fridge portions show read-only in the editor.
+- **A limited undo** saves what it could and returns `storedLimits`. The planner shows why. Lowering Prepare below portions that can't be taken back is refused (`SLOT_ITEM_STORED_EXCEEDS_PREPARED`) and nothing changes.
+- **Removing a dish** leaves its Stock items, unlinked. **Duplicating a plan** starts both counts at zero.
+
+**How it's built:**
+- `changeStored` in `backend/src/lib/slot-storing.ts`: a raise inserts one Stock item (Fridge Use-by via `defaultUseBy`). A lowering locks the linked items in that location, newest first, and takes back whole portions only, leaving reserved amounts alone. Callers settle Reservations first.
+- `useOptimisticSlotUpdate` gained an optional `onStoredLimits` callback, invalidates `storage.list` on settle, and exports `replaceSlot` for the Store mutation. Not in the kick-off plan; approved by the user after review.
+- **Independent review fixes:** `slots.store` lowers before it raises, and caps a raise by what the other count actually reached (it used to break the CHECK with a 500). `slots.relocate` locks both slot rows in id order before their dishes, matching `slots.update`'s order, so the two can't deadlock.
+- **Left as notes from the review:** an old editor save can set `frozen` back over a newer store from another device (DEC-36), deleting that Freezer stock. A Freezer item moved to the Fridge is taken back by lowering `chilled`. `takeBackStock` reads Reservations without locking them, so FEAT-80/81 must lock the Stock item before adding one.
+
+---
+
 ## 2026-11-15 — Stock items and the Storage screen (FEAT-78)
 
 **Status:** Implemented and committed on `main`, not pushed. An independent review's six suggestions are fixed. Typecheck, lint and format are clean in every workspace. Backend: 1,289 tests green. Frontend: 1,093 green. e2e: 79 of 79, including a spec that runs manual verification step 1 and axe scans of the Storage screen and both sheets at phone width in both themes. The gate check hasn't been run by hand. The FEAT-78 checkboxes are left for the user to tick.

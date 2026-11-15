@@ -486,6 +486,8 @@ function recipeContent(
         isDeleted: false,
         prepared,
         eaten,
+        frozen: 0,
+        chilled: 0,
         sortOrder: 0,
       },
     ],
@@ -516,6 +518,8 @@ function suggestionContent(suggestion: ProposedSlot): SlotContent {
       isDeleted: false,
       prepared: item.prepared,
       eaten: item.eaten,
+      frozen: 0,
+      chilled: 0,
       sortOrder: index,
     })),
   };

@@ -1,6 +1,6 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { PlanSlot, PlanSlotItem } from '@loftys-larder/shared';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Snowflake, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { CookLink } from '@/components/cook-link.tsx';
@@ -27,6 +27,9 @@ export interface SlotCellProps {
   shortfallByItem?: ReadonlyMap<number, number>;
   isSelected?: boolean;
   dndEnabled?: boolean;
+  // "Store…" on a dish (FEAT-79): send portions to the Freezer or the Fridge.
+  // Offered on a dish with portions spare or already stored.
+  onStoreItem?: (item: PlanSlotItem) => void;
   // Future content regions — leave open for downstream FEATs.
   chefChip?: ReactNode;
   commentLine?: ReactNode;
@@ -47,6 +50,7 @@ export function SlotCell({
   shortfallByItem,
   isSelected = false,
   dndEnabled = false,
+  onStoreItem,
   chefChip,
   commentLine,
 }: SlotCellProps): React.ReactElement {
@@ -107,7 +111,11 @@ export function SlotCell({
           slot.slotType === 'empty' && 'text-muted-foreground italic',
         )}
       >
-        <SlotBody slot={slot} shortfallByItem={shortfallByItem} />
+        <SlotBody
+          slot={slot}
+          shortfallByItem={shortfallByItem}
+          onStoreItem={onStoreItem}
+        />
         {chefChip}
         {commentLine ?? <SlotCommentLine comment={slot.comment} />}
       </div>
@@ -128,9 +136,11 @@ export function SlotCell({
 function SlotBody({
   slot,
   shortfallByItem,
+  onStoreItem,
 }: {
   slot: PlanSlot;
   shortfallByItem?: ReadonlyMap<number, number>;
+  onStoreItem?: (item: PlanSlotItem) => void;
 }): React.ReactElement {
   if (slot.slotType === 'leftovers') {
     const dish = slot.items[0];
@@ -174,6 +184,14 @@ function SlotBody({
                   </span>
                 </span>
                 <CookLink item={item} />
+                {onStoreItem && canStore(item) && (
+                  <StoreButton
+                    item={item}
+                    onClick={() => {
+                      onStoreItem(item);
+                    }}
+                  />
+                )}
                 <RecipeTypeBadge recipe={item} className="ml-auto" />
               </span>
               {short !== undefined && short > 0 && (
@@ -214,6 +232,33 @@ function shortfallText(shortBy: number, needsBase = false): string {
     ? 'not enough base cooked yet'
     : 'not enough cooked yet';
   return `Short ${String(shortBy)} ${unit} — ${cause}`;
+}
+
+// A dish can be stored from while it has portions spare, and its stored ones
+// taken back while it has any.
+function canStore(item: PlanSlotItem): boolean {
+  const stored = item.frozen + item.chilled;
+  return item.prepared - item.eaten - stored > 0 || stored > 0;
+}
+
+function StoreButton({
+  item,
+  onClick,
+}: {
+  item: PlanSlotItem;
+  onClick: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Store ${item.recipeName}…`}
+      title="Store…"
+      className="pointer-events-auto inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <Snowflake aria-hidden className="size-4" />
+    </button>
+  );
 }
 
 // A dish is short on a base pool when it's a base or a variation of one; a plain

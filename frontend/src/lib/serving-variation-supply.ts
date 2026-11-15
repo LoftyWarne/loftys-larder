@@ -6,8 +6,8 @@ import { compareSlotOrder, type PlanSlot } from '@loftys-larder/shared';
 // its own recipe's pool, so a slot that cooks and eats the same dish
 // self-supplies — then CONSUMES: a serving variation draws its base pool by what
 // it prepared (making N variation portions needs N base portions), and every
-// item draws its own pool by what it ate. A draw that takes a pool below zero is
-// a shortfall for that slot. Computed over the cached plan, no round-trip.
+// item draws its own pool by what it ate and what it sent to storage (FEAT-79).
+// A draw that takes a pool below zero is a shortfall for that slot. Computed over the cached plan, no round-trip.
 
 export interface BaseBalances {
   // Slots that ate/used more of a recipe than was cooked up to that point,
@@ -39,7 +39,7 @@ export function deriveBaseBalances(slots: readonly PlanSlot[]): BaseBalances {
       );
     }
     // 2. Consume — a variation draws its base pool by what it prepared; every
-    //    item draws its own pool by what it ate. Attribute any deficit to the
+    //    item draws its own pool by what it ate or stored. Attribute any deficit to the
     //    dish whose draw went negative.
     let slotShort = 0;
     for (const item of slot.items) {
@@ -52,7 +52,8 @@ export function deriveBaseBalances(slots: readonly PlanSlot[]): BaseBalances {
       if (item.baseRecipeId !== null && item.prepared > 0) {
         draw(item.baseRecipeId, item.prepared);
       }
-      if (item.eaten > 0) draw(item.recipeId, item.eaten);
+      const used = item.eaten + item.frozen + item.chilled;
+      if (used > 0) draw(item.recipeId, used);
       if (itemShort > 0) {
         shortfallByItem.set(item.id, itemShort);
         slotShort += itemShort;

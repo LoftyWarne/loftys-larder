@@ -5,10 +5,14 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   relocateSlotInputSchema,
   relocateSlotResultSchema,
+  storeSlotItemInputSchema,
+  storeSlotItemResultSchema,
   updateSlotInputSchema,
   updateSlotResultSchema,
   type PlanSlot,
   type RelocateSlotResult,
+  type StoredLimit,
+  type StoreSlotItemResult,
   type UpdateSlotResult,
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
@@ -23,10 +27,16 @@ import {
 import { recipes } from '../../db/schema/recipes.ts';
 import { mealOccasions } from '../../db/schema/reference.ts';
 import { loadSlotDiners } from '../../lib/slot-diners.ts';
-import { replaceSlotDiners, replaceSlotItems } from '../../lib/slot-writes.ts';
+import {
+  moveSlotItems,
+  reconcileSlotItems,
+  replaceSlotDiners,
+} from '../../lib/slot-writes.ts';
+import { changeStored } from '../../lib/slot-storing.ts';
+import { settleReservations } from '../../lib/stock-settlement.ts';
 import { loadSlotItems } from '../../lib/slot-items.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
-import { formatCivilDate } from '../../lib/date-utils.ts';
+import { formatCivilDate, todayInLondon } from '../../lib/date-utils.ts';
 import { protectedProcedure, router } from '../init.ts';
 
 type Schema = typeof schema;
@@ -59,8 +69,9 @@ export const slotsRouter = router({
         await assertUserExists(ctx.db, dinerUserId, 'SLOT_DINER_NOT_FOUND');
       }
 
+      const today = todayInLondon();
       const withTransaction = makeWithTransaction(ctx.db);
-      await withTransaction(async (tx) => {
+      const storedLimits = await withTransaction(async (tx) => {
         await tx
           .update(mealPlanSlots)
           .set({
@@ -71,12 +82,18 @@ export const slotsRouter = router({
             guestCount: input.guestCount,
           })
           .where(eq(mealPlanSlots.id, slot.id));
-        await replaceSlotItems(tx, slot.id, input.items);
+        const limits = await reconcileSlotItems(
+          tx,
+          slot.id,
+          input.items,
+          today,
+        );
         await replaceSlotDiners(tx, slot.id, input.dinerUserIds);
+        return limits;
       });
 
       const selected = await selectSlotById(ctx.db, slot.id);
-      return { slot: selected };
+      return { slot: selected, storedLimits };
     }),
 
   // FEAT-40 — drag a slot onto another slot. Empty dest = move (source goes
@@ -101,14 +118,24 @@ export const slotsRouter = router({
             cause: { code: 'SLOT_RELOCATE_CROSS_PLAN' },
           });
         }
-        const [sourceItems, destItems, sourceDiners, destDiners] =
+        // Lock both slot rows, lowest id first, before their dishes: a slot
+        // save locks its slot row before its items, so taking the same order
+        // here can't deadlock against it or against an opposite drag.
+        await tx
+          .select({ id: mealPlanSlots.id })
+          .from(mealPlanSlots)
+          .where(inArray(mealPlanSlots.id, [source.id, dest.id]))
+          .orderBy(asc(mealPlanSlots.id))
+          .for('update');
+        const [sourceItemIds, destItemIds, sourceDiners, destDiners] =
           await Promise.all([
-            loadRawSlotItems(tx, source.id),
-            loadRawSlotItems(tx, dest.id),
+            loadSlotItemIds(tx, source.id),
+            loadSlotItemIds(tx, dest.id),
             loadRawSlotDiners(tx, source.id),
             loadRawSlotDiners(tx, dest.id),
           ]);
-        const destPopulated = dest.slotType !== 'empty' || destItems.length > 0;
+        const destPopulated =
+          dest.slotType !== 'empty' || destItemIds.length > 0;
 
         // Dest receives source's content unconditionally; source receives
         // dest's content (swap) or is emptied (move).
@@ -121,13 +148,9 @@ export const slotsRouter = router({
           .set(destPopulated ? metaPatch(dest) : emptyMetaPatch())
           .where(eq(mealPlanSlots.id, source.id));
 
-        await tx
-          .delete(mealPlanSlotItems)
-          .where(inArray(mealPlanSlotItems.slotId, [source.id, dest.id]));
-        await replaceSlotItems(tx, dest.id, sourceItems);
-        if (destPopulated) {
-          await replaceSlotItems(tx, source.id, destItems);
-        }
+        // Dishes move by id, so what was stored from them stays linked.
+        await moveSlotItems(tx, sourceItemIds, dest.id);
+        await moveSlotItems(tx, destItemIds, source.id);
 
         // Diners ride along with the slot's content (the "who's eating" set).
         await tx
@@ -145,6 +168,82 @@ export const slotsRouter = router({
         selectSlotById(ctx.db, destSlotId),
       ]);
       return { sourceSlot, destSlot };
+    }),
+
+  // FEAT-79 — "Store…" on a slot card: set a dish's Freezer and Fridge counts.
+  // Works on any day, past ones included. Raising a count makes a Stock item;
+  // lowering one takes back linked portions still held and unreserved, and
+  // stops where it can't (reported in `storedLimits`).
+  store: protectedProcedure
+    .input(storeSlotItemInputSchema)
+    .output(storeSlotItemResultSchema)
+    .mutation(async ({ ctx, input }): Promise<StoreSlotItemResult> => {
+      const today = todayInLondon();
+      const withTransaction = makeWithTransaction(ctx.db);
+      const { slotId, storedLimits } = await withTransaction(async (tx) => {
+        const item = await loadHouseholdSlotItemForUpdate(tx, input.slotItemId);
+        if (item.eaten + input.frozen + input.chilled > item.prepared) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'More portions than this dish has spare',
+            cause: {
+              code: 'SLOT_ITEM_STORE_EXCEEDS_SPARE',
+              spare: item.prepared - item.eaten,
+            },
+          });
+        }
+        if (input.frozen < item.frozen || input.chilled < item.chilled) {
+          await settleReservations(tx, today);
+        }
+        // Lowerings run first: a count that can't all come back keeps its
+        // room, and a raise of the other count only takes what's left.
+        const limits: StoredLimit[] = [];
+        const counts = { frozen: item.frozen, chilled: item.chilled };
+        const keys = (
+          [
+            ['frozen', 'freezer'],
+            ['chilled', 'fridge'],
+          ] as const
+        )
+          .slice()
+          .sort(
+            ([a], [b]) =>
+              Number(input[a] > item[a]) - Number(input[b] > item[b]),
+          );
+        for (const [key, location] of keys) {
+          const other = key === 'frozen' ? counts.chilled : counts.frozen;
+          const room = item.prepared - item.eaten - other;
+          const target =
+            input[key] > item[key] ? Math.min(input[key], room) : input[key];
+          const reached = await changeStored(
+            tx,
+            {
+              slotItemId: item.id,
+              recipeId: item.recipeId,
+              location,
+              from: item[key],
+              to: target,
+            },
+            today,
+          );
+          if (reached !== input[key]) {
+            limits.push({
+              slotItemId: item.id,
+              location,
+              requested: input[key],
+              applied: reached,
+            });
+          }
+          counts[key] = reached;
+        }
+        await tx
+          .update(mealPlanSlotItems)
+          .set(counts)
+          .where(eq(mealPlanSlotItems.id, item.id));
+        return { slotId: item.slotId, storedLimits: limits };
+      });
+      const slot = await selectSlotById(ctx.db, slotId);
+      return { slot, storedLimits };
     }),
 });
 
@@ -183,27 +282,13 @@ function emptyMetaPatch(): MetaPatch {
   };
 }
 
-interface RawSlotItem {
-  recipeId: number;
-  prepared: number;
-  eaten: number;
-  sortOrder: number;
-}
-
-async function loadRawSlotItems(
-  tx: Tx,
-  slotId: number,
-): Promise<RawSlotItem[]> {
-  return tx
-    .select({
-      recipeId: mealPlanSlotItems.recipeId,
-      prepared: mealPlanSlotItems.prepared,
-      eaten: mealPlanSlotItems.eaten,
-      sortOrder: mealPlanSlotItems.sortOrder,
-    })
+async function loadSlotItemIds(tx: Tx, slotId: number): Promise<number[]> {
+  const rows = await tx
+    .select({ id: mealPlanSlotItems.id })
     .from(mealPlanSlotItems)
     .where(eq(mealPlanSlotItems.slotId, slotId))
-    .orderBy(asc(mealPlanSlotItems.sortOrder), asc(mealPlanSlotItems.id));
+    .for('update');
+  return rows.map((row) => row.id);
 }
 
 async function loadRawSlotDiners(tx: Tx, slotId: number): Promise<string[]> {
@@ -247,6 +332,49 @@ async function loadHouseholdSlotId(
       code: 'NOT_FOUND',
       message: 'Slot not found',
       cause: { code: 'SLOT_NOT_FOUND' },
+    });
+  }
+  return row;
+}
+
+async function loadHouseholdSlotItemForUpdate(
+  tx: Tx,
+  slotItemId: number,
+): Promise<{
+  id: number;
+  slotId: number;
+  recipeId: number;
+  prepared: number;
+  eaten: number;
+  frozen: number;
+  chilled: number;
+}> {
+  const rows = await tx
+    .select({
+      id: mealPlanSlotItems.id,
+      slotId: mealPlanSlotItems.slotId,
+      recipeId: mealPlanSlotItems.recipeId,
+      prepared: mealPlanSlotItems.prepared,
+      eaten: mealPlanSlotItems.eaten,
+      frozen: mealPlanSlotItems.frozen,
+      chilled: mealPlanSlotItems.chilled,
+    })
+    .from(mealPlanSlotItems)
+    .innerJoin(mealPlanSlots, eq(mealPlanSlotItems.slotId, mealPlanSlots.id))
+    .innerJoin(mealPlans, eq(mealPlanSlots.planId, mealPlans.id))
+    .where(
+      and(
+        eq(mealPlanSlotItems.id, slotItemId),
+        eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID),
+      ),
+    )
+    .for('update', { of: mealPlanSlotItems });
+  const row = rows[0];
+  if (!row) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Dish not found',
+      cause: { code: 'SLOT_ITEM_NOT_FOUND' },
     });
   }
   return row;

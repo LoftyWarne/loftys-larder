@@ -2,6 +2,7 @@ import type {
   HealthScoreAverage,
   HouseholdMember,
   PlanSlot,
+  PlanSlotItem,
 } from '@loftys-larder/shared';
 import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
@@ -44,6 +45,8 @@ export interface PlannerGridProps {
   slotCommentLine?: (slot: PlanSlot) => ReactNode;
   onSlotClick: (slot: PlanSlot) => void;
   onSlotClear?: (slot: PlanSlot) => void;
+  // "Store…" on a dish (FEAT-79). Left out, the card offers no Store action.
+  onSlotItemStore?: (slot: PlanSlot, item: PlanSlotItem) => void;
 }
 
 interface OccasionColumn {
@@ -64,6 +67,7 @@ export function PlannerGrid({
   slotCommentLine,
   onSlotClick,
   onSlotClear,
+  onSlotItemStore,
 }: PlannerGridProps): React.ReactElement {
   // Below `md` the grid gives way to one card per day (FEAT-72, DEC-115). Only
   // one layout mounts, so each slot registers its dnd-kit ids once.
@@ -129,6 +133,13 @@ export function PlannerGrid({
           />
         }
         commentLine={slotCommentLine?.(slot)}
+        onStoreItem={
+          onSlotItemStore
+            ? (item) => {
+                onSlotItemStore(slot, item);
+              }
+            : undefined
+        }
         onClick={() => {
           onSlotClick(slot);
         }}

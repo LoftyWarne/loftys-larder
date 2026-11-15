@@ -9,6 +9,8 @@ interface ItemSpec {
   recipeId: number;
   prepared: number;
   eaten: number;
+  frozen?: number;
+  chilled?: number;
   isBase?: boolean;
   baseRecipeId?: number | null;
 }
@@ -31,6 +33,8 @@ function item(spec: ItemSpec): PlanSlotItem {
     isDeleted: false,
     prepared: spec.prepared,
     eaten: spec.eaten,
+    frozen: spec.frozen ?? 0,
+    chilled: spec.chilled ?? 0,
     sortOrder: 0,
   };
 }
@@ -220,5 +224,48 @@ describe('deriveBaseBalances', () => {
     expect(shortfallBySlot.size).toBe(0);
     expect(remainingByBase.get(22)).toBe(6); // 12 cooked − 6 into the variation
     expect(remainingByBase.get(922)).toBe(0); // 6 made − 4 eaten − 2 leftover
+  });
+
+  it('takes frozen and chilled portions out of the pool', () => {
+    const cookSlot = slot({
+      date: '2026-06-15',
+      items: [{ recipeId: 40, prepared: 8, eaten: 2, frozen: 2, chilled: 1 }],
+    });
+    const { shortfallBySlot, remainingByBase } = deriveBaseBalances([cookSlot]);
+    expect(shortfallBySlot.size).toBe(0);
+    // Leftovers are prepared − eaten − frozen − chilled.
+    expect(remainingByBase.get(40)).toBe(3);
+  });
+
+  it('shows a shortfall on a later leftovers slot when its portions are frozen', () => {
+    const cookSlot = slot({
+      date: '2026-06-15',
+      items: [{ recipeId: 40, prepared: 8, eaten: 2, frozen: 4 }],
+    });
+    const leftoverSlot = slot({
+      date: '2026-06-16',
+      items: [eatLeftover(40, 4)],
+    });
+    const { shortfallBySlot, shortfallByItem, remainingByBase } =
+      deriveBaseBalances([cookSlot, leftoverSlot]);
+    // 6 spare, 4 frozen → 2 left; eating 4 is short by 2. The freeze slot
+    // itself is never short.
+    expect(shortfallBySlot.get(cookSlot.id)).toBeUndefined();
+    expect(shortfallBySlot.get(leftoverSlot.id)).toBe(2);
+    expect(shortfallByItem.get(leftoverSlot.items[0]?.id ?? -1)).toBe(2);
+    expect(remainingByBase.get(40)).toBe(-2);
+  });
+
+  it("stores a variation's portions under the variation, not its base", () => {
+    const cookSlot = slot({ date: '2026-06-15', items: [cook(22, 12)] });
+    const eatSlot = slot({
+      date: '2026-06-16',
+      items: [
+        { recipeId: 922, prepared: 6, eaten: 2, frozen: 2, baseRecipeId: 22 },
+      ],
+    });
+    const { remainingByBase } = deriveBaseBalances([cookSlot, eatSlot]);
+    expect(remainingByBase.get(22)).toBe(6);
+    expect(remainingByBase.get(922)).toBe(2);
   });
 });

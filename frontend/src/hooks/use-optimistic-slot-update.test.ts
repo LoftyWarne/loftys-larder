@@ -2,6 +2,7 @@ import type {
   GetPlanResult,
   PlanSlot,
   PlanSlotItem,
+  StoredLimit,
   UpdateSlotInput,
 } from '@loftys-larder/shared';
 import { renderHook } from '@testing-library/react';
@@ -16,6 +17,7 @@ const {
   plantsForPlanInvalidateMock,
   healthForDayInvalidateMock,
   healthForPlanInvalidateMock,
+  storageListInvalidateMock,
 } = vi.hoisted(() => ({
   updateMutateMock: vi.fn(),
   getDataMock: vi.fn(),
@@ -25,6 +27,7 @@ const {
   plantsForPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
   healthForDayInvalidateMock: vi.fn().mockResolvedValue(undefined),
   healthForPlanInvalidateMock: vi.fn().mockResolvedValue(undefined),
+  storageListInvalidateMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 let mutationOptions: Record<string, unknown> = {};
@@ -47,6 +50,7 @@ vi.mock('@/lib/trpc.ts', () => ({
         forDay: { invalidate: healthForDayInvalidateMock },
         forPlan: { invalidate: healthForPlanInvalidateMock },
       },
+      storage: { list: { invalidate: storageListInvalidateMock } },
     }),
     slots: {
       update: {
@@ -94,6 +98,8 @@ const ITEM_PREVIEW: PlanSlotItem = {
   isDeleted: false,
   prepared: 2,
   eaten: 2,
+  frozen: 0,
+  chilled: 0,
   sortOrder: 0,
 };
 
@@ -172,7 +178,7 @@ describe('useOptimisticSlotUpdate', () => {
     renderHook(() => useOptimisticSlotUpdate({ planId: 9 }));
 
     const onSettled = mutationOptions.onSettled as (
-      data: { slot: PlanSlot } | undefined,
+      data: { slot: PlanSlot; storedLimits: StoredLimit[] } | undefined,
     ) => void;
 
     const serverSlot: PlanSlot = {
@@ -180,7 +186,7 @@ describe('useOptimisticSlotUpdate', () => {
       slotType: 'recipe',
       items: [{ ...ITEM_PREVIEW, prepared: 3, eaten: 3 }],
     };
-    onSettled({ slot: serverSlot });
+    onSettled({ slot: serverSlot, storedLimits: [] });
 
     expect(setDataMock).toHaveBeenCalledTimes(1);
     const call = setDataMock.mock.calls[0];
@@ -195,6 +201,40 @@ describe('useOptimisticSlotUpdate', () => {
     onSettled(undefined);
     expect(healthForDayInvalidateMock).toHaveBeenCalledWith({ planId: 9 });
     expect(healthForPlanInvalidateMock).toHaveBeenCalledWith({ planId: 9 });
+  });
+
+  it('refetches storage on settle, since a Freezer count moves stock', () => {
+    renderHook(() => useOptimisticSlotUpdate({ planId: 9 }));
+    const onSettled = mutationOptions.onSettled as (data: undefined) => void;
+    onSettled(undefined);
+    expect(storageListInvalidateMock).toHaveBeenCalled();
+  });
+
+  it('passes a lowered count that stopped short to onStoredLimits', () => {
+    getDataMock.mockReturnValue(PLAN);
+    const onStoredLimits = vi.fn();
+    renderHook(() => useOptimisticSlotUpdate({ planId: 9, onStoredLimits }));
+    const onSettled = mutationOptions.onSettled as (data: {
+      slot: PlanSlot;
+      storedLimits: StoredLimit[];
+    }) => void;
+    const limits: StoredLimit[] = [
+      { slotItemId: 1, location: 'freezer', requested: 0, applied: 1 },
+    ];
+    onSettled({ slot: SLOT_EMPTY, storedLimits: limits });
+    expect(onStoredLimits).toHaveBeenCalledWith(limits);
+  });
+
+  it('does not call onStoredLimits when every count was reached', () => {
+    getDataMock.mockReturnValue(PLAN);
+    const onStoredLimits = vi.fn();
+    renderHook(() => useOptimisticSlotUpdate({ planId: 9, onStoredLimits }));
+    const onSettled = mutationOptions.onSettled as (data: {
+      slot: PlanSlot;
+      storedLimits: StoredLimit[];
+    }) => void;
+    onSettled({ slot: SLOT_EMPTY, storedLimits: [] });
+    expect(onStoredLimits).not.toHaveBeenCalled();
   });
 
   it('invokes the caller onError when the mutation fails', () => {

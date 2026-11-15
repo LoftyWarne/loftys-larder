@@ -1656,7 +1656,7 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
     - A Fridge item has a Use-by, editable. It defaults to the date added plus the ingredient's average shelf life, or plus 3 days for cooked portions. Moving an item into the Fridge sets a fresh default.
     - An item at zero is deleted.
     - A soft-deleted recipe's Stock item stays and can still be eaten (DEC-21).
-  - **Freezing** (FEAT-79) is a `frozen` count on a slot item. Leftovers are `prepared − eaten − frozen`. A freeze creates Freezer Stock items in the same transaction. It can happen at plan time or on any later day. After that the Stock item stands on its own: editing it never changes the plan.
+  - **Storing from the plan** (FEAT-79) is two counts on a slot item: `frozen` (into the Freezer) and `chilled` (kept in the Fridge, added at FEAT-79's kick-off). Leftovers are `prepared − eaten − frozen − chilled`. Raising a count creates a Stock item in that location in the same transaction. It can happen at plan time or on any later day. After that the Stock item stands on its own: editing it never changes the plan. Lowering a count takes back only linked portions still held and unreserved. Slot item ids stay stable across slot edits and moves, so the link survives.
   - **A Reservation** is an amount of one Stock item set aside by a slot (Leftovers from Storage, or a frozen base for a Variation) or by a plan's shopping line ("use from storage"), with the date it's needed.
     - Available stock is quantity minus Reservations, across all plans.
     - Changing or clearing the slot or line releases it, and deleting a plan releases its unsettled Reservations, with a warning first.
@@ -1672,13 +1672,13 @@ Decisions are numbered sequentially (`DEC-01` …) and grouped by category. A su
   - **What's dropped from the source spec:** the recipe-card badge, the "uses what I've got" filter, the oldest-first sort, the periodic freezer check, and decrementing stock on a shopping tick.
   - **Schema, approved in principle** (kick-offs confirm names and constraints):
     - FEAT-78: `stock_items`, `stock_reservations`, and the `storage_location` enum
-    - FEAT-79: `meal_plan_slot_items.frozen`
+    - FEAT-79: `meal_plan_slot_items.frozen` and `meal_plan_slot_items.chilled`
     - FEAT-80: `ingredients.staple_state`, `meal_plans.storage_glance_dismissed_at`, and the Staple state a tick replaced
     - FEAT-81: `leftovers_source` value `storage`
   - **Navigation:** Storage takes Ingredients' place in the phone tab bar. Ingredients is linked from Storage and Settings.
   - **Delivery:**
     - FEAT-78: Stock items, the Storage screen, settling
-    - FEAT-79: freezing from the plan
+    - FEAT-79: freezing and keeping in the fridge from the plan
     - FEAT-80: shopping against storage, and Staples
     - FEAT-81: Leftovers from Storage, frozen bases, and Plan Proposals
     - The eval runner moves to FEAT-82 and gains a storage input.

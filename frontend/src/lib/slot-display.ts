@@ -19,14 +19,26 @@ export const LEFTOVERS_SOURCE_LABEL: Record<
 };
 
 // Quantity label (DEC-91): what's eaten here, with a `+N` marker when the dish
-// cooks more than it eats (surplus into the pool). A prepared-only batch
-// (nothing eaten) reads as "prep ×N".
+// cooks more than it eats or stores (surplus into the pool). A prepared-only
+// batch (nothing eaten) reads as "prep ×N". Portions stored from the dish
+// (FEAT-79) follow, e.g. "×2 +4 · 2 frozen".
 export function dishQtyLabel(item: PlanSlotItem): string {
+  return [eatenLabel(item), ...storedLabels(item)].join(' · ');
+}
+
+function eatenLabel(item: PlanSlotItem): string {
   if (item.eaten <= 0) return `prep ×${String(item.prepared)}`;
-  const surplus = item.prepared - item.eaten;
+  const surplus = item.prepared - item.eaten - item.frozen - item.chilled;
   return surplus > 0
     ? `×${String(item.eaten)} +${String(surplus)}`
     : `×${String(item.eaten)}`;
+}
+
+function storedLabels(item: PlanSlotItem): string[] {
+  const labels: string[] = [];
+  if (item.frozen > 0) labels.push(`${String(item.frozen)} frozen`);
+  if (item.chilled > 0) labels.push(`${String(item.chilled)} in fridge`);
+  return labels;
 }
 
 // What a `leftovers` slot is eating, as a single label: the eaten dish

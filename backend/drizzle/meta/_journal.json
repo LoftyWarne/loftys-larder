@@ -204,6 +204,13 @@
       "when": 1794749094985,
       "tag": "0028_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794752508012,
+      "tag": "0029_slot_item_stored",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   createRecipe,
   createStockItem,
   E2E_USER_NAME,
+  getPool,
   resetHouseholdData,
   setCooksBaseOnSlot,
   setHealthScore,
@@ -356,6 +357,36 @@ test.describe('a11y — authed views', () => {
           ),
         )
         .toBe(true);
+      await runAxe(page, theme);
+    });
+
+    // The slot editor's Dishes table (with its Freeze column) and the Store
+    // dialog on a slot card (FEAT-79), at phone width.
+    test(`slot editor dishes and store dialog pass axe at phone width in ${theme} theme`, async ({
+      page,
+    }) => {
+      await getPool().query(
+        `update meal_plan_slot_items set prepared = 6
+         where recipe_id = (select id from recipes where name = 'Chicken curry batch')`,
+      );
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`/plans/${String(fixture.planId)}`);
+      await page
+        .getByRole('button', { name: /chicken curry batch/i })
+        .first()
+        .click();
+      await expect(
+        page.getByLabel('Frozen for Chicken curry batch'),
+      ).toBeVisible();
+      await runAxe(page, theme);
+      await page.keyboard.press('Escape');
+
+      await page
+        .getByRole('button', { name: 'Store Chicken curry batch…' })
+        .click();
+      await expect(
+        page.getByRole('dialog', { name: 'Store Chicken curry batch' }),
+      ).toBeVisible();
       await runAxe(page, theme);
     });
 

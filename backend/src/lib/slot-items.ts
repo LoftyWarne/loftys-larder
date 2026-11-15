@@ -27,6 +27,8 @@ export async function loadSlotItems(
       recipeId: mealPlanSlotItems.recipeId,
       prepared: mealPlanSlotItems.prepared,
       eaten: mealPlanSlotItems.eaten,
+      frozen: mealPlanSlotItems.frozen,
+      chilled: mealPlanSlotItems.chilled,
       sortOrder: mealPlanSlotItems.sortOrder,
       recipeName: recipes.name,
       recipeImageUrl: recipes.imageUrl,
@@ -54,6 +56,8 @@ export async function loadSlotItems(
       isDeleted: row.isDeleted,
       prepared: row.prepared,
       eaten: row.eaten,
+      frozen: row.frozen,
+      chilled: row.chilled,
       sortOrder: row.sortOrder,
     };
     const list = bySlot.get(row.slotId);

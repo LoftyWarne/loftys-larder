@@ -59,7 +59,7 @@ import {
   assertDinersExist,
   assertRecipesPickable,
   replaceSlotDiners,
-  replaceSlotItems,
+  insertSlotItems,
 } from '../../lib/slot-writes.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import {
@@ -189,7 +189,7 @@ export const plansRouter = router({
               guestCount: slot.guestCount,
             })
             .where(eq(mealPlanSlots.id, slotId));
-          await replaceSlotItems(tx, slotId, slot.items);
+          await insertSlotItems(tx, slotId, slot.items);
           await replaceSlotDiners(tx, slotId, [...new Set(slot.dinerUserIds)]);
         }
         return created.plan;

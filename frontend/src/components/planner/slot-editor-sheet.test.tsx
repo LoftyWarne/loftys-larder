@@ -42,6 +42,8 @@ function eat(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isDeleted: false,
     prepared: 4,
     eaten: 4,
+    frozen: 0,
+    chilled: 0,
     sortOrder: 0,
     ...overrides,
   };
@@ -58,6 +60,8 @@ function cook(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isDeleted: false,
     prepared: 8,
     eaten: 0,
+    frozen: 0,
+    chilled: 0,
     sortOrder: 1,
     ...overrides,
   };
@@ -642,6 +646,85 @@ describe('SlotEditorSheet — meal items', () => {
     await user.clear(preparedInput);
     await user.type(preparedInput, '2');
     expect(screen.getByLabelText('Eaten for Tomato Pasta')).toHaveValue(2);
+  });
+});
+
+describe('SlotEditorSheet — Freeze', () => {
+  function renderWith(
+    item: Partial<PlanSlotItem>,
+    onSave: (input: UpdateSlotInput) => void = () => undefined,
+  ): void {
+    render(
+      <SlotEditorSheet
+        open
+        slot={{ ...RECIPE_SLOT, items: [eat(item)] }}
+        members={[]}
+        isSaving={false}
+        slots={[]}
+        onClose={() => undefined}
+        onSave={onSave}
+      />,
+    );
+  }
+
+  it('saves the Freeze count with the dish, and shows what is left in plan', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    renderWith({ prepared: 8, eaten: 2 }, onSave);
+    const frozenInput = screen.getByLabelText('Frozen for Tomato Pasta');
+    await user.clear(frozenInput);
+    await user.type(frozenInput, '2');
+    expect(screen.getByTestId('base-remaining')).toHaveTextContent(
+      '(4 left in plan)',
+    );
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+    const input = onSave.mock.calls[0]?.[0] as UpdateSlotInput;
+    expect(input.items).toEqual([
+      expect.objectContaining({
+        recipeId: 10,
+        prepared: 8,
+        eaten: 2,
+        frozen: 2,
+      }),
+    ]);
+  });
+
+  it('caps Freeze at what is prepared and not eaten or in the fridge', async () => {
+    const user = userEvent.setup();
+    renderWith({ prepared: 8, eaten: 2, chilled: 1 });
+    const frozenInput = screen.getByLabelText('Frozen for Tomato Pasta');
+    await user.clear(frozenInput);
+    await user.type(frozenInput, '9');
+    expect(frozenInput).toHaveValue(5);
+  });
+
+  it('caps Eat at what is prepared and not stored', async () => {
+    const user = userEvent.setup();
+    renderWith({ prepared: 8, eaten: 2, frozen: 4 });
+    const eatenInput = screen.getByLabelText('Eaten for Tomato Pasta');
+    await user.clear(eatenInput);
+    await user.type(eatenInput, '9');
+    expect(eatenInput).toHaveValue(4);
+  });
+
+  it('pulls Freeze down when Prepare is lowered, keeping the fridge portions', async () => {
+    const user = userEvent.setup();
+    renderWith({ prepared: 8, eaten: 2, frozen: 4, chilled: 1 });
+    const preparedInput = screen.getByLabelText('Prepared for Tomato Pasta');
+    await user.clear(preparedInput);
+    await user.type(preparedInput, '5');
+    expect(screen.getByLabelText('Eaten for Tomato Pasta')).toHaveValue(2);
+    expect(screen.getByLabelText('Frozen for Tomato Pasta')).toHaveValue(2);
+  });
+
+  it('shows fridge portions read-only beside the dish', () => {
+    renderWith({ prepared: 8, eaten: 2, chilled: 3 });
+    expect(screen.getByTestId('dish-chilled')).toHaveTextContent(
+      '(3 in fridge)',
+    );
   });
 });
 

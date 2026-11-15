@@ -16,6 +16,7 @@ const {
   membersUseQueryMock,
   updateMutateMock,
   relocateMutateMock,
+  storeMutateMock,
   setDataMock,
   getDataMock,
   cancelMock,
@@ -33,6 +34,7 @@ const {
   membersUseQueryMock: vi.fn(),
   updateMutateMock: vi.fn(),
   relocateMutateMock: vi.fn(),
+  storeMutateMock: vi.fn(),
   setDataMock: vi.fn(),
   getDataMock: vi.fn(),
   cancelMock: vi.fn().mockResolvedValue(undefined),
@@ -46,6 +48,7 @@ const {
   healthForDayUseQueriesMock: vi.fn(),
 }));
 
+let updatePending = false;
 let mutationOptions: Record<string, unknown> = {};
 
 vi.mock('@tanstack/react-router', () => ({
@@ -84,6 +87,7 @@ vi.mock('@/lib/trpc.ts', () => ({
           fetch: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
         },
       },
+      storage: { list: { invalidate: vi.fn().mockResolvedValue(undefined) } },
     }),
     plans: { get: { useQuery: planUseQueryMock } },
     plants: {
@@ -113,12 +117,18 @@ vi.mock('@/lib/trpc.ts', () => ({
       update: {
         useMutation: (opts: Record<string, unknown>) => {
           mutationOptions = opts;
-          return { mutate: updateMutateMock, isPending: false };
+          return { mutate: updateMutateMock, isPending: updatePending };
         },
       },
       relocate: {
         useMutation: () => ({
           mutate: relocateMutateMock,
+          isPending: false,
+        }),
+      },
+      store: {
+        useMutation: () => ({
+          mutate: storeMutateMock,
           isPending: false,
         }),
       },
@@ -177,6 +187,8 @@ const RECIPE_SLOT: PlanSlot = {
       isDeleted: false,
       prepared: 2,
       eaten: 2,
+      frozen: 0,
+      chilled: 0,
       sortOrder: 0,
     },
   ],
@@ -271,6 +283,7 @@ function mockIsLargeViewport(isLarge: boolean): void {
 }
 
 beforeEach(() => {
+  updatePending = false;
   planUseQueryMock.mockReset();
   recipesUseInfiniteQueryMock.mockReset();
   membersUseQueryMock.mockReset();
@@ -390,6 +403,78 @@ describe('PlannerPage', () => {
     expect(
       screen.getByRole('heading', { name: /dinner.*Mon 15th Jun 2026/i }),
     ).toBeInTheDocument();
+  });
+
+  it('stores a dish from its slot card, opening at the current counts', async () => {
+    const user = userEvent.setup();
+    const firstItem = RECIPE_SLOT.items[0];
+    if (!firstItem) throw new Error('fixture has an item');
+    setup({
+      plan: {
+        ...PLAN,
+        slots: [
+          EMPTY_SLOT,
+          {
+            ...RECIPE_SLOT,
+            items: [{ ...firstItem, prepared: 8, eaten: 2 }],
+          },
+        ],
+      },
+    });
+    render(<PlannerPage />);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Store Tomato pasta…' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: /store tomato pasta/i });
+    const freezer = within(dialog).getByRole('group', { name: 'Freezer' });
+    expect(freezer).toHaveTextContent('0 portions');
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+    // The first raise adds the plan's 6 leftovers; later steps are one.
+    await user.click(
+      within(dialog).getByRole('button', { name: 'More in the Freezer' }),
+    );
+    expect(freezer).toHaveTextContent('6 portions');
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Fewer in the Freezer' }),
+    );
+    await user.click(
+      within(dialog).getByRole('button', { name: 'More in the Fridge' }),
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(storeMutateMock).toHaveBeenCalledWith({
+      slotItemId: 500,
+      frozen: 5,
+      chilled: 1,
+    });
+  });
+
+  it('hides Store… while a slot save is in flight', () => {
+    const firstItem = RECIPE_SLOT.items[0];
+    if (!firstItem) throw new Error('fixture has an item');
+    setup({
+      plan: {
+        ...PLAN,
+        slots: [
+          EMPTY_SLOT,
+          { ...RECIPE_SLOT, items: [{ ...firstItem, prepared: 8, eaten: 2 }] },
+        ],
+      },
+    });
+    updatePending = true;
+    render(<PlannerPage />);
+    expect(
+      screen.queryByRole('button', { name: 'Store Tomato pasta…' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers no Store action on a dish with nothing spare or stored', () => {
+    setup();
+    render(<PlannerPage />);
+    expect(
+      screen.queryByRole('button', { name: 'Store Tomato pasta…' }),
+    ).not.toBeInTheDocument();
   });
 
   it('no longer renders a separate base affordance', () => {

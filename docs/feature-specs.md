@@ -3741,48 +3741,54 @@ It returns that slot's items and a new reason, normalised by FEAT-74's and FEAT-
 
 ### FEAT-79 — Freezing from the plan
 
-**Goal:** A cook sends portions of a cooked dish to the Freezer from the plan, when planning (cook 8, eat 2, freeze 2, leaving 4 as leftovers) or at any time afterwards, including after the day has passed. Each freeze creates Stock items that then stand on their own. (DEC-118, DEC-88, DEC-90, DEC-91)
+**Goal:** A cook sends portions of a cooked dish to the Freezer, or keeps them in the Fridge, from the plan: when planning (cook 8, eat 2, freeze 2, leaving 4 as leftovers) or at any time afterwards, including after the day has passed. Each one creates Stock items that then stand on their own. (DEC-118, DEC-88, DEC-90, DEC-91)
 
 **Estimate:** 1 day. **Depends on:** FEAT-78. **Enables:** none specifically.
 
 **Files:**
-- `backend/src/db/schema/meal-plans.ts` and a migration: `meal_plan_slot_items.frozen smallint NOT NULL DEFAULT 0`, with a CHECK that `eaten + frozen <= prepared`. A schema change approved in principle by DEC-118
-- `backend/src/lib/slot-items.ts`, `backend/src/trpc/procedures/slots.ts` (setting `frozen`)
-- `shared/src/schemas/slots.ts`
-- `frontend/src/lib/serving-variation-supply.ts`: `deriveBaseBalances` takes `frozen` out of the pool
-- `frontend/src/components/planner/slot-editor-sheet.tsx` (a Freeze count beside Prepare and Eat), `slot-cell.tsx` (a "Freeze" action on a dish with portions left)
+- `backend/src/db/schema/meal-plans.ts` and a migration: `meal_plan_slot_items.frozen` and `meal_plan_slot_items.chilled`, both `smallint NOT NULL DEFAULT 0` and `>= 0`, with a CHECK that `frozen + chilled = 0 OR eaten + frozen + chilled <= prepared`. A schema change approved in principle by DEC-118, extended to `chilled` at kick-off
+- `backend/src/lib/slot-writes.ts`: slot item ids stay stable across a slot edit (matched by recipe) and a relocate (items move by `slot_id`)
+- `backend/src/lib/slot-storing.ts` (new), `backend/src/lib/slot-items.ts`, `backend/src/trpc/procedures/slots.ts` (setting the counts in `slots.update`, and `slots.store`), `backend/src/trpc/procedures/plans.ts` (a duplicate starts at zero)
+- `shared/src/schemas/slots.ts`, `shared/src/schemas/plans.ts`
+- `frontend/src/lib/serving-variation-supply.ts`: `deriveBaseBalances` takes `frozen` and `chilled` out of the pool
+- `frontend/src/components/planner/slot-editor-sheet.tsx` (a Freeze count beside Prepare and Eat), `slot-cell.tsx` (a "Store…" action on a dish), `store-dialog.tsx` (new)
 
 **Acceptance criteria:**
-- [ ] **At plan time:** the slot editor's Dishes table has a Freeze count beside Prepare and Eat. Leftovers are `prepared − eaten − frozen`. Eat plus Freeze can't exceed Prepare, using the same capping as Eat can't exceed Prepare
-- [ ] **At any time:** a dish whose recipe has portions left in the plan offers "Freeze…" on its slot card. This works on any day, including a day that has passed. It raises that slot item's `frozen` count
-- [ ] **What a freeze creates:** raising `frozen` by N creates one Freezer Stock item of N portions of that recipe, with `added_on` set to today and `source_slot_item_id` set, in the same `withTransaction`
-- [ ] **Undoing:** lowering `frozen` by N removes up to N portions from Stock items linked to that slot item, but only portions still held and not reserved. If fewer are left, `frozen` stops at what can be undone, and the cook is told why
-- [ ] **Standing on its own:** editing, moving or deleting a frozen Stock item never changes the plan. The plan's `frozen` count stays as a record
-- [ ] **Balances:** freezing portions a later Leftovers slot was counting on shows the usual shortfall warning (DEC-88). It never blocks the freeze
-- [ ] **Shopping:** the shopping list is unchanged by freezing, because it provisions `prepared` portions
-- [ ] Plant points and the Health Score count eaten portions only, so freezing doesn't change them
+- [ ] **At plan time:** the slot editor's Dishes table has a Freeze count beside Prepare and Eat. Leftovers are `prepared − eaten − frozen − chilled`. Eat plus Freeze plus Fridge can't exceed Prepare, using the same capping as Eat can't exceed Prepare. A Fridge count above zero shows in the table, read-only
+- [ ] **At any time:** a dish with spare portions (`prepared − eaten − frozen − chilled > 0`), or with any stored, offers "Store…" on its slot card. This works on any day, including a day that has passed. The dialog sets the Freezer and Fridge counts, up or down
+- [ ] **What storing creates:** raising `frozen` by N creates one Freezer Stock item of N portions of that recipe. Raising `chilled` by N creates one Fridge Stock item, with the default cooked-food Use-by. Both have `added_on` set to today and `source_slot_item_id` set, in the same `withTransaction`
+- [ ] **Undoing:** lowering a count by N removes up to N portions from Stock items in that location linked to that slot item, newest first, but only portions still held and not reserved. If fewer are left, the count stops at what can be undone, and the cook is told why
+- [ ] **Stable links:** editing a slot (its chef, diners, comment or dishes) or moving it keeps each remaining dish's slot item, so its stored portions stay linked. Removing a dish leaves its Stock items, unlinked
+- [ ] **Standing on its own:** editing, moving or deleting a stored Stock item never changes the plan. The plan's counts stay as a record
+- [ ] **Balances:** storing portions a later Leftovers slot was counting on shows the usual shortfall warning (DEC-88). It never blocks the store
+- [ ] **Shopping:** the shopping list is unchanged by storing, because it provisions `prepared` portions
+- [ ] Plant points and the Health Score count eaten portions only, so storing doesn't change them
+- [ ] A duplicated plan starts with both counts at zero
 
 **Implementation notes:**
-- The migration backfills `frozen = 0`. No existing row breaks the new CHECK, because `eaten <= prepared` already holds, except for `plan_meal` leftovers rows (`prepared = 0`), whose `frozen` stays 0. Kick-off confirms whether the CHECK exempts them or is written as `frozen = 0 OR eaten + frozen <= prepared`.
-- Freezing is a slot-item write, so it routes through the existing slot write path, inside `withTransaction`.
+- The migration backfills both counts to 0. The CHECK exempts rows with nothing stored, because `plan_meal` leftovers rows and recipe slots eating food cooked earlier have `prepared = 0`.
+- Storing is a slot-item write, so it routes through the slot write path, inside `withTransaction`. Undoing settles Reservations first (cross-cutting #23).
 
-**Readings (for kick-off):**
-1. **Fridge as well as Freezer?** The action is "Freeze", into the Freezer only. Cooked portions get into the Fridge by hand (FEAT-78) or by moving a frozen item. Kick-off asks the user whether a "Keep in fridge" option belongs beside it.
-2. **Variations.** Freezing a Variation's portions stores that Variation's recipe, not its base.
+**Readings (agreed at kick-off):**
+1. **Fridge as well as Freezer.** Yes, as a second count, `chilled`. Fridge portions are set from the "Store…" dialog only.
+2. **Variations.** Storing a Variation's portions stores that Variation's recipe, not its base.
+3. **"Store…" adds or removes.** The dialog opens at the dish's current counts. Raising one defaults to the plan's remaining portions of that recipe, capped at the dish's spare portions.
+4. **A limited undo** saves what it could and reports the shortfall. It isn't an error.
 
 **Manual verification:**
-1. Plan a dish with Prepare 8 and Eat 2, and set Freeze 2. The slot shows 4 left in plan, and the Freezer has 2 portions frozen today. The next day, on the same slot, freeze 2 more: "left in plan" drops to 2 and the Freezer row shows 4. Lower Freeze to 3: the Freezer shows 3.
+1. Plan a dish with Prepare 8 and Eat 2, and set Freeze 2. The slot shows 4 left in plan, and the Freezer has 2 portions frozen today. The next day, on the same slot, store 2 more in the Freezer: "left in plan" drops to 2 and the Freezer row shows 4. Lower Freeze to 3: the Freezer shows 3. Keep 1 in the Fridge: the Fridge shows 1 portion, use by three days from today.
 
 **Definition of done:**
 - Tests cover:
   - the CHECK and the backfill
-  - Stock items created and removed with the count, in one transaction
+  - Stock items created and removed with each count, in one transaction
   - undo stopping at reserved or already-used portions
+  - slot item ids surviving a slot edit and a relocate
   - Stock-item edits leaving the plan unchanged
-  - `deriveBaseBalances` with `frozen`, and the shortfall it can cause
+  - `deriveBaseBalances` with both counts, and the shortfall they can cause
   - the shopping list unchanged
-  - "Freeze…" on a past day
-  - axe scans of the Dishes table and the freeze dialog in both themes
+  - "Store…" on a past day
+  - axe scans of the Dishes table and the Store dialog in both themes
 - Commit: `feat(storage): freeze portions from the plan`
 - Gate check: manual verification step 1.
 

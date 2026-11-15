@@ -14,13 +14,21 @@ import { PlannerGrid } from '@/components/planner/planner-grid.tsx';
 import { PlantPointsBadge } from '@/components/planner/plant-points-badge.tsx';
 import { RecipeBank } from '@/components/planner/recipe-bank.tsx';
 import { SlotEditorSheet } from '@/components/planner/slot-editor-sheet.tsx';
+import {
+  StoreDialog,
+  type StoreCounts,
+} from '@/components/planner/store-dialog.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { useDayHealthScores } from '@/hooks/use-day-health-scores.ts';
 import { useDayPlantPoints } from '@/hooks/use-day-plant-points.ts';
 import { useIsLargeViewport } from '@/hooks/use-is-large-viewport.ts';
 import { useOptimisticSlotRelocate } from '@/hooks/use-optimistic-slot-relocate.ts';
-import { useOptimisticSlotUpdate } from '@/hooks/use-optimistic-slot-update.ts';
+import {
+  replaceSlot,
+  useOptimisticSlotUpdate,
+} from '@/hooks/use-optimistic-slot-update.ts';
 import { deriveBaseBalances } from '@/lib/serving-variation-supply.ts';
+import { describeStoredLimits } from '@/lib/stored-limits.ts';
 import {
   clampRange,
   eachDateInRange,
@@ -47,13 +55,40 @@ export function PlannerPage(): React.ReactElement {
 
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  // Why a lowered Freezer or Fridge count stopped short (FEAT-79).
+  const [storedNotice, setStoredNotice] = useState<string | null>(null);
+  // The dish whose "Store…" dialog is open, by slot-item id.
+  const [storingItemId, setStoringItemId] = useState<number | null>(null);
+  const [storeError, setStoreError] = useState<string | null>(null);
 
+  const utils = trpc.useUtils();
   const { update, isPending } = useOptimisticSlotUpdate({
     planId,
     onError: (err) => {
       setMutationError(
         err instanceof Error ? err.message : 'Slot update failed',
       );
+    },
+    onStoredLimits: (limits) => {
+      setStoredNotice(describeStoredLimits(limits));
+    },
+  });
+
+  const storeMutation = trpc.slots.store.useMutation({
+    onSuccess: (data) => {
+      const current = utils.plans.get.getData({ id: planId });
+      if (current) {
+        utils.plans.get.setData(
+          { id: planId },
+          replaceSlot(current, data.slot),
+        );
+      }
+      void utils.storage.list.invalidate();
+      setStoredNotice(describeStoredLimits(data.storedLimits));
+      setStoringItemId(null);
+    },
+    onError: (err) => {
+      setStoreError(err.message);
     },
   });
 
@@ -109,6 +144,15 @@ export function PlannerPage(): React.ReactElement {
         : [],
     [visibleDateRange],
   );
+  const storingItem = useMemo<PlanSlotItem | null>(() => {
+    if (storingItemId === null) return null;
+    for (const slot of planQuery.data?.slots ?? []) {
+      const found = slot.items.find((item) => item.id === storingItemId);
+      if (found) return found;
+    }
+    return null;
+  }, [storingItemId, planQuery.data]);
+
   const planTotalQuery = trpc.plants.forPlan.useQuery(
     { planId },
     { enabled: idIsValid && Boolean(planQuery.data) },
@@ -153,6 +197,7 @@ export function PlannerPage(): React.ReactElement {
 
   function handleSlotClear(slot: PlanSlot): void {
     setMutationError(null);
+    setStoredNotice(null);
     // Full clear (meal + base) — empties the slot's items entirely.
     update({
       input: {
@@ -174,8 +219,22 @@ export function PlannerPage(): React.ReactElement {
     options?: { optimisticItems?: PlanSlotItem[] },
   ): void {
     setMutationError(null);
+    setStoredNotice(null);
     update({ input, optimisticItems: options?.optimisticItems });
     setEditingSlotId(null);
+  }
+
+  function handleStoreOpen(_slot: PlanSlot, item: PlanSlotItem): void {
+    setMutationError(null);
+    setStoredNotice(null);
+    setStoreError(null);
+    setStoringItemId(item.id);
+  }
+
+  function handleStoreSubmit(counts: StoreCounts): void {
+    if (storingItemId === null) return;
+    setStoreError(null);
+    storeMutation.mutate({ slotItemId: storingItemId, ...counts });
   }
 
   function handleDragAssign({
@@ -186,6 +245,7 @@ export function PlannerPage(): React.ReactElement {
     slot: PlanSlot;
   }): void {
     setMutationError(null);
+    setStoredNotice(null);
     update(assignSingleEat(slot, recipe));
   }
 
@@ -197,6 +257,7 @@ export function PlannerPage(): React.ReactElement {
     destSlot: PlanSlot;
   }): void {
     setMutationError(null);
+    setStoredNotice(null);
     relocate({ sourceSlotId: sourceSlot.id, destSlotId: destSlot.id });
   }
 
@@ -244,6 +305,11 @@ export function PlannerPage(): React.ReactElement {
             {mutationError}
           </p>
         )}
+        {storedNotice && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {storedNotice}
+          </p>
+        )}
         {visible ? (
           <PlannerGrid
             slots={plan.slots}
@@ -261,6 +327,9 @@ export function PlannerPage(): React.ReactElement {
             dndEnabled
             onSlotClick={handleSlotClick}
             onSlotClear={handleSlotClear}
+            // While a slot save is in flight its dishes carry placeholder ids
+            // until the server answers, so Store… waits for the real ones.
+            onSlotItemStore={isPending ? undefined : handleStoreOpen}
           />
         ) : (
           <p className="text-sm text-muted-foreground" role="status">
@@ -278,6 +347,20 @@ export function PlannerPage(): React.ReactElement {
           setEditingSlotId(null);
         }}
         onSave={handleSave}
+      />
+      <StoreDialog
+        item={storingItem}
+        remainingInPlan={
+          storingItem
+            ? (baseBalances.remainingByBase.get(storingItem.recipeId) ?? 0)
+            : 0
+        }
+        isSaving={storeMutation.isPending}
+        error={storeError}
+        onClose={() => {
+          setStoringItemId(null);
+        }}
+        onSubmit={handleStoreSubmit}
       />
     </section>
   );
@@ -339,6 +422,8 @@ function assignSingleEat(
         isDeleted: recipe.isDeleted,
         prepared,
         eaten,
+        frozen: 0,
+        chilled: 0,
         sortOrder: 0,
       },
     ],

@@ -64,8 +64,10 @@ interface AddableRecipe {
 }
 
 // One dish being edited (DEC-91). `prepared` = portions cooked, `eaten` =
-// portions consumed here; both are strings so the inputs round-trip what the
-// user types. Role (produce / consume) is derived from the two, not stored.
+// portions consumed here, `frozen` = portions sent to the Freezer (FEAT-79);
+// strings so the inputs round-trip what the user types. Role (produce /
+// consume) is derived, not stored. `chilled` (kept in the Fridge) is set from
+// the slot card's "Store…" only, so it's read-only here.
 interface EditorItem {
   recipeId: number;
   name: string;
@@ -75,6 +77,8 @@ interface EditorItem {
   isDeleted: boolean;
   prepared: string;
   eaten: string;
+  frozen: string;
+  chilled: number;
 }
 
 interface EditorState {
@@ -141,6 +145,8 @@ function toEditorItem(
     isDeleted: recipe.isDeleted,
     prepared: String(prepared),
     eaten: String(eaten),
+    frozen: '0',
+    chilled: 0,
   };
 }
 
@@ -150,26 +156,43 @@ function parseQuantity(value: string): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
 }
 
-// A Cooking-slot dish can't be eaten in greater quantity than it's cooked
-// here — the two inputs stay coupled (DEC-91). Set the dish's prepared value,
-// pulling eaten down if it now exceeds prepared.
+// A Cooking-slot dish can't be eaten or stored in greater quantity than it's
+// cooked here — the inputs stay coupled (DEC-91, FEAT-79). Set the dish's
+// prepared value, pulling eaten and then frozen down to fit. Fridge portions
+// can't be changed here, so they always keep their room.
 function withPrepared(item: EditorItem, value: string): EditorItem {
   const prepared = Number.parseInt(value, 10);
-  const eaten =
-    Number.isInteger(prepared) && parseQuantity(item.eaten) > prepared
-      ? String(Math.max(prepared, 0))
-      : item.eaten;
-  return { ...item, prepared: value, eaten };
+  if (!Number.isInteger(prepared)) return { ...item, prepared: value };
+  const room = Math.max(prepared - item.chilled, 0);
+  const eatenNow = parseQuantity(item.eaten);
+  const eaten = eatenNow > room ? String(room) : item.eaten;
+  const frozenRoom = room - Math.min(eatenNow, room);
+  const frozen =
+    parseQuantity(item.frozen) > frozenRoom ? String(frozenRoom) : item.frozen;
+  return { ...item, prepared: value, eaten, frozen };
 }
 
-// Set the dish's eaten value, capped at what's prepared.
+// Set the dish's eaten value, capped at what's prepared and not stored.
 function withEaten(item: EditorItem, value: string): EditorItem {
   const eaten = Number.parseInt(value, 10);
-  const capped =
-    Number.isInteger(eaten) && eaten > parseQuantity(item.prepared)
-      ? item.prepared
-      : value;
+  const cap = Math.max(
+    parseQuantity(item.prepared) - parseQuantity(item.frozen) - item.chilled,
+    0,
+  );
+  const capped = Number.isInteger(eaten) && eaten > cap ? String(cap) : value;
   return { ...item, eaten: capped };
+}
+
+// Set the dish's frozen value, capped at what's prepared and not eaten or kept
+// in the Fridge.
+function withFrozen(item: EditorItem, value: string): EditorItem {
+  const frozen = Number.parseInt(value, 10);
+  const cap = Math.max(
+    parseQuantity(item.prepared) - parseQuantity(item.eaten) - item.chilled,
+    0,
+  );
+  const capped = Number.isInteger(frozen) && frozen > cap ? String(cap) : value;
+  return { ...item, frozen: capped };
 }
 
 export function SlotEditorSheet({
@@ -216,6 +239,8 @@ export function SlotEditorSheet({
         isDeleted: item.isDeleted,
         prepared: String(item.prepared),
         eaten: String(item.eaten),
+        frozen: String(item.frozen),
+        chilled: item.chilled,
       })),
       dinerUserIds: [...slot.dinerUserIds],
       guestCount: String(slot.guestCount),
@@ -303,6 +328,8 @@ export function SlotEditorSheet({
           isDeleted: item.isDeleted,
           prepared: parseQuantity(item.prepared),
           eaten: parseQuantity(item.eaten),
+          frozen: parseQuantity(item.frozen),
+          chilled: item.chilled,
           sortOrder: index,
         }))
       : [];
@@ -439,7 +466,7 @@ export function SlotEditorSheet({
             <fieldset className="flex flex-col gap-2">
               <legend className="text-sm font-medium">Dishes</legend>
               {state.items.length > 0 && (
-                <div className="grid grid-cols-[minmax(0,1fr)_4rem_4rem_2rem] items-center gap-x-2 rounded-md border border-border">
+                <div className="grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem_3.5rem_2rem] items-center gap-x-2 rounded-md border border-border">
                   <div className="col-span-full grid grid-cols-subgrid items-center border-b border-border px-3 py-2">
                     <span className="text-xs font-medium text-muted-foreground">
                       Dish
@@ -449,6 +476,9 @@ export function SlotEditorSheet({
                     </span>
                     <span className="text-xs font-medium text-muted-foreground">
                       Eat
+                    </span>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Freeze
                     </span>
                     <span aria-hidden="true" />
                   </div>
@@ -488,6 +518,14 @@ export function SlotEditorSheet({
                                   ({String(remaining)} left in plan)
                                 </span>
                               )}
+                              {item.chilled > 0 && (
+                                <span
+                                  className="ml-1 text-xs text-muted-foreground"
+                                  data-testid="dish-chilled"
+                                >
+                                  ({String(item.chilled)} in fridge)
+                                </span>
+                              )}
                             </span>
                             <RecipeTypeBadge
                               recipe={item}
@@ -497,7 +535,7 @@ export function SlotEditorSheet({
                           <Input
                             type="number"
                             inputMode="numeric"
-                            min={0}
+                            min={item.chilled}
                             value={item.prepared}
                             aria-label={`Prepared for ${item.name}`}
                             onChange={(event) => {
@@ -521,7 +559,12 @@ export function SlotEditorSheet({
                             type="number"
                             inputMode="numeric"
                             min={0}
-                            max={parseQuantity(item.prepared)}
+                            max={Math.max(
+                              parseQuantity(item.prepared) -
+                                parseQuantity(item.frozen) -
+                                item.chilled,
+                              0,
+                            )}
                             value={item.eaten}
                             aria-label={`Eaten for ${item.name}`}
                             onChange={(event) => {
@@ -532,6 +575,35 @@ export function SlotEditorSheet({
                                       ...prev,
                                       items: prev.items.map((it, i) =>
                                         i === index ? withEaten(it, value) : it,
+                                      ),
+                                    }
+                                  : prev,
+                              );
+                            }}
+                            className="w-full"
+                          />
+                          <Input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            max={Math.max(
+                              parseQuantity(item.prepared) -
+                                parseQuantity(item.eaten) -
+                                item.chilled,
+                              0,
+                            )}
+                            value={item.frozen}
+                            aria-label={`Frozen for ${item.name}`}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setState((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      items: prev.items.map((it, i) =>
+                                        i === index
+                                          ? withFrozen(it, value)
+                                          : it,
                                       ),
                                     }
                                   : prev,
@@ -933,6 +1005,8 @@ function applyLeftoversChoice(
         isDeleted: meal.isDeleted,
         prepared: '0',
         eaten: String(eaten),
+        frozen: '0',
+        chilled: 0,
       },
     ],
   };
@@ -973,13 +1047,19 @@ function buildInputForSave(
 
   // A chef only belongs to a Cooking slot (the field is hidden elsewhere).
   const chefUserId = slotType === 'recipe' ? state.chefUserId : null;
-  const parsed: { item: EditorItem; prepared: number; eaten: number }[] = [];
+  const parsed: {
+    item: EditorItem;
+    prepared: number;
+    eaten: number;
+    frozen: number;
+  }[] = [];
   for (const item of items) {
     const prepared = parseQuantity(item.prepared);
     const eaten = parseQuantity(item.eaten);
+    const frozen = parseQuantity(item.frozen);
     // Every dish must do at least one of cook / eat (matches the DB CHECK).
     if (prepared + eaten <= 0) return null;
-    parsed.push({ item, prepared, eaten });
+    parsed.push({ item, prepared, eaten, frozen });
   }
 
   // Attendance is independent of the slot type — who's eating persists even on
@@ -992,10 +1072,11 @@ function buildInputForSave(
     leftoversSource,
     chefUserId,
     comment: commentValue,
-    items: parsed.map(({ item, prepared, eaten }, index) => ({
+    items: parsed.map(({ item, prepared, eaten, frozen }, index) => ({
       recipeId: item.recipeId,
       prepared,
       eaten,
+      frozen,
       sortOrder: index,
     })),
     dinerUserIds: state.dinerUserIds,
@@ -1003,7 +1084,7 @@ function buildInputForSave(
   };
 
   const optimisticItems: PlanSlotItem[] = parsed.map(
-    ({ item, prepared, eaten }, index) => ({
+    ({ item, prepared, eaten, frozen }, index) => ({
       id: index + 1,
       recipeId: item.recipeId,
       recipeName: item.name,
@@ -1013,6 +1094,8 @@ function buildInputForSave(
       isDeleted: item.isDeleted,
       prepared,
       eaten,
+      frozen,
+      chilled: item.chilled,
       sortOrder: index,
     }),
   );

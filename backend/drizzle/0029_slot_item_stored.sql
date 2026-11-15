@@ -1,0 +1,5 @@
+ALTER TABLE "meal_plan_slot_items" ADD COLUMN "frozen" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "meal_plan_slot_items" ADD COLUMN "chilled" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "meal_plan_slot_items" ADD CONSTRAINT "meal_plan_slot_items_frozen_non_negative" CHECK ("meal_plan_slot_items"."frozen" >= 0);--> statement-breakpoint
+ALTER TABLE "meal_plan_slot_items" ADD CONSTRAINT "meal_plan_slot_items_chilled_non_negative" CHECK ("meal_plan_slot_items"."chilled" >= 0);--> statement-breakpoint
+ALTER TABLE "meal_plan_slot_items" ADD CONSTRAINT "meal_plan_slot_items_stored_within_prepared" CHECK ("meal_plan_slot_items"."frozen" + "meal_plan_slot_items"."chilled" = 0 or "meal_plan_slot_items"."eaten" + "meal_plan_slot_items"."frozen" + "meal_plan_slot_items"."chilled" <= "meal_plan_slot_items"."prepared");

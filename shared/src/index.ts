@@ -433,6 +433,15 @@ export {
   type RelocateSlotInput,
   relocateSlotResultSchema,
   type RelocateSlotResult,
+  PLAN_STORE_LOCATIONS,
+  planStoreLocationSchema,
+  type PlanStoreLocation,
+  storedLimitSchema,
+  type StoredLimit,
+  storeSlotItemInputSchema,
+  type StoreSlotItemInput,
+  storeSlotItemResultSchema,
+  type StoreSlotItemResult,
 } from './schemas/slots.ts';
 export {
   plannerSearchSchema,

@@ -51,6 +51,10 @@ export const planSlotItemSchema = z.object({
   isDeleted: z.boolean(),
   prepared: z.number().int().nonnegative(),
   eaten: z.number().int().nonnegative(),
+  // Portions sent to the Freezer / kept in the Fridge from this dish (FEAT-79).
+  // Leftovers in the plan are `prepared - eaten - frozen - chilled`.
+  frozen: z.number().int().nonnegative(),
+  chilled: z.number().int().nonnegative(),
   sortOrder: z.number().int().nonnegative(),
 });
 export type PlanSlotItem = z.infer<typeof planSlotItemSchema>;

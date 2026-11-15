@@ -47,6 +47,8 @@ function eatItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isDeleted: false,
     prepared: 2,
     eaten: 2,
+    frozen: 0,
+    chilled: 0,
     sortOrder: 0,
     ...overrides,
   };
@@ -63,6 +65,8 @@ function cookItem(overrides: Partial<PlanSlotItem> = {}): PlanSlotItem {
     isDeleted: false,
     prepared: 8,
     eaten: 0,
+    frozen: 0,
+    chilled: 0,
     sortOrder: 1,
     ...overrides,
   };
@@ -377,5 +381,71 @@ describe('SlotCell', () => {
     );
     expect(screen.getByText('Leftovers')).toBeInTheDocument();
     expect(screen.getByText('Takeaway')).toBeInTheDocument();
+  });
+});
+
+describe('SlotCell — storing', () => {
+  const COOKING: PlanSlot = { ...BASE_SLOT, slotType: 'recipe' };
+
+  it('shows stored portions beside the dish and leaves them out of the surplus', () => {
+    render(
+      <SlotCell
+        slot={{
+          ...COOKING,
+          items: [eatItem({ prepared: 8, eaten: 2, frozen: 2, chilled: 1 })],
+        }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByText('×2 +3 · 2 frozen · 1 in fridge'),
+    ).toBeInTheDocument();
+  });
+
+  it('offers Store… on a dish with spare portions, off the editor button', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    const onStoreItem = vi.fn();
+    const item = eatItem({ prepared: 8, eaten: 2 });
+    render(
+      <SlotCell
+        slot={{ ...COOKING, items: [item] }}
+        onClick={onClick}
+        onStoreItem={onStoreItem}
+      />,
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Store Tomato pasta…' }),
+    );
+    expect(onStoreItem).toHaveBeenCalledWith(item);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('still offers Store… once every spare portion is stored, so it can be undone', () => {
+    render(
+      <SlotCell
+        slot={{
+          ...COOKING,
+          items: [eatItem({ prepared: 4, eaten: 2, frozen: 2 })],
+        }}
+        onClick={() => undefined}
+        onStoreItem={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Store Tomato pasta…' }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers no Store… without a handler (Plan Review)', () => {
+    render(
+      <SlotCell
+        slot={{ ...COOKING, items: [eatItem({ prepared: 8, eaten: 2 })] }}
+        onClick={() => undefined}
+      />,
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Store Tomato pasta…' }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -173,6 +173,11 @@ export const mealPlanSlotItems = pgTable(
       .references(() => recipes.id, { onDelete: 'restrict' }),
     prepared: smallint().notNull(),
     eaten: smallint().notNull(),
+    // Portions sent to storage from this dish (DEC-118, FEAT-79). Each raise
+    // made a Stock item linked back by `source_slot_item_id`; the counts stay
+    // as a record even after those items are edited or eaten.
+    frozen: smallint().notNull().default(0),
+    chilled: smallint().notNull().default(0),
     sortOrder: smallint().notNull(),
     createdAt: timestamp({ withTimezone: true })
       .notNull()
@@ -191,6 +196,20 @@ export const mealPlanSlotItems = pgTable(
     check(
       'meal_plan_slot_items_prepared_or_eaten',
       sql`${table.prepared} + ${table.eaten} > 0`,
+    ),
+    check(
+      'meal_plan_slot_items_frozen_non_negative',
+      sql`${table.frozen} >= 0`,
+    ),
+    check(
+      'meal_plan_slot_items_chilled_non_negative',
+      sql`${table.chilled} >= 0`,
+    ),
+    // Rows that store nothing are exempt: a leftovers row, or a recipe slot
+    // eating food cooked earlier, has `prepared = 0` with `eaten > 0`.
+    check(
+      'meal_plan_slot_items_stored_within_prepared',
+      sql`${table.frozen} + ${table.chilled} = 0 or ${table.eaten} + ${table.frozen} + ${table.chilled} <= ${table.prepared}`,
     ),
     index('meal_plan_slot_items_slot_id_idx').on(table.slotId),
   ],

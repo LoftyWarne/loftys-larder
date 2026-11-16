@@ -85,8 +85,13 @@ test.describe('shopping against storage, and Staples', () => {
     const plan = await createPlan(today, ymd(addDays(new Date(), 1)));
 
     await page.goto('/storage?location=pantry');
-    await page.getByLabel('Add a Staple to the pantry').fill('olive');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add to storage' });
+    await dialog.getByRole('radio', { name: 'Staple' }).click();
+    await dialog.getByLabel('Staple', { exact: true }).fill('olive');
     await page.getByRole('option', { name: /Olive oil/i }).click();
+    await dialog.getByRole('button', { name: 'Add Staple' }).click();
+    await expect(dialog).toBeHidden();
     const staples = page.getByRole('region', { name: 'Staples' });
     const oil = staples.getByRole('radiogroup', {
       name: /Olive oil: how much you have/i,

@@ -26,11 +26,6 @@ test.describe('storage', () => {
     await expect(page).toHaveURL(/\/storage/);
     await expect(page.getByRole('heading', { name: 'Storage' })).toBeVisible();
 
-    await page.getByRole('link', { name: 'Ingredients', exact: true }).click();
-    await expect(
-      page.getByRole('heading', { name: 'Ingredients' }),
-    ).toBeVisible();
-
     await page.goto('/settings');
     await expect(
       page.getByRole('link', { name: 'Ingredients', exact: true }),

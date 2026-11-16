@@ -429,6 +429,7 @@ function AddForm({
             <div className="flex items-center gap-2">
               <Input
                 id={`${fieldId}-quantity`}
+                className="min-w-0"
                 inputMode="decimal"
                 autoComplete="off"
                 disabled={submitting}
@@ -438,7 +439,7 @@ function AddForm({
               />
               <span
                 id={`${fieldId}-unit`}
-                className="min-w-[3ch] text-sm text-muted-foreground"
+                className="min-w-[3ch] shrink-0 text-sm text-muted-foreground"
               >
                 {unitLabel}
               </span>

@@ -170,6 +170,7 @@ function EditForm({
             <div className="flex items-center gap-2">
               <Input
                 id={`${fieldId}-quantity`}
+                className="min-w-0"
                 inputMode="decimal"
                 autoComplete="off"
                 aria-invalid={
@@ -180,7 +181,7 @@ function EditForm({
               />
               <span
                 id={`${fieldId}-unit`}
-                className="text-sm text-muted-foreground"
+                className="shrink-0 text-sm text-muted-foreground"
               >
                 {unitLabel}
               </span>

@@ -103,7 +103,7 @@ function DesktopShell(): React.ReactElement {
 function PhoneShell(): React.ReactElement {
   return (
     <div className="space-y-4 pb-20">
-      <header className="sticky top-0 z-10 -mx-3 flex items-center justify-between border-b bg-background px-3 py-2">
+      <header className="sticky top-0 z-10 -mx-3 -mt-3 flex items-center justify-between border-b bg-background px-3 py-2 sm:-mx-6 sm:-mt-6 sm:px-6">
         <Link
           to="/"
           activeProps={{ className: 'text-primary' }}

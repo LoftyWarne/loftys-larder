@@ -188,10 +188,6 @@ export function StapleAddForm({
             </option>
           ))}
         </select>
-        <p className="text-xs text-muted-foreground">
-          Something you always keep. It’s tracked as in stock, running low or
-          out, not by amount.
-        </p>
       </div>
 
       {submitError && (

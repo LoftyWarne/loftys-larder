@@ -101,7 +101,7 @@ export function StaplesSection({
               key={staple.ingredientId}
               className="flex flex-wrap items-center justify-between gap-2 py-2"
             >
-              <span className="min-w-0 truncate text-sm font-medium">
+              <span className="min-w-0 truncate font-medium">
                 {staple.name}
               </span>
               <div className="flex shrink-0 items-center gap-1">

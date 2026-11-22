@@ -12,6 +12,7 @@ import {
 } from '../src/db/schema/auth.ts';
 import { households } from '../src/db/schema/household.ts';
 import { ingredients } from '../src/db/schema/ingredients.ts';
+import { mealPlans } from '../src/db/schema/meal-plans.ts';
 import {
   ingredientCategories,
   unitsOfMeasurement,
@@ -22,6 +23,7 @@ import {
   recipeMethodIngredients,
   recipes,
 } from '../src/db/schema/recipes.ts';
+import { shoppingListItems } from '../src/db/schema/shopping-list.ts';
 import type { AppContext } from '../src/trpc/context.ts';
 import { appRouter } from '../src/trpc/router.ts';
 import {
@@ -516,6 +518,34 @@ describe('ingredients procedures', () => {
         await db.select().from(ingredients).where(eq(ingredients.id, id)),
       ).toEqual([]);
       expect(await db.select().from(recipeMethodIngredients)).toEqual([]);
+    });
+
+    it('deletes an ingredient whose only use is tick state left on a past shopping list', async () => {
+      const id = await insertIngredient({ name: 'Leek' });
+      const [plan] = await db
+        .insert(mealPlans)
+        .values({
+          householdId: CURRENT_HOUSEHOLD_ID,
+          createdByUserId: USER_ID,
+          startDate: new Date('2026-06-01'),
+          endDate: new Date('2026-06-07'),
+        })
+        .returning({ id: mealPlans.id });
+      if (!plan) throw new Error('plan insert failed');
+      await db.insert(shoppingListItems).values({
+        planId: plan.id,
+        ingredientId: id,
+        isChecked: true,
+        lastCheckedQuantity: '200',
+      });
+      const caller = createCaller(makeContext());
+
+      await caller.ingredients.delete({ id });
+
+      expect(
+        await db.select().from(ingredients).where(eq(ingredients.id, id)),
+      ).toEqual([]);
+      expect(await db.select().from(shoppingListItems)).toEqual([]);
     });
 
     it('returns NOT_FOUND for unknown id', async () => {

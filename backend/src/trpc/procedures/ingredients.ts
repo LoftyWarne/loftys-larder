@@ -16,6 +16,7 @@ import {
 } from '../../../../shared/src/index.ts';
 import { CURRENT_HOUSEHOLD_ID } from '../../config.ts';
 import { ingredients } from '../../db/schema/ingredients.ts';
+import { mealPlans } from '../../db/schema/meal-plans.ts';
 import {
   ingredientCategories,
   unitsOfMeasurement,
@@ -24,6 +25,7 @@ import {
   recipeIngredients,
   recipeMethodIngredients,
 } from '../../db/schema/recipes.ts';
+import { shoppingListItems } from '../../db/schema/shopping-list.ts';
 import { stockItems, stockReservations } from '../../db/schema/storage.ts';
 import { makeWithTransaction, type Tx } from '../../db/withTransaction.ts';
 import { todayInLondon } from '../../lib/date-utils.ts';
@@ -379,6 +381,22 @@ export const ingredientsRouter = router({
               ),
           ),
         );
+        // Tick state outlives the recipe lines that put the ingredient on a
+        // list (DEC-30); once no recipe uses it the line is gone, so drop it.
+        await tx
+          .delete(shoppingListItems)
+          .where(
+            and(
+              eq(shoppingListItems.ingredientId, input.id),
+              inArray(
+                shoppingListItems.planId,
+                tx
+                  .select({ id: mealPlans.id })
+                  .from(mealPlans)
+                  .where(eq(mealPlans.householdId, CURRENT_HOUSEHOLD_ID)),
+              ),
+            ),
+          );
         return tx
           .delete(ingredients)
           .where(

@@ -49,6 +49,8 @@ export const pwaManifest: Partial<ManifestOptions> = {
 // tRPC URL shape (cross-cutting #16) is `/api/trpc/<procedure>?batch=1&input=...`.
 // The match runs against the URL string before the query is stripped, so a
 // non-anchored substring match on the procedure segment is the right shape.
+// The procedure name is hand-written here, so renaming `shopping.getForPlan`
+// silently stops the shopping list caching for offline use.
 export const SHOPPING_LIST_NETWORK_FIRST_PATTERN =
   /\/api\/trpc\/shopping\.getForPlan/;
 

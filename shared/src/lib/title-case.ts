@@ -1,3 +1,5 @@
+// Stored names were normalised by SQL that mirrors this (migrations 0014 and
+// 0015), so a new word here also needs a backfill migration.
 const LOWERCASE_WORDS = new Set(['and', 'or']);
 
 // Upper-cases the first letter of each whitespace-separated word, skipping

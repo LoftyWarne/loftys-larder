@@ -1,358 +1,147 @@
 # AGENTS.md — Lofty's Larder
 
-Read this file before every prompt. Your default posture is **ask, don't assume**: pausing for clarification is the cheap default, unilateral decisions are the expensive exception. If a constraint here disagrees with your instinct, the constraint wins — surface the disagreement, don't route around it.
+Lofty's Larder is a meal-planning PWA for one household: recipes, meal plans, shopping lists, health scores and storage. Shipped through FEAT-81.
 
-The doc set:
+**Posture: ask, don't assume.** A question costs a paragraph; an unwanted decision costs a revert and a DEC update. When a rule here disagrees with your instinct, the rule wins: say so, then follow it.
 
-- `README.md` — entry point, kept in sync with shipped features.
-- `CONTEXT.md` — domain glossary. Terms only, no implementation detail.
-- `docs/plan.md` — strategy. Source of hard constraints below.
-- `docs/feature-specs.md` — 82 executable units, FEAT-01 … FEAT-82.
-- `docs/design-decisions.md` — ADR log, DEC-01 … DEC-118. Cross-refs to FEATs.
-- `docs/non-goals.md` — deliberate exclusions. Useful to *prevent* work.
-- `docs/session-notes.md` — rolling working doc; pending questions, in-flight context.
-- `AGENTS.md` — this file.
+## Docs
 
----
+Read the part a task needs, not the whole set.
 
-## Hard constraints (override default behaviour)
-
-These come from `docs/plan.md` and the corresponding DECs. They are non-negotiable inside v1. If you think a task needs one of these to bend, stop and ask.
-
-1. **ESM-only, everywhere.** Every `package.json` is `"type": "module"`. `module: "NodeNext"`, `moduleResolution: "NodeNext"`. A CJS-only dependency is a stop-and-ask. (DEC-01)
-2. **Strict TS, Node LTS pinned** in `engines`, `.nvmrc`, and the Dockerfile. Do not relax `strict`. (DEC-02)
-3. **Three workspaces only:** `/backend`, `/frontend`, `/shared`. Do not introduce a build orchestrator (Turborepo/Nx). (DEC-03)
-4. **Zod schemas live in `/shared/src/schemas/*`** and are imported by both sides. Never inline a schema in a procedure or component. (cross-cutting concern #2)
-5. **Single-household MVP.** Every Drizzle query touching a household-scoped table must include `WHERE household_id = CURRENT_HOUSEHOLD_ID`. No `getCurrentScope()` resolver. `addedBy` / `createdBy` are informational — never authorisation predicates. (DEC-17, cross-cutting #3)
-6. **`snake_case` in the DB, `camelCase` in code,** mapped via Drizzle. A stray raw SQL fragment uses snake_case. (DEC-15)
-7. **`updatedAt` via Drizzle `$onUpdate`,** not triggers, not convention. All writes route through Drizzle. (DEC-16)
-8. **Soft-delete recipes; never hard-delete.** Past plans depend on the row staying. The `pickable-recipes` helper encodes visibility. (DEC-21, cross-cutting #5, #19)
-9. **No snapshotting on slot assignment.** Slots reference recipes by FK; edits propagate. (DEC-22)
-10. **One unit per ingredient.** No conversion tables. Users convert manually on entry. (DEC-18)
-11. **Whole-recipe quantities + explicit `baseServings`.** Never per-serving entry. (DEC-19)
-12. **No nested base recipes.** A recipe is either `is_base` or has a `base_recipe_id` — CHECK constraint enforces it. (DEC-23)
-13. **Slot states are an enum,** not dummy recipes. `slot_type ∈ {empty, recipe, eat_out, takeaway, leftovers}`. (DEC-25)
-14. **Plant points are computed, never stored.** (DEC-32)
-15. **Europe/London time, centralised in `dateUtils`.** Forbid `new Date()` in domain code — import from `dateUtils`. (DEC-33, cross-cutting #8)
-16. **All multi-statement writes go through `withTransaction`** — never ad-hoc `db.transaction(...)`. Concentrates the audit surface. (cross-cutting #4)
-17. **All user-generated text is plain text.** No markdown, no HTML, no rich-text editor, **never `dangerouslySetInnerHTML`**. (DEC-49)
-18. **Magic-link auth only.** No passwords. Better Auth owns its tables; domain code references `user_id` directly and keeps the boundary small. (DEC-41, DEC-42, cross-cutting #17)
-19. **Account deletion is tombstoning, not cascade.** Follow the seven-step sequence in `docs/plan.md` and FEAT-35. (DEC-29)
-20. **Last-write-wins on shared resources.** No row-version columns, no row-level locks. (DEC-36)
-21. **`req.id` propagates end-to-end** as `reqId`, identical across Pino, Axiom, and Sentry. Do not rename or regenerate along the way. (DEC-77, cross-cutting #1)
-22. **No staging environment.** Migrations run via Fly `release_command` on push to `main`. Tests against Testcontainers + restore drills are the mitigation. (DEC-40, DEC-65)
-23. **Single region (`lhr`); auto-stop enabled; 3-second cold-start budget.** Do not enable always-on without measurement (FEAT-52). (DEC-63, DEC-64)
-24. **Direct browser→Cloudinary uploads.** Never proxy image bytes through Fastify. (DEC-50)
-25. **Do not change the tRPC URL shape.** `httpBatchLink` produces `/api/trpc/<procedure>?batch=1&input=...` and the PWA cache rules match on the procedure segment. Reconfiguring this needs a coordinated change. (cross-cutting #16)
-
----
-
-## Tech stack — use this, not that
-
-Drawn from `docs/design-decisions.md`. If you reach for the *not-that* side, stop and ask.
-
-| Concern | Use | Not |
+| Doc | Holds | Read it when |
 |---|---|---|
-| Frontend framework | React + Vite (DEC-04) | Next.js, Remix, CRA |
-| Routing | TanStack Router, date range in URL search params (DEC-10) | React Router, Wouter |
-| Server state | TanStack Query via `@trpc/react-query` (DEC-08) | SWR, bespoke `useEffect`, RTK Query |
-| Client state | React `useState` + Context (DEC-09) | Redux, Zustand, Jotai, Recoil |
-| Forms | React Hook Form + Zod resolver (DEC-11) | Formik, TanStack Form, hand-rolled controlled inputs |
-| Styling | Tailwind + shadcn/ui (DEC-51) | styled-components, CSS modules, Emotion |
-| Backend framework | Fastify (DEC-05) | Express, Hono, Koa, NestJS |
-| API contract | tRPC, types via `/shared` (DEC-06) | REST + OpenAPI codegen, GraphQL, hand-rolled fetch |
-| Validation | Zod (DEC-07) | Yup, Joi, Valibot |
-| Database | PostgreSQL — Fly Postgres prod, Docker dev (DEC-12) | SQLite, MySQL, Mongo |
-| ORM | Drizzle (DEC-13) | Prisma, Kysely, raw `pg`, TypeORM |
-| Search | `ILIKE` + `pg_trgm` GIN index (DEC-14) | Postgres FTS, Meilisearch, Algolia, ES |
-| Auth | Better Auth + Resend magic links (DEC-42) | Passwords, Lucia (named fallback only), bespoke session table |
-| Email | Resend (DEC-69) | Postmark (named fallback only) |
-| Media | Cloudinary direct browser upload (DEC-68) | S3 with backend proxying |
-| Backend logging | Pino → Axiom (DEC-75) | `console.log`, Winston, Bunyan |
-| Error tracking | Sentry (front + back), `beforeSend` PII scrub, no session replay (DEC-76) | Datadog, Rollbar; session replay |
-| Edge | Cloudflare orange-cloud DNS, `/api/*` cache bypass (DEC-72) | Direct Fly exposure |
-| Containers (local) | Docker Compose for Postgres only (DEC-74) | Compose for Fastify/Vite as well |
-| Runtime host (prod) | Fly.io, `lhr`, auto-stop (DEC-63, DEC-64) | Render, Railway, ECS |
-| Tests | Vitest + Testcontainers, RTL, Playwright with `storageState` (DEC-56, DEC-57, DEC-58) | Jest; mocked DB in backend integration tests |
-| Package manager | pnpm (DEC-03) | npm, yarn |
-| Dev runtime | `tsx watch` | `ts-node`, plain `node` |
-| Prod backend | `esbuild` single bundle (DEC-61) | `tsx` in prod, `tsc` emit |
-| CI/CD | GitHub Actions + `flyctl` (DEC-66) | CircleCI, Buildkite |
+| `README.md` | What ships today, and how to run it | Setting up, or a change alters what ships |
+| `CONTEXT.md` | Domain glossary, terms only | A term in a FEAT or DEC is unclear |
+| `docs/feature-specs.md` | FEAT-01 … FEAT-82, and cross-cutting concerns #1–#23 (§Cross-feature concerns) | Working on a FEAT: read that FEAT and the concerns it threads through |
+| `docs/design-decisions.md` | DEC-01 … DEC-118 | A FEAT cites a DEC, or a change touches behaviour a DEC decides |
+| `docs/plan.md` | Strategy, data model, build order | A FEAT or DEC cites a section |
+| `docs/non-goals.md` | What v1 leaves out, and why | Work drifts towards something no FEAT asks for |
+| `docs/gotchas.md` | Symptoms with surprising causes, and non-obvious lookups | Debugging: grep it for the error text first. Changing an area: read its section |
+| `docs/session-notes.md` | Open questions and work in flight | Starting a session: read the newest entry |
+| `.claude/skills/` | The steps the user runs: `/feat-kickoff`, `/feat-implement`, `/feat-verify`, `/feat-review`, `/investigate-bug` | Asked in words to kick off, implement, verify, review or investigate a bug: read and follow the matching `SKILL.md` |
+| `OPERATIONS.md` | Production: secrets, alerts, releases and rollback, restores, rate limits | Before any `flyctl` command or production change |
 
----
-
-## Repo layout
-
-```
-/
-├── AGENTS.md               ← this file
-├── README.md               ← entry point; updated as features ship
-├── docs/
-│   ├── plan.md
-│   ├── feature-specs.md
-│   ├── design-decisions.md
-│   ├── non-goals.md
-│   └── session-notes.md    ← rolling working doc
-├── package.json            ← root, private, workspaces
-├── pnpm-workspace.yaml
-├── tsconfig.base.json
-├── docker-compose.yml      ← Postgres only
-├── Dockerfile              ← multi-stage, prod
-├── fly.toml                ← single region lhr
-├── .github/workflows/      ← ci.yml, deploy.yml, backup.yml
-├── backend/                ← Fastify + tRPC + Drizzle
-│   ├── src/
-│   │   ├── server.ts
-│   │   ├── config.ts       ← env via Zod
-│   │   ├── plugins/        ← logger, security, auth
-│   │   ├── trpc/           ← context.ts, init.ts, router.ts, procedures
-│   │   ├── db/             ← schema, migrations, withTransaction
-│   │   ├── domain/         ← pickable-recipes, aggregation, plant-points
-│   │   └── util/           ← dateUtils
-│   ├── drizzle/            ← migrations
-│   └── tsconfig.json
-├── frontend/               ← Vite + React + shadcn/ui
-│   ├── src/
-│   │   ├── main.tsx, app.tsx, router.tsx
-│   │   ├── lib/            ← trpc.ts, query-client.ts
-│   │   ├── routes/         ← TanStack Router
-│   │   ├── components/     ← shadcn primitives + app components
-│   │   ├── features/       ← recipes/, planner/, shopping-list/, settings/
-│   │   └── hooks/          ← useOptimisticSlotUpdate, etc.
-│   └── tsconfig.json
-└── shared/                 ← type pipeline
-    └── src/
-        ├── index.ts        ← barrel
-        ├── router-type.ts  ← exports AppRouter type
-        ├── schemas/        ← Zod schemas used by both sides
-        └── dto/            ← recipe DTO, shopping-list DTO
-```
-
-Cross-workspace rules:
-
-- `/frontend` imports from `/shared` only. Never from `/backend` runtime. `import type` for the router type.
-- `/backend` imports from `/shared` for schemas and DTOs.
-- `/shared` is a runtime leaf — no runtime imports from `/backend` or `/frontend`. One narrow type-only exception: `shared/src/router-type.ts` does `export type { AppRouter } from '../../backend/src/trpc/router.ts'`. Type-only re-exports are erased at compile time and add no runtime dependency. See DEC-80 for the trade-off and its revisit trigger.
-
----
+A FEAT goes kick-off → approval → implement → verify, one skill per step.
 
 ## Commands
 
-These are the canonical script names. If `package.json` is missing one, ask before inventing it.
+The `package.json` scripts are the source of truth. When one is missing, ask before inventing it.
 
-| Action | Command |
-|---|---|
-| Install | `pnpm install` |
-| Start Postgres (local) | `docker compose up -d postgres` |
-| Dev backend | `pnpm --filter backend dev` |
-| Dev frontend | `pnpm --filter frontend dev` |
-| Typecheck (all) | `pnpm -r typecheck` |
-| Lint (all) | `pnpm -r lint` |
-| Format (write) | `pnpm -r format` |
-| Format (check) | `pnpm -r format:check` |
-| Test (all) | `pnpm -r test` |
-| Test (one workspace) | `pnpm --filter <ws> test` |
-| Build frontend | `pnpm --filter frontend build` |
-| Build backend (prod bundle) | `pnpm --filter backend build` |
-| Generate migration | `pnpm --filter backend db:generate` |
-| Run migration | `pnpm --filter backend db:migrate` (or `pnpm drizzle-kit migrate`) |
-| Build image | `docker build .` |
-| Deploy | `flyctl deploy` (the `release_command` runs the migrate bundle; configured in `fly.toml`, not a CLI flag. CI does this on push to `main`) |
-| Rollback | `flyctl releases rollback` |
+- Check everything: `pnpm format:check && pnpm -r lint && pnpm -r typecheck && pnpm -r test`
+- Dev: `pnpm dev` starts Postgres, migrates, seeds, then runs the backend (`:3000`) and frontend (`:5173`).
+- e2e: `pnpm --filter backend build`, then `pnpm e2e`. Playwright runs the built server.
+- New migration: `pnpm --filter backend db:generate`.
+- Deploy: CI deploys `main` after it passes; `fly.toml`'s `release_command` migrates and seeds. Rollback is in `OPERATIONS.md` § Releases and rollback.
 
-Never use `--no-verify` on `git commit`. If a pre-commit hook fails, fix the underlying issue.
+## Workspaces
 
----
+pnpm workspaces with no build orchestrator (DEC-03).
 
-## Code conventions
-
-- **One file, one job.** Procedures live next to their feature; cross-cutting helpers in `domain/` or `util/`.
-- **Route files are thin shells.** Files under `frontend/src/routes/` export _only_ `Route`. Page components, `beforeLoad` functions, and any other exports live in `frontend/src/routes/-components/` (the `-` prefix excludes the dir from TanStack Router's file-based routing). TanStack Router's auto-code-split plugin can only split `Route.options.component`; additional exports get hoisted into the route chunk and emit a dev-server warning.
-- **Schemas: `/shared/src/schemas/`.** DTO shapes: `/shared/src/dto/`. Import these — don't redefine.
-- **Errors:** `TRPCError` with a tRPC code on `code` and a domain code on `cause` of the form `{ code: string, ...metadata }`. (cross-cutting #11, DEC-35)
-- **Optimistic updates:** use the shared hook (`useOptimisticSlotUpdate`, FEAT-31). Don't reimplement `onMutate`/`onError`/`onSettled` per consumer. (cross-cutting #7)
-- **Pickable recipes:** use the helper. Don't filter recipes by hand. (cross-cutting #5)
-- **Health-score staleness:** a recipe write that changes ingredients, method text, servings, nutrition or a variation's base calls `markHealthScoreStale` inside its transaction. (cross-cutting #21, DEC-101)
-- **Settling Reservations:** every read that shows held stock, or plans against it, calls `settleReservations` from `backend/src/lib/stock-settlement.ts` first, inside its `withTransaction`. A read that skips it shows food already eaten. (cross-cutting #23, DEC-118)
-- **Model features:** any feature that calls a model follows cross-cutting #22: its own seam with a `fake` adapter, `<FEATURE>_ADAPTER` / `<FEATURE>_MODEL` config, its rules applied outside the seam, and metadata-only logging. (DEC-109, DEC-110)
-- **Searchable combobox primitive** (FEAT-21) is the only combobox. Don't fork it per picker. (cross-cutting #6)
-- **Slot card** (FEAT-31) has explicit slots for future content. Extend, don't rewrite. (cross-cutting #14)
-- **Date logic** imports from `dateUtils`. No `new Date()` in domain code. (cross-cutting #8)
-- **Multi-statement writes** go through `withTransaction`. Never ad-hoc. (cross-cutting #4)
-- **Logging:** Pino only. No `console.log` (Axiom won't see it). (FEAT-03 gotcha)
-- **Comments:** default to none. Only add one when the *why* is non-obvious (a hidden constraint or surprising invariant).
-
----
-
-## Common traps — do NOT do these
-
-| Trap | Why |
-|---|---|
-| Use `dangerouslySetInnerHTML` | All user text is plain text. React escaping is the XSS mitigation. (DEC-49) |
-| Inline a Zod schema in a procedure or form | Schemas live in `/shared`. Inlining breaks the one-source promise. (cross-cutting #2) |
-| Write a Drizzle query without `WHERE household_id = CURRENT_HOUSEHOLD_ID` | The single-household discipline is the only scope mechanism. (DEC-17) |
-| Reach for `new Date()` in domain code | Use `dateUtils`. (DEC-33) |
-| Call `db.transaction(...)` directly | Use `withTransaction`. (cross-cutting #4) |
-| Hard-delete recipes | Soft-delete only — past plans depend on the row. (DEC-21) |
-| Snapshot recipes onto slots | Slots reference by FK; edits propagate. (DEC-22) |
-| Scope a query by `addedBy` / `createdBy` | Informational, not authorisation. (DEC-17) |
-| Add a row-version column or row-level lock | LWW is the chosen model. (DEC-36) |
-| Add a global state library (Redux, Zustand, Jotai) | Plain React state until a concrete need appears. (DEC-09) |
-| Add a CJS-only dependency | ESM-only across the project. Verify ESM at proposal time. (DEC-01, cross-cutting #20) |
-| Change the tRPC URL shape (`httpBatchLink` → `httpLink`) | PWA cache rules match on it. (cross-cutting #16) |
-| Proxy image uploads through Fastify | Direct browser → Cloudinary with signed credentials. (DEC-50) |
-| Introduce nested base recipes | Two levels only. (DEC-23) |
-| Introduce per-user timezones | Europe/London is hardcoded. (DEC-33) |
-| Add password auth, account recovery flow, or OAuth | Magic-link only. (DEC-41) |
-| Cascade delete on user removal | Tombstoning sequence — preserves household data. (DEC-29) |
-| Create dummy "Eat Out" / "Takeaway" / "Leftovers" recipes | Use the `slot_type` enum. (DEC-25) |
-| Introduce per-serving ingredient entry | Whole-recipe + `baseServings`. (DEC-19) |
-| Introduce multi-unit per ingredient | One enforced unit. (DEC-18) |
-| Add a `getCurrentScope()` resolver or thread `scope` through repositories | `CURRENT_HOUSEHOLD_ID` constant is the discipline. (DEC-17) |
-| Enable Sentry session replay | PII / cookie-consent cost not worth it at this scale. (DEC-76) |
-| Add a coverage threshold | Coverage is not a target; behaviour is. (DEC-59) |
-| Introduce a recipe-bank → slot drag below the `lg` breakpoint | Bank → slot DnD is `lg+` only per DEC-84 / FEAT-40, because the bank itself is hidden below `lg` (DEC-85). Slot ↔ slot drag *is* enabled at every viewport — touch-and-hold (200 ms) lifts a populated slot, the same `slots.relocate` mutation handles move / swap. |
-| Render the Recipe Bank below `lg` | Hidden below the `lg` cutoff per DEC-85 / FEAT-40. Recipe assignment routes through the slot-editor sheet there. (Slot ↔ slot drag still works without the bank.) |
-| Create a staging Fly app | Testcontainers + restore drills are the chosen mitigation. (DEC-65) |
-| Use `tsx` in production | `esbuild` single bundle. (DEC-61) |
-| Add a build orchestrator (Turborepo, Nx) | Three workspaces is below the threshold. (DEC-03) |
-| `console.log` for diagnostics | Pino only. (FEAT-03) |
-| Skip pre-commit hooks (`--no-verify`) | Fix the underlying failure. |
-| Export a React component or helper from `frontend/src/routes/*.tsx` | Route files are thin shells. Page bodies + `beforeLoad` live in `routes/-components/`; the route file only exports `Route`. (auto-code-split plugin warns otherwise) |
-| Pass a relative `callbackURL` / `errorCallbackURL` to Better Auth | Better Auth resolves relative URLs against `BETTER_AUTH_URL` (the backend origin). In dev the SPA lives on a different origin (Vite on `:5173`); the relative path lands on Fastify and 404s. Use `` `${window.location.origin}/path` `` so the redirect goes to whichever origin the user is actually on. The dev origin must be on `MAGIC_LINK_TRUSTED_ORIGIN`. |
-
----
-
-## Formatting and linting
-
-Prettier + ESLint + husky + lint-staged are configured at FEAT-07. Treat the config as canonical and stable.
-
-**Rules for working with the toolchain:**
-
-1. **Don't fight the formatter.** If Prettier disagrees with your layout, the layout changes. Never wrap a region in `// prettier-ignore` to preserve a personal preference.
-2. **Don't silence ESLint rules without asking.** `eslint-disable`, `eslint-disable-next-line`, `@ts-expect-error`, and `@ts-ignore` are a stop-and-ask trigger. If a rule appears to be wrong for this codebase, the conversation is "should this rule change?" not "let me suppress it here."
-3. **Don't reconfigure mid-project.** `eslint.config.js` and `.prettierrc` are part of FEAT-07's contract. Proposed changes go through the same kick-off / approval / implement flow as any other change.
-4. **Don't add or swap a linter.** No Biome, no `xo`, no `tslint`. ESLint is the only linter; Prettier is the only formatter.
-5. **`husky` pre-commit runs `lint-staged`,** which runs Prettier and `eslint --fix` on the staged files. If the hook fails, fix the issue and re-stage — do not bypass.
-6. **CI is the source of truth.** A clean local run that fails in CI means the local environment drifted (Node version, pnpm version). Fix the environment, not the CI config.
-7. **Auto-fix is allowed; rule-disable is not.** `pnpm -r lint -- --fix` for mechanical fixes is fine; suppressing a complaint is not.
-8. **`@typescript-eslint` strict-type-checked rules are deliberate.** They earn their keep on the typed tRPC pipeline.
-
----
-
-## Prompting this project
-
-### Which docs to load — by prompt type
-
-| Prompt type | Load | Don't load |
+| Workspace | Holds | Imports |
 |---|---|---|
-| **Kick-off** (new feature) | `AGENTS.md`; the specific `docs/feature-specs.md §FEAT-N`; the DECs cross-referenced by that FEAT; `docs/session-notes.md` | The whole of `feature-specs.md`; `docs/plan.md` in full; `docs/non-goals.md` unless ruling out scope creep |
-| **Implementation** | `AGENTS.md`; the approved kick-off plan; the FEAT entry; the cross-cutting concerns section; `/shared` schemas relevant to the change | `docs/plan.md` again; other FEATs not being touched |
-| **Debug** | `AGENTS.md`; `docs/design-decisions.md` for the surface in question; `docs/session-notes.md`; the failing code | `docs/feature-specs.md` (the feature has shipped) unless re-reading acceptance criteria; `docs/plan.md` in full |
-| **Review** | `AGENTS.md`; the FEAT entry; the cross-ref'd DECs; `docs/non-goals.md` (to catch in-scope expansion of out-of-scope territory); the diff | `docs/plan.md` as a whole — surgical sections only |
-| **Doc update** | The doc being edited; cross-referenced docs | The code, unless verifying a claim |
+| `/backend` | Fastify, tRPC procedures, Drizzle schema and migrations, Better Auth; shared helpers in `src/lib/` | `/shared` |
+| `/frontend` | The React PWA | `/shared`; `import type` for `AppRouter` |
+| `/shared` | Zod schemas and DTOs (`src/schemas/`), the `AppRouter` type, pure functions both sides run | nothing at runtime |
+| `/e2e` | Playwright specs, fixtures and the e2e database setup | nothing from the other workspaces |
 
-Read selectively. Reading "everything" is not safer than reading the right thing — it dilutes attention and burns context.
+`/shared`'s one reach into `/backend` is the type-only `export type { AppRouter }` in `shared/src/router-type.ts`, erased at compile time (DEC-80).
 
-### Stop-and-ask triggers
+## Rules
 
-Pause and surface the question — do not proceed unilaterally — if any of these apply:
+Each rule names its source. A task that seems to need one bent is a stop-and-ask.
 
-- The work appears to contradict a DEC in `docs/design-decisions.md`.
-- The work creeps into a `docs/non-goals.md` entry.
-- A new dependency is needed (verify ESM support; check against the "use this not that" table).
-- A schema change is needed: new table, column, FK, constraint, or index.
-- The tRPC URL shape, `dateUtils`, `withTransaction`, `pickable-recipes`, the optimistic-update hook, or the slot card shape would change.
-- The auth surface (Better Auth) would expand beyond reading the session.
-- A test would need to mock the database (use Testcontainers).
-- The obvious code path requires `eslint-disable`, `@ts-expect-error`, `@ts-ignore`, or `prettier-ignore`.
-- Acceptance criteria in the FEAT are ambiguous, contradictory, or incomplete.
-- Two libraries or two patterns are roughly equivalent and the choice isn't in `docs/design-decisions.md`.
-- The change touches three or more places that don't already share a helper (likely a new cross-cutting concern).
-- The work would mark a Definition-of-done item as complete (you never do this — see below).
+**Toolchain**
+- ESM-only: every `package.json` is `"type": "module"`, with `NodeNext` module resolution. Check that a new dependency ships ESM before proposing it. (DEC-01, concern #20)
+- Strict TypeScript on Node 24 LTS, pinned in `engines`, `.nvmrc` and the Dockerfile. (DEC-02)
+- Prettier formats and ESLint lints, with `@typescript-eslint` strict-type-checked rules on purpose; husky runs lint-staged on commit. Auto-fix freely (`pnpm lint:fix`). When the hook fails, fix the cause and re-stage. CI is the source of truth: a local pass that fails in CI means the local Node or pnpm has drifted. (FEAT-07)
+- Logging goes through Pino, the only output Axiom sees. (FEAT-03, DEC-75)
+- `req.id` travels as `reqId`, the same value in Pino, Axiom and Sentry; pass it on as it is. (DEC-77, concern #1)
+- Comments explain a *why* the code can't show, and nothing else.
+- Tests check behaviour, with no coverage threshold. Backend tests run against real Postgres in Testcontainers. (DEC-56, DEC-59)
 
-When in doubt: ask. The cost of asking is one paragraph; the cost of an unwanted decision is a revert plus a DEC update.
+**Data and domain**
+- Every query on a household-scoped table filters on `household_id = CURRENT_HOUSEHOLD_ID`, a constant in `backend/src/config.ts`, not a resolved scope. `addedBy` and `createdBy` are informational, never an authorisation check. (DEC-17, concern #3)
+- Zod schemas and DTOs live in `/shared/src/schemas/`; procedures and forms import them. (concern #2)
+- `snake_case` in the database, `camelCase` in code, mapped by Drizzle; a raw SQL fragment uses `snake_case`. `updatedAt` comes from Drizzle's `$onUpdate`, so every write goes through Drizzle. (DEC-15, DEC-16)
+- Multi-statement writes go through `withTransaction` (`backend/src/db/withTransaction.ts`). DEC-114's sign-in counters are the one recorded exception. (concern #4)
+- Time is Europe/London for everyone, through the date module (`backend/src/lib/date-utils.ts`, `frontend/src/lib/date-utils.ts`). Domain code gets "now" from it rather than `new Date()`. (DEC-33, concern #8)
+- Recipes are soft-deleted, because past plans still render them. What a picker may offer comes from `backend/src/lib/pickable-recipes.ts`. (DEC-21, concerns #5, #19)
+- Slots reference recipes by FK, so recipe edits reach past plans. (DEC-22)
+- One unit per ingredient; users convert when they enter a quantity. (DEC-18)
+- Quantities are for the whole recipe, with an explicit `baseServings`. (DEC-19)
+- A recipe is a base (`is_base`), a variation of one base (`base_recipe_id`), or standalone, two levels at most; a CHECK enforces it. (DEC-23, DEC-87)
+- A slot's state is its `slot_type` enum (`empty`, `recipe`, `eat_out`, `takeaway`, `leftovers`), not a placeholder recipe. (DEC-25)
+- Plant points are computed on read, never stored. (DEC-32)
+- Every write that concern #21 lists calls `markHealthScoreStale` inside its transaction: a recipe's ingredients, method text, servings, nutrition or base. (DEC-101)
+- Every read that shows held stock, or plans against it, calls `settleReservations` (`backend/src/lib/stock-settlement.ts`) first, inside its transaction. A read that skips it shows food already eaten. (DEC-118, concern #23)
+- Shared resources are last-write-wins, with no row-version columns or concurrency tokens. (DEC-36)
+- Account deletion tombstones, in FEAT-35's sequence, rather than cascading. A new table with a user FK extends that sequence. (DEC-29, concern #15)
+- A domain error is a `TRPCError` with the tRPC code on `code` and `{ code, ...metadata }` on `cause`. (DEC-35, concern #11)
+- A feature that calls a model gets its own seam with a `fake` adapter, `<FEATURE>_ADAPTER` and `<FEATURE>_MODEL` config, its rules applied outside the seam, and metadata-only logs. Before its first deploy, send one real request through the real adapter. (DEC-109, DEC-110, concern #22)
 
-### Three-phase feature templates
+**Frontend**
+- Files under `frontend/src/routes/` export only `Route`; page bodies and `beforeLoad` live in `routes/-components/`, because TanStack Router's auto-code-split can only split `Route.options.component`.
+- Optimistic updates reuse `useOptimisticSlotUpdate` (`frontend/src/hooks/`). A sibling hook mirrors its `onMutate` / `onError` / `onSettled` scaffold rather than forking it. (concern #7)
+- `SearchableCombobox` is the one combobox. (FEAT-21, concern #6)
+- The slot card grows through its named content regions. (FEAT-31, concern #14)
+- The planner has three widths: one card per day below `md`, the grid from `md`, and the Recipe Bank with bank → slot drag from `lg`. Slot ↔ slot drag works at every width (a 200 ms touch-and-hold lifts a slot). Below `lg`, recipes are assigned through the slot-editor sheet. (DEC-84, DEC-85, DEC-115, FEAT-40)
 
-**Phase 1 — Kick off**
+**API, auth and edge**
+- Keep `httpBatchLink`'s `/api/trpc/<procedure>?batch=1&input=…` shape: the PWA's cache rules match on the procedure segment. (concern #16)
+- Images upload from the browser straight to Cloudinary with signed credentials, never through Fastify. (DEC-50, DEC-68)
+- Sign-in is passwordless: a one-time code emailed through Better Auth's `emailOTP` plugin. Better Auth owns its tables; domain code references `user_id` and keeps the boundary small. (DEC-41, DEC-42, DEC-114, concern #17)
 
-> We're starting FEAT-N. Read `docs/feature-specs.md §FEAT-N` and the DECs cross-referenced there. Don't write code yet. Propose:
->
-> 1. The files you'll touch, grouped by workspace.
-> 2. The Zod schemas that are new or extended, and confirm they'll live in `/shared/src/schemas/`.
-> 3. Which cross-cutting helpers you'll reuse (`withTransaction`, `pickable-recipes`, `useOptimisticSlotUpdate`, `dateUtils`, the combobox primitive) and any new ones you're tempted to introduce.
-> 4. What's ambiguous in the acceptance criteria — and your proposed reading, framed as a question.
-> 5. Which DECs constrain the implementation (list them).
-> 6. The test surfaces from the Definition of Done.
->
-> Output: a numbered checklist I can approve or amend. Do not start implementation.
+**Production**
+- One Fly app in `lhr`, auto-stopping, with a 3-second cold-start budget. Going always-on needs a measurement first. (DEC-63, DEC-64, FEAT-52)
+- There is no staging environment: Testcontainers tests and restore drills are the safety net, and `release_command` runs migrations on deploy. (DEC-40, DEC-65)
 
-**Phase 2 — Implement after approval**
+## Ask first
 
-> Approved. Implement FEAT-N per the plan you proposed above.
->
-> Honour every DEC referenced. Stop and ask before:
->
-> - adding a new dependency,
-> - making a schema change beyond what was approved,
-> - introducing a new helper instead of reusing an existing one,
-> - silencing a linter, formatter, or typechecker rule,
-> - touching the auth surface, the tRPC URL shape, or `dateUtils`.
->
-> Leave the Definition-of-done checkboxes unchecked. Verification is a human action — you do not tick them.
->
-> After implementation, write a short status: what landed, what didn't, drift from the plan and why.
+Stop and ask before:
 
-**Phase 3 — Verify and close out**
+- contradicting a DEC, or settling a FEAT reading that would change one
+- work that drifts into `docs/non-goals.md`
+- adding a dependency (check its ESM support when proposing it)
+- a schema change the approved plan didn't include: table, column, FK, constraint or index
+- changing a shared piece: `withTransaction`, the date module, `pickable-recipes`, `settleReservations`, the optimistic-update hook, the slot card, the combobox or the tRPC link
+- widening the auth surface beyond reading the session
+- mocking the database in a test (Testcontainers is the pattern)
+- adding an `eslint-disable`, `@ts-expect-error`, `@ts-ignore` or `prettier-ignore`, or changing `eslint.config.js` or `.prettierrc`
+- choosing between two libraries or patterns that no DEC decides
+- writing the same logic in a third place with no shared helper (it's probably a new cross-cutting concern)
+- acting on acceptance criteria that are ambiguous, contradictory or incomplete
 
-> Implementation reported complete. Without touching code:
->
-> 1. List each acceptance criterion in FEAT-N and the evidence you have that it passes (test name + file, or manual probe).
-> 2. Flag any criterion you could not verify and why.
-> 3. Note any drift from the kick-off plan and the reason.
-> 4. Propose a single commit message in the project's style.
->
-> Do **not** tick the Definition-of-done boxes. Do **not** mark the FEAT complete. I verify and tick.
+## Never
 
-### Debugging template
+Hard guardrails, each with what to do instead:
 
-> Bug: <one-sentence description>.
-> Repro: <steps, or "unknown — investigate">.
-> Suspected surface: <FEAT-N or area / file>.
->
-> Read `AGENTS.md`, the relevant DECs in `docs/design-decisions.md`, and `docs/session-notes.md`. Don't fix yet. Propose:
->
-> 1. The smallest set of files to read to confirm or refute your hypothesis.
-> 2. Your hypothesis, in one sentence, plus one alternative you ruled in.
-> 3. The cheapest experiment whose result would falsify the hypothesis.
-> 4. Whether the bug shape suggests a DEC needs revisiting (yes/no + which).
->
-> Wait for my go before changing code.
+- **Ticking a box.** The user ticks acceptance-criteria and Definition-of-done boxes in `docs/feature-specs.md`, and judges each phase gate. Report the evidence for each: a test name and file, or a manual probe and its output.
+- **Rendering text as HTML.** User text is plain, with no markdown or rich text, and goes through React's escaping, with no `dangerouslySetInnerHTML`. (DEC-49)
+- **Committing with `--no-verify`.** Fix what the hook caught.
+- **Putting FEAT numbers in code.** Filenames, migration names and test `describe()` strings describe behaviour; FEAT numbers belong in docs.
 
-### Code-review template
+## Tech stack
 
-> Review the current diff against `docs/feature-specs.md §FEAT-N` and the DECs cross-referenced there.
->
-> For each of the following, report findings + severity (blocker / suggest / note):
->
-> 1. **DEC compliance** — list each cross-ref'd DEC; for each, does the diff align?
-> 2. **Cross-cutting concern reuse** — were the canonical helpers used? Any duplication of `pickable-recipes`, `withTransaction`, `dateUtils`, the combobox primitive, the optimistic-update hook, or the slot card?
-> 3. **Common-trap audit** — walk the "do NOT do these" table in `AGENTS.md`. Any hits?
-> 4. **Acceptance-criteria mapping** — for each criterion in the FEAT, point at the code or test that satisfies it. Do **not** tick checkboxes.
-> 5. **Non-goals creep** — does anything in the diff drift into `docs/non-goals.md` territory?
-> 6. **Formatter / linter suppressions** — any `eslint-disable`, `@ts-expect-error`, `prettier-ignore`? Each is a finding.
->
-> Output: findings list. Do not commit fixes.
+Anything outside this table is a new dependency: ask first.
 
-### The Definition-of-done rule
+| Concern | Use |
+|---|---|
+| Frontend | React + Vite (DEC-04); TanStack Router, with the date range in search params (DEC-10); TanStack Query through `@trpc/react-query` (DEC-08); `useState` and Context for client state (DEC-09) |
+| Forms and styling | React Hook Form + Zod resolver (DEC-11); Tailwind + shadcn/ui (DEC-51) |
+| Backend and API | Fastify (DEC-05); tRPC, with types through `/shared` (DEC-06); Zod (DEC-07) |
+| Database | PostgreSQL: Fly Postgres in production, Docker Compose running Postgres only in dev (DEC-12, DEC-74); Drizzle (DEC-13); `ILIKE` + `pg_trgm` GIN index for search (DEC-14) |
+| Auth and mail | Better Auth emailed one-time code (DEC-42, DEC-114); Resend (DEC-69) |
+| Media | Cloudinary, uploaded straight from the browser (DEC-68) |
+| Models | Anthropic, behind each feature's seam (DEC-109, concern #22) |
+| Observability | Pino → Axiom (DEC-75); Sentry front and back, with a `beforeSend` PII scrub and no session replay (DEC-76) |
+| Edge and hosting | Cloudflare orange-cloud DNS with an `/api/*` cache bypass (DEC-72); Fly.io in `lhr` (DEC-63) |
+| Build | `tsx watch` in dev; one esbuild bundle in production (DEC-61) |
+| Tests | Vitest + Testcontainers, React Testing Library, Playwright with `storageState` (DEC-56, DEC-57, DEC-58) |
+| CI/CD | GitHub Actions + `flyctl` (DEC-66) |
 
-**You never mark a Definition-of-done item as complete.** The agent's job ends at "I believe these pass and here is the evidence." A human reads the evidence, runs the gate check, and ticks the box.
+## Working in the repo
 
-This applies to:
-
-- The `[ ]` acceptance-criteria checkboxes in `docs/feature-specs.md`.
-- The Definition-of-done section in each FEAT.
-- The phase-end gate (no work proceeds to the next phase until tests pass in CI — that's a human assessment).
-
-Reporting "I implemented this and the test passes" is correct. Editing `feature-specs.md` to tick the checkbox is not.
+- Commit or push only when the user asks. Messages follow Conventional Commits, and each FEAT's Definition of done proposes one.
+- Record readings agreed at kick-off, drift and open questions in `docs/session-notes.md`, newest entry first. Delete an entry once its work is committed and nothing in it is open, after moving any gotcha or lookup in it to `docs/gotchas.md`.
+- A fix whose cause was hard to find adds a `docs/gotchas.md` entry in the same commit, unless a guard or a comment where it bites now explains it.
+- Change this file in the same commit as the rule or command it describes, and delete lines that stop being true.

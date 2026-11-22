@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
-import { databaseUrlSchema } from './config.ts';
+import { assertProductionOnFly, databaseUrlSchema } from './config.ts';
 
 // Standalone migration entrypoint, bundled to dist/migrate.js and run as the
 // Fly `release_command` before each new version goes live (DEC-40, DEC-65).
@@ -17,6 +17,7 @@ import { databaseUrlSchema } from './config.ts';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.join(here, 'drizzle');
 
+assertProductionOnFly(process.env);
 const databaseUrl = databaseUrlSchema.parse(process.env.DATABASE_URL);
 const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
 const db = drizzle(pool);

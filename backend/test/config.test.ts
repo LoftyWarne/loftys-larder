@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertProductionOnFly,
   ConfigValidationError,
   CURRENT_HOUSEHOLD_ID,
   loadConfig,
@@ -430,5 +431,109 @@ describe('loadConfig — meal planner', () => {
     expect(() =>
       loadConfig({ ...baseEnv, MEAL_PLAN_ADAPTER: 'anthropic' }),
     ).toThrowError(/ANTHROPIC_API_KEY is required when MEAL_PLAN_ADAPTER/);
+  });
+});
+
+describe('loadConfig — on Fly', () => {
+  const fly = { FLY_APP_NAME: 'loftys-larder-prod' } as const;
+
+  function issuesOf(env: Record<string, string>): string[] {
+    try {
+      loadConfig(env);
+    } catch (error) {
+      if (error instanceof ConfigValidationError) return error.issues;
+      throw error;
+    }
+    throw new Error('expected loadConfig to throw');
+  }
+
+  it('refuses development, naming the Fly secret and how to remove it', () => {
+    const issues = issuesOf({ ...baseEnv, ...fly, NODE_ENV: 'development' });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatch(/^- NODE_ENV: NODE_ENV is "development"/);
+    expect(issues[0]).toContain('NODE_ENV Fly secret');
+    expect(issues[0]).toContain("Dockerfile's ENV NODE_ENV=production");
+    expect(issues[0]).toContain(
+      'flyctl secrets unset NODE_ENV --app loftys-larder-prod',
+    );
+  });
+
+  it('refuses test', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv, ...fly, NODE_ENV: 'test' }),
+    ).toThrowError(/NODE_ENV Fly secret/);
+  });
+
+  it('refuses an unset NODE_ENV, which defaults to development', () => {
+    expect(() =>
+      loadConfig({ ...envWithout('NODE_ENV'), ...fly }),
+    ).toThrowError(/NODE_ENV is "development"/);
+  });
+
+  it('lists the NODE_ENV issue before the ALLOWED_ORIGIN one dev mode also raises', () => {
+    const issues = issuesOf({
+      ...envWithout('ALLOWED_ORIGIN'),
+      ...fly,
+      NODE_ENV: 'development',
+    });
+    expect(issues).toHaveLength(2);
+    expect(issues[0]).toMatch(/^- NODE_ENV:/);
+    expect(issues[1]).toMatch(/^- ALLOWED_ORIGIN:/);
+  });
+
+  it('accepts production', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      ...prodModelEnv,
+      ...fly,
+      NODE_ENV: 'production',
+      AXIOM_TOKEN: 'xaat-test',
+      AXIOM_DATASET: 'lofty-prod',
+    });
+    expect(config.NODE_ENV).toBe('production');
+    expect(config.FLY_APP_NAME).toBe('loftys-larder-prod');
+  });
+
+  it('still loads development off Fly', () => {
+    const config = loadConfig({ ...baseEnv, NODE_ENV: 'development' });
+    expect(config.NODE_ENV).toBe('development');
+    expect(config.FLY_APP_NAME).toBeUndefined();
+  });
+});
+
+describe('assertProductionOnFly', () => {
+  it('throws for development on Fly, naming the Fly secret and how to remove it', () => {
+    expect(() => {
+      assertProductionOnFly({
+        FLY_APP_NAME: 'loftys-larder-prod',
+        NODE_ENV: 'development',
+      });
+    }).toThrowError(
+      /NODE_ENV Fly secret[\s\S]*flyctl secrets unset NODE_ENV --app loftys-larder-prod/,
+    );
+  });
+
+  it('throws for an unset NODE_ENV on Fly', () => {
+    expect(() => {
+      assertProductionOnFly({ FLY_APP_NAME: 'loftys-larder-prod' });
+    }).toThrowError(/NODE_ENV is unset/);
+  });
+
+  it('passes for production on Fly', () => {
+    expect(() => {
+      assertProductionOnFly({
+        FLY_APP_NAME: 'loftys-larder-prod',
+        NODE_ENV: 'production',
+      });
+    }).not.toThrow();
+  });
+
+  it('passes off Fly whatever NODE_ENV is', () => {
+    expect(() => {
+      assertProductionOnFly({ NODE_ENV: 'development' });
+    }).not.toThrow();
+    expect(() => {
+      assertProductionOnFly({});
+    }).not.toThrow();
   });
 });

@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { pino } from 'pino';
 
-import { databaseUrlSchema } from './config.ts';
+import { assertProductionOnFly, databaseUrlSchema } from './config.ts';
 import * as schema from './db/schema/index.ts';
 import { runReferenceSeeds } from './db/seeds/index.ts';
 import { makeWithTransaction } from './db/withTransaction.ts';
@@ -20,6 +20,7 @@ import { makeWithTransaction } from './db/withTransaction.ts';
 // (AGENTS.md "Pino only; no `console.log`").
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
+assertProductionOnFly(process.env);
 const databaseUrl = databaseUrlSchema.parse(process.env.DATABASE_URL);
 const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
 const db = drizzle(pool, { schema, casing: 'snake_case' });

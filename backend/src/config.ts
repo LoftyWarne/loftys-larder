@@ -49,11 +49,40 @@ const allowedEmailsSchema = z
   )
   .pipe(z.array(z.email()).min(1));
 
+interface FlyRuntimeEnv {
+  FLY_APP_NAME?: string | undefined;
+  NODE_ENV?: string | undefined;
+}
+
+// Fly sets FLY_APP_NAME on every Machine, release machines included. A
+// NODE_ENV Fly secret overrides the Dockerfile's ENV and runs production in
+// dev mode, which every `NODE_ENV !== 'production'` check reads as safe.
+function isDevModeOnFly(env: FlyRuntimeEnv): boolean {
+  return Boolean(env.FLY_APP_NAME) && env.NODE_ENV !== 'production';
+}
+
+function devModeOnFlyMessage(env: FlyRuntimeEnv): string {
+  const nodeEnv = env.NODE_ENV === undefined ? 'unset' : `"${env.NODE_ENV}"`;
+  const app = env.FLY_APP_NAME ?? '';
+  return (
+    `NODE_ENV is ${nodeEnv} but this is Fly (FLY_APP_NAME=${app}). ` +
+    `The likely cause is a NODE_ENV Fly secret overriding the Dockerfile's ` +
+    `ENV NODE_ENV=production; remove it with ` +
+    `\`flyctl secrets unset NODE_ENV --app ${app}\`.`
+  );
+}
+
+// For the release-command entrypoints, which skip the full config.
+export function assertProductionOnFly(env: FlyRuntimeEnv): void {
+  if (isDevModeOnFly(env)) throw new Error(devModeOnFlyMessage(env));
+}
+
 const configSchema = z
   .object({
     NODE_ENV: z
       .enum(['development', 'test', 'production'])
       .default('development'),
+    FLY_APP_NAME: z.string().optional(),
     HOST: z.string().min(1).default('0.0.0.0'),
     PORT: z.coerce.number().int().positive().max(65535).default(3000),
     LOG_LEVEL: z
@@ -119,6 +148,17 @@ const configSchema = z
     MEAL_PLAN_MODEL: z.string().min(1).default('claude-opus-5-5'),
     MEAL_PLAN_EFFORT: modelEffortSchema.default('medium'),
     ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  })
+  // First, so it leads the list: dev mode also fails the ALLOWED_ORIGIN check
+  // below, whose message points the wrong way.
+  .superRefine((value, ctx) => {
+    if (isDevModeOnFly(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['NODE_ENV'],
+        message: devModeOnFlyMessage(value),
+      });
+    }
   })
   .refine(
     (value) => value.NODE_ENV === 'production' || Boolean(value.ALLOWED_ORIGIN),
